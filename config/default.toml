@@ -1,0 +1,37 @@
+# Wiseman Hub 設定ファイル
+# このファイルをコピーして環境に合わせて編集してください
+
+[app]
+version = "0.1.0"
+log_level = "INFO"
+log_dir = ""  # 空の場合はカレントディレクトリ
+
+[wiseman]
+exe_path = "C:\\Program Files\\Wiseman\\wiseman.exe"
+username = "operator01"
+startup_wait_sec = 15  # 起動・ドングル認証待機秒数
+window_title_pattern = ".*管理システム SP.*"  # メインウィンドウのタイトルパターン
+# パスワードはkeyring (Windows DPAPI) で管理
+# 初回設定:
+#   python -c "import keyring; keyring.set_password('wiseman-hub', 'operator01', 'YOUR_PASSWORD')"
+
+[schedule]
+enabled = false
+cron = "0 8 * * *"  # 毎日8時に実行
+
+# 抽出対象の帳票
+[[reports.targets]]
+name = "ケア記録集計表"
+menu_path = ["ケア記録", "集計表"]
+output_format = "csv"
+
+[gcp]
+project_id = ""
+bucket_name = ""
+service_account_key_path = ""
+region = "asia-northeast1"
+
+[updater]
+enabled = false
+check_interval_hours = 1
+release_bucket = ""
