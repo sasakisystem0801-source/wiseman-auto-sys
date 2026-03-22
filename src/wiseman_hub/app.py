@@ -30,7 +30,7 @@ class WisemanHub:
 
         # Step 1: ワイズマンにログイン
         logger.info("[Step 1/3] ワイズマンにログイン中...")
-        password = self._get_password()
+        password = self._get_password()  # noqa: F841
         # TODO: rpa_engine.launch_and_login(
         #     self.config.wiseman.exe_path,
         #     self.config.wiseman.username,
