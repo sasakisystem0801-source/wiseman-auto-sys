@@ -21,7 +21,7 @@ from pathlib import Path
 # プロジェクトルートをPYTHONPATHに追加
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from wiseman_hub.rpa.inspector import dump_control_tree, print_summary, save_catalog
+from wiseman_hub.rpa.inspector import dump_control_tree, print_summary, save_catalog  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -39,6 +39,7 @@ def main() -> None:
     parser.add_argument("--title", default=DEFAULT_TITLE_PATTERN, help="ウィンドウタイトルの正規表現パターン")
     parser.add_argument("--output", "-o", type=Path, default=None, help="出力JSONファイルパス")
     parser.add_argument("--text", action="store_true", help="テキスト形式(print_control_identifiers)も同時出力")
+
     def depth_range(val: str) -> int:
         n = int(val)
         if n < 1 or n > 50:
