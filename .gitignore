@@ -34,3 +34,7 @@ logs/
 
 # uv
 .python-version
+
+# UI catalogs (environment-specific, may contain sensitive data)
+data/ui_catalogs/*.json
+data/ui_catalogs/*.txt
