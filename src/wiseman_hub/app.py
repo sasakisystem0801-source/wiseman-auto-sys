@@ -3,26 +3,52 @@
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 
 from wiseman_hub.cloud.storage import upload_files
 from wiseman_hub.config import AppConfig, load_config
+from wiseman_hub.rpa.base import RPAEngine
 
 logger = logging.getLogger(__name__)
+
+
+def create_rpa_engine(config: AppConfig) -> RPAEngine:
+    """プラットフォームに応じたRPAエンジンを生成する。
+
+    Windows → PywinautoEngine（実RPA操作）
+    macOS/Linux → MockEngine（テスト・デモ用）
+    """
+    if sys.platform == "win32":
+        from wiseman_hub.rpa.pywinauto_engine import PywinautoEngine
+
+        return PywinautoEngine(
+            startup_wait_sec=config.wiseman.startup_wait_sec,
+            window_title_pattern=config.wiseman.window_title_pattern,
+        )
+    else:
+        from wiseman_hub.rpa.mock_engine import MockEngine
+
+        logger.warning("Windows以外の環境のためMockEngineを使用します")
+        return MockEngine()
 
 
 class WisemanHub:
     """ワイズマン自動化ハブ。RPA操作・クラウド同期・スケジューラを統括する。"""
 
-    def __init__(self, config_path: Path | None = None) -> None:
+    def __init__(self, config_path: Path | None = None, rpa_engine: RPAEngine | None = None) -> None:
         self.config: AppConfig = load_config(config_path)
         self.output_dir = Path("data/exports")
-        logger.info("Wiseman Hub v%s 初期化", self.config.version)
+        self.rpa = rpa_engine if rpa_engine is not None else create_rpa_engine(self.config)
+        logger.info("Wiseman Hub v%s 初期化 (RPA: %s)", self.config.version, type(self.rpa).__name__)
 
     def run(self) -> None:
         """メインループ。PoCではワンショット実行。"""
         logger.info("=== Wiseman Hub 開始 ===")
-        self._run_pipeline()
+        try:
+            self._run_pipeline()
+        finally:
+            self.rpa.close_wiseman()
         logger.info("=== Wiseman Hub 完了 ===")
 
     def _run_pipeline(self) -> None:
@@ -30,12 +56,12 @@ class WisemanHub:
 
         # Step 1: ワイズマンにログイン
         logger.info("[Step 1/3] ワイズマンにログイン中...")
-        password = self._get_password()  # noqa: F841
-        # TODO: rpa_engine.launch_and_login(
-        #     self.config.wiseman.exe_path,
-        #     self.config.wiseman.username,
-        #     password
-        # )
+        password = self._get_password()
+        self.rpa.launch_and_login(
+            self.config.wiseman.exe_path,
+            self.config.wiseman.username,
+            password,
+        )
 
         # Step 2: CSV抽出
         logger.info("[Step 2/3] CSV帳票を抽出中...")
@@ -43,9 +69,11 @@ class WisemanHub:
         csv_files: list[Path] = []
         for report in self.config.reports:
             logger.info("  帳票: %s (メニュー: %s)", report.name, " → ".join(report.menu_path))
-            # TODO: rpa_engine.navigate_menu(report.menu_path)
-            # TODO: path = rpa_engine.export_csv(self.output_dir)
-            # TODO: if path: csv_files.append(path)
+            self.rpa.navigate_menu(report.menu_path)
+            path = self.rpa.export_csv(self.output_dir)
+            if path:
+                csv_files.append(path)
+            self.rpa.close_current_window()
 
         if not csv_files:
             logger.warning("CSVファイルが抽出されませんでした")
