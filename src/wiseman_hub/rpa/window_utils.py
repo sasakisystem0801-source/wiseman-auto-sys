@@ -17,9 +17,9 @@ if sys.platform == "win32":
     from pywinauto import Application, Desktop
     from pywinauto.findwindows import ElementNotFoundError
 else:
-    Application = None  # type: ignore[assignment, misc]
-    Desktop = None  # type: ignore[assignment, misc]
-    ElementNotFoundError = Exception  # type: ignore[assignment, misc]
+    Application = None
+    Desktop = None
+    ElementNotFoundError = Exception
 
 
 def find_wiseman_window(title_pattern: str = ".*管理システム SP.*") -> object | None:

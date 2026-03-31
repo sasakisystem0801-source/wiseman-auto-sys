@@ -32,6 +32,7 @@ dev = [
     "mypy>=1.13.0",
     "pytest>=8.3.0",
     "pytest-cov>=6.0.0",
+    "pytest-timeout>=2.2.0",
     "pyinstaller>=6.11.0",
 ]
 
@@ -54,8 +55,14 @@ python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
+# スタブが存在しないサードパーティライブラリのimportエラーを許容
+# GA移行時にスタブ追加またはstub-onlyパッケージ導入で strict 完全対応する
+disable_error_code = ["import-untyped", "import-not-found"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --tb=short"
 pythonpath = ["src"]
+markers = [
+    "integration: Windows-only integration tests requiring mock WinForms app",
+]

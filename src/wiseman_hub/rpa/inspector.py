@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 if sys.platform == "win32":
     from pywinauto.base_wrapper import BaseWrapper
 else:
-    BaseWrapper = None  # type: ignore[assignment, misc]
+    BaseWrapper = None
 
 
 def dump_control_tree(
