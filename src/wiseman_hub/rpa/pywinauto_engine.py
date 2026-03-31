@@ -6,6 +6,7 @@ import contextlib
 import logging
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -158,11 +159,11 @@ class PywinautoEngine(RPAEngine):
             return None
 
         # ShowDialog()がUIスレッドをブロックするため、click_input()は戻らない。
-        # set_focus() + type_keys(' ') でモーダルブロックを回避する。
-        # WinFormsボタンはフォーカス中にSpaceで発火する（Enterは不可）。
+        # 別スレッドで実行し、メインスレッドはダイアログ検出に進む。
         btn_print = active_child.child_window(auto_id="btnPrint")
-        btn_print.set_focus()
-        btn_print.type_keys(" ")
+        threading.Thread(
+            target=lambda: btn_print.click_input(), daemon=True,
+        ).start()
         time.sleep(2)
 
         # SaveFileDialog を処理
@@ -356,8 +357,9 @@ class PywinautoEngine(RPAEngine):
 
         # [終了] ボタン: ShowDialog()によるモーダルブロック回避
         btn_exit = self._main_window.child_window(auto_id="btnExit")
-        btn_exit.set_focus()
-        btn_exit.type_keys(" ")
+        threading.Thread(
+            target=lambda: btn_exit.click_input(), daemon=True,
+        ).start()
         time.sleep(1)
 
         # 確認ダイアログで [はい] をクリック
