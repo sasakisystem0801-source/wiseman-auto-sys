@@ -12,7 +12,7 @@ pytestmark = pytest.mark.integration
 class TestNavigateMenu:
     """メニュー遷移テスト。"""
 
-    def test_navigate_to_care_record(self, mock_app_process, engine) -> None:
+    def test_navigate_to_care_record(self, engine) -> None:
         """ケア記録 → 集計表 でCareRecordFormが開く。"""
         engine.launch_and_login(str(MOCK_APP_EXE), "testuser", "testpass")
         engine.navigate_menu(["ケア記録", "集計表"])

@@ -12,7 +12,7 @@ pytestmark = pytest.mark.integration
 class TestReadGrid:
     """DataGridView読み取りテスト。"""
 
-    def test_read_grid_returns_data(self, mock_app_process, engine) -> None:
+    def test_read_grid_returns_data(self, engine) -> None:
         """DataGridViewからデータを読み取れる。"""
         engine.launch_and_login(str(MOCK_APP_EXE), "testuser", "testpass")
         engine.navigate_menu(["ケア記録", "集計表"])

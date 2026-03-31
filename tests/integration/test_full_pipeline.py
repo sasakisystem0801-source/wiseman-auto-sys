@@ -14,7 +14,7 @@ pytestmark = pytest.mark.integration
 class TestFullPipeline:
     """モックアプリに対するフルパイプラインテスト。"""
 
-    def test_full_rpa_pipeline(self, mock_app_process, engine, tmp_path: Path) -> None:
+    def test_full_rpa_pipeline(self, engine, tmp_path: Path) -> None:
         """RPAパイプライン全体が一連で成功する。"""
 
         # Step 1: ログイン（失敗時はlaunch_and_loginが例外を投げる）

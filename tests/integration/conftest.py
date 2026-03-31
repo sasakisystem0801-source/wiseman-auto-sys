@@ -6,10 +6,10 @@ PywinautoEngine でGUI操作をテストする。Windows環境でのみ実行可
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -69,25 +69,20 @@ def build_mock_app():
 
 
 @pytest.fixture
-def mock_app_process():
-    """モックアプリを起動し、テスト終了後に停止する。"""
-    proc = subprocess.Popen([str(MOCK_APP_EXE)])
-    time.sleep(2)  # ウィンドウ表示を待機
-    if proc.poll() is not None:
-        pytest.fail(f"モックアプリが起動直後にクラッシュしました (exit code: {proc.returncode})")
-    yield proc
-    if proc.poll() is None:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-
-
-@pytest.fixture
 def engine() -> PywinautoEngine:
-    """PywinautoEngineインスタンスを生成する（ドングル待機なし）。"""
-    return PywinautoEngine(
+    """PywinautoEngineインスタンスを生成し、テスト後にクリーンアップする。
+
+    launch_and_login() がアプリ起動を担当するため、fixture ではプロセスを起動しない。
+    テスト終了後に残存プロセスを確実に停止する。
+    """
+    eng = PywinautoEngine(
         startup_wait_sec=0,
         window_title_pattern=".*管理システム SP.*",
     )
+    yield eng
+    # クリーンアップ: engine が起動したプロセスを停止
+    if eng._app is not None:
+        with contextlib.suppress(Exception):
+            eng._app.kill()
+        eng._app = None
+        eng._main_window = None

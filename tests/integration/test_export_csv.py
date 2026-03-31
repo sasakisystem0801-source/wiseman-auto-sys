@@ -14,7 +14,7 @@ pytestmark = pytest.mark.integration
 class TestExportCsv:
     """CSV出力テスト。"""
 
-    def test_export_csv_creates_file(self, mock_app_process, engine, tmp_path: Path) -> None:
+    def test_export_csv_creates_file(self, engine, tmp_path: Path) -> None:
         """印刷ボタン → SaveFileDialog → CSVファイルが作成される。"""
         engine.launch_and_login(str(MOCK_APP_EXE), "testuser", "testpass")
         engine.navigate_menu(["ケア記録", "集計表"])

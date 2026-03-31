@@ -12,7 +12,7 @@ pytestmark = pytest.mark.integration
 class TestLogin:
     """モックアプリへのログインテスト。"""
 
-    def test_launch_and_login_success(self, mock_app_process, engine) -> None:
+    def test_launch_and_login_success(self, engine) -> None:
         """正しい資格情報でログイン → MainFormが表示される。"""
         engine.launch_and_login(str(MOCK_APP_EXE), "testuser", "testpass")
 
