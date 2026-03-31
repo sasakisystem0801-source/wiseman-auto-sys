@@ -159,12 +159,15 @@ class PywinautoEngine(RPAEngine):
             return None
 
         # ShowDialog()がUIスレッドをブロックするため、click_input()は戻らない。
-        # 別スレッドで実行し、メインスレッドはダイアログ検出に進む。
-        btn_print = active_child.child_window(auto_id="btnPrint")
+        # メインスレッドで座標解決→別スレッドで純粋なマウスクリック。
+        btn_print = active_child.child_window(auto_id="btnPrint").wrapper_object()
+        rect = btn_print.rectangle()
+        mid_x, mid_y = (rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2
+        import pywinauto.mouse
         threading.Thread(
-            target=lambda: btn_print.click_input(), daemon=True,
+            target=lambda: pywinauto.mouse.click(coords=(mid_x, mid_y)), daemon=True,
         ).start()
-        time.sleep(2)
+        time.sleep(3)
 
         # SaveFileDialog を処理
         try:
@@ -356,9 +359,12 @@ class PywinautoEngine(RPAEngine):
         logger.info("ワイズマン終了中...")
 
         # [終了] ボタン: ShowDialog()によるモーダルブロック回避
-        btn_exit = self._main_window.child_window(auto_id="btnExit")
+        btn_exit = self._main_window.child_window(auto_id="btnExit").wrapper_object()
+        rect = btn_exit.rectangle()
+        mid_x, mid_y = (rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2
+        import pywinauto.mouse
         threading.Thread(
-            target=lambda: btn_exit.click_input(), daemon=True,
+            target=lambda: pywinauto.mouse.click(coords=(mid_x, mid_y)), daemon=True,
         ).start()
         time.sleep(1)
 
