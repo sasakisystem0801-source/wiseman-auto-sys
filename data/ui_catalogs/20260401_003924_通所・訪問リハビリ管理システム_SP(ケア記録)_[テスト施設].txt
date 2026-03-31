@@ -1,0 +1,1582 @@
+Control Identifiers:
+
+Dialog - '通所・訪問リハビリ管理システム SP(ケア記録) [テスト施設]'    (L853, T42, R1877, B810)
+['通所・訪問リハビリ管理システム SP(ケア記録) [テスト施設]Dialog', 'Dialog', '通所・訪問リハビリ管理システム SP(ケア記録) [テスト施設]', 'Dialog0', 'Dialog1']
+child_window(title="通所・訪問リハビリ管理システム SP(ケア記録) [テスト施設]", control_type="Window")
+   | 
+   | Menu - ''    (L861, T73, R1869, B97)
+   | ['Menu', 'Menu0', 'Menu1']
+   | child_window(auto_id="mainMenu", control_type="MenuBar")
+   |    | 
+   |    | MenuItem - 'ケア記録'    (L867, T75, R928, B95)
+   |    | ['ケア記録', 'MenuItem', 'ケア記録MenuItem', 'MenuItem0', 'MenuItem1']
+   |    | child_window(title="ケア記録", control_type="MenuItem")
+   |    | 
+   |    | MenuItem - 'マスタ'    (L928, T75, R974, B95)
+   |    | ['マスタ', 'MenuItem2', 'マスタMenuItem']
+   |    | child_window(title="マスタ", control_type="MenuItem")
+   | 
+   | StatusBar - ''    (L861, T780, R1869, B802)
+   | ['ケア記録集計表を表示中StatusBar', 'StatusBar']
+   | child_window(auto_id="statusBar", control_type="StatusBar")
+   |    | 
+   |    | Static - 'ケア記録集計表を表示中'    (L862, T783, R992, B800)
+   |    | ['ケア記録集計表を表示中Static', 'Static', 'ケア記録集計表を表示中', 'Static0', 'Static1']
+   |    | child_window(title="ケア記録集計表を表示中", control_type="Text")
+   | 
+   | Button - '終了'    (L1769, T735, R1849, B770)
+   | ['Button', '終了', '終了Button', 'Button0', 'Button1']
+   | child_window(title="終了", auto_id="btnExit", control_type="Button")
+   | 
+   | Pane - ''    (L861, T97, R1869, B780)
+   | ['Pane', 'レイアウト:Pane', 'Pane0', 'Pane1', 'レイアウト:Pane0', 'レイアウト:Pane1']
+   | child_window(auto_id="264504", control_type="Pane")
+   |    | 
+   |    | Dialog - 'ケア記録集計表'    (L863, T99, R1813, B699)
+   |    | ['Dialog2', 'ケア記録集計表', 'ケア記録集計表Dialog']
+   |    | child_window(title="ケア記録集計表", auto_id="1", control_type="Window")
+   |    |    | 
+   |    |    | Table - 'DataGridView'    (L871, T245, R1805, B691)
+   |    |    | ['DataGridView', 'DataGridViewTable', 'Table']
+   |    |    | child_window(title="DataGridView", auto_id="dgvCareRecord", control_type="Table")
+   |    |    |    | 
+   |    |    |    | ScrollBar - '横'    (L872, T673, R1804, B690)
+   |    |    |    | ['横', 'ScrollBar', '横ScrollBar']
+   |    |    |    | child_window(title="横", auto_id="330030", control_type="ScrollBar")
+   |    |    |    |    | 
+   |    |    |    |    | Button - '1 列左'    (L872, T673, R889, B690)
+   |    |    |    |    | ['1 列左Button', 'Button2', '1 列左']
+   |    |    |    |    | child_window(title="1 列左", control_type="Button")
+   |    |    |    |    | 
+   |    |    |    |    | Thumb - '表示位置'    (L889, T673, R1377, B690)
+   |    |    |    |    | ['表示位置Thumb', 'Thumb', '表示位置']
+   |    |    |    |    | child_window(title="表示位置", control_type="Thumb")
+   |    |    |    |    | 
+   |    |    |    |    | Button - '右へドラッグ'    (L1377, T673, R1787, B690)
+   |    |    |    |    | ['Button3', '右へドラッグ', '右へドラッグButton']
+   |    |    |    |    | child_window(title="右へドラッグ", control_type="Button")
+   |    |    |    |    | 
+   |    |    |    |    | Button - '1 列右'    (L1787, T673, R1804, B690)
+   |    |    |    |    | ['Button4', '1 列右', '1 列右Button']
+   |    |    |    |    | child_window(title="1 列右", control_type="Button")
+   |    |    |    | 
+   |    |    |    | Custom - 'トップの行'    (L872, T246, R1804, B269)
+   |    |    |    | ['トップの行', 'トップの行Custom', 'Custom', 'Custom0', 'Custom1']
+   |    |    |    | child_window(title="トップの行", control_type="Custom")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '左上のヘッダー セル'    (L872, T246, R913, B269)
+   |    |    |    |    | ['左上のヘッダー セルHeader', 'Header', '左上のヘッダー セル', 'Header0', 'Header1']
+   |    |    |    |    | child_window(title="左上のヘッダー セル", auto_id="426444509", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '利用者名'    (L913, T246, R991, B269)
+   |    |    |    |    | ['Header2', '利用者名Header', '利用者名']
+   |    |    |    |    | child_window(title="利用者名", auto_id="4258000584", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - 'ケア記録項目'    (L991, T246, R1087, B269)
+   |    |    |    |    | ['Header3', 'ケア記録項目Header', 'ケア記録項目']
+   |    |    |    |    | child_window(title="ケア記録項目", auto_id="4252243212", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '1'    (L1087, T246, R1123, B269)
+   |    |    |    |    | ['1', 'Header4', '1Header']
+   |    |    |    |    | child_window(title="1", auto_id="42426867", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '2'    (L1123, T246, R1159, B269)
+   |    |    |    |    | ['2', '2Header', 'Header5']
+   |    |    |    |    | child_window(title="2", auto_id="423841804", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '3'    (L1159, T246, R1195, B269)
+   |    |    |    |    | ['Header6', '3', '3Header']
+   |    |    |    |    | child_window(title="3", auto_id="4234576242", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '4'    (L1195, T246, R1231, B269)
+   |    |    |    |    | ['4', '4Header', 'Header7']
+   |    |    |    |    | child_window(title="4", auto_id="4242750725", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '5'    (L1231, T246, R1267, B269)
+   |    |    |    |    | ['5Header', 'Header8', '5']
+   |    |    |    |    | child_window(title="5", auto_id="4249212206", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '6'    (L1267, T246, R1303, B269)
+   |    |    |    |    | ['6Header', '6', 'Header9']
+   |    |    |    |    | child_window(title="6", auto_id="4240256670", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '7'    (L1303, T246, R1339, B269)
+   |    |    |    |    | ['Header10', '7Header', '7']
+   |    |    |    |    | child_window(title="7", auto_id="4226765710", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '8'    (L1339, T246, R1375, B269)
+   |    |    |    |    | ['8', 'Header11', '8Header']
+   |    |    |    |    | child_window(title="8", auto_id="4239564799", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '9'    (L1375, T246, R1411, B269)
+   |    |    |    |    | ['9Header', 'Header12', '9']
+   |    |    |    |    | child_window(title="9", auto_id="4220538874", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '10'    (L1411, T246, R1453, B269)
+   |    |    |    |    | ['Header13', '10', '10Header']
+   |    |    |    |    | child_window(title="10", auto_id="4250632145", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '11'    (L1453, T246, R1495, B269)
+   |    |    |    |    | ['11', 'Header14', '11Header']
+   |    |    |    |    | child_window(title="11", auto_id="4253036123", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '12'    (L1495, T246, R1537, B269)
+   |    |    |    |    | ['Header15', '12Header', '12']
+   |    |    |    |    | child_window(title="12", auto_id="427563067", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '13'    (L1537, T246, R1579, B269)
+   |    |    |    |    | ['13Header', 'Header16', '13']
+   |    |    |    |    | child_window(title="13", auto_id="42958745", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '14'    (L1579, T246, R1621, B269)
+   |    |    |    |    | ['14', 'Header17', '14Header']
+   |    |    |    |    | child_window(title="14", auto_id="428628710", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '15'    (L1621, T246, R1663, B269)
+   |    |    |    |    | ['15Header', '15', 'Header18']
+   |    |    |    |    | child_window(title="15", auto_id="4210549531", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '16'    (L1663, T246, R1705, B269)
+   |    |    |    |    | ['16Header', '16', 'Header19']
+   |    |    |    |    | child_window(title="16", auto_id="4227836922", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '17'    (L1705, T246, R1747, B269)
+   |    |    |    |    | ['17', 'Header20', '17Header']
+   |    |    |    |    | child_window(title="17", auto_id="4249205706", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '18'    (L1747, T246, R1789, B269)
+   |    |    |    |    | ['18Header', 'Header21', '18']
+   |    |    |    |    | child_window(title="18", auto_id="4240198173", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '19'    (L1789, T246, R1831, B269)
+   |    |    |    |    | ['19Header', 'Header22', '19']
+   |    |    |    |    | child_window(title="19", auto_id="4226239245", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '20'    (L1831, T246, R1873, B269)
+   |    |    |    |    | ['Header23', '20', '20Header']
+   |    |    |    |    | child_window(title="20", auto_id="4234826618", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '21'    (L1873, T246, R1915, B269)
+   |    |    |    |    | ['21Header', 'Header24', '21']
+   |    |    |    |    | child_window(title="21", auto_id="4245004109", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '22'    (L1915, T246, R1957, B269)
+   |    |    |    |    | ['22', 'Header25', '22Header']
+   |    |    |    |    | child_window(title="22", auto_id="422383799", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '23'    (L1957, T246, R1999, B269)
+   |    |    |    |    | ['23Header', '23', 'Header26']
+   |    |    |    |    | child_window(title="23", auto_id="4221454193", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '24'    (L1999, T246, R2041, B269)
+   |    |    |    |    | ['Header27', '24Header', '24']
+   |    |    |    |    | child_window(title="24", auto_id="4258870012", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '25'    (L2041, T246, R2083, B269)
+   |    |    |    |    | ['Header28', '25', '25Header']
+   |    |    |    |    | child_window(title="25", auto_id="4260068066", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '26'    (L2083, T246, R2125, B269)
+   |    |    |    |    | ['26Header', 'Header29', '26']
+   |    |    |    |    | child_window(title="26", auto_id="423741682", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '27'    (L2125, T246, R2167, B269)
+   |    |    |    |    | ['Header30', '27', '27Header']
+   |    |    |    |    | child_window(title="27", auto_id="4233675143", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '28'    (L2167, T246, R2209, B269)
+   |    |    |    |    | ['28', '28Header', 'Header31']
+   |    |    |    |    | child_window(title="28", auto_id="4234640832", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '29'    (L2209, T246, R2251, B269)
+   |    |    |    |    | ['29', '29Header', 'Header32']
+   |    |    |    |    | child_window(title="29", auto_id="4243332040", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '30'    (L2251, T246, R2293, B269)
+   |    |    |    |    | ['30', 'Header33', '30Header']
+   |    |    |    |    | child_window(title="30", auto_id="4254444047", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '31'    (L2293, T246, R2335, B269)
+   |    |    |    |    | ['31', '31Header', 'Header34']
+   |    |    |    |    | child_window(title="31", auto_id="4220234383", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '件数'    (L2335, T246, R2389, B269)
+   |    |    |    |    | ['Header35', '件数', '件数Header']
+   |    |    |    |    | child_window(title="件数", auto_id="4247891719", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '平均'    (L2389, T246, R2443, B269)
+   |    |    |    |    | ['Header36', '平均', '平均Header']
+   |    |    |    |    | child_window(title="平均", auto_id="4228372289", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '最大'    (L2443, T246, R2497, B269)
+   |    |    |    |    | ['最大Header', 'Header37', '最大']
+   |    |    |    |    | child_window(title="最大", auto_id="4254024015", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '最小'    (L2497, T246, R2551, B269)
+   |    |    |    |    | ['最小Header', 'Header38', '最小']
+   |    |    |    |    | child_window(title="最小", auto_id="4216454088", control_type="Header")
+   |    |    |    | 
+   |    |    |    | Custom - '行 0'    (L872, T269, R1804, B290)
+   |    |    |    | ['行 0', '行 0Custom', 'Custom2', '行 00', '行 01']
+   |    |    |    | child_window(title="行 0", control_type="Custom")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '行 0'    (L872, T269, R913, B290)
+   |    |    |    |    | ['Header39', '行 0Header', '行 02']
+   |    |    |    |    | child_window(title="行 0", auto_id="4213869071", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '利用者名 行 0, 並べ替えられていません。'    (L913, T269, R991, B290)
+   |    |    |    |    | ['Edit', 'レイアウト:Edit', 'Edit0', 'Edit1', 'レイアウト:Edit0', 'レイアウト:Edit1']
+   |    |    |    |    | child_window(title="利用者名 行 0, 並べ替えられていません。", auto_id="4257712780", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - 'ケア記録項目 行 0, 並べ替えられていません。'    (L991, T269, R1087, B290)
+   |    |    |    |    | ['Edit2', 'レイアウト:Edit2']
+   |    |    |    |    | child_window(title="ケア記録項目 行 0, 並べ替えられていません。", auto_id="4249652976", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '1 行 0, 並べ替えられていません。'    (L1087, T269, R1123, B290)
+   |    |    |    |    | ['Edit3', 'レイアウト:Edit3']
+   |    |    |    |    | child_window(title="1 行 0, 並べ替えられていません。", auto_id="4244223604", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '2 行 0, 並べ替えられていません。'    (L1123, T269, R1159, B290)
+   |    |    |    |    | ['Edit4', 'レイアウト:Edit4']
+   |    |    |    |    | child_window(title="2 行 0, 並べ替えられていません。", auto_id="4262468121", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '3 行 0, 並べ替えられていません。'    (L1159, T269, R1195, B290)
+   |    |    |    |    | ['Edit5', 'レイアウト:Edit5']
+   |    |    |    |    | child_window(title="3 行 0, 並べ替えられていません。", auto_id="4225342185", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '4 行 0, 並べ替えられていません。'    (L1195, T269, R1231, B290)
+   |    |    |    |    | ['Edit6', 'レイアウト:Edit6']
+   |    |    |    |    | child_window(title="4 行 0, 並べ替えられていません。", auto_id="4226753075", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '5 行 0, 並べ替えられていません。'    (L1231, T269, R1267, B290)
+   |    |    |    |    | ['Edit7', 'レイアウト:Edit7']
+   |    |    |    |    | child_window(title="5 行 0, 並べ替えられていません。", auto_id="4239451090", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '6 行 0, 並べ替えられていません。'    (L1267, T269, R1303, B290)
+   |    |    |    |    | ['Edit8', 'レイアウト:Edit8']
+   |    |    |    |    | child_window(title="6 行 0, 並べ替えられていません。", auto_id="4219515494", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '7 行 0, 並べ替えられていません。'    (L1303, T269, R1339, B290)
+   |    |    |    |    | ['Edit9', 'レイアウト:Edit9']
+   |    |    |    |    | child_window(title="7 行 0, 並べ替えられていません。", auto_id="4241421720", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '8 行 0, 並べ替えられていません。'    (L1339, T269, R1375, B290)
+   |    |    |    |    | ['Edit10', '絞込 5 人/総人数 5 人Edit', '絞込 5 人/総人数 5 人Edit0', '絞込 5 人/総人数 5 人Edit1']
+   |    |    |    |    | child_window(title="8 行 0, 並べ替えられていません。", auto_id="4237251161", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '9 行 0, 並べ替えられていません。'    (L1375, T269, R1411, B290)
+   |    |    |    |    | ['Edit11', '絞込 5 人/総人数 5 人Edit2']
+   |    |    |    |    | child_window(title="9 行 0, 並べ替えられていません。", auto_id="4266824994", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '10 行 0, 並べ替えられていません。'    (L1411, T269, R1453, B290)
+   |    |    |    |    | ['Edit12', '絞込 5 人/総人数 5 人Edit3']
+   |    |    |    |    | child_window(title="10 行 0, 並べ替えられていません。", auto_id="4264554036", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '11 行 0, 並べ替えられていません。'    (L1453, T269, R1495, B290)
+   |    |    |    |    | ['Edit13', '絞込 5 人/総人数 5 人Edit4']
+   |    |    |    |    | child_window(title="11 行 0, 並べ替えられていません。", auto_id="4244115416", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '12 行 0, 並べ替えられていません。'    (L1495, T269, R1537, B290)
+   |    |    |    |    | ['Edit14', '絞込 5 人/総人数 5 人Edit5']
+   |    |    |    |    | child_window(title="12 行 0, 並べ替えられていません。", auto_id="4261494432", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '13 行 0, 並べ替えられていません。'    (L1537, T269, R1579, B290)
+   |    |    |    |    | ['Edit15', '絞込 5 人/総人数 5 人Edit6']
+   |    |    |    |    | child_window(title="13 行 0, 並べ替えられていません。", auto_id="4216578980", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '14 行 0, 並べ替えられていません。'    (L1579, T269, R1621, B290)
+   |    |    |    |    | ['Edit16', '絞込 5 人/総人数 5 人Edit7']
+   |    |    |    |    | child_window(title="14 行 0, 並べ替えられていません。", auto_id="4214993092", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '15 行 0, 並べ替えられていません。'    (L1621, T269, R1663, B290)
+   |    |    |    |    | ['Edit17', '絞込 5 人/総人数 5 人Edit8']
+   |    |    |    |    | child_window(title="15 行 0, 並べ替えられていません。", auto_id="42720107", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '16 行 0, 並べ替えられていません。'    (L1663, T269, R1705, B290)
+   |    |    |    |    | ['Edit18', '絞込 5 人/総人数 5 人Edit9']
+   |    |    |    |    | child_window(title="16 行 0, 並べ替えられていません。", auto_id="426480969", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '17 行 0, 並べ替えられていません。'    (L1705, T269, R1747, B290)
+   |    |    |    |    | ['Edit19', '絞込 5 人/総人数 5 人Edit10']
+   |    |    |    |    | child_window(title="17 行 0, 並べ替えられていません。", auto_id="4258328727", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '18 行 0, 並べ替えられていません。'    (L1747, T269, R1789, B290)
+   |    |    |    |    | ['Edit20', '絞込 5 人/総人数 5 人Edit11']
+   |    |    |    |    | child_window(title="18 行 0, 並べ替えられていません。", auto_id="4255196503", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '19 行 0, 並べ替えられていません。'    (L1789, T269, R1831, B290)
+   |    |    |    |    | ['Edit21', '絞込 5 人/総人数 5 人Edit12']
+   |    |    |    |    | child_window(title="19 行 0, 並べ替えられていません。", auto_id="4227006480", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '20 行 0, 並べ替えられていません。'    (L1831, T269, R1873, B290)
+   |    |    |    |    | ['Edit22', '絞込 5 人/総人数 5 人Edit13']
+   |    |    |    |    | child_window(title="20 行 0, 並べ替えられていません。", auto_id="4241731733", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '21 行 0, 並べ替えられていません。'    (L1873, T269, R1915, B290)
+   |    |    |    |    | ['Edit23', '絞込 5 人/総人数 5 人Edit14']
+   |    |    |    |    | child_window(title="21 行 0, 並べ替えられていません。", auto_id="4240041277", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '22 行 0, 並べ替えられていません。'    (L1915, T269, R1957, B290)
+   |    |    |    |    | ['Edit24', '絞込 5 人/総人数 5 人Edit15']
+   |    |    |    |    | child_window(title="22 行 0, 並べ替えられていません。", auto_id="4224827179", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '23 行 0, 並べ替えられていません。'    (L1957, T269, R1999, B290)
+   |    |    |    |    | ['Edit25', '絞込 5 人/総人数 5 人Edit16']
+   |    |    |    |    | child_window(title="23 行 0, 並べ替えられていません。", auto_id="4222118023", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '24 行 0, 並べ替えられていません。'    (L1999, T269, R2041, B290)
+   |    |    |    |    | ['Edit26', '絞込 5 人/総人数 5 人Edit17']
+   |    |    |    |    | child_window(title="24 行 0, 並べ替えられていません。", auto_id="4264844482", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '25 行 0, 並べ替えられていません。'    (L2041, T269, R2083, B290)
+   |    |    |    |    | ['Edit27', '絞込 5 人/総人数 5 人Edit18']
+   |    |    |    |    | child_window(title="25 行 0, 並べ替えられていません。", auto_id="4246729429", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '26 行 0, 並べ替えられていません。'    (L2083, T269, R2125, B290)
+   |    |    |    |    | ['Edit28', '絞込 5 人/総人数 5 人Edit19']
+   |    |    |    |    | child_window(title="26 行 0, 並べ替えられていません。", auto_id="4217911681", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '27 行 0, 並べ替えられていません。'    (L2125, T269, R2167, B290)
+   |    |    |    |    | ['Edit29', '絞込 5 人/総人数 5 人Edit20']
+   |    |    |    |    | child_window(title="27 行 0, 並べ替えられていません。", auto_id="4226987408", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '28 行 0, 並べ替えられていません。'    (L2167, T269, R2209, B290)
+   |    |    |    |    | ['Edit30', '絞込 5 人/総人数 5 人Edit21']
+   |    |    |    |    | child_window(title="28 行 0, 並べ替えられていません。", auto_id="4241560081", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '29 行 0, 並べ替えられていません。'    (L2209, T269, R2251, B290)
+   |    |    |    |    | ['Edit31', '絞込 5 人/総人数 5 人Edit22']
+   |    |    |    |    | child_window(title="29 行 0, 並べ替えられていません。", auto_id="4238496415", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '30 行 0, 並べ替えられていません。'    (L2251, T269, R2293, B290)
+   |    |    |    |    | ['Edit32', '絞込 5 人/総人数 5 人Edit23']
+   |    |    |    |    | child_window(title="30 行 0, 並べ替えられていません。", auto_id="4210923418", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '31 行 0, 並べ替えられていません。'    (L2293, T269, R2335, B290)
+   |    |    |    |    | ['Edit33', '絞込 5 人/総人数 5 人Edit24']
+   |    |    |    |    | child_window(title="31 行 0, 並べ替えられていません。", auto_id="4231201899", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '件数 行 0, 並べ替えられていません。'    (L2335, T269, R2389, B290)
+   |    |    |    |    | ['Edit34', '絞込 5 人/総人数 5 人Edit25']
+   |    |    |    |    | child_window(title="件数 行 0, 並べ替えられていません。", auto_id="4212381635", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '平均 行 0, 並べ替えられていません。'    (L2389, T269, R2443, B290)
+   |    |    |    |    | ['Edit35', '絞込 5 人/総人数 5 人Edit26']
+   |    |    |    |    | child_window(title="平均 行 0, 並べ替えられていません。", auto_id="4244325851", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '最大 行 0, 並べ替えられていません。'    (L2443, T269, R2497, B290)
+   |    |    |    |    | ['Edit36', '絞込 5 人/総人数 5 人Edit27']
+   |    |    |    |    | child_window(title="最大 行 0, 並べ替えられていません。", auto_id="4263388340", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '最小 行 0, 並べ替えられていません。'    (L2497, T269, R2551, B290)
+   |    |    |    |    | ['Edit37']
+   |    |    |    |    | child_window(title="最小 行 0, 並べ替えられていません。", auto_id="4233624151", control_type="Edit")
+   |    |    |    | 
+   |    |    |    | Custom - '行 1'    (L872, T290, R1804, B311)
+   |    |    |    | ['行 1Custom', '行 1', 'Custom3', '行 10', '行 11']
+   |    |    |    | child_window(title="行 1", control_type="Custom")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '行 1'    (L872, T290, R913, B311)
+   |    |    |    |    | ['Header40', '行 12', '行 1Header']
+   |    |    |    |    | child_window(title="行 1", auto_id="4234181910", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '利用者名 行 1, 並べ替えられていません。'    (L913, T290, R991, B311)
+   |    |    |    |    | ['Edit38', 'レイアウト:Edit10']
+   |    |    |    |    | child_window(title="利用者名 行 1, 並べ替えられていません。", auto_id="4239201736", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - 'ケア記録項目 行 1, 並べ替えられていません。'    (L991, T290, R1087, B311)
+   |    |    |    |    | ['Edit39', 'レイアウト:Edit11']
+   |    |    |    |    | child_window(title="ケア記録項目 行 1, 並べ替えられていません。", auto_id="4217271312", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '1 行 1, 並べ替えられていません。'    (L1087, T290, R1123, B311)
+   |    |    |    |    | ['Edit40', 'レイアウト:Edit12']
+   |    |    |    |    | child_window(title="1 行 1, 並べ替えられていません。", auto_id="4221224086", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '2 行 1, 並べ替えられていません。'    (L1123, T290, R1159, B311)
+   |    |    |    |    | ['Edit41', 'レイアウト:Edit13']
+   |    |    |    |    | child_window(title="2 行 1, 並べ替えられていません。", auto_id="4256799051", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '3 行 1, 並べ替えられていません。'    (L1159, T290, R1195, B311)
+   |    |    |    |    | ['Edit42', 'レイアウト:Edit14']
+   |    |    |    |    | child_window(title="3 行 1, 並べ替えられていません。", auto_id="4241429416", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '4 行 1, 並べ替えられていません。'    (L1195, T290, R1231, B311)
+   |    |    |    |    | ['Edit43', 'レイアウト:Edit15']
+   |    |    |    |    | child_window(title="4 行 1, 並べ替えられていません。", auto_id="4237320431", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '5 行 1, 並べ替えられていません。'    (L1231, T290, R1267, B311)
+   |    |    |    |    | ['Edit44', 'レイアウト:Edit16']
+   |    |    |    |    | child_window(title="5 行 1, 並べ替えられていません。", auto_id="42339559", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '6 行 1, 並べ替えられていません。'    (L1267, T290, R1303, B311)
+   |    |    |    |    | ['Edit45', 'レイアウト:Edit17']
+   |    |    |    |    | child_window(title="6 行 1, 並べ替えられていません。", auto_id="423056034", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '7 行 1, 並べ替えられていません。'    (L1303, T290, R1339, B311)
+   |    |    |    |    | ['Edit46', 'レイアウト:Edit18']
+   |    |    |    |    | child_window(title="7 行 1, 並べ替えられていません。", auto_id="4227504314", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '8 行 1, 並べ替えられていません。'    (L1339, T290, R1375, B311)
+   |    |    |    |    | ['Edit47', '絞込 5 人/総人数 5 人Edit28']
+   |    |    |    |    | child_window(title="8 行 1, 並べ替えられていません。", auto_id="4246212239", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '9 行 1, 並べ替えられていません。'    (L1375, T290, R1411, B311)
+   |    |    |    |    | ['Edit48', '絞込 5 人/総人数 5 人Edit29']
+   |    |    |    |    | child_window(title="9 行 1, 並べ替えられていません。", auto_id="4213256970", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '10 行 1, 並べ替えられていません。'    (L1411, T290, R1453, B311)
+   |    |    |    |    | ['Edit49', '絞込 5 人/総人数 5 人Edit30']
+   |    |    |    |    | child_window(title="10 行 1, 並べ替えられていません。", auto_id="4252203868", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '11 行 1, 並べ替えられていません。'    (L1453, T290, R1495, B311)
+   |    |    |    |    | ['Edit50', '絞込 5 人/総人数 5 人Edit31']
+   |    |    |    |    | child_window(title="11 行 1, 並べ替えられていません。", auto_id="4272766", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '12 行 1, 並べ替えられていません。'    (L1495, T290, R1537, B311)
+   |    |    |    |    | ['Edit51', '絞込 5 人/総人数 5 人Edit32']
+   |    |    |    |    | child_window(title="12 行 1, 並べ替えられていません。", auto_id="42654897", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '13 行 1, 並べ替えられていません。'    (L1537, T290, R1579, B311)
+   |    |    |    |    | ['Edit52', '絞込 5 人/総人数 5 人Edit33']
+   |    |    |    |    | child_window(title="13 行 1, 並べ替えられていません。", auto_id="425894079", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '14 行 1, 並べ替えられていません。'    (L1579, T290, R1621, B311)
+   |    |    |    |    | ['Edit53', '絞込 5 人/総人数 5 人Edit34']
+   |    |    |    |    | child_window(title="14 行 1, 並べ替えられていません。", auto_id="4253046711", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '15 行 1, 並べ替えられていません。'    (L1621, T290, R1663, B311)
+   |    |    |    |    | ['Edit54', '絞込 5 人/総人数 5 人Edit35']
+   |    |    |    |    | child_window(title="15 行 1, 並べ替えられていません。", auto_id="427658356", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '16 行 1, 並べ替えられていません。'    (L1663, T290, R1705, B311)
+   |    |    |    |    | ['Edit55', '絞込 5 人/総人数 5 人Edit36']
+   |    |    |    |    | child_window(title="16 行 1, 並べ替えられていません。", auto_id="421816341", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '17 行 1, 並べ替えられていません。'    (L1705, T290, R1747, B311)
+   |    |    |    |    | ['Edit56', '絞込 5 人/総人数 5 人Edit37']
+   |    |    |    |    | child_window(title="17 行 1, 並べ替えられていません。", auto_id="4216347077", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '18 行 1, 並べ替えられていません。'    (L1747, T290, R1789, B311)
+   |    |    |    |    | ['Edit57', '絞込 5 人/総人数 5 人Edit38']
+   |    |    |    |    | child_window(title="18 行 1, 並べ替えられていません。", auto_id="4212905972", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '19 行 1, 並べ替えられていません。'    (L1789, T290, R1831, B311)
+   |    |    |    |    | ['Edit58', '絞込 5 人/総人数 5 人Edit39']
+   |    |    |    |    | child_window(title="19 行 1, 並べ替えられていません。", auto_id="4249044892", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '20 行 1, 並べ替えられていません。'    (L1831, T290, R1873, B311)
+   |    |    |    |    | ['Edit59', '絞込 5 人/総人数 5 人Edit40']
+   |    |    |    |    | child_window(title="20 行 1, 並べ替えられていません。", auto_id="4238750844", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '21 行 1, 並べ替えられていません。'    (L1873, T290, R1915, B311)
+   |    |    |    |    | ['Edit60', '絞込 5 人/総人数 5 人Edit41']
+   |    |    |    |    | child_window(title="21 行 1, 並べ替えられていません。", auto_id="4213213278", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '22 行 1, 並べ替えられていません。'    (L1915, T290, R1957, B311)
+   |    |    |    |    | ['Edit61', '絞込 5 人/総人数 5 人Edit42']
+   |    |    |    |    | child_window(title="22 行 1, 並べ替えられていません。", auto_id="4251810644", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '23 行 1, 並べ替えられていません。'    (L1957, T290, R1999, B311)
+   |    |    |    |    | ['Edit62', '絞込 5 人/総人数 5 人Edit43']
+   |    |    |    |    | child_window(title="23 行 1, 並べ替えられていません。", auto_id="4263642613", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '24 行 1, 並べ替えられていません。'    (L1999, T290, R2041, B311)
+   |    |    |    |    | ['Edit63', '絞込 5 人/総人数 5 人Edit44']
+   |    |    |    |    | child_window(title="24 行 1, 並べ替えられていません。", auto_id="4235912612", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '25 行 1, 並べ替えられていません。'    (L2041, T290, R2083, B311)
+   |    |    |    |    | ['Edit64', '絞込 5 人/総人数 5 人Edit45']
+   |    |    |    |    | child_window(title="25 行 1, 並べ替えられていません。", auto_id="4254778057", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '26 行 1, 並べ替えられていません。'    (L2083, T290, R2125, B311)
+   |    |    |    |    | ['Edit65', '絞込 5 人/総人数 5 人Edit46']
+   |    |    |    |    | child_window(title="26 行 1, 並べ替えられていません。", auto_id="4223240469", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '27 行 1, 並べ替えられていません。'    (L2125, T290, R2167, B311)
+   |    |    |    |    | ['Edit66', '絞込 5 人/総人数 5 人Edit47']
+   |    |    |    |    | child_window(title="27 行 1, 並べ替えられていません。", auto_id="427837633", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '28 行 1, 並べ替えられていません。'    (L2167, T290, R2209, B311)
+   |    |    |    |    | ['Edit67', '絞込 5 人/総人数 5 人Edit48']
+   |    |    |    |    | child_window(title="28 行 1, 並べ替えられていません。", auto_id="423429838", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '29 行 1, 並べ替えられていません。'    (L2209, T290, R2251, B311)
+   |    |    |    |    | ['Edit68', '絞込 5 人/総人数 5 人Edit49']
+   |    |    |    |    | child_window(title="29 行 1, 並べ替えられていません。", auto_id="4230868550", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '30 行 1, 並べ替えられていません。'    (L2251, T290, R2293, B311)
+   |    |    |    |    | ['Edit69', '絞込 5 人/総人数 5 人Edit50']
+   |    |    |    |    | child_window(title="30 行 1, 並べ替えられていません。", auto_id="429381496", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '31 行 1, 並べ替えられていません。'    (L2293, T290, R2335, B311)
+   |    |    |    |    | ['Edit70', '絞込 5 人/総人数 5 人Edit51']
+   |    |    |    |    | child_window(title="31 行 1, 並べ替えられていません。", auto_id="4217324607", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '件数 行 1, 並べ替えられていません。'    (L2335, T290, R2389, B311)
+   |    |    |    |    | ['Edit71', '絞込 5 人/総人数 5 人Edit52']
+   |    |    |    |    | child_window(title="件数 行 1, 並べ替えられていません。", auto_id="4221703739", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '平均 行 1, 並べ替えられていません。'    (L2389, T290, R2443, B311)
+   |    |    |    |    | ['Edit72', '絞込 5 人/総人数 5 人Edit53']
+   |    |    |    |    | child_window(title="平均 行 1, 並べ替えられていません。", auto_id="4261115925", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '最大 行 1, 並べ替えられていません。'    (L2443, T290, R2497, B311)
+   |    |    |    |    | ['Edit73']
+   |    |    |    |    | child_window(title="最大 行 1, 並べ替えられていません。", auto_id="4213172414", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '最小 行 1, 並べ替えられていません。'    (L2497, T290, R2551, B311)
+   |    |    |    |    | ['Edit74']
+   |    |    |    |    | child_window(title="最小 行 1, 並べ替えられていません。", auto_id="4251442863", control_type="Edit")
+   |    |    |    | 
+   |    |    |    | Custom - '行 2'    (L872, T311, R1804, B332)
+   |    |    |    | ['行 2Custom', '行 2', 'Custom4', '行 20', '行 21']
+   |    |    |    | child_window(title="行 2", control_type="Custom")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '行 2'    (L872, T311, R913, B332)
+   |    |    |    |    | ['Header41', '行 22', '行 2Header']
+   |    |    |    |    | child_window(title="行 2", auto_id="4260332585", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '利用者名 行 2, 並べ替えられていません。'    (L913, T311, R991, B332)
+   |    |    |    |    | ['Edit75', 'レイアウト:Edit19']
+   |    |    |    |    | child_window(title="利用者名 行 2, 並べ替えられていません。", auto_id="426122357", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - 'ケア記録項目 行 2, 並べ替えられていません。'    (L991, T311, R1087, B332)
+   |    |    |    |    | ['Edit76', 'レイアウト:Edit20']
+   |    |    |    |    | child_window(title="ケア記録項目 行 2, 並べ替えられていません。", auto_id="4255101221", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '1 行 2, 並べ替えられていません。'    (L1087, T311, R1123, B332)
+   |    |    |    |    | ['Edit77', 'レイアウト:Edit21']
+   |    |    |    |    | child_window(title="1 行 2, 並べ替えられていません。", auto_id="4226148945", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '2 行 2, 並べ替えられていません。'    (L1123, T311, R1159, B332)
+   |    |    |    |    | ['Edit78', 'レイアウト:Edit22']
+   |    |    |    |    | child_window(title="2 行 2, 並べ替えられていません。", auto_id="4234013913", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '3 行 2, 並べ替えられていません。'    (L1159, T311, R1195, B332)
+   |    |    |    |    | ['Edit79', 'レイアウト:Edit23']
+   |    |    |    |    | child_window(title="3 行 2, 並べ替えられていません。", auto_id="4237689768", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '4 行 2, 並べ替えられていません。'    (L1195, T311, R1231, B332)
+   |    |    |    |    | ['Edit80', 'レイアウト:Edit24']
+   |    |    |    |    | child_window(title="4 行 2, 並べ替えられていません。", auto_id="423663598", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '5 行 2, 並べ替えられていません。'    (L1231, T311, R1267, B332)
+   |    |    |    |    | ['Edit81', 'レイアウト:Edit25']
+   |    |    |    |    | child_window(title="5 行 2, 並べ替えられていません。", auto_id="4232972388", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '6 行 2, 並べ替えられていません。'    (L1267, T311, R1303, B332)
+   |    |    |    |    | ['Edit82', 'レイアウト:Edit26']
+   |    |    |    |    | child_window(title="6 行 2, 並べ替えられていません。", auto_id="4228316044", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '7 行 2, 並べ替えられていません。'    (L1303, T311, R1339, B332)
+   |    |    |    |    | ['Edit83', 'レイアウト:Edit27']
+   |    |    |    |    | child_window(title="7 行 2, 並べ替えられていません。", auto_id="4253517805", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '8 行 2, 並べ替えられていません。'    (L1339, T311, R1375, B332)
+   |    |    |    |    | ['Edit84', '絞込 5 人/総人数 5 人Edit54']
+   |    |    |    |    | child_window(title="8 行 2, 並べ替えられていません。", auto_id="4211898202", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '9 行 2, 並べ替えられていません。'    (L1375, T311, R1411, B332)
+   |    |    |    |    | ['Edit85', '絞込 5 人/総人数 5 人Edit55']
+   |    |    |    |    | child_window(title="9 行 2, 並べ替えられていません。", auto_id="4239974954", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '10 行 2, 並べ替えられていません。'    (L1411, T311, R1453, B332)
+   |    |    |    |    | ['Edit86', '絞込 5 人/総人数 5 人Edit56']
+   |    |    |    |    | child_window(title="10 行 2, 並べ替えられていません。", auto_id="4224230272", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '11 行 2, 並べ替えられていません。'    (L1453, T311, R1495, B332)
+   |    |    |    |    | ['Edit87', '絞込 5 人/総人数 5 人Edit57']
+   |    |    |    |    | child_window(title="11 行 2, 並べ替えられていません。", auto_id="4216745860", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '12 行 2, 並べ替えられていません。'    (L1495, T311, R1537, B332)
+   |    |    |    |    | ['Edit88', '絞込 5 人/総人数 5 人Edit58']
+   |    |    |    |    | child_window(title="12 行 2, 並べ替えられていません。", auto_id="4216495015", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '13 行 2, 並べ替えられていません。'    (L1537, T311, R1579, B332)
+   |    |    |    |    | ['Edit89', '絞込 5 人/総人数 5 人Edit59']
+   |    |    |    |    | child_window(title="13 行 2, 並べ替えられていません。", auto_id="4214237410", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '14 行 2, 並べ替えられていません。'    (L1579, T311, R1621, B332)
+   |    |    |    |    | ['Edit90', '絞込 5 人/総人数 5 人Edit60']
+   |    |    |    |    | child_window(title="14 行 2, 並べ替えられていません。", auto_id="4261027830", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '15 行 2, 並べ替えられていません。'    (L1621, T311, R1663, B332)
+   |    |    |    |    | ['Edit91', '絞込 5 人/総人数 5 人Edit61']
+   |    |    |    |    | child_window(title="15 行 2, 並べ替えられていません。", auto_id="4212379565", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '16 行 2, 並べ替えられていません。'    (L1663, T311, R1705, B332)
+   |    |    |    |    | ['Edit92', '絞込 5 人/総人数 5 人Edit62']
+   |    |    |    |    | child_window(title="16 行 2, 並べ替えられていません。", auto_id="4244307222", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '17 行 2, 並べ替えられていません。'    (L1705, T311, R1747, B332)
+   |    |    |    |    | ['Edit93', '絞込 5 人/総人数 5 人Edit63']
+   |    |    |    |    | child_window(title="17 行 2, 並べ替えられていません。", auto_id="4263220684", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '18 行 2, 並べ替えられていません。'    (L1747, T311, R1789, B332)
+   |    |    |    |    | ['Edit94', '絞込 5 人/総人数 5 人Edit64']
+   |    |    |    |    | child_window(title="18 行 2, 並べ替えられていません。", auto_id="4232115247", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '19 行 2, 並べ替えられていません。'    (L1789, T311, R1831, B332)
+   |    |    |    |    | ['Edit95', '絞込 5 人/総人数 5 人Edit65']
+   |    |    |    |    | child_window(title="19 行 2, 並べ替えられていません。", auto_id="4220601768", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '20 行 2, 並べ替えられていません。'    (L1831, T311, R1873, B332)
+   |    |    |    |    | ['Edit96', '絞込 5 人/総人数 5 人Edit66']
+   |    |    |    |    | child_window(title="20 行 2, 並べ替えられていません。", auto_id="4251198184", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '21 行 2, 並べ替えられていません。'    (L1873, T311, R1915, B332)
+   |    |    |    |    | ['Edit97', '絞込 5 人/総人数 5 人Edit67']
+   |    |    |    |    | child_window(title="21 行 2, 並べ替えられていません。", auto_id="4258130472", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '22 行 2, 並べ替えられていません。'    (L1915, T311, R1957, B332)
+   |    |    |    |    | ['Edit98', '絞込 5 人/総人数 5 人Edit68']
+   |    |    |    |    | child_window(title="22 行 2, 並べ替えられていません。", auto_id="4253412201", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '23 行 2, 並べ替えられていません。'    (L1957, T311, R1999, B332)
+   |    |    |    |    | ['Edit99', '絞込 5 人/総人数 5 人Edit69']
+   |    |    |    |    | child_window(title="23 行 2, 並べ替えられていません。", auto_id="4210947764", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '24 行 2, 並べ替えられていません。'    (L1999, T311, R2041, B332)
+   |    |    |    |    | ['Edit100', '絞込 5 人/総人数 5 人Edit70']
+   |    |    |    |    | child_window(title="24 行 2, 並べ替えられていません。", auto_id="4231421019", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '25 行 2, 並べ替えられていません。'    (L2041, T311, R2083, B332)
+   |    |    |    |    | ['Edit101', '絞込 5 人/総人数 5 人Edit71']
+   |    |    |    |    | child_window(title="25 行 2, 並べ替えられていません。", auto_id="4214353717", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '26 行 2, 並べ替えられていません。'    (L2083, T311, R2125, B332)
+   |    |    |    |    | ['Edit102', '絞込 5 人/総人数 5 人Edit72']
+   |    |    |    |    | child_window(title="26 行 2, 並べ替えられていません。", auto_id="4262074597", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '27 行 2, 並べ替えられていません。'    (L2125, T311, R2167, B332)
+   |    |    |    |    | ['Edit103', '絞込 5 人/総人数 5 人Edit73']
+   |    |    |    |    | child_window(title="27 行 2, 並べ替えられていません。", auto_id="4221800467", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '28 行 2, 並べ替えられていません。'    (L2167, T311, R2209, B332)
+   |    |    |    |    | ['Edit104', '絞込 5 人/総人数 5 人Edit74']
+   |    |    |    |    | child_window(title="28 行 2, 並べ替えられていません。", auto_id="4261986480", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '29 行 2, 並べ替えられていません。'    (L2209, T311, R2251, B332)
+   |    |    |    |    | ['Edit105', '絞込 5 人/総人数 5 人Edit75']
+   |    |    |    |    | child_window(title="29 行 2, 並べ替えられていません。", auto_id="4221007413", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '30 行 2, 並べ替えられていません。'    (L2251, T311, R2293, B332)
+   |    |    |    |    | ['Edit106', '絞込 5 人/総人数 5 人Edit76']
+   |    |    |    |    | child_window(title="30 行 2, 並べ替えられていません。", auto_id="4254848996", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '31 行 2, 並べ替えられていません。'    (L2293, T311, R2335, B332)
+   |    |    |    |    | ['Edit107', '絞込 5 人/総人数 5 人Edit77']
+   |    |    |    |    | child_window(title="31 行 2, 並べ替えられていません。", auto_id="4223878916", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '件数 行 2, 並べ替えられていません。'    (L2335, T311, R2389, B332)
+   |    |    |    |    | ['Edit108', '絞込 5 人/総人数 5 人Edit78']
+   |    |    |    |    | child_window(title="件数 行 2, 並べ替えられていません。", auto_id="4213583655", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '平均 行 2, 並べ替えられていません。'    (L2389, T311, R2443, B332)
+   |    |    |    |    | ['Edit109', '絞込 5 人/総人数 5 人Edit79']
+   |    |    |    |    | child_window(title="平均 行 2, 並べ替えられていません。", auto_id="4255144039", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '最大 行 2, 並べ替えられていません。'    (L2443, T311, R2497, B332)
+   |    |    |    |    | ['Edit110']
+   |    |    |    |    | child_window(title="最大 行 2, 並べ替えられていません。", auto_id="4226534308", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '最小 行 2, 並べ替えられていません。'    (L2497, T311, R2551, B332)
+   |    |    |    |    | ['Edit111']
+   |    |    |    |    | child_window(title="最小 行 2, 並べ替えられていません。", auto_id="4237482183", control_type="Edit")
+   |    |    |    | 
+   |    |    |    | Custom - '行 3'    (L872, T332, R1804, B353)
+   |    |    |    | ['行 3', '行 3Custom', 'Custom5', '行 30', '行 31']
+   |    |    |    | child_window(title="行 3", control_type="Custom")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '行 3'    (L872, T332, R913, B353)
+   |    |    |    |    | ['Header42', '行 32', '行 3Header']
+   |    |    |    |    | child_window(title="行 3", auto_id="421795329", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '利用者名 行 3, 並べ替えられていません。'    (L913, T332, R991, B353)
+   |    |    |    |    | ['Edit112', 'レイアウト:Edit28']
+   |    |    |    |    | child_window(title="利用者名 行 3, 並べ替えられていません。", auto_id="4216157963", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - 'ケア記録項目 行 3, 並べ替えられていません。'    (L991, T332, R1087, B353)
+   |    |    |    |    | ['Edit113', 'レイアウト:Edit29']
+   |    |    |    |    | child_window(title="ケア記録項目 行 3, 並べ替えられていません。", auto_id="4211203942", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '1 行 3, 並べ替えられていません。'    (L1087, T332, R1123, B353)
+   |    |    |    |    | ['Edit114', 'レイアウト:Edit30']
+   |    |    |    |    | child_window(title="1 行 3, 並べ替えられていません。", auto_id="4233726620", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '2 行 3, 並べ替えられていません。'    (L1123, T332, R1159, B353)
+   |    |    |    |    | ['Edit115', 'レイアウト:Edit31']
+   |    |    |    |    | child_window(title="2 行 3, 並べ替えられていません。", auto_id="4235104124", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '3 行 3, 並べ替えられていません。'    (L1159, T332, R1195, B353)
+   |    |    |    |    | ['Edit116', 'レイアウト:Edit32']
+   |    |    |    |    | child_window(title="3 行 3, 並べ替えられていません。", auto_id="4247501665", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '4 行 3, 並べ替えられていません。'    (L1195, T332, R1231, B353)
+   |    |    |    |    | ['Edit117', 'レイアウト:Edit33']
+   |    |    |    |    | child_window(title="4 行 3, 並べ替えられていません。", auto_id="4224861802", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '5 行 3, 並べ替えられていません。'    (L1231, T332, R1267, B353)
+   |    |    |    |    | ['Edit118', 'レイアウト:Edit34']
+   |    |    |    |    | child_window(title="5 行 3, 並べ替えられていません。", auto_id="4222429634", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '6 行 3, 並べ替えられていません。'    (L1267, T332, R1303, B353)
+   |    |    |    |    | ['Edit119', 'レイアウト:Edit35']
+   |    |    |    |    | child_window(title="6 行 3, 並べ替えられていません。", auto_id="42540121", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '7 行 3, 並べ替えられていません。'    (L1303, T332, R1339, B353)
+   |    |    |    |    | ['Edit120', 'レイアウト:Edit36']
+   |    |    |    |    | child_window(title="7 行 3, 並べ替えられていません。", auto_id="424861097", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '8 行 3, 並べ替えられていません。'    (L1339, T332, R1375, B353)
+   |    |    |    |    | ['Edit121', '絞込 5 人/総人数 5 人Edit80']
+   |    |    |    |    | child_window(title="8 行 3, 並べ替えられていません。", auto_id="4243749873", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '9 行 3, 並べ替えられていません。'    (L1375, T332, R1411, B353)
+   |    |    |    |    | ['Edit122', '絞込 5 人/総人数 5 人Edit81']
+   |    |    |    |    | child_window(title="9 行 3, 並べ替えられていません。", auto_id="4258204539", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '10 行 3, 並べ替えられていません。'    (L1411, T332, R1453, B353)
+   |    |    |    |    | ['Edit123', '絞込 5 人/総人数 5 人Edit82']
+   |    |    |    |    | child_window(title="10 行 3, 並べ替えられていません。", auto_id="4254078809", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '11 行 3, 並べ替えられていません。'    (L1453, T332, R1495, B353)
+   |    |    |    |    | ['Edit124', '絞込 5 人/総人数 5 人Edit83']
+   |    |    |    |    | child_window(title="11 行 3, 並べ替えられていません。", auto_id="4216947234", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '12 行 3, 並べ替えられていません。'    (L1495, T332, R1537, B353)
+   |    |    |    |    | ['Edit125', '絞込 5 人/総人数 5 人Edit84']
+   |    |    |    |    | child_window(title="12 行 3, 並べ替えられていません。", auto_id="4218307385", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '13 行 3, 並べ替えられていません。'    (L1537, T332, R1579, B353)
+   |    |    |    |    | ['Edit126', '絞込 5 人/総人数 5 人Edit85']
+   |    |    |    |    | child_window(title="13 行 3, 並べ替えられていません。", auto_id="4230548742", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '14 行 3, 並べ替えられていません。'    (L1579, T332, R1621, B353)
+   |    |    |    |    | ['Edit127', '絞込 5 人/総人数 5 人Edit86']
+   |    |    |    |    | child_window(title="14 行 3, 並べ替えられていません。", auto_id="426503226", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '15 行 3, 並べ替えられていません。'    (L1621, T332, R1663, B353)
+   |    |    |    |    | ['Edit128', '絞込 5 人/総人数 5 人Edit87']
+   |    |    |    |    | child_window(title="15 行 3, 並べ替えられていません。", auto_id="4258529038", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '16 行 3, 並べ替えられていません。'    (L1663, T332, R1705, B353)
+   |    |    |    |    | ['Edit129', '絞込 5 人/総人数 5 人Edit88']
+   |    |    |    |    | child_window(title="16 行 3, 並べ替えられていません。", auto_id="4256999299", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '17 行 3, 並べ替えられていません。'    (L1705, T332, R1747, B353)
+   |    |    |    |    | ['Edit130', '絞込 5 人/総人数 5 人Edit89']
+   |    |    |    |    | child_window(title="17 行 3, 並べ替えられていません。", auto_id="4243231651", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '18 行 3, 並べ替えられていません。'    (L1747, T332, R1789, B353)
+   |    |    |    |    | ['Edit131', '絞込 5 人/総人数 5 人Edit90']
+   |    |    |    |    | child_window(title="18 行 3, 並べ替えられていません。", auto_id="4253540541", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '19 行 3, 並べ替えられていません。'    (L1789, T332, R1831, B353)
+   |    |    |    |    | ['Edit132', '絞込 5 人/総人数 5 人Edit91']
+   |    |    |    |    | child_window(title="19 行 3, 並べ替えられていません。", auto_id="4212102828", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '20 行 3, 並べ替えられていません。'    (L1831, T332, R1873, B353)
+   |    |    |    |    | ['Edit133', '絞込 5 人/総人数 5 人Edit92']
+   |    |    |    |    | child_window(title="20 行 3, 並べ替えられていません。", auto_id="4241816592", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '21 行 3, 並べ替えられていません。'    (L1873, T332, R1915, B353)
+   |    |    |    |    | ['Edit134', '絞込 5 人/総人数 5 人Edit93']
+   |    |    |    |    | child_window(title="21 行 3, 並べ替えられていません。", auto_id="4240805010", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '22 行 3, 並べ替えられていません。'    (L1915, T332, R1957, B353)
+   |    |    |    |    | ['Edit135', '絞込 5 人/総人数 5 人Edit94']
+   |    |    |    |    | child_window(title="22 行 3, 並べ替えられていません。", auto_id="4231700771", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '23 行 3, 並べ替えられていません。'    (L1957, T332, R1999, B353)
+   |    |    |    |    | ['Edit136', '絞込 5 人/総人数 5 人Edit95']
+   |    |    |    |    | child_window(title="23 行 3, 並べ替えられていません。", auto_id="4216871484", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '24 行 3, 並べ替えられていません。'    (L1999, T332, R2041, B353)
+   |    |    |    |    | ['Edit137', '絞込 5 人/総人数 5 人Edit96']
+   |    |    |    |    | child_window(title="24 行 3, 並べ替えられていません。", auto_id="4217625630", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '25 行 3, 並べ替えられていません。'    (L2041, T332, R2083, B353)
+   |    |    |    |    | ['Edit138', '絞込 5 人/総人数 5 人Edit97']
+   |    |    |    |    | child_window(title="25 行 3, 並べ替えられていません。", auto_id="4224412946", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '26 行 3, 並べ替えられていません。'    (L2083, T332, R2125, B353)
+   |    |    |    |    | ['Edit139', '絞込 5 人/総人数 5 人Edit98']
+   |    |    |    |    | child_window(title="26 行 3, 並べ替えられていません。", auto_id="4218389930", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '27 行 3, 並べ替えられていません。'    (L2125, T332, R2167, B353)
+   |    |    |    |    | ['Edit140', '絞込 5 人/総人数 5 人Edit99']
+   |    |    |    |    | child_window(title="27 行 3, 並べ替えられていません。", auto_id="4231291646", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '28 行 3, 並べ替えられていません。'    (L2167, T332, R2209, B353)
+   |    |    |    |    | ['Edit141', '絞込 5 人/総人数 5 人Edit100']
+   |    |    |    |    | child_window(title="28 行 3, 並べ替えられていません。", auto_id="4213189358", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '29 行 3, 並べ替えられていません。'    (L2209, T332, R2251, B353)
+   |    |    |    |    | ['Edit142', '絞込 5 人/総人数 5 人Edit101']
+   |    |    |    |    | child_window(title="29 行 3, 並べ替えられていません。", auto_id="4251595365", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '30 行 3, 並べ替えられていません。'    (L2251, T332, R2293, B353)
+   |    |    |    |    | ['Edit143', '絞込 5 人/総人数 5 人Edit102']
+   |    |    |    |    | child_window(title="30 行 3, 並べ替えられていません。", auto_id="4261705107", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '31 行 3, 並べ替えられていません。'    (L2293, T332, R2335, B353)
+   |    |    |    |    | ['Edit144', '絞込 5 人/総人数 5 人Edit103']
+   |    |    |    |    | child_window(title="31 行 3, 並べ替えられていません。", auto_id="4218475057", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '件数 行 3, 並べ替えられていません。'    (L2335, T332, R2389, B353)
+   |    |    |    |    | ['Edit145', '絞込 5 人/総人数 5 人Edit104']
+   |    |    |    |    | child_window(title="件数 行 3, 並べ替えられていません。", auto_id="4232057793", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '平均 行 3, 並べ替えられていません。'    (L2389, T332, R2443, B353)
+   |    |    |    |    | ['Edit146']
+   |    |    |    |    | child_window(title="平均 行 3, 並べ替えられていません。", auto_id="4220084682", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '最大 行 3, 並べ替えられていません。'    (L2443, T332, R2497, B353)
+   |    |    |    |    | ['Edit147']
+   |    |    |    |    | child_window(title="最大 行 3, 並べ替えられていません。", auto_id="4246544415", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '最小 行 3, 並べ替えられていません。'    (L2497, T332, R2551, B353)
+   |    |    |    |    | ['Edit148']
+   |    |    |    |    | child_window(title="最小 行 3, 並べ替えられていません。", auto_id="4216246551", control_type="Edit")
+   |    |    |    | 
+   |    |    |    | Custom - '行 4'    (L872, T353, R1804, B374)
+   |    |    |    | ['行 4Custom', '行 4', 'Custom6', '行 40', '行 41']
+   |    |    |    | child_window(title="行 4", control_type="Custom")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '行 4'    (L872, T353, R913, B374)
+   |    |    |    |    | ['Header43', '行 42', '行 4Header']
+   |    |    |    |    | child_window(title="行 4", auto_id="4212001237", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '利用者名 行 4, 並べ替えられていません。'    (L913, T353, R991, B374)
+   |    |    |    |    | ['Edit149', 'レイアウト:Edit37']
+   |    |    |    |    | child_window(title="利用者名 行 4, 並べ替えられていません。", auto_id="4240902273", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - 'ケア記録項目 行 4, 並べ替えられていません。'    (L991, T353, R1087, B374)
+   |    |    |    |    | ['Edit150', 'レイアウト:Edit38']
+   |    |    |    |    | child_window(title="ケア記録項目 行 4, 並べ替えられていません。", auto_id="4232576140", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '1 行 4, 並べ替えられていません。'    (L1087, T353, R1123, B374)
+   |    |    |    |    | ['Edit151', 'レイアウト:Edit39']
+   |    |    |    |    | child_window(title="1 行 4, 並べ替えられていません。", auto_id="4224749807", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '2 行 4, 並べ替えられていません。'    (L1123, T353, R1159, B374)
+   |    |    |    |    | ['Edit152', 'レイアウト:Edit40']
+   |    |    |    |    | child_window(title="2 行 4, 並べ替えられていません。", auto_id="4221421675", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '3 行 4, 並べ替えられていません。'    (L1159, T353, R1195, B374)
+   |    |    |    |    | ['Edit153', 'レイアウト:Edit41']
+   |    |    |    |    | child_window(title="3 行 4, 並べ替えられていません。", auto_id="4258577354", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '4 行 4, 並べ替えられていません。'    (L1195, T353, R1231, B374)
+   |    |    |    |    | ['Edit154', 'レイアウト:Edit42']
+   |    |    |    |    | child_window(title="4 行 4, 並べ替えられていません。", auto_id="4257434139", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '5 行 4, 並べ替えられていません。'    (L1231, T353, R1267, B374)
+   |    |    |    |    | ['Edit155', 'レイアウト:Edit43']
+   |    |    |    |    | child_window(title="5 行 4, 並べ替えられていません。", auto_id="4247145209", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '6 行 4, 並べ替えられていません。'    (L1267, T353, R1303, B374)
+   |    |    |    |    | ['Edit156', 'レイアウト:Edit44']
+   |    |    |    |    | child_window(title="6 行 4, 並べ替えられていません。", auto_id="4221653700", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '7 行 4, 並べ替えられていません。'    (L1303, T353, R1339, B374)
+   |    |    |    |    | ['Edit157', 'レイアウト:Edit45']
+   |    |    |    |    | child_window(title="7 行 4, 並べ替えられていません。", auto_id="4260665573", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '8 行 4, 並べ替えられていません。'    (L1339, T353, R1375, B374)
+   |    |    |    |    | ['Edit158', '絞込 5 人/総人数 5 人Edit105']
+   |    |    |    |    | child_window(title="8 行 4, 並べ替えられていません。", auto_id="429119245", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '9 行 4, 並べ替えられていません。'    (L1375, T353, R1411, B374)
+   |    |    |    |    | ['Edit159', '絞込 5 人/総人数 5 人Edit106']
+   |    |    |    |    | child_window(title="9 行 4, 並べ替えられていません。", auto_id="4214964341", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '10 行 4, 並べ替えられていません。'    (L1411, T353, R1453, B374)
+   |    |    |    |    | ['Edit160', '絞込 5 人/総人数 5 人Edit107']
+   |    |    |    |    | child_window(title="10 行 4, 並べ替えられていません。", auto_id="42461342", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '11 行 4, 並べ替えられていません。'    (L1453, T353, R1495, B374)
+   |    |    |    |    | ['Edit161', '絞込 5 人/総人数 5 人Edit108']
+   |    |    |    |    | child_window(title="11 行 4, 並べ替えられていません。", auto_id="424152081", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '12 行 4, 並べ替えられていません。'    (L1495, T353, R1537, B374)
+   |    |    |    |    | ['Edit162', '絞込 5 人/総人数 5 人Edit109']
+   |    |    |    |    | child_window(title="12 行 4, 並べ替えられていません。", auto_id="4237368736", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '13 行 4, 並べ替えられていません。'    (L1537, T353, R1579, B374)
+   |    |    |    |    | ['Edit163', '絞込 5 人/総人数 5 人Edit110']
+   |    |    |    |    | child_window(title="13 行 4, 並べ替えられていません。", auto_id="42774306", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '14 行 4, 並べ替えられていません。'    (L1579, T353, R1621, B374)
+   |    |    |    |    | ['Edit164', '絞込 5 人/総人数 5 人Edit111']
+   |    |    |    |    | child_window(title="14 行 4, 並べ替えられていません。", auto_id="426968762", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '15 行 4, 並べ替えられていません。'    (L1621, T353, R1663, B374)
+   |    |    |    |    | ['Edit165', '絞込 5 人/総人数 5 人Edit112']
+   |    |    |    |    | child_window(title="15 行 4, 並べ替えられていません。", auto_id="4262718864", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '16 行 4, 並べ替えられていません。'    (L1663, T353, R1705, B374)
+   |    |    |    |    | ['Edit166', '絞込 5 人/総人数 5 人Edit113']
+   |    |    |    |    | child_window(title="16 行 4, 並べ替えられていません。", auto_id="4227598869", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '17 行 4, 並べ替えられていません。'    (L1705, T353, R1747, B374)
+   |    |    |    |    | ['Edit167', '絞込 5 人/総人数 5 人Edit114']
+   |    |    |    |    | child_window(title="17 行 4, 並べ替えられていません。", auto_id="4247063234", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '18 行 4, 並べ替えられていません。'    (L1747, T353, R1789, B374)
+   |    |    |    |    | ['Edit168', '絞込 5 人/総人数 5 人Edit115']
+   |    |    |    |    | child_window(title="18 行 4, 並べ替えられていません。", auto_id="4220915929", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '19 行 4, 並べ替えられていません。'    (L1789, T353, R1831, B374)
+   |    |    |    |    | ['Edit169', '絞込 5 人/総人数 5 人Edit116']
+   |    |    |    |    | child_window(title="19 行 4, 並べ替えられていません。", auto_id="4254025633", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '20 行 4, 並べ替えられていません。'    (L1831, T353, R1873, B374)
+   |    |    |    |    | ['Edit170', '絞込 5 人/総人数 5 人Edit117']
+   |    |    |    |    | child_window(title="20 行 4, 並べ替えられていません。", auto_id="4216468652", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '21 行 4, 並べ替えられていません。'    (L1873, T353, R1915, B374)
+   |    |    |    |    | ['Edit171', '絞込 5 人/総人数 5 人Edit118']
+   |    |    |    |    | child_window(title="21 行 4, 並べ替えられていません。", auto_id="4214000148", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '22 行 4, 並べ替えられていません。'    (L1915, T353, R1957, B374)
+   |    |    |    |    | ['Edit172', '絞込 5 人/総人数 5 人Edit119']
+   |    |    |    |    | child_window(title="22 行 4, 並べ替えられていません。", auto_id="4258892473", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '23 行 4, 並べ替えられていません。'    (L1957, T353, R1999, B374)
+   |    |    |    |    | ['Edit173', '絞込 5 人/総人数 5 人Edit120']
+   |    |    |    |    | child_window(title="23 行 4, 並べ替えられていません。", auto_id="4260270212", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '24 行 4, 並べ替えられていません。'    (L1999, T353, R2041, B374)
+   |    |    |    |    | ['Edit174', '絞込 5 人/総人数 5 人Edit121']
+   |    |    |    |    | child_window(title="24 行 4, 並べ替えられていません。", auto_id="425560998", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '25 行 4, 並べ替えられていません。'    (L2041, T353, R2083, B374)
+   |    |    |    |    | ['Edit175', '絞込 5 人/総人数 5 人Edit122']
+   |    |    |    |    | child_window(title="25 行 4, 並べ替えられていません。", auto_id="4250048984", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '26 行 4, 並べ替えられていません。'    (L2083, T353, R2125, B374)
+   |    |    |    |    | ['Edit176', '絞込 5 人/総人数 5 人Edit123']
+   |    |    |    |    | child_window(title="26 行 4, 並べ替えられていません。", auto_id="4247787675", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '27 行 4, 並べ替えられていません。'    (L2125, T353, R2167, B374)
+   |    |    |    |    | ['Edit177', '絞込 5 人/総人数 5 人Edit124']
+   |    |    |    |    | child_window(title="27 行 4, 並べ替えられていません。", auto_id="4227435897", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '28 行 4, 並べ替えられていません。'    (L2167, T353, R2209, B374)
+   |    |    |    |    | ['Edit178', '絞込 5 人/総人数 5 人Edit125']
+   |    |    |    |    | child_window(title="28 行 4, 並べ替えられていません。", auto_id="4245596481", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '29 行 4, 並べ替えられていません。'    (L2209, T353, R2251, B374)
+   |    |    |    |    | ['Edit179', '絞込 5 人/総人数 5 人Edit126']
+   |    |    |    |    | child_window(title="29 行 4, 並べ替えられていません。", auto_id="427715150", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '30 行 4, 並べ替えられていません。'    (L2251, T353, R2293, B374)
+   |    |    |    |    | ['Edit180', '絞込 5 人/総人数 5 人Edit127']
+   |    |    |    |    | child_window(title="30 行 4, 並べ替えられていません。", auto_id="422327487", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '31 行 4, 並べ替えられていません。'    (L2293, T353, R2335, B374)
+   |    |    |    |    | ['Edit181', '絞込 5 人/総人数 5 人Edit128']
+   |    |    |    |    | child_window(title="31 行 4, 並べ替えられていません。", auto_id="4220947391", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '件数 行 4, 並べ替えられていません。'    (L2335, T353, R2389, B374)
+   |    |    |    |    | ['Edit182', '絞込 5 人/総人数 5 人Edit129']
+   |    |    |    |    | child_window(title="件数 行 4, 並べ替えられていません。", auto_id="4254308798", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '平均 行 4, 並べ替えられていません。'    (L2389, T353, R2443, B374)
+   |    |    |    |    | ['Edit183']
+   |    |    |    |    | child_window(title="平均 行 4, 並べ替えられていません。", auto_id="4219017142", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '最大 行 4, 並べ替えられていません。'    (L2443, T353, R2497, B374)
+   |    |    |    |    | ['Edit184']
+   |    |    |    |    | child_window(title="最大 行 4, 並べ替えられていません。", auto_id="4236936550", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '最小 行 4, 並べ替えられていません。'    (L2497, T353, R2551, B374)
+   |    |    |    |    | ['Edit185']
+   |    |    |    |    | child_window(title="最小 行 4, 並べ替えられていません。", auto_id="4263993496", control_type="Edit")
+   |    |    |    | 
+   |    |    |    | Custom - '行 5'    (L872, T374, R1804, B395)
+   |    |    |    | ['Custom7', '行 5Custom', '行 5', '行 50', '行 51']
+   |    |    |    | child_window(title="行 5", control_type="Custom")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '行 5'    (L872, T374, R913, B395)
+   |    |    |    |    | ['Header44', '行 5Header', '行 52']
+   |    |    |    |    | child_window(title="行 5", auto_id="4239070558", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '利用者名 行 5, 並べ替えられていません。'    (L913, T374, R991, B395)
+   |    |    |    |    | ['Edit186', 'レイアウト:Edit46']
+   |    |    |    |    | child_window(title="利用者名 行 5, 並べ替えられていません。", auto_id="4216090703", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - 'ケア記録項目 行 5, 並べ替えられていません。'    (L991, T374, R1087, B395)
+   |    |    |    |    | ['Edit187', 'レイアウト:Edit47']
+   |    |    |    |    | child_window(title="ケア記録項目 行 5, 並べ替えられていません。", auto_id="4210598606", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '1 行 5, 並べ替えられていません。'    (L1087, T374, R1123, B395)
+   |    |    |    |    | ['Edit188', 'レイアウト:Edit48']
+   |    |    |    |    | child_window(title="1 行 5, 並べ替えられていません。", auto_id="4228278595", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '2 行 5, 並べ替えられていません。'    (L1123, T374, R1159, B395)
+   |    |    |    |    | ['Edit189', 'レイアウト:Edit49']
+   |    |    |    |    | child_window(title="2 行 5, 並べ替えられていません。", auto_id="4253180767", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '3 行 5, 並べ替えられていません。'    (L1159, T374, R1195, B395)
+   |    |    |    |    | ['Edit190', 'レイアウト:Edit50']
+   |    |    |    |    | child_window(title="3 行 5, 並べ替えられていません。", auto_id="428864859", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '4 行 5, 並べ替えられていません。'    (L1195, T374, R1231, B395)
+   |    |    |    |    | ['Edit191', 'レイアウト:Edit51']
+   |    |    |    |    | child_window(title="4 行 5, 並べ替えられていません。", auto_id="4212674872", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '5 行 5, 並べ替えられていません。'    (L1231, T374, R1267, B395)
+   |    |    |    |    | ['Edit192', 'レイアウト:Edit52']
+   |    |    |    |    | child_window(title="5 行 5, 並べ替えられていません。", auto_id="4246964992", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '6 行 5, 並べ替えられていません。'    (L1267, T374, R1303, B395)
+   |    |    |    |    | ['Edit193', 'レイアウト:Edit53']
+   |    |    |    |    | child_window(title="6 行 5, 並べ替えられていません。", auto_id="4220031746", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '7 行 5, 並べ替えられていません。'    (L1303, T374, R1339, B395)
+   |    |    |    |    | ['Edit194', 'レイアウト:Edit54']
+   |    |    |    |    | child_window(title="7 行 5, 並べ替えられていません。", auto_id="4246067993", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '8 行 5, 並べ替えられていません。'    (L1339, T374, R1375, B395)
+   |    |    |    |    | ['Edit195', '絞込 5 人/総人数 5 人Edit130']
+   |    |    |    |    | child_window(title="8 行 5, 並べ替えられていません。", auto_id="4211958757", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '9 行 5, 並べ替えられていません。'    (L1375, T374, R1411, B395)
+   |    |    |    |    | ['Edit196', '絞込 5 人/総人数 5 人Edit131']
+   |    |    |    |    | child_window(title="9 行 5, 並べ替えられていません。", auto_id="4240519951", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '10 行 5, 並べ替えられていません。'    (L1411, T374, R1453, B395)
+   |    |    |    |    | ['Edit197', '絞込 5 人/総人数 5 人Edit132']
+   |    |    |    |    | child_window(title="10 行 5, 並べ替えられていません。", auto_id="4229135240", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '11 行 5, 並べ替えられていません。'    (L1453, T374, R1495, B395)
+   |    |    |    |    | ['Edit198', '絞込 5 人/総人数 5 人Edit133']
+   |    |    |    |    | child_window(title="11 行 5, 並べ替えられていません。", auto_id="4260890569", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '12 行 5, 並べ替えられていません。'    (L1495, T374, R1537, B395)
+   |    |    |    |    | ['Edit199', '絞込 5 人/総人数 5 人Edit134']
+   |    |    |    |    | child_window(title="12 行 5, 並べ替えられていません。", auto_id="4211144211", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '13 行 5, 並べ替えられていません。'    (L1537, T374, R1579, B395)
+   |    |    |    |    | ['Edit200', '絞込 5 人/総人数 5 人Edit135']
+   |    |    |    |    | child_window(title="13 行 5, 並べ替えられていません。", auto_id="4233189039", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '14 行 5, 並べ替えられていません。'    (L1579, T374, R1621, B395)
+   |    |    |    |    | ['Edit201', '絞込 5 人/総人数 5 人Edit136']
+   |    |    |    |    | child_window(title="14 行 5, 並べ替えられていません。", auto_id="4230265903", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '15 行 5, 並べ替えられていません。'    (L1621, T374, R1663, B395)
+   |    |    |    |    | ['Edit202', '絞込 5 人/総人数 5 人Edit137']
+   |    |    |    |    | child_window(title="15 行 5, 並べ替えられていません。", auto_id="423957675", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '16 行 5, 並べ替えられていません。'    (L1663, T374, R1705, B395)
+   |    |    |    |    | ['Edit203', '絞込 5 人/総人数 5 人Edit138']
+   |    |    |    |    | child_window(title="16 行 5, 並べ替えられていません。", auto_id="4235619075", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '17 行 5, 並べ替えられていません。'    (L1705, T374, R1747, B395)
+   |    |    |    |    | ['Edit204', '絞込 5 人/総人数 5 人Edit139']
+   |    |    |    |    | child_window(title="17 行 5, 並べ替えられていません。", auto_id="4252136226", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '18 行 5, 並べ替えられていません。'    (L1747, T374, R1789, B395)
+   |    |    |    |    | ['Edit205', '絞込 5 人/総人数 5 人Edit140']
+   |    |    |    |    | child_window(title="18 行 5, 並べ替えられていません。", auto_id="4266572856", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '19 行 5, 並べ替えられていません。'    (L1789, T374, R1831, B395)
+   |    |    |    |    | ['Edit206', '絞込 5 人/総人数 5 人Edit141']
+   |    |    |    |    | child_window(title="19 行 5, 並べ替えられていません。", auto_id="4262284798", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '20 行 5, 並べ替えられていません。'    (L1831, T374, R1873, B395)
+   |    |    |    |    | ['Edit207', '絞込 5 人/総人数 5 人Edit142']
+   |    |    |    |    | child_window(title="20 行 5, 並べ替えられていません。", auto_id="4223692278", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '21 行 5, 並べ替えられていません。'    (L1873, T374, R1915, B395)
+   |    |    |    |    | ['Edit208', '絞込 5 人/総人数 5 人Edit143']
+   |    |    |    |    | child_window(title="21 行 5, 並べ替えられていません。", auto_id="4211903911", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '22 行 5, 並べ替えられていません。'    (L1915, T374, R1957, B395)
+   |    |    |    |    | ['Edit209', '絞込 5 人/総人数 5 人Edit144']
+   |    |    |    |    | child_window(title="22 行 5, 並べ替えられていません。", auto_id="4240026340", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '23 行 5, 並べ替えられていません。'    (L1957, T374, R1999, B395)
+   |    |    |    |    | ['Edit210', '絞込 5 人/総人数 5 人Edit145']
+   |    |    |    |    | child_window(title="23 行 5, 並べ替えられていません。", auto_id="4224692740", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '24 行 5, 並べ替えられていません。'    (L1999, T374, R2041, B395)
+   |    |    |    |    | ['Edit211', '絞込 5 人/総人数 5 人Edit146']
+   |    |    |    |    | child_window(title="24 行 5, 並べ替えられていません。", auto_id="4220908074", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '25 行 5, 並べ替えられていません。'    (L2041, T374, R2083, B395)
+   |    |    |    |    | ['Edit212', '絞込 5 人/総人数 5 人Edit147']
+   |    |    |    |    | child_window(title="25 行 5, 並べ替えられていません。", auto_id="4253954942", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '26 行 5, 並べ替えられていません。'    (L2083, T374, R2125, B395)
+   |    |    |    |    | ['Edit213', '絞込 5 人/総人数 5 人Edit148']
+   |    |    |    |    | child_window(title="26 行 5, 並べ替えられていません。", auto_id="4215832433", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '27 行 5, 並べ替えられていません。'    (L2125, T374, R2167, B395)
+   |    |    |    |    | ['Edit214', '絞込 5 人/総人数 5 人Edit149']
+   |    |    |    |    | child_window(title="27 行 5, 並べ替えられていません。", auto_id="428274172", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '28 行 5, 並べ替えられていません。'    (L2167, T374, R2209, B395)
+   |    |    |    |    | ['Edit215', '絞込 5 人/総人数 5 人Edit150']
+   |    |    |    |    | child_window(title="28 行 5, 並べ替えられていません。", auto_id="427358688", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '29 行 5, 並べ替えられていません。'    (L2209, T374, R2251, B395)
+   |    |    |    |    | ['Edit216', '絞込 5 人/総人数 5 人Edit151']
+   |    |    |    |    | child_window(title="29 行 5, 並べ替えられていません。", auto_id="4266228199", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '30 行 5, 並べ替えられていません。'    (L2251, T374, R2293, B395)
+   |    |    |    |    | ['Edit217', '絞込 5 人/総人数 5 人Edit152']
+   |    |    |    |    | child_window(title="30 行 5, 並べ替えられていません。", auto_id="4259182880", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '31 行 5, 並べ替えられていません。'    (L2293, T374, R2335, B395)
+   |    |    |    |    | ['Edit218', '絞込 5 人/総人数 5 人Edit153']
+   |    |    |    |    | child_window(title="31 行 5, 並べ替えられていません。", auto_id="4262883878", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '件数 行 5, 並べ替えられていません。'    (L2335, T374, R2389, B395)
+   |    |    |    |    | ['Edit219', '絞込 5 人/総人数 5 人Edit154']
+   |    |    |    |    | child_window(title="件数 行 5, 並べ替えられていません。", auto_id="4229083993", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '平均 行 5, 並べ替えられていません。'    (L2389, T374, R2443, B395)
+   |    |    |    |    | ['Edit220']
+   |    |    |    |    | child_window(title="平均 行 5, 並べ替えられていません。", auto_id="4260429346", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '最大 行 5, 並べ替えられていません。'    (L2443, T374, R2497, B395)
+   |    |    |    |    | ['Edit221']
+   |    |    |    |    | child_window(title="最大 行 5, 並べ替えられていません。", auto_id="426993202", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '最小 行 5, 並べ替えられていません。'    (L2497, T374, R2551, B395)
+   |    |    |    |    | ['Edit222']
+   |    |    |    |    | child_window(title="最小 行 5, 並べ替えられていません。", auto_id="4262938818", control_type="Edit")
+   |    |    |    | 
+   |    |    |    | Custom - '行 6'    (L872, T395, R1804, B416)
+   |    |    |    | ['Custom8', '行 6Custom', '行 6', '行 60', '行 61']
+   |    |    |    | child_window(title="行 6", control_type="Custom")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '行 6'    (L872, T395, R913, B416)
+   |    |    |    |    | ['Header45', '行 6Header', '行 62']
+   |    |    |    |    | child_window(title="行 6", auto_id="4229578451", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '利用者名 行 6, 並べ替えられていません。'    (L913, T395, R991, B416)
+   |    |    |    |    | ['Edit223', 'レイアウト:Edit55']
+   |    |    |    |    | child_window(title="利用者名 行 6, 並べ替えられていません。", auto_id="4264879470", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - 'ケア記録項目 行 6, 並べ替えられていません。'    (L991, T395, R1087, B416)
+   |    |    |    |    | ['Edit224', 'レイアウト:Edit56']
+   |    |    |    |    | child_window(title="ケア記録項目 行 6, 並べ替えられていません。", auto_id="4247044325", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '1 行 6, 並べ替えられていません。'    (L1087, T395, R1123, B416)
+   |    |    |    |    | ['Edit225', 'レイアウト:Edit57']
+   |    |    |    |    | child_window(title="1 行 6, 並べ替えられていません。", auto_id="4220745743", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '2 行 6, 並べ替えられていません。'    (L1123, T395, R1159, B416)
+   |    |    |    |    | ['Edit226', 'レイアウト:Edit58']
+   |    |    |    |    | child_window(title="2 行 6, 並べ替えられていません。", auto_id="4252493967", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '3 行 6, 並べ替えられていません。'    (L1159, T395, R1195, B416)
+   |    |    |    |    | ['Edit227', 'レイアウト:Edit59']
+   |    |    |    |    | child_window(title="3 行 6, 並べ替えられていません。", auto_id="422683661", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '4 行 6, 並べ替えられていません。'    (L1195, T395, R1231, B416)
+   |    |    |    |    | ['Edit228', 'レイアウト:Edit60']
+   |    |    |    |    | child_window(title="4 行 6, 並べ替えられていません。", auto_id="4224152954", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '5 行 6, 並べ替えられていません。'    (L1231, T395, R1267, B416)
+   |    |    |    |    | ['Edit229', 'レイアウト:Edit61']
+   |    |    |    |    | child_window(title="5 行 6, 並べ替えられていません。", auto_id="4216049999", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '6 行 6, 並べ替えられていません。'    (L1267, T395, R1303, B416)
+   |    |    |    |    | ['Edit230', 'レイアウト:Edit62']
+   |    |    |    |    | child_window(title="6 行 6, 並べ替えられていません。", auto_id="4210232270", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '7 行 6, 並べ替えられていません。'    (L1303, T395, R1339, B416)
+   |    |    |    |    | ['Edit231', 'レイアウト:Edit63']
+   |    |    |    |    | child_window(title="7 行 6, 並べ替えられていません。", auto_id="4224981566", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '8 行 6, 並べ替えられていません。'    (L1339, T395, R1375, B416)
+   |    |    |    |    | ['Edit232', '絞込 5 人/総人数 5 人Edit155']
+   |    |    |    |    | child_window(title="8 行 6, 並べ替えられていません。", auto_id="4223507505", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '9 行 6, 並べ替えられていません。'    (L1375, T395, R1411, B416)
+   |    |    |    |    | ['Edit233', '絞込 5 人/総人数 5 人Edit156']
+   |    |    |    |    | child_window(title="9 行 6, 並べ替えられていません。", auto_id="4210240961", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '10 行 6, 並べ替えられていません。'    (L1411, T395, R1453, B416)
+   |    |    |    |    | ['Edit234', '絞込 5 人/総人数 5 人Edit157']
+   |    |    |    |    | child_window(title="10 行 6, 並べ替えられていません。", auto_id="4225059790", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '11 行 6, 並べ替えられていません。'    (L1453, T395, R1495, B416)
+   |    |    |    |    | ['Edit235', '絞込 5 人/総人数 5 人Edit158']
+   |    |    |    |    | child_window(title="11 行 6, 並べ替えられていません。", auto_id="4224211521", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '12 行 6, 並べ替えられていません。'    (L1495, T395, R1537, B416)
+   |    |    |    |    | ['Edit236', '絞込 5 人/総人数 5 人Edit159']
+   |    |    |    |    | child_window(title="12 行 6, 並べ替えられていません。", auto_id="4216577099", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '13 行 6, 並べ替えられていません。'    (L1537, T395, R1579, B416)
+   |    |    |    |    | ['Edit237', '絞込 5 人/総人数 5 人Edit160']
+   |    |    |    |    | child_window(title="13 行 6, 並べ替えられていません。", auto_id="4214976165", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '14 行 6, 並べ替えられていません。'    (L1579, T395, R1621, B416)
+   |    |    |    |    | ['Edit238', '絞込 5 人/総人数 5 人Edit161']
+   |    |    |    |    | child_window(title="14 行 6, 並べ替えられていません。", auto_id="42567760", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '15 行 6, 並べ替えられていません。'    (L1621, T395, R1663, B416)
+   |    |    |    |    | ['Edit239', '絞込 5 人/総人数 5 人Edit162']
+   |    |    |    |    | child_window(title="15 行 6, 並べ替えられていません。", auto_id="425109846", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '16 行 6, 並べ替えられていません。'    (L1663, T395, R1705, B416)
+   |    |    |    |    | ['Edit240', '絞込 5 人/総人数 5 人Edit163']
+   |    |    |    |    | child_window(title="16 行 6, 並べ替えられていません。", auto_id="4245988614", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '17 行 6, 並べ替えられていません。'    (L1705, T395, R1747, B416)
+   |    |    |    |    | ['Edit241', '絞込 5 人/総人数 5 人Edit164']
+   |    |    |    |    | child_window(title="17 行 6, 並べ替えられていません。", auto_id="4211244347", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '18 行 6, 並べ替えられていません。'    (L1747, T395, R1789, B416)
+   |    |    |    |    | ['Edit242', '絞込 5 人/総人数 5 人Edit165']
+   |    |    |    |    | child_window(title="18 行 6, 並べ替えられていません。", auto_id="4234090260", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '19 行 6, 並べ替えられていません。'    (L1789, T395, R1831, B416)
+   |    |    |    |    | ['Edit243', '絞込 5 人/総人数 5 人Edit166']
+   |    |    |    |    | child_window(title="19 行 6, 並べ替えられていません。", auto_id="4238376892", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '20 行 6, 並べ替えられていません。'    (L1831, T395, R1873, B416)
+   |    |    |    |    | ['Edit244', '絞込 5 人/総人数 5 人Edit167']
+   |    |    |    |    | child_window(title="20 行 6, 並べ替えられていません。", auto_id="429847715", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '21 行 6, 並べ替えられていません。'    (L1873, T395, R1915, B416)
+   |    |    |    |    | ['Edit245', '絞込 5 人/総人数 5 人Edit168']
+   |    |    |    |    | child_window(title="21 行 6, 並べ替えられていません。", auto_id="4221520579", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '22 行 6, 並べ替えられていません。'    (L1915, T395, R1957, B416)
+   |    |    |    |    | ['Edit246', '絞込 5 人/総人数 5 人Edit169']
+   |    |    |    |    | child_window(title="22 行 6, 並べ替えられていません。", auto_id="4259467483", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '23 行 6, 並べ替えられていません。'    (L1957, T395, R1999, B416)
+   |    |    |    |    | ['Edit247', '絞込 5 人/総人数 5 人Edit170']
+   |    |    |    |    | child_window(title="23 行 6, 並べ替えられていません。", auto_id="4265445301", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '24 行 6, 並べ替えられていません。'    (L1999, T395, R2041, B416)
+   |    |    |    |    | ['Edit248', '絞込 5 人/総人数 5 人Edit171']
+   |    |    |    |    | child_window(title="24 行 6, 並べ替えられていません。", auto_id="4252136803", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '25 行 6, 並べ替えられていません。'    (L2041, T395, R2083, B416)
+   |    |    |    |    | ['Edit249', '絞込 5 人/総人数 5 人Edit172']
+   |    |    |    |    | child_window(title="25 行 6, 並べ替えられていません。", auto_id="4266578044", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '26 行 6, 並べ替えられていません。'    (L2083, T395, R2125, B416)
+   |    |    |    |    | ['Edit250', '絞込 5 人/総人数 5 人Edit173']
+   |    |    |    |    | child_window(title="26 行 6, 並べ替えられていません。", auto_id="4262331491", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '27 行 6, 並べ替えられていません。'    (L2125, T395, R2167, B416)
+   |    |    |    |    | ['Edit251', '絞込 5 人/総人数 5 人Edit174']
+   |    |    |    |    | child_window(title="27 行 6, 並べ替えられていません。", auto_id="4224112512", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '28 行 6, 並べ替えられていません。'    (L2167, T395, R2209, B416)
+   |    |    |    |    | ['Edit252', '絞込 5 人/総人数 5 人Edit175']
+   |    |    |    |    | child_window(title="28 行 6, 並べ替えられていません。", auto_id="4215686020", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '29 行 6, 並べ替えられていません。'    (L2209, T395, R2251, B416)
+   |    |    |    |    | ['Edit253', '絞込 5 人/総人数 5 人Edit176']
+   |    |    |    |    | child_window(title="29 行 6, 並べ替えられていません。", auto_id="426956456", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '30 行 6, 並べ替えられていません。'    (L2251, T395, R2293, B416)
+   |    |    |    |    | ['Edit254', '絞込 5 人/総人数 5 人Edit177']
+   |    |    |    |    | child_window(title="30 行 6, 並べ替えられていません。", auto_id="4262608109", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '31 行 6, 並べ替えられていません。'    (L2293, T395, R2335, B416)
+   |    |    |    |    | ['Edit255', '絞込 5 人/総人数 5 人Edit178']
+   |    |    |    |    | child_window(title="31 行 6, 並べ替えられていません。", auto_id="4226602077", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '件数 行 6, 並べ替えられていません。'    (L2335, T395, R2389, B416)
+   |    |    |    |    | ['Edit256']
+   |    |    |    |    | child_window(title="件数 行 6, 並べ替えられていません。", auto_id="4238092103", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '平均 行 6, 並べ替えられていません。'    (L2389, T395, R2443, B416)
+   |    |    |    |    | ['Edit257']
+   |    |    |    |    | child_window(title="平均 行 6, 並べ替えられていません。", auto_id="427284614", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '最大 行 6, 並べ替えられていません。'    (L2443, T395, R2497, B416)
+   |    |    |    |    | ['Edit258']
+   |    |    |    |    | child_window(title="最大 行 6, 並べ替えられていません。", auto_id="4265561530", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '最小 行 6, 並べ替えられていません。'    (L2497, T395, R2551, B416)
+   |    |    |    |    | ['Edit259']
+   |    |    |    |    | child_window(title="最小 行 6, 並べ替えられていません。", auto_id="4253182860", control_type="Edit")
+   |    |    |    | 
+   |    |    |    | Custom - '行 7'    (L872, T416, R1804, B437)
+   |    |    |    | ['Custom9', '行 7', '行 7Custom', '行 70', '行 71']
+   |    |    |    | child_window(title="行 7", control_type="Custom")
+   |    |    |    |    | 
+   |    |    |    |    | Header - '行 7'    (L872, T416, R913, B437)
+   |    |    |    |    | ['行 7Header', '行 72', 'Header46']
+   |    |    |    |    | child_window(title="行 7", auto_id="428883693", control_type="Header")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '利用者名 行 7, 並べ替えられていません。'    (L913, T416, R991, B437)
+   |    |    |    |    | ['Edit260', 'レイアウト:Edit64']
+   |    |    |    |    | child_window(title="利用者名 行 7, 並べ替えられていません。", auto_id="4212844374", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - 'ケア記録項目 行 7, 並べ替えられていません。'    (L991, T416, R1087, B437)
+   |    |    |    |    | ['Edit261', 'レイアウト:Edit65']
+   |    |    |    |    | child_window(title="ケア記録項目 行 7, 並べ替えられていません。", auto_id="4248490504", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '1 行 7, 並べ替えられていません。'    (L1087, T416, R1123, B437)
+   |    |    |    |    | ['Edit262', 'レイアウト:Edit66']
+   |    |    |    |    | child_window(title="1 行 7, 並べ替えられていません。", auto_id="4233761356", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '2 行 7, 並べ替えられていません。'    (L1123, T416, R1159, B437)
+   |    |    |    |    | ['Edit263', 'レイアウト:Edit67']
+   |    |    |    |    | child_window(title="2 行 7, 並べ替えられていません。", auto_id="4235416756", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '3 行 7, 並べ替えられていません。'    (L1159, T416, R1195, B437)
+   |    |    |    |    | ['Edit264', 'レイアウト:Edit68']
+   |    |    |    |    | child_window(title="3 行 7, 並べ替えられていません。", auto_id="4250315352", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '4 行 7, 並べ替えられていません。'    (L1195, T416, R1231, B437)
+   |    |    |    |    | ['Edit265', 'レイアウト:Edit69']
+   |    |    |    |    | child_window(title="4 行 7, 並べ替えられていません。", auto_id="4250184984", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '5 行 7, 並べ替えられていません。'    (L1231, T416, R1267, B437)
+   |    |    |    |    | ['Edit266', 'レイアウト:Edit70']
+   |    |    |    |    | child_window(title="5 行 7, 並べ替えられていません。", auto_id="4249011679", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '6 行 7, 並べ替えられていません。'    (L1267, T416, R1303, B437)
+   |    |    |    |    | ['Edit267', 'レイアウト:Edit71']
+   |    |    |    |    | child_window(title="6 行 7, 並べ替えられていません。", auto_id="4238451933", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '7 行 7, 並べ替えられていません。'    (L1303, T416, R1339, B437)
+   |    |    |    |    | ['Edit268', 'レイアウト:Edit72']
+   |    |    |    |    | child_window(title="7 行 7, 並べ替えられていません。", auto_id="4210523083", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '8 行 7, 並べ替えられていません。'    (L1339, T416, R1375, B437)
+   |    |    |    |    | ['Edit269', '絞込 5 人/総人数 5 人Edit179']
+   |    |    |    |    | child_window(title="8 行 7, 並べ替えられていません。", auto_id="4227598891", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '9 行 7, 並べ替えられていません。'    (L1375, T416, R1411, B437)
+   |    |    |    |    | ['Edit270', '絞込 5 人/総人数 5 人Edit180']
+   |    |    |    |    | child_window(title="9 行 7, 並べ替えられていません。", auto_id="4247063428", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '10 行 7, 並べ替えられていません。'    (L1411, T416, R1453, B437)
+   |    |    |    |    | ['Edit271', '絞込 5 人/総人数 5 人Edit181']
+   |    |    |    |    | child_window(title="10 行 7, 並べ替えられていません。", auto_id="4220917673", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '11 行 7, 並べ替えられていません。'    (L1453, T416, R1495, B437)
+   |    |    |    |    | ['Edit272', '絞込 5 人/総人数 5 人Edit182']
+   |    |    |    |    | child_window(title="11 行 7, 並べ替えられていません。", auto_id="4254041329", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '12 行 7, 並べ替えられていません。'    (L1495, T416, R1537, B437)
+   |    |    |    |    | ['Edit273', '絞込 5 人/総人数 5 人Edit183']
+   |    |    |    |    | child_window(title="12 行 7, 並べ替えられていません。", auto_id="4216609919", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '13 行 7, 並べ替えられていません。'    (L1537, T416, R1579, B437)
+   |    |    |    |    | ['Edit274', '絞込 5 人/総人数 5 人Edit184']
+   |    |    |    |    | child_window(title="13 行 7, 並べ替えられていません。", auto_id="4215271547", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '14 行 7, 並べ替えられていません。'    (L1579, T416, R1621, B437)
+   |    |    |    |    | ['Edit275', '絞込 5 人/総人数 5 人Edit185']
+   |    |    |    |    | child_window(title="14 行 7, 並べ替えられていません。", auto_id="423226198", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '15 行 7, 並べ替えられていません。'    (L1621, T416, R1663, B437)
+   |    |    |    |    | ['Edit276', '絞込 5 人/総人数 5 人Edit186']
+   |    |    |    |    | child_window(title="15 行 7, 並べ替えられていません。", auto_id="4229035785", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '16 行 7, 並べ替えられていません。'    (L1663, T416, R1705, B437)
+   |    |    |    |    | ['Edit277', '絞込 5 人/総人数 5 人Edit187']
+   |    |    |    |    | child_window(title="16 行 7, 並べ替えられていません。", auto_id="4259995477", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '17 行 7, 並べ替えられていません。'    (L1705, T416, R1747, B437)
+   |    |    |    |    | ['Edit278', '絞込 5 人/総人数 5 人Edit188']
+   |    |    |    |    | child_window(title="17 行 7, 並べ替えられていません。", auto_id="423088388", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '18 行 7, 並べ替えられていません。'    (L1747, T416, R1789, B437)
+   |    |    |    |    | ['Edit279', '絞込 5 人/総人数 5 人Edit189']
+   |    |    |    |    | child_window(title="18 行 7, 並べ替えられていません。", auto_id="4227795493", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '19 行 7, 並べ替えられていません。'    (L1789, T416, R1831, B437)
+   |    |    |    |    | ['Edit280', '絞込 5 人/総人数 5 人Edit190']
+   |    |    |    |    | child_window(title="19 行 7, 並べ替えられていません。", auto_id="4248832851", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '20 行 7, 並べ替えられていません。'    (L1831, T416, R1873, B437)
+   |    |    |    |    | ['Edit281', '絞込 5 人/総人数 5 人Edit191']
+   |    |    |    |    | child_window(title="20 行 7, 並べ替えられていません。", auto_id="4236842478", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '21 行 7, 並べ替えられていません。'    (L1873, T416, R1915, B437)
+   |    |    |    |    | ['Edit282', '絞込 5 人/総人数 5 人Edit192']
+   |    |    |    |    | child_window(title="21 行 7, 並べ替えられていません。", auto_id="4263146847", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '22 行 7, 並べ替えられていません。'    (L1915, T416, R1957, B437)
+   |    |    |    |    | ['Edit283', '絞込 5 人/総人数 5 人Edit193']
+   |    |    |    |    | child_window(title="22 行 7, 並べ替えられていません。", auto_id="4231450711", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '23 行 7, 並べ替えられていません。'    (L1957, T416, R1999, B437)
+   |    |    |    |    | ['Edit284', '絞込 5 人/総人数 5 人Edit194']
+   |    |    |    |    | child_window(title="23 行 7, 並べ替えられていません。", auto_id="4214620943", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '24 行 7, 並べ替えられていません。'    (L1999, T416, R2041, B437)
+   |    |    |    |    | ['Edit285', '絞込 5 人/総人数 5 人Edit195']
+   |    |    |    |    | child_window(title="24 行 7, 並べ替えられていません。", auto_id="4264479624", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '25 行 7, 並べ替えられていません。'    (L2041, T416, R2083, B437)
+   |    |    |    |    | ['Edit286', '絞込 5 人/総人数 5 人Edit196']
+   |    |    |    |    | child_window(title="25 行 7, 並べ替えられていません。", auto_id="4243445707", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '26 行 7, 並べ替えられていません。'    (L2083, T416, R2125, B437)
+   |    |    |    |    | ['Edit287', '絞込 5 人/総人数 5 人Edit197']
+   |    |    |    |    | child_window(title="26 行 7, 並べ替えられていません。", auto_id="4255467050", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '27 行 7, 並べ替えられていません。'    (L2125, T416, R2167, B437)
+   |    |    |    |    | ['Edit288', '絞込 5 人/総人数 5 人Edit198']
+   |    |    |    |    | child_window(title="27 行 7, 並べ替えられていません。", auto_id="4229441404", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '28 行 7, 並べ替えられていません。'    (L2167, T416, R2209, B437)
+   |    |    |    |    | ['Edit289', '絞込 5 人/総人数 5 人Edit199']
+   |    |    |    |    | child_window(title="28 行 7, 並べ替えられていません。", auto_id="4263646052", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '29 行 7, 並べ替えられていません。'    (L2209, T416, R2251, B437)
+   |    |    |    |    | ['Edit290', '絞込 5 人/総人数 5 人Edit200']
+   |    |    |    |    | child_window(title="29 行 7, 並べ替えられていません。", auto_id="4235943562", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '30 行 7, 並べ替えられていません。'    (L2251, T416, R2293, B437)
+   |    |    |    |    | ['Edit291', '絞込 5 人/総人数 5 人Edit201']
+   |    |    |    |    | child_window(title="30 行 7, 並べ替えられていません。", auto_id="4255056607", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '31 行 7, 並べ替えられていません。'    (L2293, T416, R2335, B437)
+   |    |    |    |    | ['Edit292', '絞込 5 人/総人数 5 人Edit202']
+   |    |    |    |    | child_window(title="31 行 7, 並べ替えられていません。", auto_id="4225747420", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '件数 行 7, 並べ替えられていません。'    (L2335, T416, R2389, B437)
+   |    |    |    |    | ['Edit293']
+   |    |    |    |    | child_window(title="件数 行 7, 並べ替えられていません。", auto_id="4230400195", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '平均 行 7, 並べ替えられていません。'    (L2389, T416, R2443, B437)
+   |    |    |    |    | ['Edit294']
+   |    |    |    |    | child_window(title="平均 行 7, 並べ替えられていません。", auto_id="425166299", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '最大 行 7, 並べ替えられていません。'    (L2443, T416, R2497, B437)
+   |    |    |    |    | ['Edit295']
+   |    |    |    |    | child_window(title="最大 行 7, 並べ替えられていません。", auto_id="4246496694", control_type="Edit")
+   |    |    |    |    | 
+   |    |    |    |    | Edit - '最小 行 7, 並べ替えられていません。'    (L2497, T416, R2551, B437)
+   |    |    |    |    | ['Edit296']
+   |    |    |    |    | child_window(title="最小 行 7, 並べ替えられていません。", auto_id="4215817070", control_type="Edit")
+   |    |    | 
+   |    |    | Pane - ''    (L871, T210, R1805, B245)
+   |    |    | ['Pane2', 'レイアウト:Pane2']
+   |    |    | child_window(auto_id="526650", control_type="Pane")
+   |    |    |    | 
+   |    |    |    | CheckBox - '通所リハ'    (L876, T217, R941, B233)
+   |    |    |    | ['通所リハ', 'CheckBox', '通所リハCheckBox', 'CheckBox0', 'CheckBox1']
+   |    |    |    | child_window(title="通所リハ", auto_id="chkTusho", control_type="CheckBox")
+   |    |    |    | 
+   |    |    |    | CheckBox - '予防通所リハ'    (L981, T217, R1070, B233)
+   |    |    |    | ['予防通所リハ', 'CheckBox2', '予防通所リハCheckBox']
+   |    |    |    | child_window(title="予防通所リハ", auto_id="chkYoboTusho", control_type="CheckBox")
+   |    |    |    | 
+   |    |    |    | CheckBox - '訪問リハ'    (L1111, T217, R1176, B233)
+   |    |    |    | ['訪問リハ', 'CheckBox3', '訪問リハCheckBox']
+   |    |    |    | child_window(title="訪問リハ", auto_id="chkHomon", control_type="CheckBox")
+   |    |    |    | 
+   |    |    |    | CheckBox - '予防訪問リハ'    (L1211, T217, R1300, B233)
+   |    |    |    | ['CheckBox4', '予防訪問リハ', '予防訪問リハCheckBox']
+   |    |    |    | child_window(title="予防訪問リハ", auto_id="chkYoboHomon", control_type="CheckBox")
+   |    |    |    | 
+   |    |    |    | Static - '絞込 5 人/総人数 5 人'    (L1371, T220, R1494, B232)
+   |    |    |    | ['絞込 5 人/総人数 5 人', 'Static2', '絞込 5 人/総人数 5 人Static', '絞込 5 人/総人数 5 人0', '絞込 5 人/総人数 5 人1']
+   |    |    |    | child_window(title="絞込 5 人/総人数 5 人", auto_id="264474", control_type="Text")
+   |    |    | 
+   |    |    | Pane - '絞込 5 人/総人数 5 人'    (L871, T170, R1805, B210)
+   |    |    | ['絞込 5 人/総人数 5 人Pane', '絞込 5 人/総人数 5 人2', 'Pane3']
+   |    |    | child_window(title="絞込 5 人/総人数 5 人", auto_id="264472", control_type="Pane")
+   |    |    |    | 
+   |    |    |    | Static - 'レイアウト:'    (L876, T180, R927, B192)
+   |    |    |    | ['レイアウト:', 'レイアウト:Static', 'Static3', 'レイアウト:0', 'レイアウト:1', 'レイアウト:Static0', 'レイアウト:Static1']
+   |    |    |    | child_window(title="レイアウト:", auto_id="264470", control_type="Text")
+   |    |    |    | 
+   |    |    |    | ComboBox - 'レイアウト:'    (L951, T177, R1131, B197)
+   |    |    |    | ['レイアウト:ComboBox', 'レイアウト:2', 'ComboBox', 'ComboBox0', 'ComboBox1']
+   |    |    |    | child_window(title="レイアウト:", auto_id="cmbLayout", control_type="ComboBox")
+   |    |    |    |    | 
+   |    |    |    |    | Static - 'レイアウト:'    (L951, T177, R1131, B197)
+   |    |    |    |    | ['レイアウト:3', 'レイアウト:Static2', 'Static4']
+   |    |    |    |    | child_window(title="レイアウト:", control_type="Text")
+   |    |    |    |    | 
+   |    |    |    |    | Button - 'Open'    (L1115, T178, R1130, B196)
+   |    |    |    |    | ['Open', 'Button5', 'OpenButton', 'Open0', 'Open1', 'OpenButton0', 'OpenButton1']
+   |    |    |    |    | child_window(title="Open", control_type="Button")
+   |    |    |    | 
+   |    |    |    | ComboBox - '令和08年03月'    (L1151, T177, R1291, B197)
+   |    |    |    | ['令和08年03月', '令和08年03月ComboBox', 'ComboBox2']
+   |    |    |    | child_window(title="令和08年03月", auto_id="cmbMonth", control_type="ComboBox")
+   |    |    |    |    | 
+   |    |    |    |    | Static - ''    (L1151, T177, R1291, B197)
+   |    |    |    |    | ['レイアウト:Static3', 'Static5']
+   |    |    |    |    | 
+   |    |    |    |    | Button - 'Open'    (L1275, T178, R1290, B196)
+   |    |    |    |    | ['Open2', 'Button6', 'OpenButton2']
+   |    |    |    |    | child_window(title="Open", control_type="Button")
+   |    |    | 
+   |    |    | Pane - ''    (L871, T130, R1805, B170)
+   |    |    | ['Pane4']
+   |    |    | child_window(auto_id="854364", control_type="Pane")
+   |    |    |    | 
+   |    |    |    | Button - 'ヘルプ'    (L876, T137, R946, B165)
+   |    |    |    | ['ヘルプButton', 'Button7', 'ヘルプ']
+   |    |    |    | child_window(title="ヘルプ", auto_id="btnHelp", control_type="Button")
+   |    |    |    | 
+   |    |    |    | Button - '印 刷'    (L951, T137, R1021, B165)
+   |    |    |    | ['Button8', '印 刷', '印 刷Button']
+   |    |    |    | child_window(title="印 刷", auto_id="btnPrint", control_type="Button")
+   |    |    |    | 
+   |    |    |    | Button - '閉じる'    (L1026, T137, R1096, B165)
+   |    |    |    | ['Button9', '閉じる', '閉じるButton', '閉じる0', '閉じる1', '閉じるButton0', '閉じるButton1']
+   |    |    |    | child_window(title="閉じる", auto_id="btnClose", control_type="Button")
+   |    |    | 
+   |    |    | TitleBar - ''    (L887, T107, R1805, B129)
+   |    |    | ['TitleBar', 'TitleBar0', 'TitleBar1']
+   |    |    |    | 
+   |    |    |    | Menu - 'システム'    (L871, T107, R893, B129)
+   |    |    |    | ['Menu2', 'システム', 'システムMenu', 'システム0', 'システム1', 'システムMenu0', 'システムMenu1']
+   |    |    |    | child_window(title="システム", auto_id="MenuBar", control_type="MenuBar")
+   |    |    |    |    | 
+   |    |    |    |    | MenuItem - 'ドキュメント ウィンドウ'    (L871, T107, R893, B129)
+   |    |    |    |    | ['MenuItem3', 'ドキュメント ウィンドウ', 'ドキュメント ウィンドウMenuItem']
+   |    |    |    |    | child_window(title="ドキュメント ウィンドウ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | Button - '最小化'    (L1703, T109, R1735, B127)
+   |    |    |    | ['Button10', '最小化Button', '最小化', '最小化Button0', '最小化Button1', '最小化0', '最小化1']
+   |    |    |    | child_window(title="最小化", control_type="Button")
+   |    |    |    | 
+   |    |    |    | Button - '最大化'    (L1737, T109, R1769, B127)
+   |    |    |    | ['Button11', '最大化Button', '最大化', '最大化Button0', '最大化Button1', '最大化0', '最大化1']
+   |    |    |    | child_window(title="最大化", control_type="Button")
+   |    |    |    | 
+   |    |    |    | Button - '閉じる'    (L1771, T109, R1803, B127)
+   |    |    |    | ['Button12', '閉じる2', '閉じるButton2']
+   |    |    |    | child_window(title="閉じる", control_type="Button")
+   | 
+   | TitleBar - ''    (L877, T45, R1869, B73)
+   | ['TitleBar2']
+   |    | 
+   |    | Menu - 'システム'    (L861, T50, R883, B72)
+   |    | ['Menu3', 'システム2', 'システムMenu2']
+   |    | child_window(title="システム", auto_id="MenuBar", control_type="MenuBar")
+   |    |    | 
+   |    |    | MenuItem - 'システム'    (L861, T50, R883, B72)
+   |    |    | ['システム3', 'MenuItem4', 'システムMenuItem']
+   |    |    | child_window(title="システム", control_type="MenuItem")
+   |    | 
+   |    | Button - '最小化'    (L1730, T43, R1777, B73)
+   |    | ['Button13', '最小化Button2', '最小化2']
+   |    | child_window(title="最小化", control_type="Button")
+   |    | 
+   |    | Button - '最大化'    (L1777, T43, R1823, B73)
+   |    | ['Button14', '最大化Button2', '最大化2']
+   |    | child_window(title="最大化", control_type="Button")
+   |    | 
+   |    | Button - '閉じる'    (L1823, T43, R1870, B73)
+   |    | ['Button15', '閉じる3', '閉じるButton3']
+   |    | child_window(title="閉じる", control_type="Button")
