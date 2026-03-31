@@ -39,15 +39,28 @@ class PywinautoEngine(RPAEngine):
         self._window_title_pattern = window_title_pattern
 
     def _get_active_mdi_child(self) -> WindowSpecification | None:
-        """アクティブなMDI子ウィンドウを取得する。"""
+        """アクティブなMDI子ウィンドウを取得する。
+
+        WinForms MDI構造ではMDI子フォームはメインウィンドウ直下ではなく、
+        MDIクライアント領域（Pane）の下にWindow として配置される:
+            MainWindow > Pane (MDI Client) > Window (MDI Child)
+        """
         if self._main_window is None:
             return None
-        children = self._main_window.children(control_type="Window")
-        if not children:
-            return None
-        # TODO: 本番Wiseman接続時にタイトルマッチで特定する
-        # 現時点ではchildren()の末尾（最前面）を返す
-        return children[-1]
+
+        # MDIクライアント領域（Pane）を経由してMDI子ウィンドウを検索
+        mdi_client_panes = self._main_window.children(control_type="Pane")
+        for pane in mdi_client_panes:
+            mdi_children = pane.children(control_type="Window")
+            if mdi_children:
+                return mdi_children[-1]
+
+        # フォールバック: メインウィンドウ直下のWindowも検索
+        direct_children = self._main_window.children(control_type="Window")
+        if direct_children:
+            return direct_children[-1]
+
+        return None
 
     def launch_and_login(self, exe_path: str, username: str, password: str) -> None:
         """ワイズマンを起動してログインする。
@@ -192,10 +205,13 @@ class PywinautoEngine(RPAEngine):
             logger.warning("MDI子ウィンドウが見つかりません")
             return []
 
-        grid = active_child.child_window(auto_id="dgvCareRecord", control_type="DataGrid")
+        # WinForms DataGridView は UIA では "Table" として公開される
+        grid = active_child.child_window(auto_id="dgvCareRecord", control_type="Table")
         if not grid.exists(timeout=2):
-            # automation_idが異なる場合のフォールバック
-            grid = active_child.child_window(control_type="DataGrid")
+            # automation_idが異なる場合のフォールバック（Table → DataGrid の順）
+            grid = active_child.child_window(control_type="Table")
+            if not grid.exists(timeout=2):
+                grid = active_child.child_window(control_type="DataGrid")
 
         rows: list[list[str]] = []
 
