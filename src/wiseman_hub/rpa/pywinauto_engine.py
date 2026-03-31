@@ -126,20 +126,14 @@ class PywinautoEngine(RPAEngine):
             # MenuItem を個別にクリック
             logger.warning("menu_select失敗 (%s): %s。個別クリックにフォールバック", type(exc).__name__, exc)
             try:
-                clicked_count = 0
                 for i, item in enumerate(menu_path):
-                    menu_item = self._main_window.child_window(title=item, control_type="MenuItem")
-                    if not menu_item.exists(timeout=1):
-                        logger.error("MenuItem '%s' が見つかりません (ステップ %d/%d)", item, i, len(menu_path))
-                        break
-                    menu_item.click_input()
-                    clicked_count += 1
-                    logger.debug("MenuItem clicked: %s", item)
+                    self._main_window.child_window(
+                        title=item, control_type="MenuItem",
+                    ).click_input()
+                    logger.debug("MenuItem clicked: %s (%d/%d)", item, i + 1, len(menu_path))
                     time.sleep(0.5)
-                # 全MenuItemをクリックできた場合のみ成功
-                if clicked_count == len(menu_path):
-                    menu_success = True
-            except (ElementNotFoundError, AttributeError) as e:
+                menu_success = True
+            except (ElementNotFoundError, AttributeError, PywinautoTimeoutError) as e:
                 logger.error("個別クリックフォールバック失敗: %s", e)
 
         # MDI子ウィンドウが開くのを待機
@@ -178,21 +172,16 @@ class PywinautoEngine(RPAEngine):
         csv_path = output_dir / csv_filename
 
         # ファイル名入力欄にパスを設定
-        # Windows標準のSaveFileDialogではComboBox "ファイル名" またはEdit要素を使用
         filename_set = False
         for selector in [
-            ("FileNameControlHost", lambda d: d.child_window(auto_id="FileNameControlHost")),
-            ("Edit", lambda d: d.child_window(control_type="Edit")),
+            lambda d: d.child_window(auto_id="FileNameControlHost"),
+            lambda d: d.child_window(control_type="Edit"),
         ]:
             try:
-                filename_edit = selector[1](save_dlg)
-                if filename_edit.exists(timeout=1):
-                    filename_edit.set_edit_text(str(csv_path))
-                    logger.debug("ファイル名を設定: %s", selector[0])
-                    filename_set = True
-                    break
-            except (ElementNotFoundError, PywinautoTimeoutError, AttributeError) as e:
-                logger.debug("ファイル名入力 (%s) 失敗: %s", selector[0], e)
+                selector(save_dlg).set_edit_text(str(csv_path))
+                filename_set = True
+                break
+            except (ElementNotFoundError, PywinautoTimeoutError, AttributeError):
                 continue
 
         if not filename_set:
@@ -203,13 +192,13 @@ class PywinautoEngine(RPAEngine):
 
         # [保存] ボタンをクリック
         save_clicked = False
-        for button_title in [".*保存.*", "Save", "OK"]:
+        for selector in [
+            lambda d: d.child_window(title_re=".*保存.*", control_type="Button"),
+            lambda d: d.child_window(title="Save", control_type="Button"),
+            lambda d: d.child_window(title="OK", control_type="Button"),
+        ]:
             try:
-                if button_title == ".*保存.*":
-                    save_dlg.child_window(title_re=button_title, control_type="Button").click_input()
-                else:
-                    save_dlg.child_window(title=button_title, control_type="Button").click_input()
-                logger.debug("保存ボタンクリック: %s", button_title)
+                selector(save_dlg).click_input()
                 save_clicked = True
                 break
             except (ElementNotFoundError, PywinautoTimeoutError):
@@ -249,6 +238,7 @@ class PywinautoEngine(RPAEngine):
             return []
 
         # WinForms DataGridView は UIA では "Table" として公開される
+        # wrapper() で実体化を試み、成功した候補を使う（TOCTOU回避）
         grid = None
         for selector in [
             lambda c: c.child_window(auto_id="dgvCareRecord", control_type="Table"),
@@ -257,10 +247,9 @@ class PywinautoEngine(RPAEngine):
         ]:
             try:
                 candidate = selector(active_child)
-                if candidate.exists(timeout=1):
-                    grid = candidate
-                    logger.debug("グリッド検出: %s", type(candidate).__name__)
-                    break
+                candidate.wrapper_object()  # 実体化して存在を確認
+                grid = candidate
+                break
             except (ElementNotFoundError, PywinautoTimeoutError):
                 continue
 
