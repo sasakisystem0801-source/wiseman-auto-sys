@@ -158,10 +158,11 @@ class PywinautoEngine(RPAEngine):
             return None
 
         # ShowDialog()がUIスレッドをブロックするため、click_input()は戻らない。
-        # set_focus() + type_keys('{ENTER}') でモーダルブロックを回避する。
+        # set_focus() + type_keys(' ') でモーダルブロックを回避する。
+        # WinFormsボタンはフォーカス中にSpaceで発火する（Enterは不可）。
         btn_print = active_child.child_window(auto_id="btnPrint")
         btn_print.set_focus()
-        btn_print.type_keys("{ENTER}")
+        btn_print.type_keys(" ")
         time.sleep(2)
 
         # SaveFileDialog を処理
@@ -356,7 +357,7 @@ class PywinautoEngine(RPAEngine):
         # [終了] ボタン: ShowDialog()によるモーダルブロック回避
         btn_exit = self._main_window.child_window(auto_id="btnExit")
         btn_exit.set_focus()
-        btn_exit.type_keys("{ENTER}")
+        btn_exit.type_keys(" ")
         time.sleep(1)
 
         # 確認ダイアログで [はい] をクリック
