@@ -50,24 +50,13 @@ class PywinautoEngine(RPAEngine):
         if self._main_window is None:
             return None
 
-        # MDIクライアント領域（Pane）経由でMDI子ウィンドウを検索
-        # child_window チェーンで WindowSpecification を返す
+        # MDI子フォームは Pane (MDI Client) > Window の階層にある
+        # child_window() は子孫を再帰検索するため、直接 Window を指定すれば
+        # Pane を飛び越えて MDI 子フォームを見つけられる
         try:
-            mdi_child = self._main_window.child_window(
-                control_type="Pane"
-            ).child_window(
-                control_type="Window"
-            )
+            mdi_child = self._main_window.child_window(control_type="Window")
             if mdi_child.exists(timeout=2):
                 return mdi_child
-        except ElementNotFoundError:
-            pass
-
-        # フォールバック: メインウィンドウから直接Window子を検索
-        try:
-            direct_child = self._main_window.child_window(control_type="Window")
-            if direct_child.exists(timeout=2):
-                return direct_child
         except ElementNotFoundError:
             pass
 
