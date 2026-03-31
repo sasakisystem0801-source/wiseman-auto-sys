@@ -157,12 +157,18 @@ class PywinautoEngine(RPAEngine):
             logger.error("MDI子ウィンドウが見つかりません")
             return None
 
-        active_child.child_window(auto_id="btnPrint").click_input()
+        # UIA Invokeパターンでボタンを直接呼び出し（click_inputより確実）
+        try:
+            btn_print = active_child.child_window(auto_id="btnPrint")
+            btn_print.invoke()
+        except (ElementNotFoundError, AttributeError):
+            # invoke未対応の場合はclick_inputにフォールバック
+            active_child.child_window(auto_id="btnPrint").click_input()
         time.sleep(1)
 
         # SaveFileDialog を処理
         try:
-            save_dlg = self._app.window(title_re=".*保存.*|.*Save.*")
+            save_dlg = self._app.window(title_re=".*保存.*|.*名前.*|.*Save.*")
             save_dlg.wait("visible", timeout=10)
         except (ElementNotFoundError, PywinautoTimeoutError):
             logger.error("保存ダイアログが表示されません")
@@ -258,25 +264,50 @@ class PywinautoEngine(RPAEngine):
             return []
 
         rows: list[list[str]] = []
+        col_count = 0
 
         # ヘッダー行の取得
+        # WinForms DataGridView: Table > Custom("トップの行") > Header の階層
         try:
-            headers = grid.children(control_type="Header")
-            if headers:
-                header_items = headers[0].children(control_type="HeaderItem")
-                rows.append([h.window_text() for h in header_items])
-                logger.debug("ヘッダー行取得: %d列", len(rows[0]))
+            custom_rows = grid.children(control_type="Custom")
+            if custom_rows:
+                header_items = custom_rows[0].children(control_type="Header")
+                header_texts = [h.window_text() for h in header_items]
+                rows.append(header_texts)
+                col_count = len(header_texts)
+                logger.debug("ヘッダー行取得: %d列", col_count)
+            else:
+                # フォールバック: Header直下検索
+                headers = grid.children(control_type="Header")
+                if headers:
+                    header_items = headers[0].children(control_type="HeaderItem")
+                    header_texts = [h.window_text() for h in header_items]
+                    rows.append(header_texts)
+                    col_count = len(header_texts)
         except (ElementNotFoundError, IndexError) as e:
             logger.warning("ヘッダー行の読み取り失敗: %s", e)
 
         # データ行の取得
+        # WinForms DataGridView: 各セルがEditとしてフラットに展開される
         try:
+            # まずDataItem（標準的なUIA構造）を試行
             data_items = grid.children(control_type="DataItem")
-            for item in data_items:
-                cells = item.children()
-                row_data = [c.window_text() for c in cells]
-                rows.append(row_data)
-            logger.debug("データ行取得: %d行", len(data_items))
+            if data_items:
+                for item in data_items:
+                    cells = item.children()
+                    row_data = [c.window_text() for c in cells]
+                    rows.append(row_data)
+                logger.debug("DataItem経由: %d行", len(data_items))
+            elif col_count > 0:
+                # フォールバック: Edit要素をフラットに取得し列数で分割
+                edits = grid.children(control_type="Edit")
+                if edits:
+                    for i in range(0, len(edits), col_count):
+                        row_data = [e.window_text() for e in edits[i:i + col_count]]
+                        if len(row_data) == col_count:
+                            rows.append(row_data)
+                    logger.debug("Edit経由: %d行 (%dセル / %d列)",
+                                 len(rows) - 1, len(edits), col_count)
         except ElementNotFoundError as e:
             logger.warning("データ行の読み取り失敗: %s", e)
 
@@ -310,16 +341,22 @@ class PywinautoEngine(RPAEngine):
 
         logger.info("ワイズマン終了中...")
 
-        # [終了] ボタンをクリック
-        self._main_window.child_window(auto_id="btnExit").click_input()
+        # [終了] ボタンをクリック（UIA Invokeパターン優先）
+        try:
+            self._main_window.child_window(auto_id="btnExit").invoke()
+        except (ElementNotFoundError, AttributeError):
+            self._main_window.child_window(auto_id="btnExit").click_input()
         time.sleep(0.5)
 
         # 確認ダイアログで [はい] をクリック
         try:
             confirm = self._app.window(title_re=".*確認.*")
             confirm.wait("visible", timeout=5)
-            confirm.child_window(title="はい").click_input()
-        except ElementNotFoundError:
+            try:
+                confirm.child_window(title="はい").invoke()
+            except AttributeError:
+                confirm.child_window(title="はい").click_input()
+        except (ElementNotFoundError, PywinautoTimeoutError):
             logger.warning("確認ダイアログが見つかりません。直接終了を試みます")
             self._main_window.close()
 
