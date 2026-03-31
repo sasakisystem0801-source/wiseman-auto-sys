@@ -6,7 +6,6 @@ import contextlib
 import logging
 import os
 import sys
-import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -159,14 +158,13 @@ class PywinautoEngine(RPAEngine):
             return None
 
         # ShowDialog()がUIスレッドをブロックするため、click_input()は戻らない。
-        # メインスレッドで座標解決→別スレッドで純粋なマウスクリック。
+        # PostMessageで非同期クリックを送信（キューに入れて即戻る）。
         btn_print = active_child.child_window(auto_id="btnPrint").wrapper_object()
-        rect = btn_print.rectangle()
-        mid_x, mid_y = (rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2
-        import pywinauto.mouse
-        threading.Thread(
-            target=lambda: pywinauto.mouse.click(coords=(mid_x, mid_y)), daemon=True,
-        ).start()
+        import ctypes
+        WM_LBUTTONDOWN, WM_LBUTTONUP = 0x0201, 0x0202
+        ctypes.windll.user32.PostMessageW(btn_print.handle, WM_LBUTTONDOWN, 1, 0)
+        time.sleep(0.05)
+        ctypes.windll.user32.PostMessageW(btn_print.handle, WM_LBUTTONUP, 0, 0)
         time.sleep(3)
 
         # SaveFileDialog を処理
@@ -360,12 +358,11 @@ class PywinautoEngine(RPAEngine):
 
         # [終了] ボタン: ShowDialog()によるモーダルブロック回避
         btn_exit = self._main_window.child_window(auto_id="btnExit").wrapper_object()
-        rect = btn_exit.rectangle()
-        mid_x, mid_y = (rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2
-        import pywinauto.mouse
-        threading.Thread(
-            target=lambda: pywinauto.mouse.click(coords=(mid_x, mid_y)), daemon=True,
-        ).start()
+        import ctypes
+        WM_LBUTTONDOWN, WM_LBUTTONUP = 0x0201, 0x0202
+        ctypes.windll.user32.PostMessageW(btn_exit.handle, WM_LBUTTONDOWN, 1, 0)
+        time.sleep(0.05)
+        ctypes.windll.user32.PostMessageW(btn_exit.handle, WM_LBUTTONUP, 0, 0)
         time.sleep(1)
 
         # 確認ダイアログで [はい] をクリック
