@@ -6,6 +6,7 @@ PywinautoEngine でGUI操作をテストする。Windows環境でのみ実行可
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 import time
@@ -25,14 +26,37 @@ MOCK_APP_SLN = MOCK_APP_DIR / "WisemanMock.sln"
 MOCK_APP_EXE = MOCK_APP_DIR / "WisemanMock" / "bin" / "Release" / "WisemanMock.exe"
 
 
+def _find_msbuild() -> str | None:
+    """MSBuild.exe のパスを探す。"""
+    # PATH上にあればそのまま
+    if shutil.which("msbuild"):
+        return "msbuild"
+    # VS Build Tools の既定パス
+    vs_msbuild = Path(
+        r"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools"
+        r"\MSBuild\Current\Bin\MSBuild.exe"
+    )
+    if vs_msbuild.exists():
+        return str(vs_msbuild)
+    return None
+
+
 @pytest.fixture(scope="session", autouse=True)
 def build_mock_app():
     """テストセッション開始時にモックアプリをビルドする。"""
+    # 既にビルド済みならスキップ
+    if MOCK_APP_EXE.exists():
+        return
+
     if not MOCK_APP_SLN.exists():
         pytest.skip(f"モックアプリのソリューションが見つかりません: {MOCK_APP_SLN}")
 
+    msbuild = _find_msbuild()
+    if msbuild is None:
+        pytest.fail("MSBuild が見つかりません。VS Build Tools をインストールしてください")
+
     result = subprocess.run(
-        ["msbuild", str(MOCK_APP_SLN), "/p:Configuration=Release", "/v:minimal"],
+        [msbuild, str(MOCK_APP_SLN), "/p:Configuration=Release", "/v:minimal"],
         capture_output=True,
         text=True,
         timeout=120,
