@@ -26,9 +26,9 @@ menu_path = ["ケア記録", "集計表"]
 output_format = "csv"
 
 [gcp]
-project_id = ""
-bucket_name = ""
-service_account_key_path = ""
+project_id = "wiseman-hub-prod"
+bucket_name = "wiseman-hub-prod-datalake"
+service_account_key_path = "config/sa-key.json"
 region = "asia-northeast1"
 
 [updater]
