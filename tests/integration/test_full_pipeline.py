@@ -22,8 +22,7 @@ class TestFullPipeline:
 
         # Step 2: メニュー遷移
         engine.navigate_menu(["ケア記録", "集計表"])
-        children = engine._main_window.children(control_type="Window")
-        assert len(children) > 0
+        assert engine._get_active_mdi_child() is not None
 
         # Step 3: グリッドデータ読み取り
         data = engine.read_grid_data()

@@ -44,21 +44,32 @@ class PywinautoEngine(RPAEngine):
         WinForms MDI構造ではMDI子フォームはメインウィンドウ直下ではなく、
         MDIクライアント領域（Pane）の下にWindow として配置される:
             MainWindow > Pane (MDI Client) > Window (MDI Child)
+
+        WindowSpecification を返すため、戻り値に対して child_window() 等が使用可能。
         """
         if self._main_window is None:
             return None
 
-        # MDIクライアント領域（Pane）を経由してMDI子ウィンドウを検索
-        mdi_client_panes = self._main_window.children(control_type="Pane")
-        for pane in mdi_client_panes:
-            mdi_children = pane.children(control_type="Window")
-            if mdi_children:
-                return mdi_children[-1]
+        # MDIクライアント領域（Pane）経由でMDI子ウィンドウを検索
+        # child_window チェーンで WindowSpecification を返す
+        try:
+            mdi_child = self._main_window.child_window(
+                control_type="Pane"
+            ).child_window(
+                control_type="Window"
+            )
+            if mdi_child.exists(timeout=2):
+                return mdi_child
+        except ElementNotFoundError:
+            pass
 
-        # フォールバック: メインウィンドウ直下のWindowも検索
-        direct_children = self._main_window.children(control_type="Window")
-        if direct_children:
-            return direct_children[-1]
+        # フォールバック: メインウィンドウから直接Window子を検索
+        try:
+            direct_child = self._main_window.child_window(control_type="Window")
+            if direct_child.exists(timeout=2):
+                return direct_child
+        except ElementNotFoundError:
+            pass
 
         return None
 

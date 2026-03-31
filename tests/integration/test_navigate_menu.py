@@ -18,7 +18,7 @@ class TestNavigateMenu:
         engine.navigate_menu(["ケア記録", "集計表"])
 
         # MDI子ウィンドウ「ケア記録集計表」が存在することを確認
-        children = engine._main_window.children(control_type="Window")
-        assert len(children) > 0
-        child_titles = [c.window_text() for c in children]
-        assert any("ケア記録集計表" in t for t in child_titles)
+        # WinForms MDI: Pane (MDI Client) > Window の階層
+        mdi_child = engine._get_active_mdi_child()
+        assert mdi_child is not None
+        assert "ケア記録集計表" in mdi_child.window_text()

@@ -20,15 +20,13 @@ class TestCloseWindow:
         engine.navigate_menu(["ケア記録", "集計表"])
 
         # 子ウィンドウが存在することを確認
-        children = engine._main_window.children(control_type="Window")
-        assert len(children) > 0
+        assert engine._get_active_mdi_child() is not None
 
         engine.close_current_window()
         time.sleep(0.5)
 
         # 子ウィンドウが閉じられたことを確認
-        children_after = engine._main_window.children(control_type="Window")
-        assert len(children_after) < len(children)
+        assert engine._get_active_mdi_child() is None
 
     def test_close_wiseman(self, mock_app_process, engine) -> None:
         """ワイズマン終了後、プロセスが終了する。"""
