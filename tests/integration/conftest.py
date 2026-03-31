@@ -49,6 +49,8 @@ def mock_app_process():
     """モックアプリを起動し、テスト終了後に停止する。"""
     proc = subprocess.Popen([str(MOCK_APP_EXE)])
     time.sleep(2)  # ウィンドウ表示を待機
+    if proc.poll() is not None:
+        pytest.fail(f"モックアプリが起動直後にクラッシュしました (exit code: {proc.returncode})")
     yield proc
     if proc.poll() is None:
         proc.terminate()

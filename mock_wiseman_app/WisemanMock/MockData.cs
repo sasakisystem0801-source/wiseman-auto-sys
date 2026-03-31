@@ -10,7 +10,7 @@ namespace WisemanMock
     {
         /// <summary>
         /// ケア記録集計データを返す。
-        /// 各行: 利用者名, ケア記録項目, 1-31日, 件数, 平均, 最大, 最小 (35列)
+        /// 各行: 利用者名, ケア記録項目, 1-31日, 件数, 平均, 最大, 最小 (37列)
         /// </summary>
         public static List<object[]> GetCareRecordData()
         {

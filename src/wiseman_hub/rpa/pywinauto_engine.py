@@ -2,19 +2,25 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
-import os
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from wiseman_hub.rpa.base import RPAEngine
+
+if TYPE_CHECKING:
+    from pywinauto.application import WindowSpecification
 
 if sys.platform != "win32":
     raise ImportError("pywinauto_engine はWindows環境でのみ使用できます")
 
+import psutil
 from pywinauto import Application
 from pywinauto.findwindows import ElementNotFoundError
+from pywinauto.timings import TimeoutError as PywinautoTimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +34,11 @@ class PywinautoEngine(RPAEngine):
 
     def __init__(self, startup_wait_sec: int = 15, window_title_pattern: str = ".*管理システム SP.*") -> None:
         self._app: Application | None = None
-        self._main_window: object | None = None
+        self._main_window: WindowSpecification | None = None
         self._startup_wait_sec = startup_wait_sec
         self._window_title_pattern = window_title_pattern
 
-    def _get_active_mdi_child(self) -> object | None:
+    def _get_active_mdi_child(self) -> WindowSpecification | None:
         """アクティブなMDI子ウィンドウを取得する。"""
         if self._main_window is None:
             return None
@@ -53,34 +59,39 @@ class PywinautoEngine(RPAEngine):
         """
         logger.info("ワイズマン起動: %s", exe_path)
         self._app = Application(backend="uia").start(exe_path)
-
-        # ドングル認証通過を待機
-        logger.info("ドングル認証待機中 (%d秒)...", self._startup_wait_sec)
-        time.sleep(self._startup_wait_sec)
-
-        # ログインウィンドウを検索
-        # TODO: 実機でInspect/Accessibility Insightsを使い、正確なセレクタを特定する
-        # 以下はプレースホルダー。dump_ui.pyのカタログを参照して更新すること。
-        logger.info("ログインウィンドウを検索中...")
         try:
-            login_window = self._app.window(title_re=".*ログイン.*")
-            login_window.wait("visible", timeout=30)
+            # ドングル認証通過を待機
+            logger.info("ドングル認証待機中 (%d秒)...", self._startup_wait_sec)
+            time.sleep(self._startup_wait_sec)
 
-            # ユーザー名入力
-            # TODO: automation_idはカタログから特定
-            login_window.child_window(auto_id="txtUserId").set_edit_text(username)
-            login_window.child_window(auto_id="txtPassword").set_edit_text(password)
-            login_window.child_window(auto_id="btnLogin").click()
-            logger.info("ログイン実行")
-        except ElementNotFoundError:
-            logger.error("ログインウィンドウが見つかりません")
+            # ログインウィンドウを検索
+            # モックアプリのセレクタで動作確認済み。
+            # 実機では Inspect.exe / dump_ui.py で正確なセレクタを特定し更新すること。
+            logger.info("ログインウィンドウを検索中...")
+            try:
+                login_window = self._app.window(title_re=".*ログイン.*")
+                login_window.wait("visible", timeout=30)
+
+                # ユーザー名入力
+                login_window.child_window(auto_id="txtUserId").set_edit_text(username)
+                login_window.child_window(auto_id="txtPassword").set_edit_text(password)
+                login_window.child_window(auto_id="btnLogin").click()
+                logger.info("ログイン実行")
+            except ElementNotFoundError:
+                logger.error("ログインウィンドウが見つかりません")
+                raise
+
+            # メインウィンドウ表示を待機
+            logger.info("メインウィンドウ待機中...")
+            self._main_window = self._app.window(title_re=self._window_title_pattern)
+            self._main_window.wait("visible", timeout=30)
+            logger.info("ログイン成功: %s", self._main_window.window_text())
+        except Exception:
+            if self._app is not None:
+                with contextlib.suppress(Exception):
+                    self._app.kill()
+                self._app = None
             raise
-
-        # メインウィンドウ表示を待機
-        logger.info("メインウィンドウ待機中...")
-        self._main_window = self._app.window(title_re=self._window_title_pattern)
-        self._main_window.wait("visible", timeout=30)
-        logger.info("ログイン成功: %s", self._main_window.window_text())
 
     def navigate_menu(self, menu_path: list[str]) -> None:
         """MDIメニューを階層的に辿って指定画面に遷移する。"""
@@ -93,10 +104,10 @@ class PywinautoEngine(RPAEngine):
         menu_string = "->".join(menu_path)
         try:
             self._main_window.menu_select(menu_string)
-        except Exception:
+        except (ElementNotFoundError, AttributeError) as exc:
             # menu_selectがUIA backendで動作しない場合のフォールバック:
             # MenuItem を個別にクリック
-            logger.info("menu_select失敗、個別クリックにフォールバック")
+            logger.warning("menu_select失敗 (%s)、個別クリックにフォールバック: %s", type(exc).__name__, exc)
             for item in menu_path:
                 self._main_window.child_window(title=item, control_type="MenuItem").click_input()
                 time.sleep(0.3)
@@ -140,6 +151,7 @@ class PywinautoEngine(RPAEngine):
             filename_edit.set_edit_text(str(csv_path))
         else:
             # フォールバック: Edit コントロールを直接検索
+            logger.warning("FileNameControlHostが見つかりません。汎用Editコントロールにフォールバック")
             filename_edit = save_dlg.child_window(control_type="Edit")
             filename_edit.set_edit_text(str(csv_path))
 
@@ -159,7 +171,7 @@ class PywinautoEngine(RPAEngine):
             msg_box.wait("visible", timeout=5)
             msg_box.child_window(title="OK", control_type="Button").click_input()
             logger.info("保存完了ダイアログを閉じました")
-        except ElementNotFoundError:
+        except (ElementNotFoundError, PywinautoTimeoutError):
             logger.debug("保存完了ダイアログは表示されませんでした")
 
         if csv_path.exists():
@@ -248,13 +260,14 @@ class PywinautoEngine(RPAEngine):
         timeout_sec = 10
         deadline = time.monotonic() + timeout_sec
         while time.monotonic() < deadline:
-            try:
-                os.kill(pid, 0)  # プロセス存在チェック（シグナルは送らない）
-            except OSError:
-                break  # プロセス終了済み
+            if not psutil.pid_exists(pid):
+                break
             time.sleep(0.5)
         else:
             logger.warning("ワイズマンプロセス(PID=%d)が%d秒以内に終了しませんでした", pid, timeout_sec)
+            self._main_window = None
+            self._app = None
+            return
 
         self._main_window = None
         self._app = None
