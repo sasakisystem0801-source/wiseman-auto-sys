@@ -1,0 +1,35 @@
+name: Windows Integration Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-integration:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build WinForms mock app
+        run: msbuild mock_wiseman_app/WisemanMock.sln /p:Configuration=Release /v:minimal
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Run integration tests
+        run: uv run pytest tests/integration -v -m integration --timeout=120
+        timeout-minutes: 5

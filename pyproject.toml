@@ -32,6 +32,7 @@ dev = [
     "mypy>=1.13.0",
     "pytest>=8.3.0",
     "pytest-cov>=6.0.0",
+    "pytest-timeout>=2.2.0",
     "pyinstaller>=6.11.0",
 ]
 
@@ -59,3 +60,6 @@ warn_unused_configs = true
 testpaths = ["tests"]
 addopts = "-v --tb=short"
 pythonpath = ["src"]
+markers = [
+    "integration: Windows-only integration tests requiring mock WinForms app",
+]

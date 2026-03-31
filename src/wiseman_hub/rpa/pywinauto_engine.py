@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -30,6 +31,17 @@ class PywinautoEngine(RPAEngine):
         self._main_window: object | None = None
         self._startup_wait_sec = startup_wait_sec
         self._window_title_pattern = window_title_pattern
+
+    def _get_active_mdi_child(self) -> object | None:
+        """アクティブなMDI子ウィンドウを取得する。"""
+        if self._main_window is None:
+            return None
+        children = self._main_window.children(control_type="Window")
+        if not children:
+            return None
+        # TODO: 本番Wiseman接続時にタイトルマッチで特定する
+        # 現時点ではchildren()の末尾（最前面）を返す
+        return children[-1]
 
     def launch_and_login(self, exe_path: str, username: str, password: str) -> None:
         """ワイズマンを起動してログインする。
@@ -76,17 +88,22 @@ class PywinautoEngine(RPAEngine):
             raise RuntimeError("メインウィンドウが未接続です。先にlaunch_and_loginを実行してください")
 
         logger.info("メニュー遷移: %s", " → ".join(menu_path))
-        # TODO: 実機でメニュー構造を確認し実装
-        # ワイズマンのメニューはツリービューまたはタブ形式の可能性がある
-        # dump_ui.pyでメニュー部分のカタログを取得して構造を把握すること
-        #
-        # 想定実装パターン:
-        # current = self._main_window
-        # for item in menu_path:
-        #     current = current.child_window(title=item, control_type="MenuItem")
-        #     current.click_input()
-        #     time.sleep(0.5)
-        raise NotImplementedError("navigate_menu: 実機でカタログ取得後に実装")
+
+        # WinForms MenuStrip: menu_select("親メニュー->子メニュー") 形式
+        menu_string = "->".join(menu_path)
+        try:
+            self._main_window.menu_select(menu_string)
+        except Exception:
+            # menu_selectがUIA backendで動作しない場合のフォールバック:
+            # MenuItem を個別にクリック
+            logger.info("menu_select失敗、個別クリックにフォールバック")
+            for item in menu_path:
+                self._main_window.child_window(title=item, control_type="MenuItem").click_input()
+                time.sleep(0.3)
+
+        # MDI子ウィンドウが開くのを待機
+        time.sleep(1)
+        logger.info("メニュー遷移完了: %s", menu_string)
 
     def export_csv(self, output_dir: Path) -> Path | None:
         """現在の画面からCSVエクスポートを実行する。"""
@@ -94,36 +111,116 @@ class PywinautoEngine(RPAEngine):
             raise RuntimeError("メインウィンドウが未接続です")
 
         logger.info("CSVエクスポート開始")
-        # TODO: 実機で以下のフローを確認
-        # 1. [印刷] ボタンをクリック
-        # 2. 出力形式でCSVを選択
-        # 3. 保存ダイアログでファイルパスを指定
-        # 4. [保存] クリック
-        #
-        # 想定:
-        # active_child = self._main_window.active()
-        # active_child.child_window(auto_id="btnPrint").click()
-        # ...保存ダイアログ処理...
-        raise NotImplementedError("export_csv: 実機でカタログ取得後に実装")
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # アクティブなMDI子ウィンドウの[印刷]ボタンをクリック
+        active_child = self._get_active_mdi_child()
+        if active_child is None:
+            logger.error("MDI子ウィンドウが見つかりません")
+            return None
+
+        active_child.child_window(auto_id="btnPrint").click_input()
+        time.sleep(1)
+
+        # SaveFileDialog を処理
+        try:
+            save_dlg = self._app.window(title_re=".*保存.*|.*Save.*")
+            save_dlg.wait("visible", timeout=10)
+        except ElementNotFoundError:
+            logger.error("保存ダイアログが表示されません")
+            return None
+
+        csv_filename = f"care_record_{int(time.time())}.csv"
+        csv_path = output_dir / csv_filename
+
+        # ファイル名入力欄にパスを設定
+        # Windows標準のSaveFileDialogではComboBox "ファイル名" またはEdit要素を使用
+        filename_edit = save_dlg.child_window(auto_id="FileNameControlHost")
+        if filename_edit.exists(timeout=2):
+            filename_edit.set_edit_text(str(csv_path))
+        else:
+            # フォールバック: Edit コントロールを直接検索
+            filename_edit = save_dlg.child_window(control_type="Edit")
+            filename_edit.set_edit_text(str(csv_path))
+
+        time.sleep(0.5)
+
+        # [保存] ボタンをクリック
+        try:
+            save_dlg.child_window(title_re=".*保存.*", control_type="Button").click_input()
+        except ElementNotFoundError:
+            save_dlg.child_window(title="Save", control_type="Button").click_input()
+
+        time.sleep(1)
+
+        # 保存完了メッセージボックスを検出してOKをクリック
+        try:
+            msg_box = self._app.window(title_re=".*完了.*")
+            msg_box.wait("visible", timeout=5)
+            msg_box.child_window(title="OK", control_type="Button").click_input()
+            logger.info("保存完了ダイアログを閉じました")
+        except ElementNotFoundError:
+            logger.debug("保存完了ダイアログは表示されませんでした")
+
+        if csv_path.exists():
+            logger.info("CSVエクスポート成功: %s", csv_path)
+            return csv_path
+
+        logger.warning("CSVファイルが見つかりません: %s", csv_path)
+        return None
 
     def read_grid_data(self) -> list[list[str]]:
         """現在の画面のデータグリッドからデータを直接読み取る。"""
         if self._main_window is None:
             raise RuntimeError("メインウィンドウが未接続です")
 
-        # TODO: DataGridView のセル読み取り
-        # WinForms DataGridView は UIA の Grid/Table パターンに対応
-        # grid = active_child.child_window(control_type="DataGrid")
-        # items = grid.children(control_type="DataItem")
-        raise NotImplementedError("read_grid_data: 実機でカタログ取得後に実装")
+        # アクティブなMDI子ウィンドウのDataGridViewを検索
+        active_child = self._get_active_mdi_child()
+        if active_child is None:
+            logger.warning("MDI子ウィンドウが見つかりません")
+            return []
+
+        grid = active_child.child_window(auto_id="dgvCareRecord", control_type="DataGrid")
+        if not grid.exists(timeout=2):
+            # automation_idが異なる場合のフォールバック
+            grid = active_child.child_window(control_type="DataGrid")
+
+        rows: list[list[str]] = []
+
+        # ヘッダー行の取得
+        headers = grid.children(control_type="Header")
+        if headers:
+            header_items = headers[0].children(control_type="HeaderItem")
+            rows.append([h.window_text() for h in header_items])
+
+        # データ行の取得
+        data_items = grid.children(control_type="DataItem")
+        for item in data_items:
+            cells = item.children()
+            row_data = [c.window_text() for c in cells]
+            rows.append(row_data)
+
+        logger.info("グリッドデータ読み取り: %d行", len(rows))
+        return rows
 
     def close_current_window(self) -> None:
         """現在のMDI子ウィンドウを閉じる。"""
         if self._main_window is None:
             raise RuntimeError("メインウィンドウが未接続です")
 
-        # TODO: MDI子ウィンドウの[閉じる]ボタンをクリック
-        raise NotImplementedError("close_current_window: 実機で確認後に実装")
+        active_child = self._get_active_mdi_child()
+        if active_child is None:
+            logger.warning("閉じるべきMDI子ウィンドウが見つかりません")
+            return
+        close_btn = active_child.child_window(auto_id="btnClose")
+        if close_btn.exists(timeout=2):
+            close_btn.click_input()
+        else:
+            # フォールバック: タイトルバーの閉じるボタン
+            active_child.close()
+
+        time.sleep(0.5)
+        logger.info("MDI子ウィンドウを閉じました")
 
     def close_wiseman(self) -> None:
         """ワイズマンを安全に終了する。"""
@@ -132,11 +229,36 @@ class PywinautoEngine(RPAEngine):
             return
 
         logger.info("ワイズマン終了中...")
-        # TODO: [終了]ボタン → 確認ダイアログ → [はい]
-        # self._main_window.child_window(auto_id="btnExit").click()
-        # confirm = self._app.window(title_re=".*確認.*")
-        # confirm.child_window(title="はい").click()
-        raise NotImplementedError("close_wiseman: 実機で確認後に実装")
+
+        # [終了] ボタンをクリック
+        self._main_window.child_window(auto_id="btnExit").click_input()
+        time.sleep(0.5)
+
+        # 確認ダイアログで [はい] をクリック
+        try:
+            confirm = self._app.window(title_re=".*確認.*")
+            confirm.wait("visible", timeout=5)
+            confirm.child_window(title="はい").click_input()
+        except ElementNotFoundError:
+            logger.warning("確認ダイアログが見つかりません。直接終了を試みます")
+            self._main_window.close()
+
+        # プロセス終了を待機（タイムアウト10秒）
+        pid = self._app.process
+        timeout_sec = 10
+        deadline = time.monotonic() + timeout_sec
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)  # プロセス存在チェック（シグナルは送らない）
+            except OSError:
+                break  # プロセス終了済み
+            time.sleep(0.5)
+        else:
+            logger.warning("ワイズマンプロセス(PID=%d)が%d秒以内に終了しませんでした", pid, timeout_sec)
+
+        self._main_window = None
+        self._app = None
+        logger.info("ワイズマン終了完了")
 
     def is_dongle_present(self) -> bool:
         """USBドングルが認識されているか確認する。"""
