@@ -115,19 +115,35 @@ class PywinautoEngine(RPAEngine):
 
         # WinForms MenuStrip: menu_select("親メニュー->子メニュー") 形式
         menu_string = "->".join(menu_path)
+        menu_success = False
+
         try:
             self._main_window.menu_select(menu_string)
-        except (ElementNotFoundError, AttributeError) as exc:
+            menu_success = True
+            logger.debug("menu_select成功")
+        except (ElementNotFoundError, AttributeError, PywinautoTimeoutError) as exc:
             # menu_selectがUIA backendで動作しない場合のフォールバック:
             # MenuItem を個別にクリック
-            logger.warning("menu_select失敗 (%s)、個別クリックにフォールバック: %s", type(exc).__name__, exc)
-            for item in menu_path:
-                self._main_window.child_window(title=item, control_type="MenuItem").click_input()
-                time.sleep(0.3)
+            logger.warning("menu_select失敗 (%s): %s。個別クリックにフォールバック", type(exc).__name__, exc)
+            try:
+                for i, item in enumerate(menu_path):
+                    menu_item = self._main_window.child_window(title=item, control_type="MenuItem")
+                    if not menu_item.exists(timeout=1):
+                        logger.error("MenuItem '%s' が見つかりません (ステップ %d)", item, i)
+                        break
+                    menu_item.click_input()
+                    logger.debug("MenuItem clicked: %s", item)
+                    time.sleep(0.5)
+                menu_success = True
+            except (ElementNotFoundError, AttributeError) as e:
+                logger.error("個別クリックフォールバック失敗: %s", e)
 
         # MDI子ウィンドウが開くのを待機
-        time.sleep(1)
-        logger.info("メニュー遷移完了: %s", menu_string)
+        if menu_success:
+            time.sleep(1)
+            logger.info("メニュー遷移完了: %s", menu_string)
+        else:
+            logger.warning("メニュー遷移失敗の可能性があります: %s", menu_string)
 
     def export_csv(self, output_dir: Path) -> Path | None:
         """現在の画面からCSVエクスポートを実行する。"""
@@ -159,22 +175,46 @@ class PywinautoEngine(RPAEngine):
 
         # ファイル名入力欄にパスを設定
         # Windows標準のSaveFileDialogではComboBox "ファイル名" またはEdit要素を使用
-        filename_edit = save_dlg.child_window(auto_id="FileNameControlHost")
-        if filename_edit.exists(timeout=2):
-            filename_edit.set_edit_text(str(csv_path))
-        else:
-            # フォールバック: Edit コントロールを直接検索
-            logger.warning("FileNameControlHostが見つかりません。汎用Editコントロールにフォールバック")
-            filename_edit = save_dlg.child_window(control_type="Edit")
-            filename_edit.set_edit_text(str(csv_path))
+        filename_set = False
+        for selector in [
+            ("FileNameControlHost", lambda d: d.child_window(auto_id="FileNameControlHost")),
+            ("ComboBox[Edit]", lambda d: d.child_window(control_type="ComboBox")),
+            ("Edit", lambda d: d.child_window(control_type="Edit")),
+        ]:
+            try:
+                filename_edit = selector[1](save_dlg)
+                if filename_edit.exists(timeout=1):
+                    filename_edit.set_edit_text(str(csv_path))
+                    logger.debug("ファイル名を設定: %s", selector[0])
+                    filename_set = True
+                    break
+            except (ElementNotFoundError, PywinautoTimeoutError, AttributeError) as e:
+                logger.debug("ファイル名入力 (%s) 失敗: %s", selector[0], e)
+                continue
+
+        if not filename_set:
+            logger.warning("ファイル名入力欄が見つかりません")
+            return None
 
         time.sleep(0.5)
 
         # [保存] ボタンをクリック
-        try:
-            save_dlg.child_window(title_re=".*保存.*", control_type="Button").click_input()
-        except ElementNotFoundError:
-            save_dlg.child_window(title="Save", control_type="Button").click_input()
+        save_clicked = False
+        for button_title in [".*保存.*", "Save", "OK"]:
+            try:
+                if button_title == ".*保存.*":
+                    save_dlg.child_window(title_re=button_title, control_type="Button").click_input()
+                else:
+                    save_dlg.child_window(title=button_title, control_type="Button").click_input()
+                logger.debug("保存ボタンクリック: %s", button_title)
+                save_clicked = True
+                break
+            except (ElementNotFoundError, PywinautoTimeoutError):
+                continue
+
+        if not save_clicked:
+            logger.warning("保存ボタンが見つかりません")
+            return None
 
         time.sleep(1)
 
@@ -206,27 +246,47 @@ class PywinautoEngine(RPAEngine):
             return []
 
         # WinForms DataGridView は UIA では "Table" として公開される
-        grid = active_child.child_window(auto_id="dgvCareRecord", control_type="Table")
-        if not grid.exists(timeout=2):
-            # automation_idが異なる場合のフォールバック（Table → DataGrid の順）
-            grid = active_child.child_window(control_type="Table")
-            if not grid.exists(timeout=2):
-                grid = active_child.child_window(control_type="DataGrid")
+        grid = None
+        for selector in [
+            lambda c: c.child_window(auto_id="dgvCareRecord", control_type="Table"),
+            lambda c: c.child_window(control_type="Table"),
+            lambda c: c.child_window(control_type="DataGrid"),
+        ]:
+            try:
+                candidate = selector(active_child)
+                if candidate.exists(timeout=1):
+                    grid = candidate
+                    logger.debug("グリッド検出: %s", type(candidate).__name__)
+                    break
+            except (ElementNotFoundError, PywinautoTimeoutError):
+                continue
+
+        if grid is None:
+            logger.warning("DataGridViewが見つかりません")
+            return []
 
         rows: list[list[str]] = []
 
         # ヘッダー行の取得
-        headers = grid.children(control_type="Header")
-        if headers:
-            header_items = headers[0].children(control_type="HeaderItem")
-            rows.append([h.window_text() for h in header_items])
+        try:
+            headers = grid.children(control_type="Header")
+            if headers:
+                header_items = headers[0].children(control_type="HeaderItem")
+                rows.append([h.window_text() for h in header_items])
+                logger.debug("ヘッダー行取得: %d列", len(rows[0]))
+        except (ElementNotFoundError, IndexError) as e:
+            logger.warning("ヘッダー行の読み取り失敗: %s", e)
 
         # データ行の取得
-        data_items = grid.children(control_type="DataItem")
-        for item in data_items:
-            cells = item.children()
-            row_data = [c.window_text() for c in cells]
-            rows.append(row_data)
+        try:
+            data_items = grid.children(control_type="DataItem")
+            for item in data_items:
+                cells = item.children()
+                row_data = [c.window_text() for c in cells]
+                rows.append(row_data)
+            logger.debug("データ行取得: %d行", len(data_items))
+        except ElementNotFoundError as e:
+            logger.warning("データ行の読み取り失敗: %s", e)
 
         logger.info("グリッドデータ読み取り: %d行", len(rows))
         return rows
