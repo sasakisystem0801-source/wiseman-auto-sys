@@ -157,7 +157,11 @@ class PywinautoEngine(RPAEngine):
             logger.error("MDI子ウィンドウが見つかりません")
             return None
 
-        active_child.child_window(auto_id="btnPrint").click_input()
+        # ShowDialog()がUIスレッドをブロックするため、click_input()は戻らない。
+        # set_focus() + type_keys('{ENTER}') でモーダルブロックを回避する。
+        btn_print = active_child.child_window(auto_id="btnPrint")
+        btn_print.set_focus()
+        btn_print.type_keys("{ENTER}")
         time.sleep(2)
 
         # SaveFileDialog を処理
@@ -349,8 +353,10 @@ class PywinautoEngine(RPAEngine):
 
         logger.info("ワイズマン終了中...")
 
-        # [終了] ボタンをクリック
-        self._main_window.child_window(auto_id="btnExit").click_input()
+        # [終了] ボタン: ShowDialog()によるモーダルブロック回避
+        btn_exit = self._main_window.child_window(auto_id="btnExit")
+        btn_exit.set_focus()
+        btn_exit.type_keys("{ENTER}")
         time.sleep(1)
 
         # 確認ダイアログで [はい] をクリック
