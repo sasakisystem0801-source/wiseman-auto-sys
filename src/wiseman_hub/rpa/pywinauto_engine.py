@@ -157,14 +157,8 @@ class PywinautoEngine(RPAEngine):
             logger.error("MDI子ウィンドウが見つかりません")
             return None
 
-        # UIA Invokeパターンでボタンを直接呼び出し（click_inputより確実）
-        try:
-            btn_print = active_child.child_window(auto_id="btnPrint")
-            btn_print.invoke()
-        except (ElementNotFoundError, AttributeError):
-            # invoke未対応の場合はclick_inputにフォールバック
-            active_child.child_window(auto_id="btnPrint").click_input()
-        time.sleep(1)
+        active_child.child_window(auto_id="btnPrint").click_input()
+        time.sleep(2)
 
         # SaveFileDialog を処理
         try:
@@ -341,21 +335,15 @@ class PywinautoEngine(RPAEngine):
 
         logger.info("ワイズマン終了中...")
 
-        # [終了] ボタンをクリック（UIA Invokeパターン優先）
-        try:
-            self._main_window.child_window(auto_id="btnExit").invoke()
-        except (ElementNotFoundError, AttributeError):
-            self._main_window.child_window(auto_id="btnExit").click_input()
-        time.sleep(0.5)
+        # [終了] ボタンをクリック
+        self._main_window.child_window(auto_id="btnExit").click_input()
+        time.sleep(1)
 
         # 確認ダイアログで [はい] をクリック
         try:
             confirm = self._app.window(title_re=".*確認.*")
-            confirm.wait("visible", timeout=5)
-            try:
-                confirm.child_window(title="はい").invoke()
-            except AttributeError:
-                confirm.child_window(title="はい").click_input()
+            confirm.wait("visible", timeout=10)
+            confirm.child_window(title="はい").click_input()
         except (ElementNotFoundError, PywinautoTimeoutError):
             logger.warning("確認ダイアログが見つかりません。直接終了を試みます")
             self._main_window.close()
