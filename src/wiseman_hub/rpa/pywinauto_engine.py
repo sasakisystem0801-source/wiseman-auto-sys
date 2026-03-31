@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -17,7 +18,6 @@ if TYPE_CHECKING:
 if sys.platform != "win32":
     raise ImportError("pywinauto_engine はWindows環境でのみ使用できます")
 
-import psutil
 from pywinauto import Application
 from pywinauto.findwindows import ElementNotFoundError
 from pywinauto.timings import TimeoutError as PywinautoTimeoutError
@@ -260,8 +260,12 @@ class PywinautoEngine(RPAEngine):
         timeout_sec = 10
         deadline = time.monotonic() + timeout_sec
         while time.monotonic() < deadline:
-            if not psutil.pid_exists(pid):
-                break
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break  # プロセス終了済み
+            except PermissionError:
+                pass  # プロセスは存在するがアクセス権なし → 存在として扱う
             time.sleep(0.5)
         else:
             logger.warning("ワイズマンプロセス(PID=%d)が%d秒以内に終了しませんでした", pid, timeout_sec)
