@@ -282,7 +282,10 @@ class PywinautoEngine(RPAEngine):
             logger.warning("ヘッダー行の読み取り失敗: %s", e)
 
         # データ行の取得
-        # WinForms DataGridView: 各セルがEditとしてフラットに展開される
+        # WinForms DataGridView UIA構造:
+        #   Table > Custom(ヘッダー行) > Header...
+        #   Table > Custom(データ行1) > Edit...
+        #   Table > Custom(データ行2) > Edit...
         try:
             # まずDataItem（標準的なUIA構造）を試行
             data_items = grid.children(control_type="DataItem")
@@ -292,16 +295,27 @@ class PywinautoEngine(RPAEngine):
                     row_data = [c.window_text() for c in cells]
                     rows.append(row_data)
                 logger.debug("DataItem経由: %d行", len(data_items))
-            elif col_count > 0:
-                # フォールバック: Edit要素をフラットに取得し列数で分割
-                edits = grid.children(control_type="Edit")
-                if edits:
-                    for i in range(0, len(edits), col_count):
-                        row_data = [e.window_text() for e in edits[i:i + col_count]]
-                        if len(row_data) == col_count:
-                            rows.append(row_data)
-                    logger.debug("Edit経由: %d行 (%dセル / %d列)",
-                                 len(rows) - 1, len(edits), col_count)
+            else:
+                # WinForms DataGridView: 行がCustom要素、セルがEdit子要素
+                custom_items = grid.children(control_type="Custom")
+                data_row_count = 0
+                for item in custom_items:
+                    edits = item.children(control_type="Edit")
+                    if edits:
+                        row_data = [e.window_text() for e in edits]
+                        rows.append(row_data)
+                        data_row_count += 1
+                if data_row_count > 0:
+                    logger.debug("Custom>Edit経由: %d行", data_row_count)
+                elif col_count > 0:
+                    # 最終フォールバック: 全子孫Editをフラットに取得し列数で分割
+                    edits = grid.descendants(control_type="Edit")
+                    if edits:
+                        for i in range(0, len(edits), col_count):
+                            row_data = [e.window_text() for e in edits[i:i + col_count]]
+                            if len(row_data) == col_count:
+                                rows.append(row_data)
+                        logger.debug("descendants(Edit)経由: %d行", len(rows) - 1)
         except ElementNotFoundError as e:
             logger.warning("データ行の読み取り失敗: %s", e)
 
