@@ -126,15 +126,19 @@ class PywinautoEngine(RPAEngine):
             # MenuItem を個別にクリック
             logger.warning("menu_select失敗 (%s): %s。個別クリックにフォールバック", type(exc).__name__, exc)
             try:
+                clicked_count = 0
                 for i, item in enumerate(menu_path):
                     menu_item = self._main_window.child_window(title=item, control_type="MenuItem")
                     if not menu_item.exists(timeout=1):
-                        logger.error("MenuItem '%s' が見つかりません (ステップ %d)", item, i)
+                        logger.error("MenuItem '%s' が見つかりません (ステップ %d/%d)", item, i, len(menu_path))
                         break
                     menu_item.click_input()
+                    clicked_count += 1
                     logger.debug("MenuItem clicked: %s", item)
                     time.sleep(0.5)
-                menu_success = True
+                # 全MenuItemをクリックできた場合のみ成功
+                if clicked_count == len(menu_path):
+                    menu_success = True
             except (ElementNotFoundError, AttributeError) as e:
                 logger.error("個別クリックフォールバック失敗: %s", e)
 
@@ -166,7 +170,7 @@ class PywinautoEngine(RPAEngine):
         try:
             save_dlg = self._app.window(title_re=".*保存.*|.*Save.*")
             save_dlg.wait("visible", timeout=10)
-        except ElementNotFoundError:
+        except (ElementNotFoundError, PywinautoTimeoutError):
             logger.error("保存ダイアログが表示されません")
             return None
 
@@ -178,7 +182,6 @@ class PywinautoEngine(RPAEngine):
         filename_set = False
         for selector in [
             ("FileNameControlHost", lambda d: d.child_window(auto_id="FileNameControlHost")),
-            ("ComboBox[Edit]", lambda d: d.child_window(control_type="ComboBox")),
             ("Edit", lambda d: d.child_window(control_type="Edit")),
         ]:
             try:
