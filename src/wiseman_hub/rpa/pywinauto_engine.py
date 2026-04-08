@@ -122,7 +122,7 @@ class PywinautoEngine(RPAEngine):
         # 複数の control_type を順に試して最初にマッチしたものをクリックする。
         # title は半角カナ "ｹｱ記録" / 全角 "ケア記録" の両方にマッチさせる。
         title_pattern = r".*通所.*[ｹケ][ｱア]記録.*"
-        wrapper = None
+        coords: tuple[int, int] | None = None
         last_err: Exception | None = None
         for ct in ("Pane", "Text", "Button", "Hyperlink"):
             try:
@@ -131,22 +131,27 @@ class PywinautoEngine(RPAEngine):
                     control_type=ct,
                 )
                 wrapper = candidate.wait("visible", timeout=5)
-                logger.debug("ケア記録要素発見: control_type=%s", ct)
+                rect = wrapper.rectangle()
+                coords = (int(rect.mid_point().x), int(rect.mid_point().y))
+                logger.debug("ケア記録要素発見: control_type=%s coords=%s", ct, coords)
+                # COM クロススレッド競合 (0x8001010d) 回避のため、UIA 参照を即座に破棄
+                del wrapper
+                del candidate
                 break
             except (ElementNotFoundError, PywinautoTimeoutError) as exc:
                 last_err = exc
                 continue
-        if wrapper is None:
+        if coords is None:
             # デバッグ用: launcher の descendants を列挙してログ出力
             try:
                 descendants = self._launcher_window.descendants()
                 logger.error("ケア記録要素が見つかりません。launcher の descendants (先頭50件):")
                 for i, d in enumerate(descendants[:50]):
                     try:
-                        ct = d.element_info.control_type
+                        ct_name = d.element_info.control_type
                         name = d.element_info.name or ''
                         aid = d.element_info.automation_id or ''
-                        logger.error("  [%d] %s name=%r aid=%r", i, ct, name, aid)
+                        logger.error("  [%d] %s name=%r aid=%r", i, ct_name, name, aid)
                     except Exception:
                         continue
             except Exception as dump_err:
@@ -155,11 +160,15 @@ class PywinautoEngine(RPAEngine):
                 f"ケア記録選択要素が見つかりません (pattern={title_pattern!r})"
             ) from last_err
 
-        # Pane/Text は click() が効かないため、中心座標でマウスクリック
-        rect = wrapper.rectangle()
-        center = (rect.mid_point().x, rect.mid_point().y)
-        logger.debug("ケア記録クリック座標: %s", center)
-        mouse.click(coords=center)
+        # UIA 参照を完全に解放してから mouse.click を呼ぶ
+        # （UIA COM ハンドルを保持したまま mouse.click すると
+        #  RPC_E_CANTCALLOUT_ININPUTSYNCCALL (0x8001010d) が発生する）
+        import gc
+        gc.collect()
+        time.sleep(0.1)
+        logger.debug("ケア記録クリック: %s", coords)
+        mouse.click(coords=coords)
+        time.sleep(0.5)
 
         # ケア記録メインウィンドウ frmMenu200 を待機
         logger.info("ケア記録メインウィンドウ待機中...")
