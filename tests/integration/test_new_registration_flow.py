@@ -41,6 +41,6 @@ class TestNewRegistrationFlow:
         engine.select_care_system()
         engine.click_new_registration()
 
-        # frmKihon が開いていることを確認
-        reg_window = engine._app.window(auto_id="frmKihon")
+        # frmKihon は MDI 子として開くため main_window の descendant として検索
+        reg_window = engine._main_window.child_window(auto_id="frmKihon")
         assert reg_window.exists(timeout=5)
