@@ -39,6 +39,39 @@ class PywinautoEngine(RPAEngine):
         self._startup_wait_sec = startup_wait_sec
         self._window_title_pattern = window_title_pattern
 
+    @staticmethod
+    def _post_message(hwnd: int, msg: int, wparam: int, lparam: int) -> None:
+        """PostMessageW を呼び、戻り値 0 (失敗) を RuntimeError に昇格させる。
+
+        PostMessage は非同期キュー投入で、失敗時は 0 を返し GetLastError() を
+        セットする (無効 HWND / 対象スレッド終了 / キュー満杯等)。戻り値を無視
+        すると、後段の wait("visible") が "ウィンドウが見つからない" という
+        誤ったエラーになり調査を誤誘導するため、ここで明示的に検出する。
+        """
+        import ctypes
+        user32 = ctypes.windll.user32
+        ok = user32.PostMessageW(hwnd, msg, wparam, lparam)
+        if not ok:
+            err = ctypes.get_last_error()
+            raise RuntimeError(
+                f"PostMessageW failed: hwnd=0x{hwnd:x} msg=0x{msg:x} "
+                f"GetLastError={err}"
+            )
+
+    @staticmethod
+    def _send_message(hwnd: int, msg: int, wparam: int, lparam: int) -> int:
+        """SendMessageW を呼ぶ。SendMessage は同期のため戻り値はメッセージ依存。
+
+        失敗時の 0 は他メッセージの正常値と衝突するため GetLastError() を参照
+        しても確実ではない。HWND の生存確認のみ事前に行い、以降は呼び出し元が
+        後段の状態遷移で検知する責務を持つ。
+        """
+        import ctypes
+        user32 = ctypes.windll.user32
+        if not user32.IsWindow(hwnd):
+            raise RuntimeError(f"SendMessageW: invalid hwnd=0x{hwnd:x}")
+        return user32.SendMessageW(hwnd, msg, wparam, lparam)
+
     def _get_active_mdi_child(self) -> WindowSpecification | None:
         """アクティブなMDI子ウィンドウを取得する。
 
@@ -60,6 +93,15 @@ class PywinautoEngine(RPAEngine):
                 return mdi_child
         except ElementNotFoundError:
             pass
+        except Exception as exc:
+            # comtypes.COMError / RuntimeError 等 pywinauto の UIA 呼び出しは
+            # 環境によって様々な型を投げる。ここで黙殺はせず debug ログに残し、
+            # 呼び出し元には "見つからなかった" と同等の None を返す（上位で
+            # 明示的に欠落判定するため）。
+            logger.debug(
+                "_get_active_mdi_child: UIA 呼び出しで例外 (%s): %s",
+                type(exc).__name__, exc,
+            )
 
         return None
 
@@ -138,7 +180,11 @@ class PywinautoEngine(RPAEngine):
                 logger.info(
                     "ケア記録要素発見: control_type=%s hwnd=0x%x", ct, target_hwnd or 0,
                 )
-                # UIA 参照を即座に破棄（COM クロススレッド競合 0x8001010d 回避）
+                # UIA ラッパーと探索オブジェクトを即座に破棄する。
+                # これらを抱えたまま後段の Win32 クリック送信に入ると、comtypes が
+                # 管理する COM プロキシが別スレッドで解放されて再入/スレッド制約の
+                # 違反を引き起こす場合があった。HWND だけを保持して参照を切るのが
+                # 最も確実な回避策。
                 del wrapper
                 del candidate
                 break
@@ -166,26 +212,25 @@ class PywinautoEngine(RPAEngine):
 
         # HWND に直接クリックイベントを送る
         # （座標/フォーカス/DPI 非依存、COM も介さないため安全）
-        import ctypes
         import gc
         gc.collect()
         time.sleep(0.1)
-        user32 = ctypes.windll.user32
         WM_LBUTTONDOWN = 0x0201
         WM_LBUTTONUP = 0x0202
         BM_CLICK = 0x00F5
         MK_LBUTTON = 0x0001
 
         if found_ct == "Button":
-            # Button は BM_CLICK に確実に反応する（最も信頼できる）
+            # Button は BM_CLICK に確実に反応する（最も信頼できる）。
+            # care system 選択はクリック後モーダルを開かないため Send で OK。
             logger.info("ケア記録 BM_CLICK: hwnd=0x%x", target_hwnd)
-            user32.SendMessageW(target_hwnd, BM_CLICK, 0, 0)
+            self._send_message(target_hwnd, BM_CLICK, 0, 0)
         else:
             # Pane/Text: WM_LBUTTONDOWN/UP を Post
             logger.info("ケア記録 WM_LBUTTON: hwnd=0x%x", target_hwnd)
-            user32.PostMessageW(target_hwnd, WM_LBUTTONDOWN, MK_LBUTTON, 0)
+            self._post_message(target_hwnd, WM_LBUTTONDOWN, MK_LBUTTON, 0)
             time.sleep(0.05)
-            user32.PostMessageW(target_hwnd, WM_LBUTTONUP, 0, 0)
+            self._post_message(target_hwnd, WM_LBUTTONUP, 0, 0)
         time.sleep(0.5)
 
         # ケア記録メインウィンドウ frmMenu200 を待機
@@ -208,21 +253,21 @@ class PywinautoEngine(RPAEngine):
         logger.info("新規登録ボタンをクリック中...")
         btn = self._main_window.child_window(title="新規登録", control_type="Button")
         btn.wait("visible", timeout=10)
-        # btn.click() は内部で UIA InvokePattern.Invoke を呼ぶが、このボタンは
-        # クリック直後に MDI 子ウィンドウ frmKihon へ遷移するため Invoke の完了確認
-        # フェーズで元要素が消失し COMError (0x80131503 UIA_E_ELEMENTNOTAVAILABLE)
-        # を投げる。care system 選択と同じく HWND + BM_CLICK で統一する。
-        import ctypes
+        # pywinauto の UIA backend で btn.click() を実行すると、クリック直後に
+        # MDI 子ウィンドウ frmKihon が表示されて元のボタン要素が消失し、UIA 操作の
+        # 完了確認フェーズで COMError (UIA_E_ELEMENTNOTAVAILABLE) を投げる。
+        # care system 選択と同じく HWND + BM_CLICK で統一する。
         import gc
         target_hwnd = btn.wrapper_object().handle
         del btn
         gc.collect()
         BM_CLICK = 0x00F5
-        logger.info("新規登録 BM_CLICK(Post): hwnd=0x%x", target_hwnd)
         # SendMessage は同期呼び出しのため、クリックで開く MDI 子フォームが
-        # 独自メッセージループに入るとブロックされ返らなくなる。PostMessage で
-        # 非同期にキューへ投入し、後段の frmKihon 出現待ちで完了を検知する。
-        ctypes.windll.user32.PostMessageW(target_hwnd, BM_CLICK, 0, 0)
+        # ShowDialog 相当の独自メッセージループに入ると返らなくなり全体がハング
+        # する。PostMessage で非同期にキューへ投入し、frmKihon の出現を後段で
+        # 検知する。
+        logger.info("新規登録 BM_CLICK(Post): hwnd=0x%x", target_hwnd)
+        self._post_message(target_hwnd, BM_CLICK, 0, 0)
 
         # 新規登録フォーム frmKihon を待機
         # frmKihon は MDI 子ウィンドウとして開くため、Application.window() (top-level only)
@@ -241,11 +286,9 @@ class PywinautoEngine(RPAEngine):
 
         # WinForms MenuStrip: menu_select("親メニュー->子メニュー") 形式
         menu_string = "->".join(menu_path)
-        menu_success = False
 
         try:
             self._main_window.menu_select(menu_string)
-            menu_success = True
             logger.debug("menu_select成功")
         except (ElementNotFoundError, AttributeError, PywinautoTimeoutError) as exc:
             # menu_selectがUIA backendで動作しない場合のフォールバック:
@@ -258,16 +301,18 @@ class PywinautoEngine(RPAEngine):
                     ).click_input()
                     logger.debug("MenuItem clicked: %s (%d/%d)", item, i + 1, len(menu_path))
                     time.sleep(0.5)
-                menu_success = True
-            except (ElementNotFoundError, AttributeError, PywinautoTimeoutError) as e:
-                logger.error("個別クリックフォールバック失敗: %s", e)
+            except (ElementNotFoundError, AttributeError, PywinautoTimeoutError) as fallback_err:
+                # menu_select と個別クリックの両方が失敗した場合は silent failure
+                # にせず呼び出し元に伝播させる（後段の export_csv 等が誤った MDI
+                # 子ウィンドウに対して動作するのを防ぐ）。
+                raise RuntimeError(
+                    f"メニュー遷移失敗: {menu_string} "
+                    f"(menu_select: {exc}; individual click: {fallback_err})"
+                ) from fallback_err
 
         # MDI子ウィンドウが開くのを待機
-        if menu_success:
-            time.sleep(1)
-            logger.info("メニュー遷移完了: %s", menu_string)
-        else:
-            logger.warning("メニュー遷移失敗の可能性があります: %s", menu_string)
+        time.sleep(1)
+        logger.info("メニュー遷移完了: %s", menu_string)
 
     def export_csv(self, output_dir: Path) -> Path | None:
         """現在の画面からCSVエクスポートを実行する。"""
@@ -286,11 +331,10 @@ class PywinautoEngine(RPAEngine):
         # ShowDialog()がUIスレッドをブロックするため、click_input()は戻らない。
         # PostMessageで非同期クリックを送信（キューに入れて即戻る）。
         btn_print = active_child.child_window(auto_id="btnPrint").wrapper_object()
-        import ctypes
         WM_LBUTTONDOWN, WM_LBUTTONUP = 0x0201, 0x0202
-        ctypes.windll.user32.PostMessageW(btn_print.handle, WM_LBUTTONDOWN, 1, 0)
+        self._post_message(btn_print.handle, WM_LBUTTONDOWN, 1, 0)
         time.sleep(0.05)
-        ctypes.windll.user32.PostMessageW(btn_print.handle, WM_LBUTTONUP, 0, 0)
+        self._post_message(btn_print.handle, WM_LBUTTONUP, 0, 0)
         time.sleep(3)
 
         # SaveFileDialog を処理
@@ -484,11 +528,10 @@ class PywinautoEngine(RPAEngine):
 
         # [終了] ボタン: ShowDialog()によるモーダルブロック回避
         btn_exit = self._main_window.child_window(auto_id="btnExit").wrapper_object()
-        import ctypes
         WM_LBUTTONDOWN, WM_LBUTTONUP = 0x0201, 0x0202
-        ctypes.windll.user32.PostMessageW(btn_exit.handle, WM_LBUTTONDOWN, 1, 0)
+        self._post_message(btn_exit.handle, WM_LBUTTONDOWN, 1, 0)
         time.sleep(0.05)
-        ctypes.windll.user32.PostMessageW(btn_exit.handle, WM_LBUTTONUP, 0, 0)
+        self._post_message(btn_exit.handle, WM_LBUTTONUP, 0, 0)
         time.sleep(1)
 
         # 確認ダイアログで [はい] をクリック

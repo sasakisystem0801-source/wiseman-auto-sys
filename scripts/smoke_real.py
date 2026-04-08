@@ -1,33 +1,54 @@
 """実機ワイズマン最小E2E検証スクリプト (#3)。
 
 使い方:
+    # 環境変数で指定
+    $env:WISEMAN_LNK_PATH = "C:\\Users\\<you>\\...\\ワイズマンASPサービス起動.lnk"
     uv run python scripts/smoke_real.py
+
+    # または引数で指定
+    uv run python scripts/smoke_real.py "C:\\path\\to\\shortcut.lnk"
 
 事前準備:
     - USBドングルが挿入されていること
     - ワイズマンが起動していないこと (事前終了)
-    - 設定: LNK_PATH を環境に合わせて調整
 """
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
 import sys
+from pathlib import Path
 
 from wiseman_hub.rpa.pywinauto_engine import PywinautoEngine
-
-LNK_PATH = r"C:\Users\sasak\OneDrive\デスクトップ\ワイズマンASPサービス起動_O.lnk"
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s:%(lineno)d %(message)s",
 )
+logger = logging.getLogger(__name__)
+
+
+def _resolve_lnk_path() -> Path:
+    """ワイズマン起動ショートカットのパスを argv / 環境変数から解決する。"""
+    raw = sys.argv[1] if len(sys.argv) >= 2 else os.environ.get("WISEMAN_LNK_PATH", "")
+    if not raw:
+        raise SystemExit(
+            "WISEMAN_LNK_PATH 環境変数またはコマンドライン引数でワイズマン "
+            "ショートカット (.lnk) のパスを指定してください。"
+        )
+    path = Path(raw)
+    if not path.exists():
+        raise SystemExit(f"指定されたパスが存在しません: {path}")
+    return path
 
 
 def main() -> int:
+    lnk_path = _resolve_lnk_path()
     engine = PywinautoEngine(startup_wait_sec=10)
     try:
-        engine.launch(LNK_PATH)
+        engine.launch(str(lnk_path))
         print("[1/3] launcher OK")
         engine.select_care_system()
         print("[2/3] care system OK")
@@ -35,17 +56,15 @@ def main() -> int:
         print("[3/3] new registration OK")
         print("=== ALL GREEN ===")
     except Exception:
-        logging.exception("smoke test failed")
+        logger.exception("smoke test failed")
         return 1
     finally:
-        try:
+        with contextlib.suppress(EOFError):
             input("Press Enter to close Wiseman and exit...")
-        except EOFError:
-            pass
         try:
             engine.close_wiseman()
         except Exception:
-            pass
+            logger.exception("close_wiseman failed")
     return 0
 
 
