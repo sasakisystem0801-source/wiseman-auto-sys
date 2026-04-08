@@ -218,8 +218,11 @@ class PywinautoEngine(RPAEngine):
         del btn
         gc.collect()
         BM_CLICK = 0x00F5
-        logger.info("新規登録 BM_CLICK: hwnd=0x%x", target_hwnd)
-        ctypes.windll.user32.SendMessageW(target_hwnd, BM_CLICK, 0, 0)
+        logger.info("新規登録 BM_CLICK(Post): hwnd=0x%x", target_hwnd)
+        # SendMessage は同期呼び出しのため、クリックで開く MDI 子フォームが
+        # 独自メッセージループに入るとブロックされ返らなくなる。PostMessage で
+        # 非同期にキューへ投入し、後段の frmKihon 出現待ちで完了を検知する。
+        ctypes.windll.user32.PostMessageW(target_hwnd, BM_CLICK, 0, 0)
 
         # 新規登録フォーム frmKihon を待機
         # frmKihon は MDI 子ウィンドウとして開くため、Application.window() (top-level only)
