@@ -119,10 +119,11 @@ class PywinautoEngine(RPAEngine):
         logger.info("ケア記録システムを選択中...")
         # 実機はPane(auto_id動的)、モックはPanel+Labelの構造で、UIA の Name プロパティを
         # 持つのが Pane なのか Text(Label) なのか Button なのかは環境により異なる。
-        # 複数の control_type を順に試して最初にマッチしたものをクリックする。
-        # title は半角カナ "ｹｱ記録" / 全角 "ケア記録" の両方にマッチさせる。
+        # 複数の control_type を順に試して最初にマッチしたもの（の HWND）にクリック
+        # メッセージを直接 PostMessage する。PostMessage は画面座標やフォーカスに依存せず、
+        # COM クロススレッド競合も起きない。
         title_pattern = r".*通所.*[ｹケ][ｱア]記録.*"
-        coords: tuple[int, int] | None = None
+        target_hwnd: int | None = None
         last_err: Exception | None = None
         for ct in ("Pane", "Text", "Button", "Hyperlink"):
             try:
@@ -131,17 +132,18 @@ class PywinautoEngine(RPAEngine):
                     control_type=ct,
                 )
                 wrapper = candidate.wait("visible", timeout=5)
-                rect = wrapper.rectangle()
-                coords = (int(rect.mid_point().x), int(rect.mid_point().y))
-                logger.debug("ケア記録要素発見: control_type=%s coords=%s", ct, coords)
-                # COM クロススレッド競合 (0x8001010d) 回避のため、UIA 参照を即座に破棄
+                target_hwnd = wrapper.handle
+                logger.debug(
+                    "ケア記録要素発見: control_type=%s hwnd=0x%x", ct, target_hwnd or 0,
+                )
+                # UIA 参照を即座に破棄（COM クロススレッド競合 0x8001010d 回避）
                 del wrapper
                 del candidate
                 break
             except (ElementNotFoundError, PywinautoTimeoutError) as exc:
                 last_err = exc
                 continue
-        if coords is None:
+        if target_hwnd is None or target_hwnd == 0:
             # デバッグ用: launcher の descendants を列挙してログ出力
             try:
                 descendants = self._launcher_window.descendants()
@@ -160,24 +162,21 @@ class PywinautoEngine(RPAEngine):
                 f"ケア記録選択要素が見つかりません (pattern={title_pattern!r})"
             ) from last_err
 
-        # UIA 参照を完全に解放してから Win32 API で直接クリックする
-        # （UIA COM ハンドル保持中に mouse.click すると
-        #  RPC_E_CANTCALLOUT_ININPUTSYNCCALL (0x8001010d) が発生するため、
-        #  ctypes 経由の mouse_event で COM を迂回する）
+        # PostMessage で HWND に直接クリックイベントを送る
+        # （座標/フォーカス/DPI 非依存、COM も介さないため安全）
         import ctypes
         import gc
         gc.collect()
-        time.sleep(0.2)
-        logger.debug("ケア記録クリック (Win32): %s", coords)
-        cx, cy = coords
+        time.sleep(0.1)
+        logger.debug("ケア記録 PostMessage クリック: hwnd=0x%x", target_hwnd)
         user32 = ctypes.windll.user32
-        user32.SetCursorPos(cx, cy)
+        WM_LBUTTONDOWN = 0x0201
+        WM_LBUTTONUP = 0x0202
+        MK_LBUTTON = 0x0001
+        # lParam=0: クライアント座標 (0,0) で十分（WinForms の Click は位置不問）
+        user32.PostMessageW(target_hwnd, WM_LBUTTONDOWN, MK_LBUTTON, 0)
         time.sleep(0.05)
-        MOUSEEVENTF_LEFTDOWN = 0x0002
-        MOUSEEVENTF_LEFTUP = 0x0004
-        user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-        time.sleep(0.05)
-        user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        user32.PostMessageW(target_hwnd, WM_LBUTTONUP, 0, 0)
         time.sleep(0.5)
 
         # ケア記録メインウィンドウ frmMenu200 を待機
