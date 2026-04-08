@@ -137,6 +137,20 @@ class PywinautoEngine(RPAEngine):
                 last_err = exc
                 continue
         if wrapper is None:
+            # デバッグ用: launcher の descendants を列挙してログ出力
+            try:
+                descendants = self._launcher_window.descendants()
+                logger.error("ケア記録要素が見つかりません。launcher の descendants (先頭50件):")
+                for i, d in enumerate(descendants[:50]):
+                    try:
+                        ct = d.element_info.control_type
+                        name = d.element_info.name or ''
+                        aid = d.element_info.automation_id or ''
+                        logger.error("  [%d] %s name=%r aid=%r", i, ct, name, aid)
+                    except Exception:
+                        continue
+            except Exception as dump_err:
+                logger.error("descendants 列挙も失敗: %s", dump_err)
             raise RuntimeError(
                 f"ケア記録選択要素が見つかりません (pattern={title_pattern!r})"
             ) from last_err
