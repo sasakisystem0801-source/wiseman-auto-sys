@@ -124,8 +124,9 @@ class PywinautoEngine(RPAEngine):
         # COM クロススレッド競合も起きない。
         title_pattern = r".*通所.*[ｹケ][ｱア]記録.*"
         target_hwnd: int | None = None
+        found_ct: str | None = None
         last_err: Exception | None = None
-        for ct in ("Pane", "Text", "Button", "Hyperlink"):
+        for ct in ("Button", "Pane", "Text", "Hyperlink"):
             try:
                 candidate = self._launcher_window.child_window(
                     title_re=title_pattern,
@@ -133,7 +134,8 @@ class PywinautoEngine(RPAEngine):
                 )
                 wrapper = candidate.wait("visible", timeout=5)
                 target_hwnd = wrapper.handle
-                logger.debug(
+                found_ct = ct
+                logger.info(
                     "ケア記録要素発見: control_type=%s hwnd=0x%x", ct, target_hwnd or 0,
                 )
                 # UIA 参照を即座に破棄（COM クロススレッド競合 0x8001010d 回避）
@@ -162,21 +164,28 @@ class PywinautoEngine(RPAEngine):
                 f"ケア記録選択要素が見つかりません (pattern={title_pattern!r})"
             ) from last_err
 
-        # PostMessage で HWND に直接クリックイベントを送る
+        # HWND に直接クリックイベントを送る
         # （座標/フォーカス/DPI 非依存、COM も介さないため安全）
         import ctypes
         import gc
         gc.collect()
         time.sleep(0.1)
-        logger.debug("ケア記録 PostMessage クリック: hwnd=0x%x", target_hwnd)
         user32 = ctypes.windll.user32
         WM_LBUTTONDOWN = 0x0201
         WM_LBUTTONUP = 0x0202
+        BM_CLICK = 0x00F5
         MK_LBUTTON = 0x0001
-        # lParam=0: クライアント座標 (0,0) で十分（WinForms の Click は位置不問）
-        user32.PostMessageW(target_hwnd, WM_LBUTTONDOWN, MK_LBUTTON, 0)
-        time.sleep(0.05)
-        user32.PostMessageW(target_hwnd, WM_LBUTTONUP, 0, 0)
+
+        if found_ct == "Button":
+            # Button は BM_CLICK に確実に反応する（最も信頼できる）
+            logger.info("ケア記録 BM_CLICK: hwnd=0x%x", target_hwnd)
+            user32.SendMessageW(target_hwnd, BM_CLICK, 0, 0)
+        else:
+            # Pane/Text: WM_LBUTTONDOWN/UP を Post
+            logger.info("ケア記録 WM_LBUTTON: hwnd=0x%x", target_hwnd)
+            user32.PostMessageW(target_hwnd, WM_LBUTTONDOWN, MK_LBUTTON, 0)
+            time.sleep(0.05)
+            user32.PostMessageW(target_hwnd, WM_LBUTTONUP, 0, 0)
         time.sleep(0.5)
 
         # ケア記録メインウィンドウ frmMenu200 を待機

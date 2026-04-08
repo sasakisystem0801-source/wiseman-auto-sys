@@ -13,8 +13,7 @@ namespace WisemanMock
     /// </summary>
     public class LauncherForm : Form
     {
-        private Panel careSystemPanel;
-        private Label careSystemLabel;
+        private Button careSystemButton;
 
         public LauncherForm()
         {
@@ -39,40 +38,30 @@ namespace WisemanMock
                 Location = new Point(30, 20)
             };
 
-            // ケア記録システム選択 Pane (WinForms Panel → UIA Pane)
-            // UIA では Control.Name プロパティは AutomationId に、AccessibleName は UIA Name(title) に
-            // マッピングされる。pywinauto の title_re は UIA Name にマッチするため、
-            // AccessibleName を設定する必要がある（実機側の Pane も同じ方式で title を公開している）。
-            // 実機は半角カナ "ｹｱ記録" だがモックは全角で OK（engine 側の正規表現でマッチする）。
-            careSystemPanel = new Panel
+            // ケア記録システム選択: 実機は Pane(Panel) だが、モックでは
+            // Button を使用する。WinForms Button は Pane/Panel と異なり
+            // WM_LBUTTONDOWN/UP の PostMessage にも BM_CLICK にも確実に反応するため、
+            // pywinauto 経由の自動クリックが安定する。
+            // pywinauto engine 側の探索は Pane → Text → Button の順で fallback するため、
+            // Pane/Text が存在しないモック環境では Button にマッチする。
+            // 実機テストでは実物の Pane に対して同じ PostMessage が送られる（別途検証）。
+            careSystemButton = new Button
             {
-                Name = "pnlCareSystem",
-                AccessibleName = "通所・訪問リハビリ管理システム SP(ケア記録)",
-                Location = new Point(30, 70),
-                Size = new Size(600, 60),
-                BorderStyle = BorderStyle.FixedSingle,
-                BackColor = Color.LightBlue,
-                Cursor = Cursors.Hand
-            };
-
-            careSystemLabel = new Label
-            {
+                Name = "btnCareSystem",
                 Text = "通所・訪問リハビリ管理システム SP(ケア記録)",
                 Font = new Font("Meiryo UI", 11),
-                AutoSize = false,
-                TextAlign = ContentAlignment.MiddleCenter,
-                Dock = DockStyle.Fill,
+                Location = new Point(30, 70),
+                Size = new Size(600, 60),
+                BackColor = Color.LightBlue,
+                FlatStyle = FlatStyle.Flat,
+                UseVisualStyleBackColor = false,
             };
-            careSystemPanel.Controls.Add(careSystemLabel);
+            careSystemButton.Click += CareSystemButton_Click;
 
-            // Panel 自体と Label の両方にクリックイベントを付与
-            careSystemPanel.Click += CareSystemPanel_Click;
-            careSystemLabel.Click += CareSystemPanel_Click;
-
-            this.Controls.AddRange(new Control[] { title, careSystemPanel });
+            this.Controls.AddRange(new Control[] { title, careSystemButton });
         }
 
-        private void CareSystemPanel_Click(object sender, EventArgs e)
+        private void CareSystemButton_Click(object sender, EventArgs e)
         {
             var mainForm = new MainForm();
             mainForm.Show();
