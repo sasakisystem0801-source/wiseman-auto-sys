@@ -211,8 +211,10 @@ class PywinautoEngine(RPAEngine):
         btn.click()
 
         # 新規登録フォーム frmKihon を待機
+        # frmKihon は MDI 子ウィンドウとして開くため、Application.window() (top-level only)
+        # ではなく main_window の descendant として検索する
         logger.info("新規登録フォーム待機中...")
-        reg_window = self._app.window(auto_id="frmKihon")
+        reg_window = self._main_window.child_window(auto_id="frmKihon")
         reg_window.wait("visible", timeout=10)
         logger.info("新規登録フォーム表示完了")
 
