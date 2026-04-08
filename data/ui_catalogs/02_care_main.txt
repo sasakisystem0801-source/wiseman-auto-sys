@@ -1,0 +1,603 @@
+Control Identifiers:
+
+Dialog - '通所・訪問リハビリ管理システム SP(ｹｱ記録) [ささき整形外科デイケアセンター]'    (L324, T21, R1595, B1010)
+['通所・訪問リハビリ管理システム SP(ｹｱ記録) [ささき整形外科デイケアセンター]Dialog', 'Dialog', '通所・訪問リハビリ管理システム SP(ｹｱ記録) [ささき整形外科デイケアセンター]']
+child_window(title="通所・訪問リハビリ管理システム SP(ｹｱ記録) [ささき整形外科デイケアセンター]", auto_id="frmMenu200", control_type="Window")
+   | 
+   | Pane - ''    (L328, T259, R493, B260)
+   | ['(通所・訪問リハビリ管理システム SP(ｹｱ記録))Pane', 'Pane', '(通所・訪問リハビリ管理システム SP(ｹｱ記録))Pane0', '(通所・訪問リハビリ管理システム SP(ｹｱ記録))Pane1', 'Pane0', 'Pane1']
+   | child_window(auto_id="linDummy", control_type="Pane")
+   | 
+   | Pane - ''    (L327, T259, R494, B1007)
+   | ['(通所・訪問リハビリ管理システム SP(ｹｱ記録))Pane2', 'Pane2']
+   | child_window(auto_id="199020", control_type="Pane")
+   |    | 
+   |    | Button - '新規登録'    (L333, T263, R490, B303)
+   |    | ['新規登録', '新規登録Button', 'Button', 'Button0', 'Button1']
+   |    | child_window(title="新規登録", auto_id="395888", control_type="Button")
+   |    | 
+   |    | Button - '基本情報'    (L333, T303, R490, B343)
+   |    | ['基本情報', '基本情報Button', 'Button2']
+   |    | child_window(title="基本情報", auto_id="330356", control_type="Button")
+   |    | 
+   |    | Button - '関係者'    (L333, T343, R490, B383)
+   |    | ['Button3', '関係者Button', '関係者']
+   |    | child_window(title="関係者", auto_id="330360", control_type="Button")
+   |    | 
+   |    | Button - '介護保険'    (L333, T383, R490, B423)
+   |    | ['介護保険Button', '介護保険', 'Button4']
+   |    | child_window(title="介護保険", auto_id="264828", control_type="Button")
+   |    | 
+   |    | Button - '介護保険給付率'    (L333, T423, R490, B463)
+   |    | ['介護保険給付率', '介護保険給付率Button', 'Button5']
+   |    | child_window(title="介護保険給付率", auto_id="330368", control_type="Button")
+   |    | 
+   |    | Button - '生活保護介護券'    (L333, T463, R490, B503)
+   |    | ['生活保護介護券', 'Button6', '生活保護介護券Button']
+   |    | child_window(title="生活保護介護券", auto_id="526980", control_type="Button")
+   |    | 
+   |    | Button - '公費'    (L333, T503, R490, B543)
+   |    | ['公費Button', 'Button7', '公費']
+   |    | child_window(title="公費", auto_id="526984", control_type="Button")
+   |    | 
+   |    | Button - '利用料支払情報'    (L333, T543, R490, B583)
+   |    | ['利用料支払情報', '利用料支払情報Button', 'Button8']
+   |    | child_window(title="利用料支払情報", auto_id="199308", control_type="Button")
+   |    | 
+   |    | Button - '日常生活自立度'    (L333, T583, R490, B623)
+   |    | ['日常生活自立度', 'Button9', '日常生活自立度Button']
+   |    | child_window(title="日常生活自立度", auto_id="526992", control_type="Button")
+   |    | 
+   |    | Button - '住所地特例'    (L333, T623, R490, B663)
+   |    | ['住所地特例Button', '住所地特例', 'Button10']
+   |    | child_window(title="住所地特例", auto_id="526996", control_type="Button")
+   |    | 
+   |    | Button - '医療保険'    (L333, T663, R490, B703)
+   |    | ['医療保険', 'Button11', '医療保険Button']
+   |    | child_window(title="医療保険", auto_id="395928", control_type="Button")
+   |    | 
+   |    | Button - '連絡先'    (L333, T703, R490, B743)
+   |    | ['連絡先', '連絡先Button', 'Button12']
+   |    | child_window(title="連絡先", auto_id="330396", control_type="Button")
+   | 
+   | Pane - '表示順'    (L327, T131, R1592, B260)
+   | ['表示順Pane', '表示順', 'Pane3', '表示順Pane0', '表示順Pane1', '表示順0', '表示順1']
+   | child_window(title="表示順", auto_id="tabLargeMenu", control_type="Pane")
+   |    | 
+   |    | Pane - '利用者の管理'    (L331, T190, R1588, B256)
+   |    | ['利用者の管理Pane', '利用者の管理', 'Pane4']
+   |    | child_window(title="利用者の管理", auto_id="4653260", control_type="Pane")
+   |    |    | 
+   |    |    | Pane - ''    (L331, T190, R1588, B256)
+   |    |    | ['(通所・訪問リハビリ管理システム SP(ｹｱ記録))Pane3', 'Pane5']
+   |    |    | child_window(auto_id="uscPaneMiddleMenuScroll", control_type="Pane")
+   |    |    |    | 
+   |    |    |    | Pane - ''    (L331, T190, R1588, B256)
+   |    |    |    | ['(通所・訪問リハビリ管理システム SP(ｹｱ記録))Pane4', 'Pane6']
+   |    |    |    | child_window(auto_id="pnlButtonLine", control_type="Pane")
+   |    |    |    |    | 
+   |    |    |    |    | CheckBox - '利用者台帳'    (L331, T200, R489, B250)
+   |    |    |    |    | ['利用者台帳CheckBox', 'CheckBox', '利用者台帳', 'CheckBox0', 'CheckBox1']
+   |    |    |    |    | child_window(title="利用者台帳", auto_id="68178", control_type="CheckBox")
+   |    |    |    |    | 
+   |    |    |    |    | CheckBox - '利用者状況'    (L488, T200, R646, B250)
+   |    |    |    |    | ['利用者状況', 'CheckBox2', '利用者状況CheckBox']
+   |    |    |    |    | child_window(title="利用者状況", auto_id="723542", control_type="CheckBox")
+   |    |    |    |    | 
+   |    |    |    |    | CheckBox - '台帳一覧入力'    (L645, T200, R803, B250)
+   |    |    |    |    | ['CheckBox3', '台帳一覧入力', '台帳一覧入力CheckBox']
+   |    |    |    |    | child_window(title="台帳一覧入力", auto_id="723546", control_type="CheckBox")
+   |    |    |    |    | 
+   |    |    |    |    | CheckBox - '台帳資料'    (L802, T200, R960, B250)
+   |    |    |    |    | ['台帳資料', 'CheckBox4', '台帳資料CheckBox']
+   |    |    |    |    | child_window(title="台帳資料", auto_id="854622", control_type="CheckBox")
+   |    |    |    |    | 
+   |    |    |    |    | CheckBox - '抽出・宛名ﾗﾍﾞﾙ'    (L959, T200, R1117, B250)
+   |    |    |    |    | ['抽出・宛名ﾗﾍﾞﾙCheckBox', '抽出・宛名ﾗﾍﾞﾙ', 'CheckBox5']
+   |    |    |    |    | child_window(title="抽出・宛名ﾗﾍﾞﾙ", auto_id="592482", control_type="CheckBox")
+   |    |    |    |    | 
+   |    |    |    |    | CheckBox - 'ｻﾏﾘｰ'    (L1116, T200, R1274, B250)
+   |    |    |    |    | ['CheckBox6', 'ｻﾏﾘｰCheckBox', 'ｻﾏﾘｰ']
+   |    |    |    |    | child_window(title="ｻﾏﾘｰ", auto_id="1247846", control_type="CheckBox")
+   |    |    |    |    | 
+   |    |    |    |    | CheckBox - '支援ﾉｰﾄ'    (L1273, T200, R1431, B250)
+   |    |    |    |    | ['支援ﾉｰﾄ', 'CheckBox7', '支援ﾉｰﾄCheckBox']
+   |    |    |    |    | child_window(title="支援ﾉｰﾄ", auto_id="592490", control_type="CheckBox")
+   |    |    |    |    | 
+   |    |    |    |    | Static - ''    (L331, T212, R1588, B236)
+   |    |    |    |    | ['(通所・訪問リハビリ管理システム SP(ｹｱ記録))Static', 'Static', '(通所・訪問リハビリ管理システム SP(ｹｱ記録))Static0', '(通所・訪問リハビリ管理システム SP(ｹｱ記録))Static1', 'Static0', 'Static1']
+   |    |    |    |    | child_window(auto_id="lblBorder", control_type="Text")
+   |    |    | 
+   |    |    | Static - ''    (L331, T212, R1589, B236)
+   |    |    | ['(通所・訪問リハビリ管理システム SP(ｹｱ記録))Static2', 'Static2']
+   |    |    | child_window(auto_id="723566", control_type="Text")
+   | 
+   | Pane - ''    (L497, T259, R1592, B1007)
+   | ['利 用 状 況Pane', 'Pane7', '利 用 状 況Pane0', '利 用 状 況Pane1']
+   | child_window(auto_id="pnlScroll", control_type="Pane")
+   |    | 
+   |    | Pane - ''    (L497, T419, R1592, B1007)
+   |    | ['件Pane', 'Pane8', '件Pane0', '件Pane1']
+   |    | child_window(auto_id="pnlSearchResult", control_type="Pane")
+   |    |    | 
+   |    |    | Pane - ''    (L498, T420, R1591, B1003)
+   |    |    | ['件Pane2', 'Pane9']
+   |    |    | child_window(auto_id="uscRiyosyaIchiran", control_type="Pane")
+   |    |    |    | 
+   |    |    |    | Pane - ''    (L498, T420, R1591, B1003)
+   |    |    |    | ['件Pane3', 'Pane10']
+   |    |    |    | child_window(auto_id="pnlRiyosyaIchiran", control_type="Pane")
+   |    |    |    |    | 
+   |    |    |    |    | Button - '表示項目'    (L1470, T428, R1582, B460)
+   |    |    |    |    | ['表示項目Button', '表示項目', 'Button13']
+   |    |    |    |    | child_window(title="表示項目", auto_id="btnShowHyoziKomoku", control_type="Button")
+   |    |    |    |    | 
+   |    |    |    |    | Pane - ''    (L970, T428, R1115, B460)
+   |    |    |    |    | ['表示順Pane2', 'Pane11']
+   |    |    |    |    | child_window(auto_id="pnlSort", control_type="Pane")
+   |    |    |    |    |    | 
+   |    |    |    |    |    | RadioButton - '降順'    (L1046, T432, R1110, B456)
+   |    |    |    |    |    | ['RadioButton', '降順RadioButton', '降順', 'RadioButton0', 'RadioButton1']
+   |    |    |    |    |    | child_window(title="降順", auto_id="rbnRiyosyaDesc", control_type="RadioButton")
+   |    |    |    |    |    | 
+   |    |    |    |    |    | RadioButton - '昇順'    (L979, T433, R1043, B457)
+   |    |    |    |    |    | ['RadioButton2', '昇順RadioButton', '昇順']
+   |    |    |    |    |    | child_window(title="昇順", auto_id="rbnRiyosyaAsc", control_type="RadioButton")
+   |    |    |    |    | 
+   |    |    |    |    | Pane - 'ﾌﾘｶﾞﾅ'    (L706, T428, R962, B460)
+   |    |    |    |    | ['ﾌﾘｶﾞﾅPane', 'ﾌﾘｶﾞﾅ', 'Pane12']
+   |    |    |    |    | child_window(title="ﾌﾘｶﾞﾅ", auto_id="cmbRiyosyaSort", control_type="Pane")
+   |    |    |    |    | 
+   |    |    |    |    | Static - '表示順'    (L638, T428, R698, B460)
+   |    |    |    |    | ['表示順Static', '表示順2', 'Static3']
+   |    |    |    |    | child_window(title="表示順", auto_id="lblHyojiJun", control_type="Text")
+   |    |    |    |    | 
+   |    |    |    |    | Static - '件'    (L602, T428, R626, B460)
+   |    |    |    |    | ['件', 'Static4', '件Static']
+   |    |    |    |    | child_window(title="件", auto_id="lblRowCountTani", control_type="Text")
+   |    |    |    |    | 
+   |    |    |    |    | Static - ''    (L506, T428, R599, B460)
+   |    |    |    |    | ['(通所・訪問リハビリ管理システム SP(ｹｱ記録))Static3', 'Static5']
+   |    |    |    |    | child_window(auto_id="lblRowCount", control_type="Text")
+   |    |    |    |    | 
+   |    |    |    |    | Pane - 'InhElTabelleSheet1'    (L506, T468, R1582, B996)
+   |    |    |    |    | ['InhElTabelleSheet1Pane', 'InhElTabelleSheet1', 'Pane13']
+   |    |    |    |    | child_window(title="InhElTabelleSheet1", auto_id="etsRiyosya", control_type="Pane")
+   |    | 
+   |    | Pane - '▼'    (L497, T263, R1592, B415)
+   |    | ['▼', 'Pane14', '▼Pane', '▼0', '▼1', '▼Pane0', '▼Pane1']
+   |    | child_window(title="▼", auto_id="pnlSearchCondition", control_type="Pane")
+   |    |    | 
+   |    |    | Pane - '▼'    (L506, T272, R1462, B406)
+   |    |    | ['▼2', 'Pane15', '▼Pane2']
+   |    |    | child_window(title="▼", auto_id="tabSearchCondition", control_type="Pane")
+   |    |    |    | 
+   |    |    |    | Pane - '利用者一覧'    (L669, T276, R1458, B402)
+   |    |    |    | ['利用者一覧', '利用者一覧Pane', 'Pane16']
+   |    |    |    | child_window(title="利用者一覧", auto_id="GcTabPage3", control_type="Pane")
+   |    |    |    |    | 
+   |    |    |    |    | Pane - ''    (L669, T276, R1457, B400)
+   |    |    |    |    | ['利 用 状 況Pane2', 'Pane17']
+   |    |    |    |    | child_window(auto_id="uscRiyosyaZyoken", control_type="Pane")
+   |    |    |    |    |    | 
+   |    |    |    |    |    | Pane - ''    (L669, T276, R1457, B400)
+   |    |    |    |    |    | ['利 用 状 況Pane3', 'Pane18']
+   |    |    |    |    |    | child_window(auto_id="pnlRiyosyaZyoken", control_type="Pane")
+   |    |    |    |    |    |    | 
+   |    |    |    |    |    |    | Pane - '抽 出 条 件'    (L789, T324, R933, B356)
+   |    |    |    |    |    |    | ['抽 出 条 件Pane', '抽 出 条 件', 'Pane19', '抽 出 条 件0', '抽 出 条 件1']
+   |    |    |    |    |    |    | child_window(title="抽 出 条 件", auto_id="cmbChusyutsuZyoken", control_type="Pane")
+   |    |    |    |    |    |    | 
+   |    |    |    |    |    |    | Pane - '部屋ｸﾞﾙｰﾌﾟ'    (L1189, T364, R1461, B400)
+   |    |    |    |    |    |    | ['部屋ｸﾞﾙｰﾌﾟ', '部屋ｸﾞﾙｰﾌﾟPane', 'Pane20', '部屋ｸﾞﾙｰﾌﾟ0', '部屋ｸﾞﾙｰﾌﾟ1', '部屋ｸﾞﾙｰﾌﾟPane0', '部屋ｸﾞﾙｰﾌﾟPane1']
+   |    |    |    |    |    |    | child_window(title="部屋ｸﾞﾙｰﾌﾟ", auto_id="pnlKizyunbi", control_type="Pane")
+   |    |    |    |    |    |    |    | 
+   |    |    |    |    |    |    |    | Static - '基準日'    (L1189, T364, R1253, B396)
+   |    |    |    |    |    |    |    | ['基準日', 'Static6', '基準日Static']
+   |    |    |    |    |    |    |    | child_window(title="基準日", auto_id="lblKizyunbi", control_type="Text")
+   |    |    |    |    |    |    |    | 
+   |    |    |    |    |    |    |    | Pane - '部屋ｸﾞﾙｰﾌﾟ'    (L1253, T364, R1455, B396)
+   |    |    |    |    |    |    |    | ['部屋ｸﾞﾙｰﾌﾟ2', '部屋ｸﾞﾙｰﾌﾟPane2', 'Pane21']
+   |    |    |    |    |    |    |    | child_window(title="部屋ｸﾞﾙｰﾌﾟ", auto_id="uscKizyunbi", control_type="Pane")
+   |    |    |    |    |    |    |    |    | 
+   |    |    |    |    |    |    |    |    | Pane - ''    (L1253, T364, R1455, B396)
+   |    |    |    |    |    |    |    |    | ['基準日Pane', 'Pane22']
+   |    |    |    |    |    |    |    |    | child_window(auto_id="fpnlDate", control_type="Pane")
+   |    |    |    |    |    |    |    |    |    | 
+   |    |    |    |    |    |    |    |    |    | Pane - '令和08年04月09日'    (L1253, T364, R1423, B396)
+   |    |    |    |    |    |    |    |    |    | ['令和08年04月09日', '令和08年04月09日Pane', 'Pane23']
+   |    |    |    |    |    |    |    |    |    | child_window(title="令和08年04月09日", auto_id="idatDate", control_type="Pane")
+   |    |    |    |    |    |    |    |    |    | 
+   |    |    |    |    |    |    |    |    |    | Static - '木'    (L1423, T364, R1455, B396)
+   |    |    |    |    |    |    |    |    |    | ['木', '木Static', 'Static7']
+   |    |    |    |    |    |    |    |    |    | child_window(title="木", auto_id="ilblWeekday", control_type="Text")
+   |    |    |    |    |    |    | 
+   |    |    |    |    |    |    | Pane - '利 用 状 況'    (L941, T284, R1089, B316)
+   |    |    |    |    |    |    | ['利 用 状 況', '利 用 状 況Pane4', 'Pane24', '利 用 状 況0', '利 用 状 況1']
+   |    |    |    |    |    |    | child_window(title="利 用 状 況", auto_id="pnlSibosya", control_type="Pane")
+   |    |    |    |    |    |    |    | 
+   |    |    |    |    |    |    |    | CheckBox - '死亡者を除く'    (L950, T285, R1082, B317)
+   |    |    |    |    |    |    |    | ['死亡者を除く', 'CheckBox8', '死亡者を除くCheckBox']
+   |    |    |    |    |    |    |    | child_window(title="死亡者を除く", auto_id="chkSibosya", control_type="CheckBox")
+   |    |    |    |    |    |    | 
+   |    |    |    |    |    |    | Pane - '全員'    (L789, T284, R933, B316)
+   |    |    |    |    |    |    | ['全員', '全員Pane', 'Pane25']
+   |    |    |    |    |    |    | child_window(title="全員", auto_id="cmbRiyoZyokyo", control_type="Pane")
+   |    |    |    |    |    |    | 
+   |    |    |    |    |    |    | Static - '利 用 状 況'    (L677, T284, R785, B316)
+   |    |    |    |    |    |    | ['利 用 状 況Static', 'Static8', '利 用 状 況2']
+   |    |    |    |    |    |    | child_window(title="利 用 状 況", auto_id="lblRiyoZyokyo", control_type="Text")
+   |    |    |    |    |    |    | 
+   |    |    |    |    |    |    | Static - '抽 出 条 件'    (L677, T324, R785, B356)
+   |    |    |    |    |    |    | ['抽 出 条 件2', '抽 出 条 件Static', 'Static9']
+   |    |    |    |    |    |    | child_window(title="抽 出 条 件", auto_id="lblChusyutsuZyoken", control_type="Text")
+   |    |    | 
+   |    |    | Button - '一覧表示'    (L1471, T272, R1583, B304)
+   |    |    | ['一覧表示Button', 'Button14', '一覧表示']
+   |    |    | child_window(title="一覧表示", auto_id="btnShowItiran", control_type="Button")
+   | 
+   | Pane - ''    (L327, T71, R1592, B131)
+   | ['ささき整形外科デイケアセンターPane', 'Pane26']
+   | child_window(auto_id="uscTitleHeader", control_type="Pane")
+   |    | 
+   |    | Button - '終　了'    (L1496, T77, R1588, B129)
+   |    | ['終\u3000了Button', '終\u3000了', 'Button15']
+   |    | child_window(title="終　了", auto_id="btnOther1", control_type="Button")
+   |    | 
+   |    | Button - '印　刷'    (L1400, T77, R1492, B129)
+   |    | ['印\u3000刷', '印\u3000刷Button', 'Button16']
+   |    | child_window(title="印　刷", auto_id="btnOther2", control_type="Button")
+   |    | 
+   |    | Button - 'ヘルプ'    (L1280, T77, R1372, B129)
+   |    | ['Button17', 'ヘルプButton', 'ヘルプ']
+   |    | child_window(title="ヘルプ", auto_id="btnHelp", control_type="Button")
+   |    | 
+   |    | Static - ''    (L328, T72, R1591, B130)
+   |    | ['Static10', 'ささき整形外科デイケアセンターStatic', 'ささき整形外科デイケアセンターStatic0', 'ささき整形外科デイケアセンターStatic1']
+   |    | child_window(auto_id="lblHeaderTitle", control_type="Text")
+   |    |    | 
+   |    |    | Static - 'ささき整形外科デイケアセンター'    (L329, T73, R1592, B108)
+   |    |    | ['ささき整形外科デイケアセンター', 'Static11', 'ささき整形外科デイケアセンターStatic2']
+   |    |    | child_window(title="ささき整形外科デイケアセンター", auto_id="lblHeaderTitleMain", control_type="Text")
+   |    |    | 
+   |    |    | Static - '(通所・訪問リハビリ管理システム SP(ｹｱ記録))'    (L332, T108, R1595, B127)
+   |    |    | ['(通所・訪問リハビリ管理システム SP(ｹｱ記録))Static4', '(通所・訪問リハビリ管理システム SP(ｹｱ記録))', 'Static12']
+   |    |    | child_window(title="(通所・訪問リハビリ管理システム SP(ｹｱ記録))", auto_id="lblHeaderTitleSub", control_type="Text")
+   | 
+   | Menu - 'UscMnsSystemMenu1'    (L327, T47, R1592, B71)
+   | ['Menu', 'UscMnsSystemMenu1', 'UscMnsSystemMenu1Menu', 'Menu0', 'Menu1']
+   | child_window(title="UscMnsSystemMenu1", auto_id="68162", control_type="MenuBar")
+   |    | 
+   |    | MenuItem - '環境設定'    (L333, T49, R400, B69)
+   |    | ['MenuItem', '環境設定', '環境設定MenuItem', 'MenuItem0', 'MenuItem1']
+   |    | child_window(title="環境設定", control_type="MenuItem")
+   |    |    | 
+   |    |    | MenuItem - 'ﾕｰｻﾞｰ情報'    (L333, T70, R515, B92)
+   |    |    | ['ﾕｰｻﾞｰ情報MenuItem', 'MenuItem2', 'ﾕｰｻﾞｰ情報']
+   |    |    | child_window(title="ﾕｰｻﾞｰ情報", control_type="MenuItem")
+   |    |    | 
+   |    |    | MenuItem - '利用者台帳環境設定'    (L333, T92, R515, B114)
+   |    |    | ['MenuItem3', '利用者台帳環境設定', '利用者台帳環境設定MenuItem']
+   |    |    | child_window(title="利用者台帳環境設定", control_type="MenuItem")
+   |    |    | 
+   |    |    | MenuItem - '事業所専用'    (L333, T114, R515, B136)
+   |    |    | ['MenuItem4', '事業所専用MenuItem', '事業所専用', '事業所専用MenuItem0', '事業所専用MenuItem1', '事業所専用0', '事業所専用1']
+   |    |    | child_window(title="事業所専用", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '環境設定（事業所）'    (L515, T116, R721, B138)
+   |    |    |    | ['MenuItem5', '環境設定（事業所）MenuItem', '環境設定（事業所）']
+   |    |    |    | child_window(title="環境設定（事業所）", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '環境設定（事業所設定）'    (L515, T138, R721, B160)
+   |    |    |    | ['環境設定（事業所設定）', 'MenuItem6', '環境設定（事業所設定）MenuItem']
+   |    |    |    | child_window(title="環境設定（事業所設定）", control_type="MenuItem")
+   |    |    | 
+   |    |    | MenuItem - '請求'    (L333, T136, R515, B158)
+   |    |    | ['請求', 'MenuItem7', '請求MenuItem', '請求0', '請求1', '請求MenuItem0', '請求MenuItem1']
+   |    |    | child_window(title="請求", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '介護給付請求'    (L515, T138, R765, B160)
+   |    |    |    | ['MenuItem8', '介護給付請求MenuItem', '介護給付請求']
+   |    |    |    | child_window(title="介護給付請求", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '利用料請求'    (L515, T160, R765, B182)
+   |    |    |    | ['MenuItem9', '利用料請求MenuItem', '利用料請求']
+   |    |    |    | child_window(title="利用料請求", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '請求先一括変更(金融機関合併用)'    (L515, T182, R765, B204)
+   |    |    |    | ['MenuItem10', '請求先一括変更(金融機関合併用)', '請求先一括変更(金融機関合併用)MenuItem']
+   |    |    |    | child_window(title="請求先一括変更(金融機関合併用)", control_type="MenuItem")
+   |    |    | 
+   |    |    | MenuItem - '記録管理'    (L333, T158, R515, B180)
+   |    |    | ['MenuItem11', '記録管理MenuItem', '記録管理', '記録管理MenuItem0', '記録管理MenuItem1', '記録管理0', '記録管理1']
+   |    |    | child_window(title="記録管理", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '個別援助計画'    (L515, T160, R715, B182)
+   |    |    |    | ['MenuItem12', '個別援助計画', '個別援助計画MenuItem']
+   |    |    |    | child_window(title="個別援助計画", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '環境設定(記録管理)'    (L515, T182, R715, B204)
+   |    |    |    | ['MenuItem13', '環境設定(記録管理)MenuItem', '環境設定(記録管理)']
+   |    |    |    | child_window(title="環境設定(記録管理)", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '業務日誌ﾚｲｱｳﾄ設定'    (L515, T204, R715, B226)
+   |    |    |    | ['MenuItem14', '業務日誌ﾚｲｱｳﾄ設定', '業務日誌ﾚｲｱｳﾄ設定MenuItem']
+   |    |    |    | child_window(title="業務日誌ﾚｲｱｳﾄ設定", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '記入表ﾚｲｱｳﾄ設定'    (L515, T226, R715, B248)
+   |    |    |    | ['MenuItem15', '記入表ﾚｲｱｳﾄ設定', '記入表ﾚｲｱｳﾄ設定MenuItem']
+   |    |    |    | child_window(title="記入表ﾚｲｱｳﾄ設定", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '連絡帳ﾚｲｱｳﾄ設定'    (L515, T248, R715, B270)
+   |    |    |    | ['連絡帳ﾚｲｱｳﾄ設定MenuItem', 'MenuItem16', '連絡帳ﾚｲｱｳﾄ設定']
+   |    |    |    | child_window(title="連絡帳ﾚｲｱｳﾄ設定", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - 'ｹｱ記録一覧設定'    (L515, T270, R715, B292)
+   |    |    |    | ['MenuItem17', 'ｹｱ記録一覧設定MenuItem', 'ｹｱ記録一覧設定']
+   |    |    |    | child_window(title="ｹｱ記録一覧設定", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '温度板ﾚｲｱｳﾄ設定'    (L515, T292, R715, B314)
+   |    |    |    | ['MenuItem18', '温度板ﾚｲｱｳﾄ設定', '温度板ﾚｲｱｳﾄ設定MenuItem']
+   |    |    |    | child_window(title="温度板ﾚｲｱｳﾄ設定", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '総合ｸﾞﾗﾌﾊﾟﾀｰﾝ設定'    (L515, T314, R715, B336)
+   |    |    |    | ['MenuItem19', '総合ｸﾞﾗﾌﾊﾟﾀｰﾝ設定', '総合ｸﾞﾗﾌﾊﾟﾀｰﾝ設定MenuItem']
+   |    |    |    | child_window(title="総合ｸﾞﾗﾌﾊﾟﾀｰﾝ設定", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - 'ｹｱ記録集計表ﾚｲｱｳﾄ設定'    (L515, T336, R715, B358)
+   |    |    |    | ['MenuItem20', 'ｹｱ記録集計表ﾚｲｱｳﾄ設定MenuItem', 'ｹｱ記録集計表ﾚｲｱｳﾄ設定']
+   |    |    |    | child_window(title="ｹｱ記録集計表ﾚｲｱｳﾄ設定", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - 'ｹｱ記録抽出ﾊﾟﾀｰﾝ設定'    (L515, T358, R715, B380)
+   |    |    |    | ['MenuItem21', 'ｹｱ記録抽出ﾊﾟﾀｰﾝ設定', 'ｹｱ記録抽出ﾊﾟﾀｰﾝ設定MenuItem']
+   |    |    |    | child_window(title="ｹｱ記録抽出ﾊﾟﾀｰﾝ設定", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - 'ﾋﾔﾘﾊｯﾄ報告書ﾚｲｱｳﾄ設定'    (L515, T380, R715, B402)
+   |    |    |    | ['MenuItem22', 'ﾋﾔﾘﾊｯﾄ報告書ﾚｲｱｳﾄ設定', 'ﾋﾔﾘﾊｯﾄ報告書ﾚｲｱｳﾄ設定MenuItem']
+   |    |    |    | child_window(title="ﾋﾔﾘﾊｯﾄ報告書ﾚｲｱｳﾄ設定", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '事故報告書ﾚｲｱｳﾄ設定'    (L515, T402, R715, B424)
+   |    |    |    | ['MenuItem23', '事故報告書ﾚｲｱｳﾄ設定', '事故報告書ﾚｲｱｳﾄ設定MenuItem']
+   |    |    |    | child_window(title="事故報告書ﾚｲｱｳﾄ設定", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '療法士支援環境設定'    (L515, T424, R715, B446)
+   |    |    |    | ['療法士支援環境設定', 'MenuItem24', '療法士支援環境設定MenuItem']
+   |    |    |    | child_window(title="療法士支援環境設定", control_type="MenuItem")
+   |    |    | 
+   |    |    | MenuItem - 'マスキング設定'    (L333, T180, R515, B202)
+   |    |    | ['MenuItem25', 'マスキング設定', 'マスキング設定MenuItem']
+   |    |    | child_window(title="マスキング設定", control_type="MenuItem")
+   |    |    | 
+   |    |    | MenuItem - '環境設定(経営分析)'    (L333, T202, R515, B224)
+   |    |    | ['MenuItem26', '環境設定(経営分析)MenuItem', '環境設定(経営分析)']
+   |    |    | child_window(title="環境設定(経営分析)", control_type="MenuItem")
+   |    |    | 
+   |    |    | MenuItem - '他社ｼｽﾃﾑ連携'    (L333, T224, R515, B246)
+   |    |    | ['MenuItem27', '他社ｼｽﾃﾑ連携MenuItem', '他社ｼｽﾃﾑ連携']
+   |    |    | child_window(title="他社ｼｽﾃﾑ連携", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '運用開始時一括出力（WebAPI連携版）'    (L515, T226, R799, B248)
+   |    |    |    | ['MenuItem28', '運用開始時一括出力（WebAPI連携版）MenuItem', '運用開始時一括出力（WebAPI連携版）']
+   |    |    |    | child_window(title="運用開始時一括出力（WebAPI連携版）", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '連携ﾃﾞｰﾀ送信ｴﾗｰ一覧'    (L515, T248, R799, B270)
+   |    |    |    | ['MenuItem29', '連携ﾃﾞｰﾀ送信ｴﾗｰ一覧', '連携ﾃﾞｰﾀ送信ｴﾗｰ一覧MenuItem']
+   |    |    |    | child_window(title="連携ﾃﾞｰﾀ送信ｴﾗｰ一覧", control_type="MenuItem")
+   |    | 
+   |    | MenuItem - '共通ﾏｽﾀｰ'    (L400, T49, R467, B69)
+   |    | ['MenuItem30', '共通ﾏｽﾀｰ', '共通ﾏｽﾀｰMenuItem']
+   |    | child_window(title="共通ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    | 
+   |    |    | MenuItem - '共通情報'    (L400, T70, R522, B92)
+   |    |    | ['MenuItem31', '共通情報', '共通情報MenuItem']
+   |    |    | child_window(title="共通情報", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '市町村ﾏｽﾀｰ'    (L522, T72, R716, B94)
+   |    |    |    | ['MenuItem32', '市町村ﾏｽﾀｰ', '市町村ﾏｽﾀｰMenuItem']
+   |    |    |    | child_window(title="市町村ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '法人ﾏｽﾀｰ'    (L522, T94, R716, B116)
+   |    |    |    | ['MenuItem33', '法人ﾏｽﾀｰMenuItem', '法人ﾏｽﾀｰ']
+   |    |    |    | child_window(title="法人ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '関連機関ﾏｽﾀｰ'    (L522, T116, R716, B138)
+   |    |    |    | ['関連機関ﾏｽﾀｰ', 'MenuItem34', '関連機関ﾏｽﾀｰMenuItem']
+   |    |    |    | child_window(title="関連機関ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '職種ﾏｽﾀｰ'    (L522, T138, R716, B160)
+   |    |    |    | ['職種ﾏｽﾀｰ', 'MenuItem35', '職種ﾏｽﾀｰMenuItem']
+   |    |    |    | child_window(title="職種ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - 'ｻｰﾋﾞｽ関係者ﾏｽﾀｰ'    (L522, T160, R716, B182)
+   |    |    |    | ['MenuItem36', 'ｻｰﾋﾞｽ関係者ﾏｽﾀｰ', 'ｻｰﾋﾞｽ関係者ﾏｽﾀｰMenuItem']
+   |    |    |    | child_window(title="ｻｰﾋﾞｽ関係者ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '傷病ﾏｽﾀｰ'    (L522, T182, R716, B204)
+   |    |    |    | ['傷病ﾏｽﾀｰ', 'MenuItem37', '傷病ﾏｽﾀｰMenuItem']
+   |    |    |    | child_window(title="傷病ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '薬剤ﾏｽﾀｰ'    (L522, T204, R716, B226)
+   |    |    |    | ['MenuItem38', '薬剤ﾏｽﾀｰ', '薬剤ﾏｽﾀｰMenuItem']
+   |    |    |    | child_window(title="薬剤ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '金融機関ﾏｽﾀｰ'    (L522, T226, R716, B248)
+   |    |    |    | ['MenuItem39', '金融機関ﾏｽﾀｰ', '金融機関ﾏｽﾀｰMenuItem']
+   |    |    |    | child_window(title="金融機関ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '文例ﾏｽﾀｰ'    (L522, T248, R716, B270)
+   |    |    |    | ['文例ﾏｽﾀｰMenuItem', 'MenuItem40', '文例ﾏｽﾀｰ']
+   |    |    |    | child_window(title="文例ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '分類ﾏｽﾀｰ'    (L522, T270, R716, B292)
+   |    |    |    | ['MenuItem41', '分類ﾏｽﾀｰMenuItem', '分類ﾏｽﾀｰ']
+   |    |    |    | child_window(title="分類ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - 'ADLﾏｽﾀｰ'    (L522, T292, R716, B314)
+   |    |    |    | ['MenuItem42', 'ADLﾏｽﾀｰMenuItem', 'ADLﾏｽﾀｰ']
+   |    |    |    | child_window(title="ADLﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '医療保険者ﾏｽﾀｰ'    (L522, T314, R716, B336)
+   |    |    |    | ['MenuItem43', '医療保険者ﾏｽﾀｰMenuItem', '医療保険者ﾏｽﾀｰ']
+   |    |    |    | child_window(title="医療保険者ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '医療保険制度給付ﾏｽﾀｰ'    (L522, T336, R716, B358)
+   |    |    |    | ['MenuItem44', '医療保険制度給付ﾏｽﾀｰMenuItem', '医療保険制度給付ﾏｽﾀｰ']
+   |    |    |    | child_window(title="医療保険制度給付ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '介護保険者ﾏｽﾀｰ'    (L522, T358, R716, B380)
+   |    |    |    | ['介護保険者ﾏｽﾀｰ', 'MenuItem45', '介護保険者ﾏｽﾀｰMenuItem']
+   |    |    |    | child_window(title="介護保険者ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '広域保険者ﾏｽﾀｰ'    (L522, T380, R716, B402)
+   |    |    |    | ['MenuItem46', '広域保険者ﾏｽﾀｰMenuItem', '広域保険者ﾏｽﾀｰ']
+   |    |    |    | child_window(title="広域保険者ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '共通地区ﾏｽﾀｰ'    (L522, T402, R716, B424)
+   |    |    |    | ['MenuItem47', '共通地区ﾏｽﾀｰ', '共通地区ﾏｽﾀｰMenuItem']
+   |    |    |    | child_window(title="共通地区ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '個人状況ﾏｽﾀｰ'    (L522, T424, R716, B446)
+   |    |    |    | ['MenuItem48', '個人状況ﾏｽﾀｰMenuItem', '個人状況ﾏｽﾀｰ']
+   |    |    |    | child_window(title="個人状況ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    | 
+   |    |    | MenuItem - '算定情報'    (L400, T92, R522, B114)
+   |    |    | ['MenuItem49', '算定情報MenuItem', '算定情報']
+   |    |    | child_window(title="算定情報", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '公費ﾏｽﾀｰ'    (L522, T94, R656, B116)
+   |    |    |    | ['MenuItem50', '公費ﾏｽﾀｰMenuItem', '公費ﾏｽﾀｰ']
+   |    |    |    | child_window(title="公費ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '体制情報'    (L522, T116, R656, B138)
+   |    |    |    | ['MenuItem51', '体制情報MenuItem', '体制情報']
+   |    |    |    | child_window(title="体制情報", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '限度額ﾏｽﾀｰ'    (L522, T138, R656, B160)
+   |    |    |    | ['MenuItem52', '限度額ﾏｽﾀｰMenuItem', '限度額ﾏｽﾀｰ']
+   |    |    |    | child_window(title="限度額ﾏｽﾀｰ", control_type="MenuItem")
+   |    | 
+   |    | MenuItem - 'ｼｽﾃﾑ専用ﾏｽﾀｰ'    (L467, T49, R558, B69)
+   |    | ['MenuItem53', 'ｼｽﾃﾑ専用ﾏｽﾀｰMenuItem', 'ｼｽﾃﾑ専用ﾏｽﾀｰ']
+   |    | child_window(title="ｼｽﾃﾑ専用ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    | 
+   |    |    | MenuItem - '事業所専用'    (L467, T70, R601, B92)
+   |    |    | ['MenuItem54', '事業所専用MenuItem2', '事業所専用2']
+   |    |    | child_window(title="事業所専用", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '提出資料地区ﾏｽﾀｰ'    (L601, T72, R807, B94)
+   |    |    |    | ['MenuItem55', '提出資料地区ﾏｽﾀｰ', '提出資料地区ﾏｽﾀｰMenuItem']
+   |    |    |    | child_window(title="提出資料地区ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '運営日ﾏｽﾀｰ'    (L601, T94, R807, B116)
+   |    |    |    | ['MenuItem56', '運営日ﾏｽﾀｰ', '運営日ﾏｽﾀｰMenuItem']
+   |    |    |    | child_window(title="運営日ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '食事区分ﾏｽﾀｰ'    (L601, T116, R807, B138)
+   |    |    |    | ['MenuItem57', '食事区分ﾏｽﾀｰMenuItem', '食事区分ﾏｽﾀｰ']
+   |    |    |    | child_window(title="食事区分ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - 'ﾘﾊﾋﾞﾘ項目ﾏｽﾀｰ'    (L601, T138, R807, B160)
+   |    |    |    | ['MenuItem58', 'ﾘﾊﾋﾞﾘ項目ﾏｽﾀｰMenuItem', 'ﾘﾊﾋﾞﾘ項目ﾏｽﾀｰ']
+   |    |    |    | child_window(title="ﾘﾊﾋﾞﾘ項目ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '稼働率定員ﾏｽﾀｰ（通所）'    (L601, T160, R807, B182)
+   |    |    |    | ['稼働率定員ﾏｽﾀｰ（通所）MenuItem', 'MenuItem59', '稼働率定員ﾏｽﾀｰ（通所）']
+   |    |    |    | child_window(title="稼働率定員ﾏｽﾀｰ（通所）", control_type="MenuItem")
+   |    |    | 
+   |    |    | MenuItem - '請求'    (L467, T92, R601, B114)
+   |    |    | ['請求2', 'MenuItem60', '請求MenuItem2']
+   |    |    | child_window(title="請求", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '利用料項目ﾏｽﾀｰ'    (L601, T94, R807, B116)
+   |    |    |    | ['MenuItem61', '利用料項目ﾏｽﾀｰ', '利用料項目ﾏｽﾀｰMenuItem']
+   |    |    |    | child_window(title="利用料項目ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '利用料請求書出力順設定'    (L601, T116, R807, B138)
+   |    |    |    | ['MenuItem62', '利用料請求書出力順設定MenuItem', '利用料請求書出力順設定']
+   |    |    |    | child_window(title="利用料請求書出力順設定", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '口座振替ﾃﾞｰﾀﾌｫｰﾏｯﾄ設定'    (L601, T138, R807, B160)
+   |    |    |    | ['MenuItem63', '口座振替ﾃﾞｰﾀﾌｫｰﾏｯﾄ設定MenuItem', '口座振替ﾃﾞｰﾀﾌｫｰﾏｯﾄ設定']
+   |    |    |    | child_window(title="口座振替ﾃﾞｰﾀﾌｫｰﾏｯﾄ設定", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '口座振替ﾍｯﾀﾞｰ情報設定'    (L601, T160, R807, B182)
+   |    |    |    | ['MenuItem64', '口座振替ﾍｯﾀﾞｰ情報設定', '口座振替ﾍｯﾀﾞｰ情報設定MenuItem']
+   |    |    |    | child_window(title="口座振替ﾍｯﾀﾞｰ情報設定", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '顧客番号ﾊﾟﾀｰﾝﾏｽﾀｰ'    (L601, T182, R807, B204)
+   |    |    |    | ['MenuItem65', '顧客番号ﾊﾟﾀｰﾝﾏｽﾀｰ', '顧客番号ﾊﾟﾀｰﾝﾏｽﾀｰMenuItem']
+   |    |    |    | child_window(title="顧客番号ﾊﾟﾀｰﾝﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '顧客番号ﾁｪｯｸ一覧表'    (L601, T204, R807, B226)
+   |    |    |    | ['顧客番号ﾁｪｯｸ一覧表MenuItem', 'MenuItem66', '顧客番号ﾁｪｯｸ一覧表']
+   |    |    |    | child_window(title="顧客番号ﾁｪｯｸ一覧表", control_type="MenuItem")
+   |    |    | 
+   |    |    | MenuItem - '記録管理'    (L467, T114, R601, B136)
+   |    |    | ['MenuItem67', '記録管理MenuItem2', '記録管理2']
+   |    |    | child_window(title="記録管理", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - 'ｹｱ記録項目ﾏｽﾀｰ'    (L601, T116, R801, B138)
+   |    |    |    | ['ｹｱ記録項目ﾏｽﾀｰ', 'MenuItem68', 'ｹｱ記録項目ﾏｽﾀｰMenuItem']
+   |    |    |    | child_window(title="ｹｱ記録項目ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - 'ｹｱ記録入力ﾊﾟﾀｰﾝﾏｽﾀｰ'    (L601, T138, R801, B160)
+   |    |    |    | ['MenuItem69', 'ｹｱ記録入力ﾊﾟﾀｰﾝﾏｽﾀｰ', 'ｹｱ記録入力ﾊﾟﾀｰﾝﾏｽﾀｰMenuItem']
+   |    |    |    | child_window(title="ｹｱ記録入力ﾊﾟﾀｰﾝﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '介護内容項目ﾏｽﾀｰ'    (L601, T160, R801, B182)
+   |    |    |    | ['MenuItem70', '介護内容項目ﾏｽﾀｰMenuItem', '介護内容項目ﾏｽﾀｰ']
+   |    |    |    | child_window(title="介護内容項目ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '利用者ｸﾞﾙｰﾌﾟﾏｽﾀｰ'    (L601, T182, R801, B204)
+   |    |    |    | ['利用者ｸﾞﾙｰﾌﾟﾏｽﾀｰ', 'MenuItem71', '利用者ｸﾞﾙｰﾌﾟﾏｽﾀｰMenuItem']
+   |    |    |    | child_window(title="利用者ｸﾞﾙｰﾌﾟﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - 'ﾊﾞｲﾀﾙ設定（ｸﾞﾙｰﾌﾟ別）'    (L601, T204, R801, B226)
+   |    |    |    | ['MenuItem72', 'ﾊﾞｲﾀﾙ設定（ｸﾞﾙｰﾌﾟ別）', 'ﾊﾞｲﾀﾙ設定（ｸﾞﾙｰﾌﾟ別）MenuItem']
+   |    |    |    | child_window(title="ﾊﾞｲﾀﾙ設定（ｸﾞﾙｰﾌﾟ別）", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - 'ﾊﾞｲﾀﾙ設定（個人別）'    (L601, T226, R801, B248)
+   |    |    |    | ['ﾊﾞｲﾀﾙ設定（個人別）MenuItem', 'MenuItem73', 'ﾊﾞｲﾀﾙ設定（個人別）']
+   |    |    |    | child_window(title="ﾊﾞｲﾀﾙ設定（個人別）", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '連絡帳質問ﾊﾟﾀｰﾝﾏｽﾀｰ'    (L601, T248, R801, B270)
+   |    |    |    | ['MenuItem74', '連絡帳質問ﾊﾟﾀｰﾝﾏｽﾀｰMenuItem', '連絡帳質問ﾊﾟﾀｰﾝﾏｽﾀｰ']
+   |    |    |    | child_window(title="連絡帳質問ﾊﾟﾀｰﾝﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - 'ﾋﾔﾘﾊｯﾄ･事故項目ﾏｽﾀｰ'    (L601, T270, R801, B292)
+   |    |    |    | ['MenuItem75', 'ﾋﾔﾘﾊｯﾄ･事故項目ﾏｽﾀｰMenuItem', 'ﾋﾔﾘﾊｯﾄ･事故項目ﾏｽﾀｰ']
+   |    |    |    | child_window(title="ﾋﾔﾘﾊｯﾄ･事故項目ﾏｽﾀｰ", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | Separator - ''    (L603, T292, R800, B298)
+   |    |    |    | ['Separator', '利 用 状 況Separator']
+   |    |    |    | 
+   |    |    |    | MenuItem - 'ｹｱ記録項目ﾏｽﾀｰ更新'    (L601, T298, R801, B320)
+   |    |    |    | ['MenuItem76', 'ｹｱ記録項目ﾏｽﾀｰ更新MenuItem', 'ｹｱ記録項目ﾏｽﾀｰ更新']
+   |    |    |    | child_window(title="ｹｱ記録項目ﾏｽﾀｰ更新", control_type="MenuItem")
+   |    | 
+   |    | MenuItem - 'ﾊﾞｰｼﾞｮﾝ情報'    (L558, T49, R643, B69)
+   |    | ['MenuItem77', 'ﾊﾞｰｼﾞｮﾝ情報', 'ﾊﾞｰｼﾞｮﾝ情報MenuItem']
+   |    | child_window(title="ﾊﾞｰｼﾞｮﾝ情報", control_type="MenuItem")
+   | 
+   | TitleBar - ''    (L343, T24, R1592, B47)
+   | ['TitleBar']
+   |    | 
+   |    | Menu - 'システム'    (L332, T29, R354, B51)
+   |    | ['Menu2', 'システムMenu', 'システム', 'システム0', 'システム1']
+   |    | child_window(title="システム", auto_id="MenuBar", control_type="MenuBar")
+   |    |    | 
+   |    |    | MenuItem - 'システム'    (L332, T29, R354, B51)
+   |    |    | ['MenuItem78', 'システムMenuItem', 'システム2']
+   |    |    | child_window(title="システム", control_type="MenuItem")
+   |    | 
+   |    | Button - '最小化'    (L1453, T22, R1500, B47)
+   |    | ['最小化', 'Button18', '最小化Button']
+   |    | child_window(title="最小化", control_type="Button")
+   |    | 
+   |    | Button - '最大化'    (L1500, T22, R1546, B47)
+   |    | ['最大化', '最大化Button', 'Button19']
+   |    | child_window(title="最大化", control_type="Button")
+   |    | 
+   |    | Button - '閉じる'    (L1546, T22, R1593, B47)
+   |    | ['Button20', '閉じる', '閉じるButton']
+   |    | child_window(title="閉じる", control_type="Button")

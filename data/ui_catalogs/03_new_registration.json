@@ -1,0 +1,4653 @@
+{
+  "control_type": "Window",
+  "name": "通所・訪問リハビリ管理システム SP(ｹｱ記録) [ささき整形外科デイケアセンター]",
+  "automation_id": "frmMenu200",
+  "class_name": "WindowsForms10.Window.208.app.0.3ce0bb8",
+  "rectangle": {
+    "left": 324,
+    "top": 21,
+    "right": 1595,
+    "bottom": 1010
+  },
+  "is_enabled": false,
+  "is_visible": true,
+  "depth": 0,
+  "children": [
+    {
+      "control_type": "Window",
+      "name": "通所・訪問リハビリ管理システム SP(ｹｱ記録) [ささき整形外科デイケアセンター]",
+      "automation_id": "frmKihon",
+      "class_name": "WindowsForms10.Window.208.app.0.3ce0bb8",
+      "rectangle": {
+        "left": 324,
+        "top": 20,
+        "right": 1596,
+        "bottom": 1012
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "depth": 1,
+      "children": [
+        {
+          "control_type": "Pane",
+          "name": "",
+          "automation_id": "pnlScroll",
+          "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 491,
+            "top": 174,
+            "right": 1587,
+            "bottom": 994
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": [
+            {
+              "control_type": "Text",
+              "name": "▼",
+              "automation_id": "lblScrollBottom",
+              "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 1571,
+                "top": 978,
+                "right": 1587,
+                "bottom": 994
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "Text",
+              "name": "▲",
+              "automation_id": "lblScrollTop",
+              "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 1571,
+                "top": 174,
+                "right": 1587,
+                "bottom": 190
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "Pane",
+              "name": "顔写真選択画面で設定したｲﾒｰｼﾞが表示されます。",
+              "automation_id": "pnlFace",
+              "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 1323,
+                "top": 174,
+                "right": 1579,
+                "bottom": 214
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": [
+                {
+                  "control_type": "Button",
+                  "name": "削除",
+                  "automation_id": "btnGazoDelete",
+                  "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                  "rectangle": {
+                    "left": 1502,
+                    "top": 179,
+                    "right": 1558,
+                    "bottom": 211
+                  },
+                  "is_enabled": true,
+                  "is_visible": true,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "Button",
+                  "name": "選択",
+                  "automation_id": "199346",
+                  "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                  "rectangle": {
+                    "left": 1440,
+                    "top": 179,
+                    "right": 1496,
+                    "bottom": 211
+                  },
+                  "is_enabled": true,
+                  "is_visible": true,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "Text",
+                  "name": "顔写真",
+                  "automation_id": "lblFace",
+                  "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                  "rectangle": {
+                    "left": 1332,
+                    "top": 179,
+                    "right": 1408,
+                    "bottom": 211
+                  },
+                  "is_enabled": true,
+                  "is_visible": true,
+                  "depth": 4,
+                  "children": []
+                }
+              ]
+            },
+            {
+              "control_type": "Pane",
+              "name": "InhLabel1",
+              "automation_id": "pnlMain",
+              "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 495,
+                "top": 218,
+                "right": 1579,
+                "bottom": 998
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": [
+                {
+                  "control_type": "Text",
+                  "name": "顔写真選択画面で設定したｲﾒｰｼﾞが表示されます。",
+                  "automation_id": "lblGazo",
+                  "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                  "rectangle": {
+                    "left": 1336,
+                    "top": 315,
+                    "right": 1560,
+                    "bottom": 387
+                  },
+                  "is_enabled": true,
+                  "is_visible": true,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "Pane",
+                  "name": "",
+                  "automation_id": "pnlBiko",
+                  "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                  "rectangle": {
+                    "left": 501,
+                    "top": 691,
+                    "right": 1572,
+                    "bottom": 991
+                  },
+                  "is_enabled": true,
+                  "is_visible": true,
+                  "depth": 4,
+                  "children": [
+                    {
+                      "control_type": "Pane",
+                      "name": "備　　考",
+                      "automation_id": "uscBiko",
+                      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 626,
+                        "top": 700,
+                        "right": 1374,
+                        "bottom": 972
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": [
+                        {
+                          "control_type": "Button",
+                          "name": "消去",
+                          "automation_id": "btnClr",
+                          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 1290,
+                            "top": 732,
+                            "right": 1344,
+                            "bottom": 764
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": []
+                        },
+                        {
+                          "control_type": "Button",
+                          "name": "文例検索",
+                          "automation_id": "btnSrc",
+                          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 1290,
+                            "top": 700,
+                            "right": 1374,
+                            "bottom": 732
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": []
+                        },
+                        {
+                          "control_type": "Pane",
+                          "name": "",
+                          "automation_id": "edtBunrei",
+                          "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 626,
+                            "top": 700,
+                            "right": 1290,
+                            "bottom": 972
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": []
+                        }
+                      ]
+                    },
+                    {
+                      "control_type": "Text",
+                      "name": "印刷は\r\n最大16行",
+                      "automation_id": "lblGyosu",
+                      "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 530,
+                        "top": 736,
+                        "right": 594,
+                        "bottom": 770
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "Text",
+                      "name": "備　　考",
+                      "automation_id": "lblBiko",
+                      "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 514,
+                        "top": 700,
+                        "right": 594,
+                        "bottom": 732
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "control_type": "Pane",
+                  "name": "救護区分",
+                  "automation_id": "pnlShibou",
+                  "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                  "rectangle": {
+                    "left": 1120,
+                    "top": 643,
+                    "right": 1572,
+                    "bottom": 687
+                  },
+                  "is_enabled": true,
+                  "is_visible": true,
+                  "depth": 4,
+                  "children": [
+                    {
+                      "control_type": "Pane",
+                      "name": "死 亡 日",
+                      "automation_id": "uscShibou",
+                      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 1209,
+                        "top": 648,
+                        "right": 1547,
+                        "bottom": 680
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": [
+                        {
+                          "control_type": "Pane",
+                          "name": "",
+                          "automation_id": "fpnlDate",
+                          "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 1209,
+                            "top": 648,
+                            "right": 1547,
+                            "bottom": 680
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": [
+                            {
+                              "control_type": "Pane",
+                              "name": "____年__月__日",
+                              "automation_id": "idatDate",
+                              "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                              "rectangle": {
+                                "left": 1209,
+                                "top": 648,
+                                "right": 1379,
+                                "bottom": 680
+                              },
+                              "is_enabled": true,
+                              "is_visible": true,
+                              "depth": 7,
+                              "children": []
+                            },
+                            {
+                              "control_type": "Button",
+                              "name": "＜",
+                              "automation_id": "ibtnPrevDay",
+                              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                              "rectangle": {
+                                "left": 1379,
+                                "top": 648,
+                                "right": 1411,
+                                "bottom": 680
+                              },
+                              "is_enabled": true,
+                              "is_visible": true,
+                              "depth": 7,
+                              "children": []
+                            },
+                            {
+                              "control_type": "Button",
+                              "name": "今日",
+                              "automation_id": "ibtnToday",
+                              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                              "rectangle": {
+                                "left": 1411,
+                                "top": 648,
+                                "right": 1463,
+                                "bottom": 680
+                              },
+                              "is_enabled": true,
+                              "is_visible": true,
+                              "depth": 7,
+                              "children": []
+                            },
+                            {
+                              "control_type": "Button",
+                              "name": "＞",
+                              "automation_id": "ibtnNextDay",
+                              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                              "rectangle": {
+                                "left": 1463,
+                                "top": 648,
+                                "right": 1495,
+                                "bottom": 680
+                              },
+                              "is_enabled": true,
+                              "is_visible": true,
+                              "depth": 7,
+                              "children": []
+                            },
+                            {
+                              "control_type": "Button",
+                              "name": "消去",
+                              "automation_id": "ibtnClear",
+                              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                              "rectangle": {
+                                "left": 1495,
+                                "top": 648,
+                                "right": 1547,
+                                "bottom": 680
+                              },
+                              "is_enabled": true,
+                              "is_visible": true,
+                              "depth": 7,
+                              "children": []
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "control_type": "Text",
+                      "name": "死 亡 日",
+                      "automation_id": "lblShibou",
+                      "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 1125,
+                        "top": 648,
+                        "right": 1205,
+                        "bottom": 680
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "control_type": "Pane",
+                  "name": "",
+                  "automation_id": "pnlSTKbn",
+                  "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                  "rectangle": {
+                    "left": 1120,
+                    "top": 531,
+                    "right": 1572,
+                    "bottom": 635
+                  },
+                  "is_enabled": true,
+                  "is_visible": true,
+                  "depth": 4,
+                  "children": [
+                    {
+                      "control_type": "Pane",
+                      "name": "世帯区分",
+                      "automation_id": "pnl13",
+                      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 1209,
+                        "top": 536,
+                        "right": 1333,
+                        "bottom": 568
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": [
+                        {
+                          "control_type": "CheckBox",
+                          "name": "老人世帯",
+                          "automation_id": "chkStRoujin",
+                          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 1214,
+                            "top": 539,
+                            "right": 1318,
+                            "bottom": 567
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": []
+                        }
+                      ]
+                    },
+                    {
+                      "control_type": "Pane",
+                      "name": "",
+                      "automation_id": "pnl10",
+                      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 1209,
+                        "top": 572,
+                        "right": 1549,
+                        "bottom": 628
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": [
+                        {
+                          "control_type": "CheckBox",
+                          "name": "同居世帯(日中独居)",
+                          "automation_id": "uscStDokyodykbn",
+                          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 1214,
+                            "top": 601,
+                            "right": 1406,
+                            "bottom": 625
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": []
+                        },
+                        {
+                          "control_type": "CheckBox",
+                          "name": "同居世帯",
+                          "automation_id": "uscStDokyokbn",
+                          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 1410,
+                            "top": 577,
+                            "right": 1514,
+                            "bottom": 601
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": []
+                        },
+                        {
+                          "control_type": "CheckBox",
+                          "name": "独居世帯",
+                          "automation_id": "uscStDokkyo",
+                          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 1214,
+                            "top": 573,
+                            "right": 1318,
+                            "bottom": 597
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": []
+                        }
+                      ]
+                    },
+                    {
+                      "control_type": "Text",
+                      "name": "世帯区分",
+                      "automation_id": "lblSTKbn",
+                      "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 1125,
+                        "top": 536,
+                        "right": 1205,
+                        "bottom": 568
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "control_type": "Pane",
+                  "name": "",
+                  "automation_id": "pnlJob",
+                  "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                  "rectangle": {
+                    "left": 1120,
+                    "top": 479,
+                    "right": 1572,
+                    "bottom": 523
+                  },
+                  "is_enabled": true,
+                  "is_visible": true,
+                  "depth": 4,
+                  "children": [
+                    {
+                      "control_type": "Pane",
+                      "name": "職　　業",
+                      "automation_id": "uscJob",
+                      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 1209,
+                        "top": 484,
+                        "right": 1569,
+                        "bottom": 516
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": [
+                        {
+                          "control_type": "Button",
+                          "name": "文例検索",
+                          "automation_id": "btnSrc",
+                          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 1485,
+                            "top": 484,
+                            "right": 1569,
+                            "bottom": 516
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": []
+                        },
+                        {
+                          "control_type": "Pane",
+                          "name": "",
+                          "automation_id": "edtBunrei",
+                          "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 1209,
+                            "top": 484,
+                            "right": 1485,
+                            "bottom": 516
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": []
+                        }
+                      ]
+                    },
+                    {
+                      "control_type": "Text",
+                      "name": "職　　業",
+                      "automation_id": "lblJob",
+                      "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 1125,
+                        "top": 484,
+                        "right": 1205,
+                        "bottom": 516
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "control_type": "Pane",
+                  "name": "印刷は\r\n最大16行",
+                  "automation_id": "pibGazo",
+                  "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                  "rectangle": {
+                    "left": 1324,
+                    "top": 227,
+                    "right": 1572,
+                    "bottom": 471
+                  },
+                  "is_enabled": true,
+                  "is_visible": true,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "Pane",
+                  "name": "",
+                  "automation_id": "pnlBirth",
+                  "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                  "rectangle": {
+                    "left": 500,
+                    "top": 315,
+                    "right": 1316,
+                    "bottom": 435
+                  },
+                  "is_enabled": true,
+                  "is_visible": true,
+                  "depth": 4,
+                  "children": [
+                    {
+                      "control_type": "Pane",
+                      "name": "性　　別",
+                      "automation_id": "uscSex",
+                      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 625,
+                        "top": 400,
+                        "right": 805,
+                        "bottom": 436
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": [
+                        {
+                          "control_type": "Pane",
+                          "name": "",
+                          "automation_id": "pnlBase",
+                          "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 625,
+                            "top": 400,
+                            "right": 801,
+                            "bottom": 432
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": [
+                            {
+                              "control_type": "RadioButton",
+                              "name": "女",
+                              "automation_id": "rbnFemale",
+                              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                              "rectangle": {
+                                "left": 718,
+                                "top": 405,
+                                "right": 790,
+                                "bottom": 429
+                              },
+                              "is_enabled": true,
+                              "is_visible": true,
+                              "depth": 7,
+                              "children": []
+                            },
+                            {
+                              "control_type": "RadioButton",
+                              "name": "男",
+                              "automation_id": "rbnMale",
+                              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                              "rectangle": {
+                                "left": 642,
+                                "top": 405,
+                                "right": 714,
+                                "bottom": 429
+                              },
+                              "is_enabled": true,
+                              "is_visible": true,
+                              "depth": 7,
+                              "children": []
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "control_type": "Text",
+                      "name": "性　　別",
+                      "automation_id": "lblSex",
+                      "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 513,
+                        "top": 400,
+                        "right": 597,
+                        "bottom": 432
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "Text",
+                      "name": "年　　齢",
+                      "automation_id": "lblAge",
+                      "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 513,
+                        "top": 360,
+                        "right": 593,
+                        "bottom": 392
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "Pane",
+                      "name": "生年月日",
+                      "automation_id": "uscBirth",
+                      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 625,
+                        "top": 320,
+                        "right": 847,
+                        "bottom": 396
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": [
+                        {
+                          "control_type": "Pane",
+                          "name": "",
+                          "automation_id": "pnlBirth",
+                          "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 625,
+                            "top": 320,
+                            "right": 847,
+                            "bottom": 396
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": [
+                            {
+                              "control_type": "Text",
+                              "name": "歳",
+                              "automation_id": "lblTitle00",
+                              "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                              "rectangle": {
+                                "left": 685,
+                                "top": 360,
+                                "right": 713,
+                                "bottom": 392
+                              },
+                              "is_enabled": true,
+                              "is_visible": true,
+                              "depth": 7,
+                              "children": []
+                            },
+                            {
+                              "control_type": "Text",
+                              "name": "",
+                              "automation_id": "lblAge",
+                              "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                              "rectangle": {
+                                "left": 625,
+                                "top": 360,
+                                "right": 681,
+                                "bottom": 392
+                              },
+                              "is_enabled": true,
+                              "is_visible": true,
+                              "depth": 7,
+                              "children": []
+                            },
+                            {
+                              "control_type": "Pane",
+                              "name": "",
+                              "automation_id": "uscDateBirth",
+                              "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                              "rectangle": {
+                                "left": 625,
+                                "top": 320,
+                                "right": 847,
+                                "bottom": 352
+                              },
+                              "is_enabled": true,
+                              "is_visible": true,
+                              "depth": 7,
+                              "children": [
+                                {
+                                  "control_type": "Pane",
+                                  "name": "",
+                                  "automation_id": "fpnlDate",
+                                  "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                                  "rectangle": {
+                                    "left": 625,
+                                    "top": 320,
+                                    "right": 847,
+                                    "bottom": 352
+                                  },
+                                  "is_enabled": true,
+                                  "is_visible": true,
+                                  "depth": 8,
+                                  "children": [
+                                    {
+                                      "control_type": "Pane",
+                                      "name": "____年__月__日",
+                                      "automation_id": "idatDate",
+                                      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                                      "rectangle": {
+                                        "left": 625,
+                                        "top": 320,
+                                        "right": 795,
+                                        "bottom": 352
+                                      },
+                                      "is_enabled": true,
+                                      "is_visible": true,
+                                      "depth": 9,
+                                      "children": []
+                                    },
+                                    {
+                                      "control_type": "Button",
+                                      "name": "元号",
+                                      "automation_id": "ibtnGengo",
+                                      "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                                      "rectangle": {
+                                        "left": 795,
+                                        "top": 320,
+                                        "right": 847,
+                                        "bottom": 352
+                                      },
+                                      "is_enabled": true,
+                                      "is_visible": true,
+                                      "depth": 9,
+                                      "children": []
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "control_type": "Text",
+                      "name": "生年月日",
+                      "automation_id": "lblBirth",
+                      "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 511,
+                        "top": 324,
+                        "right": 595,
+                        "bottom": 356
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "control_type": "Pane",
+                  "name": "血 液 型",
+                  "automation_id": "pnlAdrs",
+                  "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                  "rectangle": {
+                    "left": 500,
+                    "top": 439,
+                    "right": 1116,
+                    "bottom": 687
+                  },
+                  "is_enabled": true,
+                  "is_visible": true,
+                  "depth": 4,
+                  "children": [
+                    {
+                      "control_type": "Pane",
+                      "name": "",
+                      "automation_id": "cmbTel2Kbn",
+                      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 505,
+                        "top": 648,
+                        "right": 621,
+                        "bottom": 680
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "Pane",
+                      "name": "日常生活圏域",
+                      "automation_id": "uscTiku",
+                      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 625,
+                        "top": 568,
+                        "right": 1109,
+                        "bottom": 600
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": [
+                        {
+                          "control_type": "Text",
+                          "name": "※日常生活圏域の地区を入力してください。",
+                          "automation_id": "lblTyui",
+                          "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 830,
+                            "top": 600,
+                            "right": 1109,
+                            "bottom": 616
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": []
+                        },
+                        {
+                          "control_type": "Text",
+                          "name": "",
+                          "automation_id": "lblTiku2",
+                          "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 809,
+                            "top": 568,
+                            "right": 1109,
+                            "bottom": 600
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": []
+                        },
+                        {
+                          "control_type": "Pane",
+                          "name": "",
+                          "automation_id": "uscTikuSyo",
+                          "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 717,
+                            "top": 568,
+                            "right": 804,
+                            "bottom": 600
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": [
+                            {
+                              "control_type": "Pane",
+                              "name": "",
+                              "automation_id": "ucdCode",
+                              "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                              "rectangle": {
+                                "left": 717,
+                                "top": 568,
+                                "right": 804,
+                                "bottom": 600
+                              },
+                              "is_enabled": true,
+                              "is_visible": true,
+                              "depth": 7,
+                              "children": [
+                                {
+                                  "control_type": "Button",
+                                  "name": "▼",
+                                  "automation_id": "ibtnSearch",
+                                  "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                                  "rectangle": {
+                                    "left": 770,
+                                    "top": 568,
+                                    "right": 804,
+                                    "bottom": 600
+                                  },
+                                  "is_enabled": true,
+                                  "is_visible": true,
+                                  "depth": 8,
+                                  "children": []
+                                },
+                                {
+                                  "control_type": "Pane",
+                                  "name": "",
+                                  "automation_id": "iedtCode",
+                                  "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                                  "rectangle": {
+                                    "left": 717,
+                                    "top": 568,
+                                    "right": 770,
+                                    "bottom": 600
+                                  },
+                                  "is_enabled": true,
+                                  "is_visible": true,
+                                  "depth": 8,
+                                  "children": []
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "control_type": "Pane",
+                          "name": "",
+                          "automation_id": "uscTikuTyu",
+                          "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 625,
+                            "top": 568,
+                            "right": 712,
+                            "bottom": 600
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": [
+                            {
+                              "control_type": "Pane",
+                              "name": "",
+                              "automation_id": "ucdCode",
+                              "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                              "rectangle": {
+                                "left": 625,
+                                "top": 568,
+                                "right": 712,
+                                "bottom": 600
+                              },
+                              "is_enabled": true,
+                              "is_visible": true,
+                              "depth": 7,
+                              "children": [
+                                {
+                                  "control_type": "Button",
+                                  "name": "▼",
+                                  "automation_id": "ibtnSearch",
+                                  "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                                  "rectangle": {
+                                    "left": 678,
+                                    "top": 568,
+                                    "right": 712,
+                                    "bottom": 600
+                                  },
+                                  "is_enabled": true,
+                                  "is_visible": true,
+                                  "depth": 8,
+                                  "children": []
+                                },
+                                {
+                                  "control_type": "Pane",
+                                  "name": "",
+                                  "automation_id": "iedtCode",
+                                  "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                                  "rectangle": {
+                                    "left": 625,
+                                    "top": 568,
+                                    "right": 678,
+                                    "bottom": 600
+                                  },
+                                  "is_enabled": true,
+                                  "is_visible": true,
+                                  "depth": 8,
+                                  "children": []
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "control_type": "Pane",
+                      "name": "",
+                      "automation_id": "edtTel2",
+                      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 625,
+                        "top": 648,
+                        "right": 756,
+                        "bottom": 680
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "Pane",
+                      "name": "電話番号",
+                      "automation_id": "edtTel1",
+                      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 625,
+                        "top": 608,
+                        "right": 756,
+                        "bottom": 640
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "Text",
+                      "name": "電話番号",
+                      "automation_id": "lblTel",
+                      "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 513,
+                        "top": 608,
+                        "right": 593,
+                        "bottom": 640
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "Text",
+                      "name": "日常生活圏域",
+                      "automation_id": "lblTiku",
+                      "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 513,
+                        "top": 568,
+                        "right": 625,
+                        "bottom": 600
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "Pane",
+                      "name": "血 液 型",
+                      "automation_id": "pnl7",
+                      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 505,
+                        "top": 448,
+                        "right": 1093,
+                        "bottom": 560
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": [
+                        {
+                          "control_type": "Text",
+                          "name": "住　　所",
+                          "automation_id": "lblAdrs",
+                          "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 513,
+                            "top": 488,
+                            "right": 593,
+                            "bottom": 520
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": []
+                        },
+                        {
+                          "control_type": "Text",
+                          "name": "郵便番号",
+                          "automation_id": "lblPost",
+                          "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 513,
+                            "top": 452,
+                            "right": 593,
+                            "bottom": 484
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": []
+                        },
+                        {
+                          "control_type": "Pane",
+                          "name": "郵便番号",
+                          "automation_id": "uscAdrs",
+                          "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 625,
+                            "top": 452,
+                            "right": 1081,
+                            "bottom": 556
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": [
+                            {
+                              "control_type": "Pane",
+                              "name": "",
+                              "automation_id": "uscBunrei",
+                              "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                              "rectangle": {
+                                "left": 625,
+                                "top": 488,
+                                "right": 1077,
+                                "bottom": 520
+                              },
+                              "is_enabled": true,
+                              "is_visible": true,
+                              "depth": 7,
+                              "children": [
+                                {
+                                  "control_type": "Button",
+                                  "name": "文例検索",
+                                  "automation_id": "btnSrc",
+                                  "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                                  "rectangle": {
+                                    "left": 993,
+                                    "top": 488,
+                                    "right": 1077,
+                                    "bottom": 520
+                                  },
+                                  "is_enabled": true,
+                                  "is_visible": true,
+                                  "depth": 8,
+                                  "children": []
+                                },
+                                {
+                                  "control_type": "Pane",
+                                  "name": "",
+                                  "automation_id": "edtBunrei",
+                                  "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                                  "rectangle": {
+                                    "left": 625,
+                                    "top": 488,
+                                    "right": 993,
+                                    "bottom": 520
+                                  },
+                                  "is_enabled": true,
+                                  "is_visible": true,
+                                  "depth": 8,
+                                  "children": []
+                                }
+                              ]
+                            },
+                            {
+                              "control_type": "Pane",
+                              "name": "",
+                              "automation_id": "uscNCodePost",
+                              "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                              "rectangle": {
+                                "left": 625,
+                                "top": 452,
+                                "right": 741,
+                                "bottom": 484
+                              },
+                              "is_enabled": true,
+                              "is_visible": true,
+                              "depth": 7,
+                              "children": [
+                                {
+                                  "control_type": "Button",
+                                  "name": "▼",
+                                  "automation_id": "btnSearch",
+                                  "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                                  "rectangle": {
+                                    "left": 705,
+                                    "top": 452,
+                                    "right": 739,
+                                    "bottom": 484
+                                  },
+                                  "is_enabled": true,
+                                  "is_visible": true,
+                                  "depth": 8,
+                                  "children": []
+                                },
+                                {
+                                  "control_type": "Pane",
+                                  "name": "",
+                                  "automation_id": "edtNearCode",
+                                  "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                                  "rectangle": {
+                                    "left": 625,
+                                    "top": 452,
+                                    "right": 705,
+                                    "bottom": 484
+                                  },
+                                  "is_enabled": true,
+                                  "is_visible": true,
+                                  "depth": 8,
+                                  "children": []
+                                }
+                              ]
+                            },
+                            {
+                              "control_type": "Button",
+                              "name": "地図表示",
+                              "automation_id": "btnTizu",
+                              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                              "rectangle": {
+                                "left": 901,
+                                "top": 452,
+                                "right": 993,
+                                "bottom": 484
+                              },
+                              "is_enabled": true,
+                              "is_visible": true,
+                              "depth": 7,
+                              "children": []
+                            },
+                            {
+                              "control_type": "Pane",
+                              "name": "",
+                              "automation_id": "edtAddr2",
+                              "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                              "rectangle": {
+                                "left": 625,
+                                "top": 524,
+                                "right": 993,
+                                "bottom": 556
+                              },
+                              "is_enabled": true,
+                              "is_visible": true,
+                              "depth": 7,
+                              "children": []
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "control_type": "Pane",
+                  "name": "InhLabel1",
+                  "automation_id": "pnlSimei",
+                  "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                  "rectangle": {
+                    "left": 500,
+                    "top": 227,
+                    "right": 1316,
+                    "bottom": 311
+                  },
+                  "is_enabled": true,
+                  "is_visible": true,
+                  "depth": 4,
+                  "children": [
+                    {
+                      "control_type": "Text",
+                      "name": "様",
+                      "automation_id": "lblKeisyo",
+                      "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 1029,
+                        "top": 240,
+                        "right": 1109,
+                        "bottom": 264
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "Pane",
+                      "name": "",
+                      "automation_id": "edtKana",
+                      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 625,
+                        "top": 276,
+                        "right": 905,
+                        "bottom": 308
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "Text",
+                      "name": "ﾌ ﾘ ｶﾞ ﾅ",
+                      "automation_id": "lblHurigana",
+                      "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 509,
+                        "top": 276,
+                        "right": 597,
+                        "bottom": 308
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "Text",
+                      "name": "氏　　名",
+                      "automation_id": "lblSimei",
+                      "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 509,
+                        "top": 236,
+                        "right": 593,
+                        "bottom": 268
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "Pane",
+                      "name": "ﾌ ﾘ ｶﾞ ﾅ",
+                      "automation_id": "uscName",
+                      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 625,
+                        "top": 232,
+                        "right": 1025,
+                        "bottom": 268
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "control_type": "Pane",
+              "name": "",
+              "automation_id": "pnlKCode",
+              "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 495,
+                "top": 174,
+                "right": 1315,
+                "bottom": 214
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": [
+                {
+                  "control_type": "Pane",
+                  "name": "0000000287",
+                  "automation_id": "uscKCode",
+                  "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                  "rectangle": {
+                    "left": 636,
+                    "top": 178,
+                    "right": 819,
+                    "bottom": 210
+                  },
+                  "is_enabled": true,
+                  "is_visible": true,
+                  "depth": 4,
+                  "children": [
+                    {
+                      "control_type": "Pane",
+                      "name": "0000000287",
+                      "automation_id": "ucdCode",
+                      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 636,
+                        "top": 178,
+                        "right": 819,
+                        "bottom": 210
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": [
+                        {
+                          "control_type": "Button",
+                          "name": "新規",
+                          "automation_id": "ibtnNew",
+                          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 768,
+                            "top": 178,
+                            "right": 819,
+                            "bottom": 210
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": []
+                        },
+                        {
+                          "control_type": "Button",
+                          "name": "▼",
+                          "automation_id": "ibtnSearch",
+                          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 734,
+                            "top": 178,
+                            "right": 768,
+                            "bottom": 210
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": []
+                        },
+                        {
+                          "control_type": "Pane",
+                          "name": "0000000287",
+                          "automation_id": "iedtCode",
+                          "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 636,
+                            "top": 178,
+                            "right": 734,
+                            "bottom": 210
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": []
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "control_type": "Text",
+                  "name": "利用者ｺｰﾄﾞ",
+                  "automation_id": "lblKCode",
+                  "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                  "rectangle": {
+                    "left": 504,
+                    "top": 178,
+                    "right": 632,
+                    "bottom": 210
+                  },
+                  "is_enabled": true,
+                  "is_visible": true,
+                  "depth": 4,
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "control_type": "Button",
+          "name": "法人内\r\n利用者検索",
+          "automation_id": "btnSearchRiyosyaHozin",
+          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 494,
+            "top": 121,
+            "right": 618,
+            "bottom": 161
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Button",
+          "name": "利用受付",
+          "automation_id": "68494",
+          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 1331,
+            "top": 122,
+            "right": 1455,
+            "bottom": 162
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Button",
+          "name": "最終更新",
+          "automation_id": "uscButtonLastUpdate",
+          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 1455,
+            "top": 122,
+            "right": 1579,
+            "bottom": 162
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Pane",
+          "name": "",
+          "automation_id": "pnlSeni",
+          "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 335,
+            "top": 174,
+            "right": 487,
+            "bottom": 614
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": [
+            {
+              "control_type": "CheckBox",
+              "name": "基本情報",
+              "automation_id": "uscRSG01",
+              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 335,
+                "top": 174,
+                "right": 487,
+                "bottom": 214
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "CheckBox",
+              "name": "関 係 者",
+              "automation_id": "uscRSG02",
+              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 335,
+                "top": 214,
+                "right": 487,
+                "bottom": 254
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "CheckBox",
+              "name": "介護保険",
+              "automation_id": "uscRSG03",
+              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 335,
+                "top": 254,
+                "right": 487,
+                "bottom": 294
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "CheckBox",
+              "name": "介護保険給付率",
+              "automation_id": "uscRSG04",
+              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 335,
+                "top": 294,
+                "right": 487,
+                "bottom": 334
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "CheckBox",
+              "name": "生活保護介護券",
+              "automation_id": "uscRSG05",
+              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 335,
+                "top": 334,
+                "right": 487,
+                "bottom": 374
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "CheckBox",
+              "name": "公　　費",
+              "automation_id": "uscRSG06",
+              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 335,
+                "top": 374,
+                "right": 487,
+                "bottom": 414
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "CheckBox",
+              "name": "利用料支払情報",
+              "automation_id": "uscRSG07",
+              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 335,
+                "top": 414,
+                "right": 487,
+                "bottom": 454
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "CheckBox",
+              "name": "日常生活自立度",
+              "automation_id": "uscRSG08",
+              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 335,
+                "top": 454,
+                "right": 487,
+                "bottom": 494
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "CheckBox",
+              "name": "住所地特例",
+              "automation_id": "uscRSG09",
+              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 335,
+                "top": 494,
+                "right": 487,
+                "bottom": 534
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "CheckBox",
+              "name": "医療保険",
+              "automation_id": "uscRSG10",
+              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 335,
+                "top": 534,
+                "right": 487,
+                "bottom": 574
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "CheckBox",
+              "name": "連 絡 先",
+              "automation_id": "uscRSG11",
+              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 335,
+                "top": 574,
+                "right": 487,
+                "bottom": 614
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            }
+          ]
+        },
+        {
+          "control_type": "Text",
+          "name": "",
+          "automation_id": "lblBtnLineVertical",
+          "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 351,
+            "top": 110,
+            "right": 375,
+            "bottom": 1005
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Text",
+          "name": "",
+          "automation_id": "lblBtnLineHolizontal",
+          "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 331,
+            "top": 130,
+            "right": 1589,
+            "bottom": 154
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Pane",
+          "name": "",
+          "automation_id": "ulnOutLineRight",
+          "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 1589,
+            "top": 110,
+            "right": 1593,
+            "bottom": 1005
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Pane",
+          "name": "",
+          "automation_id": "ulnOutLineBottom",
+          "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 331,
+            "top": 1005,
+            "right": 1593,
+            "bottom": 1009
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Pane",
+          "name": "",
+          "automation_id": "ulnOutLineTop",
+          "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 331,
+            "top": 106,
+            "right": 1593,
+            "bottom": 110
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Pane",
+          "name": "",
+          "automation_id": "ulnOutLineLeft",
+          "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 327,
+            "top": 106,
+            "right": 331,
+            "bottom": 1009
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Pane",
+          "name": "",
+          "automation_id": "uhtHeaderTitle",
+          "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 327,
+            "top": 46,
+            "right": 1593,
+            "bottom": 106
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": [
+            {
+              "control_type": "Button",
+              "name": "閉じる",
+              "automation_id": "btnExit",
+              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 1497,
+                "top": 52,
+                "right": 1589,
+                "bottom": 104
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "Button",
+              "name": "削　除",
+              "automation_id": "btnDelete",
+              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 1401,
+                "top": 52,
+                "right": 1493,
+                "bottom": 104
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "Button",
+              "name": "印　刷",
+              "automation_id": "btnPrint",
+              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 1305,
+                "top": 52,
+                "right": 1397,
+                "bottom": 104
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "Button",
+              "name": "登　録",
+              "automation_id": "btnSave",
+              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 1209,
+                "top": 52,
+                "right": 1301,
+                "bottom": 104
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "Button",
+              "name": "ヘルプ",
+              "automation_id": "btnHelp",
+              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 1089,
+                "top": 52,
+                "right": 1181,
+                "bottom": 104
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "Pane",
+              "name": "利用者台帳(基本情報)",
+              "automation_id": "pnlInfo",
+              "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 330,
+                "top": 81,
+                "right": 484,
+                "bottom": 105
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": [
+                {
+                  "control_type": "Text",
+                  "name": "利用者台帳(基本情報)",
+                  "automation_id": "lblInfo",
+                  "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                  "rectangle": {
+                    "left": 331,
+                    "top": 82,
+                    "right": 483,
+                    "bottom": 104
+                  },
+                  "is_enabled": true,
+                  "is_visible": true,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "Text",
+                  "name": "",
+                  "automation_id": "lblInfoShadow",
+                  "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                  "rectangle": {
+                    "left": 331,
+                    "top": 84,
+                    "right": 483,
+                    "bottom": 106
+                  },
+                  "is_enabled": true,
+                  "is_visible": true,
+                  "depth": 4,
+                  "children": []
+                }
+              ]
+            },
+            {
+              "control_type": "Text",
+              "name": "利用者台帳(基本情報)",
+              "automation_id": "lblHeaderTitle",
+              "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 328,
+                "top": 47,
+                "right": 1592,
+                "bottom": 105
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            }
+          ]
+        },
+        {
+          "control_type": "TitleBar",
+          "name": "",
+          "automation_id": "",
+          "class_name": "",
+          "rectangle": {
+            "left": 343,
+            "top": 23,
+            "right": 1593,
+            "bottom": 46
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": [
+            {
+              "control_type": "MenuBar",
+              "name": "システム",
+              "automation_id": "MenuBar",
+              "class_name": "",
+              "rectangle": {
+                "left": 332,
+                "top": 28,
+                "right": 354,
+                "bottom": 50
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": [
+                {
+                  "control_type": "MenuItem",
+                  "name": "システム",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 332,
+                    "top": 28,
+                    "right": 354,
+                    "bottom": 50
+                  },
+                  "is_enabled": true,
+                  "is_visible": true,
+                  "depth": 4,
+                  "children": []
+                }
+              ]
+            },
+            {
+              "control_type": "Button",
+              "name": "最小化",
+              "automation_id": "",
+              "class_name": "",
+              "rectangle": {
+                "left": 1454,
+                "top": 21,
+                "right": 1501,
+                "bottom": 46
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "Button",
+              "name": "最大化",
+              "automation_id": "",
+              "class_name": "",
+              "rectangle": {
+                "left": 1501,
+                "top": 21,
+                "right": 1547,
+                "bottom": 46
+              },
+              "is_enabled": false,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "Button",
+              "name": "閉じる",
+              "automation_id": "",
+              "class_name": "",
+              "rectangle": {
+                "left": 1547,
+                "top": 21,
+                "right": 1594,
+                "bottom": 46
+              },
+              "is_enabled": false,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "control_type": "Pane",
+      "name": "",
+      "automation_id": "linDummy",
+      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+      "rectangle": {
+        "left": 328,
+        "top": 259,
+        "right": 493,
+        "bottom": 260
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "depth": 1,
+      "children": []
+    },
+    {
+      "control_type": "Pane",
+      "name": "",
+      "automation_id": "199020",
+      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+      "rectangle": {
+        "left": 327,
+        "top": 259,
+        "right": 494,
+        "bottom": 1007
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "depth": 1,
+      "children": [
+        {
+          "control_type": "Button",
+          "name": "新規登録",
+          "automation_id": "395888",
+          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 333,
+            "top": 263,
+            "right": 490,
+            "bottom": 303
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Button",
+          "name": "基本情報",
+          "automation_id": "330356",
+          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 333,
+            "top": 303,
+            "right": 490,
+            "bottom": 343
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Button",
+          "name": "関係者",
+          "automation_id": "330360",
+          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 333,
+            "top": 343,
+            "right": 490,
+            "bottom": 383
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Button",
+          "name": "介護保険",
+          "automation_id": "264828",
+          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 333,
+            "top": 383,
+            "right": 490,
+            "bottom": 423
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Button",
+          "name": "介護保険給付率",
+          "automation_id": "330368",
+          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 333,
+            "top": 423,
+            "right": 490,
+            "bottom": 463
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Button",
+          "name": "生活保護介護券",
+          "automation_id": "526980",
+          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 333,
+            "top": 463,
+            "right": 490,
+            "bottom": 503
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Button",
+          "name": "公費",
+          "automation_id": "526984",
+          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 333,
+            "top": 503,
+            "right": 490,
+            "bottom": 543
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Button",
+          "name": "利用料支払情報",
+          "automation_id": "199308",
+          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 333,
+            "top": 543,
+            "right": 490,
+            "bottom": 583
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Button",
+          "name": "日常生活自立度",
+          "automation_id": "526992",
+          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 333,
+            "top": 583,
+            "right": 490,
+            "bottom": 623
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Button",
+          "name": "住所地特例",
+          "automation_id": "526996",
+          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 333,
+            "top": 623,
+            "right": 490,
+            "bottom": 663
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Button",
+          "name": "医療保険",
+          "automation_id": "395928",
+          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 333,
+            "top": 663,
+            "right": 490,
+            "bottom": 703
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Button",
+          "name": "連絡先",
+          "automation_id": "330396",
+          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 333,
+            "top": 703,
+            "right": 490,
+            "bottom": 743
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        }
+      ]
+    },
+    {
+      "control_type": "Pane",
+      "name": "表示順",
+      "automation_id": "tabLargeMenu",
+      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+      "rectangle": {
+        "left": 327,
+        "top": 131,
+        "right": 1592,
+        "bottom": 260
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "depth": 1,
+      "children": [
+        {
+          "control_type": "Pane",
+          "name": "利用者の管理",
+          "automation_id": "4653260",
+          "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 331,
+            "top": 190,
+            "right": 1588,
+            "bottom": 256
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": [
+            {
+              "control_type": "Pane",
+              "name": "",
+              "automation_id": "uscPaneMiddleMenuScroll",
+              "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 331,
+                "top": 190,
+                "right": 1588,
+                "bottom": 256
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": [
+                {
+                  "control_type": "Pane",
+                  "name": "",
+                  "automation_id": "pnlButtonLine",
+                  "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                  "rectangle": {
+                    "left": 331,
+                    "top": 190,
+                    "right": 1588,
+                    "bottom": 256
+                  },
+                  "is_enabled": true,
+                  "is_visible": true,
+                  "depth": 4,
+                  "children": [
+                    {
+                      "control_type": "CheckBox",
+                      "name": "利用者台帳",
+                      "automation_id": "68178",
+                      "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 331,
+                        "top": 200,
+                        "right": 489,
+                        "bottom": 250
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "CheckBox",
+                      "name": "利用者状況",
+                      "automation_id": "723542",
+                      "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 488,
+                        "top": 200,
+                        "right": 646,
+                        "bottom": 250
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "CheckBox",
+                      "name": "台帳一覧入力",
+                      "automation_id": "723546",
+                      "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 645,
+                        "top": 200,
+                        "right": 803,
+                        "bottom": 250
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "CheckBox",
+                      "name": "台帳資料",
+                      "automation_id": "854622",
+                      "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 802,
+                        "top": 200,
+                        "right": 960,
+                        "bottom": 250
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "CheckBox",
+                      "name": "抽出・宛名ﾗﾍﾞﾙ",
+                      "automation_id": "592482",
+                      "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 959,
+                        "top": 200,
+                        "right": 1117,
+                        "bottom": 250
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "CheckBox",
+                      "name": "ｻﾏﾘｰ",
+                      "automation_id": "1247846",
+                      "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 1116,
+                        "top": 200,
+                        "right": 1274,
+                        "bottom": 250
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "CheckBox",
+                      "name": "支援ﾉｰﾄ",
+                      "automation_id": "592490",
+                      "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 1273,
+                        "top": 200,
+                        "right": 1431,
+                        "bottom": 250
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "Text",
+                      "name": "",
+                      "automation_id": "lblBorder",
+                      "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 331,
+                        "top": 212,
+                        "right": 1588,
+                        "bottom": 236
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "control_type": "Text",
+              "name": "",
+              "automation_id": "723566",
+              "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 331,
+                "top": 212,
+                "right": 1589,
+                "bottom": 236
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "control_type": "Pane",
+      "name": "",
+      "automation_id": "pnlScroll",
+      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+      "rectangle": {
+        "left": 497,
+        "top": 259,
+        "right": 1592,
+        "bottom": 1007
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "depth": 1,
+      "children": [
+        {
+          "control_type": "Pane",
+          "name": "",
+          "automation_id": "pnlSearchResult",
+          "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 497,
+            "top": 419,
+            "right": 1592,
+            "bottom": 1007
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": [
+            {
+              "control_type": "Pane",
+              "name": "",
+              "automation_id": "uscRiyosyaIchiran",
+              "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 498,
+                "top": 420,
+                "right": 1591,
+                "bottom": 1003
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": [
+                {
+                  "control_type": "Pane",
+                  "name": "",
+                  "automation_id": "pnlRiyosyaIchiran",
+                  "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                  "rectangle": {
+                    "left": 498,
+                    "top": 420,
+                    "right": 1591,
+                    "bottom": 1003
+                  },
+                  "is_enabled": true,
+                  "is_visible": true,
+                  "depth": 4,
+                  "children": [
+                    {
+                      "control_type": "Button",
+                      "name": "表示項目",
+                      "automation_id": "btnShowHyoziKomoku",
+                      "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 1470,
+                        "top": 428,
+                        "right": 1582,
+                        "bottom": 460
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "Pane",
+                      "name": "",
+                      "automation_id": "pnlSort",
+                      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 970,
+                        "top": 428,
+                        "right": 1115,
+                        "bottom": 460
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": [
+                        {
+                          "control_type": "RadioButton",
+                          "name": "降順",
+                          "automation_id": "rbnRiyosyaDesc",
+                          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 1046,
+                            "top": 432,
+                            "right": 1110,
+                            "bottom": 456
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": []
+                        },
+                        {
+                          "control_type": "RadioButton",
+                          "name": "昇順",
+                          "automation_id": "rbnRiyosyaAsc",
+                          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 979,
+                            "top": 433,
+                            "right": 1043,
+                            "bottom": 457
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": []
+                        }
+                      ]
+                    },
+                    {
+                      "control_type": "Pane",
+                      "name": "ﾌﾘｶﾞﾅ",
+                      "automation_id": "cmbRiyosyaSort",
+                      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 706,
+                        "top": 428,
+                        "right": 962,
+                        "bottom": 460
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "Text",
+                      "name": "表示順",
+                      "automation_id": "lblHyojiJun",
+                      "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 638,
+                        "top": 428,
+                        "right": 698,
+                        "bottom": 460
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "Text",
+                      "name": "件",
+                      "automation_id": "lblRowCountTani",
+                      "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 602,
+                        "top": 428,
+                        "right": 626,
+                        "bottom": 460
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "Text",
+                      "name": "",
+                      "automation_id": "lblRowCount",
+                      "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 506,
+                        "top": 428,
+                        "right": 599,
+                        "bottom": 460
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    },
+                    {
+                      "control_type": "Pane",
+                      "name": "InhElTabelleSheet1",
+                      "automation_id": "etsRiyosya",
+                      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 506,
+                        "top": 468,
+                        "right": 1582,
+                        "bottom": 996
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "control_type": "Pane",
+          "name": "▼",
+          "automation_id": "pnlSearchCondition",
+          "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 497,
+            "top": 263,
+            "right": 1592,
+            "bottom": 415
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": [
+            {
+              "control_type": "Pane",
+              "name": "▼",
+              "automation_id": "tabSearchCondition",
+              "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 506,
+                "top": 272,
+                "right": 1462,
+                "bottom": 406
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": [
+                {
+                  "control_type": "Pane",
+                  "name": "利用者一覧",
+                  "automation_id": "GcTabPage3",
+                  "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                  "rectangle": {
+                    "left": 669,
+                    "top": 276,
+                    "right": 1458,
+                    "bottom": 402
+                  },
+                  "is_enabled": true,
+                  "is_visible": true,
+                  "depth": 4,
+                  "children": [
+                    {
+                      "control_type": "Pane",
+                      "name": "",
+                      "automation_id": "uscRiyosyaZyoken",
+                      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                      "rectangle": {
+                        "left": 669,
+                        "top": 276,
+                        "right": 1457,
+                        "bottom": 400
+                      },
+                      "is_enabled": true,
+                      "is_visible": true,
+                      "depth": 5,
+                      "children": [
+                        {
+                          "control_type": "Pane",
+                          "name": "",
+                          "automation_id": "pnlRiyosyaZyoken",
+                          "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                          "rectangle": {
+                            "left": 669,
+                            "top": 276,
+                            "right": 1457,
+                            "bottom": 400
+                          },
+                          "is_enabled": true,
+                          "is_visible": true,
+                          "depth": 6,
+                          "children": [
+                            {
+                              "control_type": "Pane",
+                              "name": "抽 出 条 件",
+                              "automation_id": "cmbChusyutsuZyoken",
+                              "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                              "rectangle": {
+                                "left": 789,
+                                "top": 324,
+                                "right": 933,
+                                "bottom": 356
+                              },
+                              "is_enabled": true,
+                              "is_visible": true,
+                              "depth": 7,
+                              "children": []
+                            },
+                            {
+                              "control_type": "Pane",
+                              "name": "部屋ｸﾞﾙｰﾌﾟ",
+                              "automation_id": "pnlKizyunbi",
+                              "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                              "rectangle": {
+                                "left": 1189,
+                                "top": 364,
+                                "right": 1461,
+                                "bottom": 400
+                              },
+                              "is_enabled": true,
+                              "is_visible": true,
+                              "depth": 7,
+                              "children": [
+                                {
+                                  "control_type": "Text",
+                                  "name": "基準日",
+                                  "automation_id": "lblKizyunbi",
+                                  "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                                  "rectangle": {
+                                    "left": 1189,
+                                    "top": 364,
+                                    "right": 1253,
+                                    "bottom": 396
+                                  },
+                                  "is_enabled": true,
+                                  "is_visible": true,
+                                  "depth": 8,
+                                  "children": []
+                                },
+                                {
+                                  "control_type": "Pane",
+                                  "name": "部屋ｸﾞﾙｰﾌﾟ",
+                                  "automation_id": "uscKizyunbi",
+                                  "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                                  "rectangle": {
+                                    "left": 1253,
+                                    "top": 364,
+                                    "right": 1455,
+                                    "bottom": 396
+                                  },
+                                  "is_enabled": true,
+                                  "is_visible": true,
+                                  "depth": 8,
+                                  "children": [
+                                    {
+                                      "control_type": "Pane",
+                                      "name": "",
+                                      "automation_id": "fpnlDate",
+                                      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                                      "rectangle": {
+                                        "left": 1253,
+                                        "top": 364,
+                                        "right": 1455,
+                                        "bottom": 396
+                                      },
+                                      "is_enabled": true,
+                                      "is_visible": true,
+                                      "depth": 9,
+                                      "children": [
+                                        {
+                                          "control_type": "Pane",
+                                          "name": "令和08年04月09日",
+                                          "automation_id": "idatDate",
+                                          "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                                          "rectangle": {
+                                            "left": 1253,
+                                            "top": 364,
+                                            "right": 1423,
+                                            "bottom": 396
+                                          },
+                                          "is_enabled": true,
+                                          "is_visible": true,
+                                          "depth": 10,
+                                          "children": []
+                                        },
+                                        {
+                                          "control_type": "Text",
+                                          "name": "木",
+                                          "automation_id": "ilblWeekday",
+                                          "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                                          "rectangle": {
+                                            "left": 1423,
+                                            "top": 364,
+                                            "right": 1455,
+                                            "bottom": 396
+                                          },
+                                          "is_enabled": true,
+                                          "is_visible": true,
+                                          "depth": 10,
+                                          "children": []
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "control_type": "Pane",
+                              "name": "利 用 状 況",
+                              "automation_id": "pnlSibosya",
+                              "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                              "rectangle": {
+                                "left": 941,
+                                "top": 284,
+                                "right": 1089,
+                                "bottom": 316
+                              },
+                              "is_enabled": true,
+                              "is_visible": true,
+                              "depth": 7,
+                              "children": [
+                                {
+                                  "control_type": "CheckBox",
+                                  "name": "死亡者を除く",
+                                  "automation_id": "chkSibosya",
+                                  "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+                                  "rectangle": {
+                                    "left": 950,
+                                    "top": 285,
+                                    "right": 1082,
+                                    "bottom": 317
+                                  },
+                                  "is_enabled": true,
+                                  "is_visible": true,
+                                  "depth": 8,
+                                  "children": []
+                                }
+                              ]
+                            },
+                            {
+                              "control_type": "Pane",
+                              "name": "全員",
+                              "automation_id": "cmbRiyoZyokyo",
+                              "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+                              "rectangle": {
+                                "left": 789,
+                                "top": 284,
+                                "right": 933,
+                                "bottom": 316
+                              },
+                              "is_enabled": true,
+                              "is_visible": true,
+                              "depth": 7,
+                              "children": []
+                            },
+                            {
+                              "control_type": "Text",
+                              "name": "利 用 状 況",
+                              "automation_id": "lblRiyoZyokyo",
+                              "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                              "rectangle": {
+                                "left": 677,
+                                "top": 284,
+                                "right": 785,
+                                "bottom": 316
+                              },
+                              "is_enabled": true,
+                              "is_visible": true,
+                              "depth": 7,
+                              "children": []
+                            },
+                            {
+                              "control_type": "Text",
+                              "name": "抽 出 条 件",
+                              "automation_id": "lblChusyutsuZyoken",
+                              "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+                              "rectangle": {
+                                "left": 677,
+                                "top": 324,
+                                "right": 785,
+                                "bottom": 356
+                              },
+                              "is_enabled": true,
+                              "is_visible": true,
+                              "depth": 7,
+                              "children": []
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "control_type": "Button",
+              "name": "一覧表示",
+              "automation_id": "btnShowItiran",
+              "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 1471,
+                "top": 272,
+                "right": 1583,
+                "bottom": 304
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "control_type": "Pane",
+      "name": "",
+      "automation_id": "uscTitleHeader",
+      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+      "rectangle": {
+        "left": 327,
+        "top": 71,
+        "right": 1592,
+        "bottom": 131
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "depth": 1,
+      "children": [
+        {
+          "control_type": "Button",
+          "name": "終　了",
+          "automation_id": "btnOther1",
+          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 1496,
+            "top": 77,
+            "right": 1588,
+            "bottom": 129
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Button",
+          "name": "印　刷",
+          "automation_id": "btnOther2",
+          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 1400,
+            "top": 77,
+            "right": 1492,
+            "bottom": 129
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Button",
+          "name": "ヘルプ",
+          "automation_id": "btnHelp",
+          "class_name": "WindowsForms10.BUTTON.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 1280,
+            "top": 77,
+            "right": 1372,
+            "bottom": 129
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Text",
+          "name": "",
+          "automation_id": "lblHeaderTitle",
+          "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+          "rectangle": {
+            "left": 328,
+            "top": 72,
+            "right": 1591,
+            "bottom": 130
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": [
+            {
+              "control_type": "Text",
+              "name": "ささき整形外科デイケアセンター",
+              "automation_id": "lblHeaderTitleMain",
+              "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 329,
+                "top": 73,
+                "right": 1592,
+                "bottom": 108
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "Text",
+              "name": "(通所・訪問リハビリ管理システム SP(ｹｱ記録))",
+              "automation_id": "lblHeaderTitleSub",
+              "class_name": "WindowsForms10.STATIC.app.0.3ce0bb8",
+              "rectangle": {
+                "left": 332,
+                "top": 108,
+                "right": 1595,
+                "bottom": 127
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "control_type": "MenuBar",
+      "name": "UscMnsSystemMenu1",
+      "automation_id": "68162",
+      "class_name": "WindowsForms10.Window.8.app.0.3ce0bb8",
+      "rectangle": {
+        "left": 327,
+        "top": 47,
+        "right": 1592,
+        "bottom": 71
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "depth": 1,
+      "children": [
+        {
+          "control_type": "MenuItem",
+          "name": "環境設定",
+          "automation_id": "",
+          "class_name": "",
+          "rectangle": {
+            "left": 333,
+            "top": 49,
+            "right": 400,
+            "bottom": 69
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": [
+            {
+              "control_type": "MenuItem",
+              "name": "ﾕｰｻﾞｰ情報",
+              "automation_id": "",
+              "class_name": "",
+              "rectangle": {
+                "left": 333,
+                "top": 70,
+                "right": 515,
+                "bottom": 92
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "MenuItem",
+              "name": "利用者台帳環境設定",
+              "automation_id": "",
+              "class_name": "",
+              "rectangle": {
+                "left": 333,
+                "top": 92,
+                "right": 515,
+                "bottom": 114
+              },
+              "is_enabled": true,
+              "is_visible": false,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "MenuItem",
+              "name": "事業所専用",
+              "automation_id": "",
+              "class_name": "",
+              "rectangle": {
+                "left": 333,
+                "top": 114,
+                "right": 515,
+                "bottom": 136
+              },
+              "is_enabled": true,
+              "is_visible": false,
+              "depth": 3,
+              "children": [
+                {
+                  "control_type": "MenuItem",
+                  "name": "環境設定（事業所）",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 515,
+                    "top": 116,
+                    "right": 721,
+                    "bottom": 138
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "環境設定（事業所設定）",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 515,
+                    "top": 138,
+                    "right": 721,
+                    "bottom": 160
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                }
+              ]
+            },
+            {
+              "control_type": "MenuItem",
+              "name": "請求",
+              "automation_id": "",
+              "class_name": "",
+              "rectangle": {
+                "left": 333,
+                "top": 136,
+                "right": 515,
+                "bottom": 158
+              },
+              "is_enabled": true,
+              "is_visible": false,
+              "depth": 3,
+              "children": [
+                {
+                  "control_type": "MenuItem",
+                  "name": "介護給付請求",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 515,
+                    "top": 138,
+                    "right": 765,
+                    "bottom": 160
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "利用料請求",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 515,
+                    "top": 160,
+                    "right": 765,
+                    "bottom": 182
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "請求先一括変更(金融機関合併用)",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 515,
+                    "top": 182,
+                    "right": 765,
+                    "bottom": 204
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                }
+              ]
+            },
+            {
+              "control_type": "MenuItem",
+              "name": "記録管理",
+              "automation_id": "",
+              "class_name": "",
+              "rectangle": {
+                "left": 333,
+                "top": 158,
+                "right": 515,
+                "bottom": 180
+              },
+              "is_enabled": true,
+              "is_visible": false,
+              "depth": 3,
+              "children": [
+                {
+                  "control_type": "MenuItem",
+                  "name": "個別援助計画",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 515,
+                    "top": 160,
+                    "right": 715,
+                    "bottom": 182
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "環境設定(記録管理)",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 515,
+                    "top": 182,
+                    "right": 715,
+                    "bottom": 204
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "業務日誌ﾚｲｱｳﾄ設定",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 515,
+                    "top": 204,
+                    "right": 715,
+                    "bottom": 226
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "記入表ﾚｲｱｳﾄ設定",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 515,
+                    "top": 226,
+                    "right": 715,
+                    "bottom": 248
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "連絡帳ﾚｲｱｳﾄ設定",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 515,
+                    "top": 248,
+                    "right": 715,
+                    "bottom": 270
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "ｹｱ記録一覧設定",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 515,
+                    "top": 270,
+                    "right": 715,
+                    "bottom": 292
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "温度板ﾚｲｱｳﾄ設定",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 515,
+                    "top": 292,
+                    "right": 715,
+                    "bottom": 314
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "総合ｸﾞﾗﾌﾊﾟﾀｰﾝ設定",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 515,
+                    "top": 314,
+                    "right": 715,
+                    "bottom": 336
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "ｹｱ記録集計表ﾚｲｱｳﾄ設定",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 515,
+                    "top": 336,
+                    "right": 715,
+                    "bottom": 358
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "ｹｱ記録抽出ﾊﾟﾀｰﾝ設定",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 515,
+                    "top": 358,
+                    "right": 715,
+                    "bottom": 380
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "ﾋﾔﾘﾊｯﾄ報告書ﾚｲｱｳﾄ設定",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 515,
+                    "top": 380,
+                    "right": 715,
+                    "bottom": 402
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "事故報告書ﾚｲｱｳﾄ設定",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 515,
+                    "top": 402,
+                    "right": 715,
+                    "bottom": 424
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "療法士支援環境設定",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 515,
+                    "top": 424,
+                    "right": 715,
+                    "bottom": 446
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                }
+              ]
+            },
+            {
+              "control_type": "MenuItem",
+              "name": "マスキング設定",
+              "automation_id": "",
+              "class_name": "",
+              "rectangle": {
+                "left": 333,
+                "top": 180,
+                "right": 515,
+                "bottom": 202
+              },
+              "is_enabled": true,
+              "is_visible": false,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "MenuItem",
+              "name": "環境設定(経営分析)",
+              "automation_id": "",
+              "class_name": "",
+              "rectangle": {
+                "left": 333,
+                "top": 202,
+                "right": 515,
+                "bottom": 224
+              },
+              "is_enabled": true,
+              "is_visible": false,
+              "depth": 3,
+              "children": []
+            },
+            {
+              "control_type": "MenuItem",
+              "name": "他社ｼｽﾃﾑ連携",
+              "automation_id": "",
+              "class_name": "",
+              "rectangle": {
+                "left": 333,
+                "top": 224,
+                "right": 515,
+                "bottom": 246
+              },
+              "is_enabled": true,
+              "is_visible": false,
+              "depth": 3,
+              "children": [
+                {
+                  "control_type": "MenuItem",
+                  "name": "運用開始時一括出力（WebAPI連携版）",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 515,
+                    "top": 226,
+                    "right": 799,
+                    "bottom": 248
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "連携ﾃﾞｰﾀ送信ｴﾗｰ一覧",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 515,
+                    "top": 248,
+                    "right": 799,
+                    "bottom": 270
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "control_type": "MenuItem",
+          "name": "共通ﾏｽﾀｰ",
+          "automation_id": "",
+          "class_name": "",
+          "rectangle": {
+            "left": 400,
+            "top": 49,
+            "right": 467,
+            "bottom": 69
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": [
+            {
+              "control_type": "MenuItem",
+              "name": "共通情報",
+              "automation_id": "",
+              "class_name": "",
+              "rectangle": {
+                "left": 400,
+                "top": 70,
+                "right": 522,
+                "bottom": 92
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": [
+                {
+                  "control_type": "MenuItem",
+                  "name": "市町村ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 522,
+                    "top": 72,
+                    "right": 716,
+                    "bottom": 94
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "法人ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 522,
+                    "top": 94,
+                    "right": 716,
+                    "bottom": 116
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "関連機関ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 522,
+                    "top": 116,
+                    "right": 716,
+                    "bottom": 138
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "職種ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 522,
+                    "top": 138,
+                    "right": 716,
+                    "bottom": 160
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "ｻｰﾋﾞｽ関係者ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 522,
+                    "top": 160,
+                    "right": 716,
+                    "bottom": 182
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "傷病ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 522,
+                    "top": 182,
+                    "right": 716,
+                    "bottom": 204
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "薬剤ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 522,
+                    "top": 204,
+                    "right": 716,
+                    "bottom": 226
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "金融機関ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 522,
+                    "top": 226,
+                    "right": 716,
+                    "bottom": 248
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "文例ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 522,
+                    "top": 248,
+                    "right": 716,
+                    "bottom": 270
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "分類ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 522,
+                    "top": 270,
+                    "right": 716,
+                    "bottom": 292
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "ADLﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 522,
+                    "top": 292,
+                    "right": 716,
+                    "bottom": 314
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "医療保険者ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 522,
+                    "top": 314,
+                    "right": 716,
+                    "bottom": 336
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "医療保険制度給付ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 522,
+                    "top": 336,
+                    "right": 716,
+                    "bottom": 358
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "介護保険者ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 522,
+                    "top": 358,
+                    "right": 716,
+                    "bottom": 380
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "広域保険者ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 522,
+                    "top": 380,
+                    "right": 716,
+                    "bottom": 402
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "共通地区ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 522,
+                    "top": 402,
+                    "right": 716,
+                    "bottom": 424
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "個人状況ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 522,
+                    "top": 424,
+                    "right": 716,
+                    "bottom": 446
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                }
+              ]
+            },
+            {
+              "control_type": "MenuItem",
+              "name": "算定情報",
+              "automation_id": "",
+              "class_name": "",
+              "rectangle": {
+                "left": 400,
+                "top": 92,
+                "right": 522,
+                "bottom": 114
+              },
+              "is_enabled": true,
+              "is_visible": false,
+              "depth": 3,
+              "children": [
+                {
+                  "control_type": "MenuItem",
+                  "name": "公費ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 522,
+                    "top": 94,
+                    "right": 656,
+                    "bottom": 116
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "体制情報",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 522,
+                    "top": 116,
+                    "right": 656,
+                    "bottom": 138
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "限度額ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 522,
+                    "top": 138,
+                    "right": 656,
+                    "bottom": 160
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "control_type": "MenuItem",
+          "name": "ｼｽﾃﾑ専用ﾏｽﾀｰ",
+          "automation_id": "",
+          "class_name": "",
+          "rectangle": {
+            "left": 467,
+            "top": 49,
+            "right": 558,
+            "bottom": 69
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": [
+            {
+              "control_type": "MenuItem",
+              "name": "事業所専用",
+              "automation_id": "",
+              "class_name": "",
+              "rectangle": {
+                "left": 467,
+                "top": 70,
+                "right": 601,
+                "bottom": 92
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": [
+                {
+                  "control_type": "MenuItem",
+                  "name": "提出資料地区ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 601,
+                    "top": 72,
+                    "right": 807,
+                    "bottom": 94
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "運営日ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 601,
+                    "top": 94,
+                    "right": 807,
+                    "bottom": 116
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "食事区分ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 601,
+                    "top": 116,
+                    "right": 807,
+                    "bottom": 138
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "ﾘﾊﾋﾞﾘ項目ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 601,
+                    "top": 138,
+                    "right": 807,
+                    "bottom": 160
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "稼働率定員ﾏｽﾀｰ（通所）",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 601,
+                    "top": 160,
+                    "right": 807,
+                    "bottom": 182
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                }
+              ]
+            },
+            {
+              "control_type": "MenuItem",
+              "name": "請求",
+              "automation_id": "",
+              "class_name": "",
+              "rectangle": {
+                "left": 467,
+                "top": 92,
+                "right": 601,
+                "bottom": 114
+              },
+              "is_enabled": true,
+              "is_visible": false,
+              "depth": 3,
+              "children": [
+                {
+                  "control_type": "MenuItem",
+                  "name": "利用料項目ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 601,
+                    "top": 94,
+                    "right": 807,
+                    "bottom": 116
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "利用料請求書出力順設定",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 601,
+                    "top": 116,
+                    "right": 807,
+                    "bottom": 138
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "口座振替ﾃﾞｰﾀﾌｫｰﾏｯﾄ設定",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 601,
+                    "top": 138,
+                    "right": 807,
+                    "bottom": 160
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "口座振替ﾍｯﾀﾞｰ情報設定",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 601,
+                    "top": 160,
+                    "right": 807,
+                    "bottom": 182
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "顧客番号ﾊﾟﾀｰﾝﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 601,
+                    "top": 182,
+                    "right": 807,
+                    "bottom": 204
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "顧客番号ﾁｪｯｸ一覧表",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 601,
+                    "top": 204,
+                    "right": 807,
+                    "bottom": 226
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                }
+              ]
+            },
+            {
+              "control_type": "MenuItem",
+              "name": "記録管理",
+              "automation_id": "",
+              "class_name": "",
+              "rectangle": {
+                "left": 467,
+                "top": 114,
+                "right": 601,
+                "bottom": 136
+              },
+              "is_enabled": true,
+              "is_visible": false,
+              "depth": 3,
+              "children": [
+                {
+                  "control_type": "MenuItem",
+                  "name": "ｹｱ記録項目ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 601,
+                    "top": 116,
+                    "right": 801,
+                    "bottom": 138
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "ｹｱ記録入力ﾊﾟﾀｰﾝﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 601,
+                    "top": 138,
+                    "right": 801,
+                    "bottom": 160
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "介護内容項目ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 601,
+                    "top": 160,
+                    "right": 801,
+                    "bottom": 182
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "利用者ｸﾞﾙｰﾌﾟﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 601,
+                    "top": 182,
+                    "right": 801,
+                    "bottom": 204
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "ﾊﾞｲﾀﾙ設定（ｸﾞﾙｰﾌﾟ別）",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 601,
+                    "top": 204,
+                    "right": 801,
+                    "bottom": 226
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "ﾊﾞｲﾀﾙ設定（個人別）",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 601,
+                    "top": 226,
+                    "right": 801,
+                    "bottom": 248
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "連絡帳質問ﾊﾟﾀｰﾝﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 601,
+                    "top": 248,
+                    "right": 801,
+                    "bottom": 270
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "ﾋﾔﾘﾊｯﾄ･事故項目ﾏｽﾀｰ",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 601,
+                    "top": 270,
+                    "right": 801,
+                    "bottom": 292
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "Separator",
+                  "name": "",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 603,
+                    "top": 292,
+                    "right": 800,
+                    "bottom": 298
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                },
+                {
+                  "control_type": "MenuItem",
+                  "name": "ｹｱ記録項目ﾏｽﾀｰ更新",
+                  "automation_id": "",
+                  "class_name": "",
+                  "rectangle": {
+                    "left": 601,
+                    "top": 298,
+                    "right": 801,
+                    "bottom": 320
+                  },
+                  "is_enabled": true,
+                  "is_visible": false,
+                  "depth": 4,
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "control_type": "MenuItem",
+          "name": "ﾊﾞｰｼﾞｮﾝ情報",
+          "automation_id": "",
+          "class_name": "",
+          "rectangle": {
+            "left": 558,
+            "top": 49,
+            "right": 643,
+            "bottom": 69
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        }
+      ]
+    },
+    {
+      "control_type": "TitleBar",
+      "name": "",
+      "automation_id": "",
+      "class_name": "",
+      "rectangle": {
+        "left": 343,
+        "top": 24,
+        "right": 1592,
+        "bottom": 47
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "depth": 1,
+      "children": [
+        {
+          "control_type": "MenuBar",
+          "name": "システム",
+          "automation_id": "MenuBar",
+          "class_name": "",
+          "rectangle": {
+            "left": 332,
+            "top": 29,
+            "right": 354,
+            "bottom": 51
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": [
+            {
+              "control_type": "MenuItem",
+              "name": "システム",
+              "automation_id": "",
+              "class_name": "",
+              "rectangle": {
+                "left": 332,
+                "top": 29,
+                "right": 354,
+                "bottom": 51
+              },
+              "is_enabled": true,
+              "is_visible": true,
+              "depth": 3,
+              "children": []
+            }
+          ]
+        },
+        {
+          "control_type": "Button",
+          "name": "最小化",
+          "automation_id": "",
+          "class_name": "",
+          "rectangle": {
+            "left": 1453,
+            "top": 22,
+            "right": 1500,
+            "bottom": 47
+          },
+          "is_enabled": true,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Button",
+          "name": "最大化",
+          "automation_id": "",
+          "class_name": "",
+          "rectangle": {
+            "left": 1500,
+            "top": 22,
+            "right": 1546,
+            "bottom": 47
+          },
+          "is_enabled": false,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        },
+        {
+          "control_type": "Button",
+          "name": "閉じる",
+          "automation_id": "",
+          "class_name": "",
+          "rectangle": {
+            "left": 1546,
+            "top": 22,
+            "right": 1593,
+            "bottom": 47
+          },
+          "is_enabled": false,
+          "is_visible": true,
+          "depth": 2,
+          "children": []
+        }
+      ]
+    }
+  ]
+}
