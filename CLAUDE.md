@@ -31,11 +31,11 @@ Note: `pythonpath = ["src"]` is configured in pyproject.toml for pytest.
 
 ### What This System Does
 
-Automates the care software "Wiseman System SP" via Python RPA (pywinauto) and syncs extracted data to GCP. The pipeline: **launch Wiseman → login → navigate to report → export CSV → upload to GCS**.
+Automates the care software "Wiseman System SP" via Python RPA (pywinauto) and syncs extracted data to GCP. The pipeline: **launch Wiseman → navigate to report → export CSV → upload to GCS**. Authentication is USB dongle only — no in-app login screen (see ADR-007).
 
 ### Key Architectural Fact
 
-Wiseman is marketed as "ASP" (Application Service Provider) but the client is a **.NET Framework 3.5 native Windows app** (WinForms, MDI), not a browser app. Installed at `C:\Users\{User}\AppData\Local\Programs\WISEMAN\WISEMANVSYSTEM\`. Authentication via USB dongle or License ID.
+Wiseman is marketed as "ASP" (Application Service Provider) but the client is a **.NET Framework 3.5 native Windows app** (WinForms, MDI), not a browser app. Installed at `C:\Users\{User}\AppData\Local\Programs\WISEMAN\WISEMANVSYSTEM\`. Authentication is via physical USB dongle only — the app has no in-app login screen. Launch flow: exe start → dongle auth wait → main window appears directly (ADR-007).
 
 ### Data Flow
 
@@ -56,7 +56,7 @@ WisemanHub (app.py)  orchestrates:
 
 ### Credentials
 
-Wiseman password stored via `keyring` (Windows DPAPI), never in config files. GCP uses service account key file referenced by path in TOML config.
+Wiseman uses USB dongle authentication only — there is no password to store. The `keyring` dependency was removed in ADR-007. GCP uses a service account key file referenced by path in TOML config.
 
 ## Cross-Platform Development
 

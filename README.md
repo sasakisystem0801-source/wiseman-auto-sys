@@ -54,7 +54,7 @@
 | クラウド | GCP (Cloud Storage, BigQuery, Pub/Sub, Cloud Functions) |
 | パッケージング | PyInstaller |
 | 設定 | TOML |
-| 認証情報 | keyring (Windows DPAPI) |
+| 認証 | USBドングルのみ（アプリ内ログイン画面なし。ADR-007） |
 
 ## ディレクトリ構成
 
@@ -63,7 +63,7 @@ wiseman_auto_sys/
 ├── docs/
 │   ├── prd.md                  # Product Requirements Document
 │   ├── wiseman-system-spec.md  # ワイズマン技術仕様書
-│   └── adr/                    # Architecture Decision Records (001-006)
+│   └── adr/                    # Architecture Decision Records (001-007)
 ├── src/wiseman_hub/
 │   ├── app.py                  # オーケストレータ
 │   ├── config.py               # TOML設定ローダー
@@ -86,8 +86,9 @@ wiseman_auto_sys/
   - [002: パッケージングツール](docs/adr/002-packaging-tool.md) — PyInstaller→Nuitka段階移行
   - [003: GCPサービス選定](docs/adr/003-gcp-service-selection.md) — 月額$0-2のFree Tier活用
   - [004: 自動更新メカニズム](docs/adr/004-auto-update-mechanism.md) — GCSマニフェストポーリング
-  - [005: 設定形式](docs/adr/005-config-format.md) — TOML + keyring暗号化
+  - [005: 設定形式](docs/adr/005-config-format.md) — TOML（keyring部分はADR-007で廃止）
   - [006: ASP型自動化戦略](docs/adr/006-asp-automation-strategy.md) — Superseded（参考記録）
+  - [007: 認証設計の確定](docs/adr/007-auth-design-change.md) — USBドングルのみ、アプリ内ログイン画面なし
 
 ## 開発環境
 

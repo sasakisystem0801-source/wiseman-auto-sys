@@ -8,12 +8,9 @@ log_dir = ""  # 空の場合はカレントディレクトリ
 
 [wiseman]
 exe_path = "C:\\Program Files\\Wiseman\\wiseman.exe"
-username = "operator01"
 startup_wait_sec = 15  # 起動・ドングル認証待機秒数
 window_title_pattern = ".*管理システム SP.*"  # メインウィンドウのタイトルパターン
-# パスワードはkeyring (Windows DPAPI) で管理
-# 初回設定:
-#   python -c "import keyring; keyring.set_password('wiseman-hub', 'operator01', 'YOUR_PASSWORD')"
+# 認証はUSBドングルのみ。アプリ内ログイン画面は存在しない（ADR-007参照）
 
 [schedule]
 enabled = false

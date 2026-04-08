@@ -14,7 +14,7 @@ class TestReadGrid:
 
     def test_read_grid_returns_data(self, engine) -> None:
         """DataGridViewからデータを読み取れる。"""
-        engine.launch_and_login(str(MOCK_APP_EXE), "testuser", "testpass")
+        engine.launch(str(MOCK_APP_EXE))
         engine.navigate_menu(["ケア記録", "集計表"])
 
         data = engine.read_grid_data()

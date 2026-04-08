@@ -14,13 +14,13 @@ class RPAEngine(abc.ABC):
     """
 
     @abc.abstractmethod
-    def launch_and_login(self, exe_path: str, username: str, password: str) -> None:
-        """ワイズマンを起動してログインする。
+    def launch(self, exe_path: str) -> None:
+        """ワイズマンを起動する。
 
+        ワイズマンはUSBドングル認証のみで動作し、アプリ内のログイン画面は存在しない。
         1. exe_pathからアプリを起動
         2. USBドングル認証通過を待機
-        3. ログイン画面でユーザー名/パスワード入力
-        4. メインメニュー表示を確認
+        3. メインメニュー表示を確認
         """
 
     @abc.abstractmethod

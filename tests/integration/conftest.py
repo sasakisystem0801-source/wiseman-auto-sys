@@ -72,7 +72,7 @@ def build_mock_app():
 def engine() -> PywinautoEngine:
     """PywinautoEngineインスタンスを生成し、テスト後にクリーンアップする。
 
-    launch_and_login() がアプリ起動を担当するため、fixture ではプロセスを起動しない。
+    launch() がアプリ起動を担当するため、fixture ではプロセスを起動しない。
     テスト終了後に残存プロセスを確実に停止する。
     """
     eng = PywinautoEngine(

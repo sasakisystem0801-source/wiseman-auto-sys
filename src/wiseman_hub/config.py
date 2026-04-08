@@ -14,7 +14,6 @@ from typing import Any
 @dataclass
 class WisemanConfig:
     exe_path: str = ""  # ワイズマンSPの実行ファイルパス
-    username: str = ""
     startup_wait_sec: int = 15  # 起動・ドングル認証待機秒数
     window_title_pattern: str = ".*管理システム SP.*"  # メインウィンドウのタイトルパターン
 

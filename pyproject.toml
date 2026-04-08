@@ -18,8 +18,6 @@ dependencies = [
     # Desktop UI
     "pystray>=0.19.5",
     "Pillow>=10.0.0",
-    # Config & Security
-    "keyring>=25.0.0",
     # Data
     "pandas>=2.2.0",
     # TOML (Python <3.11 fallback)

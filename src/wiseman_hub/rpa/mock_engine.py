@@ -18,7 +18,7 @@ class MockEngine(RPAEngine):
     """
 
     def __init__(self) -> None:
-        self._logged_in = False
+        self._launched = False
         self._current_screen: str = ""
         self._call_log: list[str] = []
 
@@ -27,10 +27,10 @@ class MockEngine(RPAEngine):
         """呼び出し履歴（テスト検証用）"""
         return self._call_log
 
-    def launch_and_login(self, exe_path: str, username: str, password: str) -> None:
-        self._call_log.append(f"launch_and_login({exe_path}, {username})")
-        logger.info("[MOCK] ワイズマン起動・ログイン: %s / %s", exe_path, username)
-        self._logged_in = True
+    def launch(self, exe_path: str) -> None:
+        self._call_log.append(f"launch({exe_path})")
+        logger.info("[MOCK] ワイズマン起動: %s", exe_path)
+        self._launched = True
 
     def navigate_menu(self, menu_path: list[str]) -> None:
         path_str = " → ".join(menu_path)
@@ -71,7 +71,7 @@ class MockEngine(RPAEngine):
     def close_wiseman(self) -> None:
         self._call_log.append("close_wiseman()")
         logger.info("[MOCK] ワイズマン終了")
-        self._logged_in = False
+        self._launched = False
 
     def is_dongle_present(self) -> bool:
         self._call_log.append("is_dongle_present()")

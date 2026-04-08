@@ -10,7 +10,9 @@ namespace WisemanMock
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new LoginForm());
+            // 実機ワイズマンはUSBドングル認証のみでログイン画面がないため、
+            // モックも起動直後に MainForm を直接表示する（ADR-007参照）
+            Application.Run(new MainForm());
         }
     }
 }

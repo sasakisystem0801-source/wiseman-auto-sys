@@ -23,7 +23,6 @@ log_level = "DEBUG"
 [wiseman]
 exe_path = "C:\\\\test\\\\wiseman.exe"
 startup_wait_sec = 15
-username = "testuser"
 
 [gcp]
 project_id = "test-project"
@@ -41,7 +40,7 @@ output_format = "csv"
     config = load_config(config_file)
     assert config.version == "1.0.0"
     assert config.log_level == "DEBUG"
-    assert config.wiseman.username == "testuser"
+    assert config.wiseman.exe_path == "C:\\test\\wiseman.exe"
     assert config.wiseman.startup_wait_sec == 15
     assert config.gcp.project_id == "test-project"
     assert len(config.reports) == 1

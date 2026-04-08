@@ -8,11 +8,11 @@ from wiseman_hub.rpa.mock_engine import MockEngine
 
 
 class TestMockEngine:
-    def test_launch_and_login(self) -> None:
+    def test_launch(self) -> None:
         engine = MockEngine()
-        engine.launch_and_login("C:\\wiseman.exe", "user1", "pass1")
-        assert engine._logged_in is True
-        assert "launch_and_login" in engine.call_log[0]
+        engine.launch("C:\\wiseman.exe")
+        assert engine._launched is True
+        assert "launch" in engine.call_log[0]
 
     def test_navigate_menu(self) -> None:
         engine = MockEngine()
@@ -52,7 +52,7 @@ class TestMockEngine:
 
     def test_call_log_tracks_operations(self) -> None:
         engine = MockEngine()
-        engine.launch_and_login("exe", "u", "p")
+        engine.launch("exe")
         engine.navigate_menu(["メニュー1"])
         engine.is_dongle_present()
         assert len(engine.call_log) == 3
@@ -60,7 +60,7 @@ class TestMockEngine:
     def test_full_pipeline(self, tmp_path: Path) -> None:
         """PoC相当のパイプラインをモックで通しテスト"""
         engine = MockEngine()
-        engine.launch_and_login("C:\\wiseman.exe", "user1", "pass1")
+        engine.launch("C:\\wiseman.exe")
         engine.navigate_menu(["ケア記録", "集計表"])
         csv_path = engine.export_csv(tmp_path)
         assert csv_path is not None
@@ -68,4 +68,4 @@ class TestMockEngine:
         assert len(data) > 0
         engine.close_current_window()
         engine.close_wiseman()
-        assert engine._logged_in is False
+        assert engine._launched is False

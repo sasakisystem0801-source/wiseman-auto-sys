@@ -14,7 +14,7 @@ class TestNavigateMenu:
 
     def test_navigate_to_care_record(self, engine) -> None:
         """ケア記録 → 集計表 でCareRecordFormが開く。"""
-        engine.launch_and_login(str(MOCK_APP_EXE), "testuser", "testpass")
+        engine.launch(str(MOCK_APP_EXE))
         engine.navigate_menu(["ケア記録", "集計表"])
 
         # MDI子ウィンドウ「ケア記録集計表」が存在することを確認

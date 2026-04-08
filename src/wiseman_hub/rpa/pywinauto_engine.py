@@ -62,13 +62,13 @@ class PywinautoEngine(RPAEngine):
 
         return None
 
-    def launch_and_login(self, exe_path: str, username: str, password: str) -> None:
-        """ワイズマンを起動してログインする。
+    def launch(self, exe_path: str) -> None:
+        """ワイズマンを起動する。
 
+        ワイズマンはUSBドングル認証のみで動作し、アプリ内ログイン画面は存在しない（ADR-007）。
         1. exe起動
         2. USBドングル認証待機（startup_wait_sec）
-        3. ログイン画面でユーザー名/パスワード入力
-        4. メインウィンドウ表示を確認
+        3. メインウィンドウ表示を確認
         """
         logger.info("ワイズマン起動: %s", exe_path)
         self._app = Application(backend="uia").start(exe_path)
@@ -77,28 +77,11 @@ class PywinautoEngine(RPAEngine):
             logger.info("ドングル認証待機中 (%d秒)...", self._startup_wait_sec)
             time.sleep(self._startup_wait_sec)
 
-            # ログインウィンドウを検索
-            # モックアプリのセレクタで動作確認済み。
-            # 実機では Inspect.exe / dump_ui.py で正確なセレクタを特定し更新すること。
-            logger.info("ログインウィンドウを検索中...")
-            try:
-                login_window = self._app.window(title_re=".*ログイン.*")
-                login_window.wait("visible", timeout=30)
-
-                # ユーザー名入力
-                login_window.child_window(auto_id="txtUserId").set_edit_text(username)
-                login_window.child_window(auto_id="txtPassword").set_edit_text(password)
-                login_window.child_window(auto_id="btnLogin").click()
-                logger.info("ログイン実行")
-            except ElementNotFoundError:
-                logger.error("ログインウィンドウが見つかりません")
-                raise
-
             # メインウィンドウ表示を待機
             logger.info("メインウィンドウ待機中...")
             self._main_window = self._app.window(title_re=self._window_title_pattern)
             self._main_window.wait("visible", timeout=30)
-            logger.info("ログイン成功: %s", self._main_window.window_text())
+            logger.info("起動成功: %s", self._main_window.window_text())
         except Exception:
             if self._app is not None:
                 with contextlib.suppress(Exception):
@@ -109,7 +92,7 @@ class PywinautoEngine(RPAEngine):
     def navigate_menu(self, menu_path: list[str]) -> None:
         """MDIメニューを階層的に辿って指定画面に遷移する。"""
         if self._main_window is None:
-            raise RuntimeError("メインウィンドウが未接続です。先にlaunch_and_loginを実行してください")
+            raise RuntimeError("メインウィンドウが未接続です。先にlaunchを実行してください")
 
         logger.info("メニュー遷移: %s", " → ".join(menu_path))
 
