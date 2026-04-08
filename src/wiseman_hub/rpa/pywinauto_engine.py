@@ -117,28 +117,34 @@ class PywinautoEngine(RPAEngine):
             raise RuntimeError("ランチャーが未接続です。先に launch() を実行してください")
 
         logger.info("ケア記録システムを選択中...")
-        # Pane はカスタム UserControl として実装されている想定
-        # 実機の name: "通所・訪問リハビリ管理システム SP(ｹｱ記録)" (半角ｹｱ)
-        # モックは全角ケア記録の可能性あり → どちらもマッチする正規表現
-        care_pane = self._launcher_window.child_window(
-            title_re=r".*通所.*[ｹケ][ｱア]記録.*",
-            control_type="Pane",
-        )
-        try:
-            wrapper = care_pane.wait("visible", timeout=10)
-        except (ElementNotFoundError, PywinautoTimeoutError):
-            # Pane として見つからない場合、Button としてフォールバック（モック対応）
-            logger.warning("Pane として見つかりません。Button フォールバック")
-            care_pane = self._launcher_window.child_window(
-                title_re=r".*通所.*[ｹケ][ｱア]記録.*",
-                control_type="Button",
-            )
-            wrapper = care_pane.wait("visible", timeout=10)
+        # 実機はPane(auto_id動的)、モックはPanel+Labelの構造で、UIA の Name プロパティを
+        # 持つのが Pane なのか Text(Label) なのか Button なのかは環境により異なる。
+        # 複数の control_type を順に試して最初にマッチしたものをクリックする。
+        # title は半角カナ "ｹｱ記録" / 全角 "ケア記録" の両方にマッチさせる。
+        title_pattern = r".*通所.*[ｹケ][ｱア]記録.*"
+        wrapper = None
+        last_err: Exception | None = None
+        for ct in ("Pane", "Text", "Button", "Hyperlink"):
+            try:
+                candidate = self._launcher_window.child_window(
+                    title_re=title_pattern,
+                    control_type=ct,
+                )
+                wrapper = candidate.wait("visible", timeout=5)
+                logger.debug("ケア記録要素発見: control_type=%s", ct)
+                break
+            except (ElementNotFoundError, PywinautoTimeoutError) as exc:
+                last_err = exc
+                continue
+        if wrapper is None:
+            raise RuntimeError(
+                f"ケア記録選択要素が見つかりません (pattern={title_pattern!r})"
+            ) from last_err
 
-        # Pane は click() が効かないため、中心座標でマウスクリック
+        # Pane/Text は click() が効かないため、中心座標でマウスクリック
         rect = wrapper.rectangle()
         center = (rect.mid_point().x, rect.mid_point().y)
-        logger.debug("ケア記録 Pane クリック座標: %s", center)
+        logger.debug("ケア記録クリック座標: %s", center)
         mouse.click(coords=center)
 
         # ケア記録メインウィンドウ frmMenu200 を待機
