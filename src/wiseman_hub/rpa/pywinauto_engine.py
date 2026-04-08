@@ -208,7 +208,18 @@ class PywinautoEngine(RPAEngine):
         logger.info("新規登録ボタンをクリック中...")
         btn = self._main_window.child_window(title="新規登録", control_type="Button")
         btn.wait("visible", timeout=10)
-        btn.click()
+        # btn.click() は内部で UIA InvokePattern.Invoke を呼ぶが、このボタンは
+        # クリック直後に MDI 子ウィンドウ frmKihon へ遷移するため Invoke の完了確認
+        # フェーズで元要素が消失し COMError (0x80131503 UIA_E_ELEMENTNOTAVAILABLE)
+        # を投げる。care system 選択と同じく HWND + BM_CLICK で統一する。
+        import ctypes
+        import gc
+        target_hwnd = btn.wrapper_object().handle
+        del btn
+        gc.collect()
+        BM_CLICK = 0x00F5
+        logger.info("新規登録 BM_CLICK: hwnd=0x%x", target_hwnd)
+        ctypes.windll.user32.SendMessageW(target_hwnd, BM_CLICK, 0, 0)
 
         # 新規登録フォーム frmKihon を待機
         # frmKihon は MDI 子ウィンドウとして開くため、Application.window() (top-level only)
