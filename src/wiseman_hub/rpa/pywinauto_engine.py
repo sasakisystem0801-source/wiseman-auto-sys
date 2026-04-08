@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 if sys.platform != "win32":
     raise ImportError("pywinauto_engine はWindows環境でのみ使用できます")
 
-from pywinauto import Application
+from pywinauto import Application, mouse
 from pywinauto.findwindows import ElementNotFoundError
 from pywinauto.timings import TimeoutError as PywinautoTimeoutError
 
@@ -34,6 +34,7 @@ class PywinautoEngine(RPAEngine):
 
     def __init__(self, startup_wait_sec: int = 15, window_title_pattern: str = ".*管理システム SP.*") -> None:
         self._app: Application | None = None
+        self._launcher_window: WindowSpecification | None = None
         self._main_window: WindowSpecification | None = None
         self._startup_wait_sec = startup_wait_sec
         self._window_title_pattern = window_title_pattern
@@ -63,31 +64,110 @@ class PywinautoEngine(RPAEngine):
         return None
 
     def launch(self, exe_path: str) -> None:
-        """ワイズマンを起動する。
+        """ワイズマンを起動する（システム選択ランチャー frmStartUp まで）。
 
         ワイズマンはUSBドングル認証のみで動作し、アプリ内ログイン画面は存在しない（ADR-007）。
-        1. exe起動
-        2. USBドングル認証待機（startup_wait_sec）
-        3. メインウィンドウ表示を確認
+        起動直後に表示されるのはシステム選択ランチャー(frmStartUp)であり、
+        目的のケア記録システムには続けて select_care_system() を呼ぶ必要がある。
+
+        exe_path が .lnk ショートカットの場合、pywinauto の Application.start() は
+        Windows Shell を介してショートカットを解決する。
         """
         logger.info("ワイズマン起動: %s", exe_path)
-        self._app = Application(backend="uia").start(exe_path)
+        is_shortcut = exe_path.lower().endswith(".lnk")
+        if is_shortcut:
+            # Application.start は .exe 前提で .lnk を扱えないため、Shell 経由で解決する。
+            # 起動後、frmStartUp ウィンドウが見えたタイミングで connect() でアタッチする。
+            import subprocess
+            subprocess.Popen(["cmd", "/c", "start", "", exe_path], shell=False)
+            self._app = Application(backend="uia")
+        else:
+            self._app = Application(backend="uia").start(exe_path)
         try:
-            # ドングル認証通過を待機
-            logger.info("ドングル認証待機中 (%d秒)...", self._startup_wait_sec)
+            # ドングル認証とランチャー表示を待機
+            logger.info("ドングル認証・ランチャー表示待機中 (%d秒)...", self._startup_wait_sec)
             time.sleep(self._startup_wait_sec)
 
-            # メインウィンドウ表示を待機
-            logger.info("メインウィンドウ待機中...")
-            self._main_window = self._app.window(title_re=self._window_title_pattern)
-            self._main_window.wait("visible", timeout=30)
-            logger.info("起動成功: %s", self._main_window.window_text())
+            if is_shortcut:
+                # ランチャーウィンドウ(frmStartUp)に直接アタッチする
+                # class_name_re は .NET WinForms のバージョン差で揺れるため使わない
+                logger.info("ランチャープロセスに接続中...")
+                self._app.connect(title_re=r".*ワイズマンシステム.*", timeout=30)
+
+            # システム選択ランチャー frmStartUp を待機
+            logger.info("システム選択ランチャー待機中...")
+            self._launcher_window = self._app.window(auto_id="frmStartUp")
+            self._launcher_window.wait("visible", timeout=30)
+            logger.info("起動成功: %s", self._launcher_window.window_text())
         except Exception:
             if self._app is not None:
                 with contextlib.suppress(Exception):
                     self._app.kill()
                 self._app = None
             raise
+
+    def select_care_system(self) -> None:
+        """システム選択ランチャーから「通所・訪問リハビリ管理システム SP(ケア記録)」を選択する。
+
+        実機ではケア記録の選択項目は Button ではなく Pane（WinForms Panel）として
+        実装されており、auto_id が動的なため title_re で検索する。
+        Pane は UIA の InvokePattern を持たないことが多いため、座標クリックで対応する。
+        """
+        if self._launcher_window is None:
+            raise RuntimeError("ランチャーが未接続です。先に launch() を実行してください")
+
+        logger.info("ケア記録システムを選択中...")
+        # Pane はカスタム UserControl として実装されている想定
+        # 実機の name: "通所・訪問リハビリ管理システム SP(ｹｱ記録)" (半角ｹｱ)
+        # モックは全角ケア記録の可能性あり → どちらもマッチする正規表現
+        care_pane = self._launcher_window.child_window(
+            title_re=r".*通所.*[ｹケ][ｱア]記録.*",
+            control_type="Pane",
+        )
+        try:
+            wrapper = care_pane.wait("visible", timeout=10)
+        except (ElementNotFoundError, PywinautoTimeoutError):
+            # Pane として見つからない場合、Button としてフォールバック（モック対応）
+            logger.warning("Pane として見つかりません。Button フォールバック")
+            care_pane = self._launcher_window.child_window(
+                title_re=r".*通所.*[ｹケ][ｱア]記録.*",
+                control_type="Button",
+            )
+            wrapper = care_pane.wait("visible", timeout=10)
+
+        # Pane は click() が効かないため、中心座標でマウスクリック
+        rect = wrapper.rectangle()
+        center = (rect.mid_point().x, rect.mid_point().y)
+        logger.debug("ケア記録 Pane クリック座標: %s", center)
+        mouse.click(coords=center)
+
+        # ケア記録メインウィンドウ frmMenu200 を待機
+        logger.info("ケア記録メインウィンドウ待機中...")
+        self._main_window = self._app.window(auto_id="frmMenu200")
+        self._main_window.wait("visible", timeout=30)
+        # MDI 子ウィンドウ等の初期化が完了するまで少し待つ
+        time.sleep(1)
+        logger.info("ケア記録システム起動完了: %s", self._main_window.window_text())
+
+    def click_new_registration(self) -> None:
+        """ケア記録メインウィンドウの「新規登録」ボタンをクリックし、新規登録フォームを開く。
+
+        実機の「新規登録」Button は auto_id が動的（例: 395888）なため title で検索する。
+        クリック後、MDI子ウィンドウ frmKihon が開くのを待つ。
+        """
+        if self._main_window is None:
+            raise RuntimeError("メインウィンドウが未接続です。先に select_care_system() を実行してください")
+
+        logger.info("新規登録ボタンをクリック中...")
+        btn = self._main_window.child_window(title="新規登録", control_type="Button")
+        btn.wait("visible", timeout=10)
+        btn.click()
+
+        # 新規登録フォーム frmKihon を待機
+        logger.info("新規登録フォーム待機中...")
+        reg_window = self._app.window(auto_id="frmKihon")
+        reg_window.wait("visible", timeout=10)
+        logger.info("新規登録フォーム表示完了")
 
     def navigate_menu(self, menu_path: list[str]) -> None:
         """MDIメニューを階層的に辿って指定画面に遷移する。"""

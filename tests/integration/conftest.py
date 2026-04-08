@@ -41,11 +41,30 @@ def _find_msbuild() -> str | None:
     return None
 
 
+def _sources_newer_than_exe() -> bool:
+    """モックアプリのソース(.cs/.csproj)が exe より新しければ True。
+
+    既存ビルドのスキップは開発中のソース変更を見逃す原因になる（#3 で実証済み）ため、
+    mtime 比較で必要時のみ再ビルドする。
+    """
+    if not MOCK_APP_EXE.exists():
+        return True
+    exe_mtime = MOCK_APP_EXE.stat().st_mtime
+    source_dir = MOCK_APP_DIR / "WisemanMock"
+    for pattern in ("*.cs", "*.csproj"):
+        for src in source_dir.glob(pattern):
+            if src.stat().st_mtime > exe_mtime:
+                return True
+    return False
+
+
 @pytest.fixture(scope="session", autouse=True)
 def build_mock_app():
-    """テストセッション開始時にモックアプリをビルドする。"""
-    # 既にビルド済みならスキップ
-    if MOCK_APP_EXE.exists():
+    """テストセッション開始時にモックアプリをビルドする。
+
+    ソース(.cs/.csproj)が exe より新しい場合のみ再ビルドする。
+    """
+    if not _sources_newer_than_exe():
         return
 
     if not MOCK_APP_SLN.exists():

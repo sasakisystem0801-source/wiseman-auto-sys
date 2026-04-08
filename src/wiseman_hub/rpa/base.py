@@ -15,12 +15,35 @@ class RPAEngine(abc.ABC):
 
     @abc.abstractmethod
     def launch(self, exe_path: str) -> None:
-        """ワイズマンを起動する。
+        """ワイズマンを起動する（システム選択ランチャーまで）。
 
         ワイズマンはUSBドングル認証のみで動作し、アプリ内のログイン画面は存在しない。
-        1. exe_pathからアプリを起動
-        2. USBドングル認証通過を待機
-        3. メインメニュー表示を確認
+        起動後、最初に表示されるのは「ワイズマンシステムSP」システム選択ランチャー
+        （auto_id=frmStartUp）で、ここから目的のサブシステムを選択する必要がある。
+
+        1. exe_path（.lnk または .exe）からアプリを起動
+        2. USBドングル認証通過を待機（startup_wait_sec）
+        3. システム選択ランチャーウィンドウ(frmStartUp)の表示を確認
+
+        Args:
+            exe_path: ワイズマン起動用のショートカット(.lnk)または実行ファイル(.exe)パス。
+                Windows の場合、.lnk は Shell 経由で解決される。
+        """
+
+    @abc.abstractmethod
+    def select_care_system(self) -> None:
+        """システム選択ランチャーから「通所・訪問リハビリ管理システム SP(ケア記録)」を選択する。
+
+        ランチャー画面の該当Pane（WinForms Panel）をクリックし、
+        ケア記録メインウィンドウ(auto_id=frmMenu200)が開くのを待つ。
+        """
+
+    @abc.abstractmethod
+    def click_new_registration(self) -> None:
+        """ケア記録メインウィンドウの「新規登録」ボタンをクリックし、新規登録フォームを開く。
+
+        クリック後、MDI子ウィンドウ(auto_id=frmKihon)が開くのを待つ。
+        最小動作確認シナリオのためのメソッド。
         """
 
     @abc.abstractmethod

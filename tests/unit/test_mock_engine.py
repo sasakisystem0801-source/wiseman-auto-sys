@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from wiseman_hub.rpa.mock_engine import MockEngine
 
 
@@ -13,6 +15,32 @@ class TestMockEngine:
         engine.launch("C:\\wiseman.exe")
         assert engine._launched is True
         assert "launch" in engine.call_log[0]
+
+    def test_select_care_system_requires_launch(self) -> None:
+        engine = MockEngine()
+        with pytest.raises(RuntimeError, match="先に launch"):
+            engine.select_care_system()
+
+    def test_select_care_system_after_launch(self) -> None:
+        engine = MockEngine()
+        engine.launch("C:\\wiseman.exe")
+        engine.select_care_system()
+        assert engine._care_system_selected is True
+        assert any("select_care_system" in c for c in engine.call_log)
+
+    def test_click_new_registration_requires_select(self) -> None:
+        engine = MockEngine()
+        engine.launch("C:\\wiseman.exe")
+        with pytest.raises(RuntimeError, match="先に select_care_system"):
+            engine.click_new_registration()
+
+    def test_click_new_registration_after_select(self) -> None:
+        engine = MockEngine()
+        engine.launch("C:\\wiseman.exe")
+        engine.select_care_system()
+        engine.click_new_registration()
+        assert engine._registration_opened is True
+        assert any("click_new_registration" in c for c in engine.call_log)
 
     def test_navigate_menu(self) -> None:
         engine = MockEngine()

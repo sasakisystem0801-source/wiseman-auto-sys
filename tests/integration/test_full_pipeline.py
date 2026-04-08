@@ -17,8 +17,9 @@ class TestFullPipeline:
     def test_full_rpa_pipeline(self, engine, tmp_path: Path) -> None:
         """RPAパイプライン全体が一連で成功する。"""
 
-        # Step 1: 起動（失敗時はlaunchが例外を投げる）
+        # Step 1: 起動 → ランチャー → ケア記録選択（失敗時は例外を投げる）
         engine.launch(str(MOCK_APP_EXE))
+        engine.select_care_system()
 
         # Step 2: メニュー遷移
         engine.navigate_menu(["ケア記録", "集計表"])

@@ -39,7 +39,13 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="LauncherForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="MainForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="NewRegistrationForm.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="CareRecordForm.cs">

@@ -5,11 +5,13 @@ using System.Windows.Forms;
 namespace WisemanMock
 {
     /// <summary>
-    /// MDI親ウィンドウ。pywinauto セレクタ: title_re=".*管理システム SP.*"
+    /// ケア記録メインウィンドウ（MDI親）。実機の "frmMenu200" に対応。
+    /// pywinauto セレクタ: auto_id="frmMenu200", title_re=".*管理システム SP.*"
     /// </summary>
     public class MainForm : Form
     {
         private MenuStrip mainMenu;
+        private Button btnNewRegistration;
         private Button btnExit;
         private StatusStrip statusBar;
         private ToolStripStatusLabel statusLabel;
@@ -21,6 +23,7 @@ namespace WisemanMock
 
         private void InitializeComponent()
         {
+            this.Name = "frmMenu200";
             this.Text = "通所・訪問リハビリ管理システム SP(ケア記録) [テスト施設]";
             this.Size = new Size(1024, 768);
             this.IsMdiContainer = true;
@@ -40,6 +43,16 @@ namespace WisemanMock
 
             mainMenu.Items.AddRange(new ToolStripItem[] { menuCareRecord, menuMaster });
 
+            // 新規登録 Button（実機では利用者台帳画面の左ナビゲーション）
+            btnNewRegistration = new Button
+            {
+                Name = "btnNewRegistration",
+                Text = "新規登録",
+                Size = new Size(150, 40),
+                Location = new Point(30, 50)
+            };
+            btnNewRegistration.Click += BtnNewRegistration_Click;
+
             // Exit button
             btnExit = new Button
             {
@@ -52,11 +65,12 @@ namespace WisemanMock
 
             // StatusStrip
             statusBar = new StatusStrip { Name = "statusBar" };
-            statusLabel = new ToolStripStatusLabel("ログイン中");
+            statusLabel = new ToolStripStatusLabel("準備完了");
             statusBar.Items.Add(statusLabel);
 
             this.MainMenuStrip = mainMenu;
             this.Controls.Add(mainMenu);
+            this.Controls.Add(btnNewRegistration);
             this.Controls.Add(statusBar);
             this.Controls.Add(btnExit);
 
@@ -82,6 +96,13 @@ namespace WisemanMock
             var careForm = new CareRecordForm { MdiParent = this };
             careForm.Show();
             statusLabel.Text = "ケア記録集計表を表示中";
+        }
+
+        private void BtnNewRegistration_Click(object sender, EventArgs e)
+        {
+            var regForm = new NewRegistrationForm { MdiParent = this };
+            regForm.Show();
+            statusLabel.Text = "新規登録フォームを表示中";
         }
 
         private void BtnExit_Click(object sender, EventArgs e)

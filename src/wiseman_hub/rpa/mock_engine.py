@@ -19,6 +19,8 @@ class MockEngine(RPAEngine):
 
     def __init__(self) -> None:
         self._launched = False
+        self._care_system_selected = False
+        self._registration_opened = False
         self._current_screen: str = ""
         self._call_log: list[str] = []
 
@@ -31,6 +33,20 @@ class MockEngine(RPAEngine):
         self._call_log.append(f"launch({exe_path})")
         logger.info("[MOCK] ワイズマン起動: %s", exe_path)
         self._launched = True
+
+    def select_care_system(self) -> None:
+        self._call_log.append("select_care_system()")
+        logger.info("[MOCK] ケア記録システム選択")
+        if not self._launched:
+            raise RuntimeError("先に launch() を実行してください")
+        self._care_system_selected = True
+
+    def click_new_registration(self) -> None:
+        self._call_log.append("click_new_registration()")
+        logger.info("[MOCK] 新規登録ボタンクリック")
+        if not self._care_system_selected:
+            raise RuntimeError("先に select_care_system() を実行してください")
+        self._registration_opened = True
 
     def navigate_menu(self, menu_path: list[str]) -> None:
         path_str = " → ".join(menu_path)
