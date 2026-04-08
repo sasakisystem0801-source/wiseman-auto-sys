@@ -33,43 +33,47 @@ Start-Sleep -Seconds 1
 uv run pytest tests/integration -v -m integration --timeout=120
 
 # 個別テスト実行
-uv run pytest tests/integration/test_login.py -v --timeout=120
+uv run pytest tests/integration/test_launch.py -v --timeout=120
 uv run pytest tests/integration/test_navigate_menu.py -v --timeout=120
 uv run pytest tests/integration/test_read_grid.py -v --timeout=120
 uv run pytest tests/integration/test_export_csv.py -v --timeout=120
 uv run pytest tests/integration/test_close_window.py -v --timeout=120
+uv run pytest tests/integration/test_new_registration_flow.py -v --timeout=120
 uv run pytest tests/integration/test_full_pipeline.py -v --timeout=120
 ```
 
 ## 推奨実行順序
 
-依存関係に基づく推奨順序:
+依存関係に基づく推奨順序（ADR-007: USB ドングル認証のみ、ログイン画面なし）:
 
-1. **test_login.py** — 基本: アプリ起動、ログイン
+1. **test_launch.py** — 基本: アプリ起動、メインウィンドウ出現確認
 2. **test_navigate_menu.py** — メニュー操作
 3. **test_read_grid.py** — DataGridView読み取り
 4. **test_export_csv.py** — CSV出力
 5. **test_close_window.py** — ウィンドウ閉じる・終了
-6. **test_full_pipeline.py** — E2Eパイプライン
+6. **test_new_registration_flow.py** — 新規登録フロー
+7. **test_full_pipeline.py** — E2Eパイプライン
 
 ## よくある失敗パターンと解決方法
 
-### パターン1: `launch_and_login` 失敗
+### パターン1: `launch` 失敗
 
 **症状:**
 ```
-ElementNotFoundError: ログインウィンドウが見つかりません
+ElementNotFoundError: メインウィンドウが見つかりません
 ```
 
 **原因:**
 - モックアプリが正しく起動していない
 - ウィンドウタイトルが想定と異なる
+- 実機では USB ドングルが未接続
 
 **解決方法:**
 ```powershell
 # モックアプリを手動起動してUI検査
 Inspect.exe  # Windows標準ツール
 # WisemanMock.exe のウィンドウタイトルとコントロールを確認
+# 実機の場合: USB ドングルの接続を確認してから exe を起動
 ```
 
 ### パターン2: `navigate_menu` 失敗
@@ -204,9 +208,9 @@ from tests.integration.conftest import MOCK_APP_EXE
 
 engine = PywinautoEngine()
 try:
-    # ステップ1: ログイン
-    engine.launch_and_login(str(MOCK_APP_EXE), "testuser", "testpass")
-    print("OK: Login")
+    # ステップ1: 起動（USB ドングル認証、ログイン画面なし - ADR-007）
+    engine.launch(str(MOCK_APP_EXE))
+    print("OK: Launch")
 
     # ステップ2: メニュー遷移
     engine.navigate_menu(["ケア記録", "集計表"])
@@ -270,8 +274,8 @@ python scripts/dump_ui.py --text
 ## 次のステップ
 
 ### 全7テスト通過後:
-1. Issue #3 進行: 実ワイズマンアプリでUIカタログ取得
-2. Issue #6 進行: E2Eパイプライン実装
+1. Issue #3 進行: 実ワイズマンアプリでUIカタログ取得（smoke_real.py 利用）
+2. Issue #6 進行: E2Eパイプライン実装（launch → navigate → export_csv → GCS upload）
 
 ### GitHub Actions CI安定化（任意）:
 - 統合テストをローカルテストとして分類し、CIではスキップ
