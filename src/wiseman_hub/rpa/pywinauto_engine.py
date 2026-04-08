@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 if sys.platform != "win32":
     raise ImportError("pywinauto_engine はWindows環境でのみ使用できます")
 
-from pywinauto import Application, mouse
+from pywinauto import Application
 from pywinauto.findwindows import ElementNotFoundError
 from pywinauto.timings import TimeoutError as PywinautoTimeoutError
 
@@ -160,14 +160,24 @@ class PywinautoEngine(RPAEngine):
                 f"ケア記録選択要素が見つかりません (pattern={title_pattern!r})"
             ) from last_err
 
-        # UIA 参照を完全に解放してから mouse.click を呼ぶ
-        # （UIA COM ハンドルを保持したまま mouse.click すると
-        #  RPC_E_CANTCALLOUT_ININPUTSYNCCALL (0x8001010d) が発生する）
+        # UIA 参照を完全に解放してから Win32 API で直接クリックする
+        # （UIA COM ハンドル保持中に mouse.click すると
+        #  RPC_E_CANTCALLOUT_ININPUTSYNCCALL (0x8001010d) が発生するため、
+        #  ctypes 経由の mouse_event で COM を迂回する）
+        import ctypes
         import gc
         gc.collect()
-        time.sleep(0.1)
-        logger.debug("ケア記録クリック: %s", coords)
-        mouse.click(coords=coords)
+        time.sleep(0.2)
+        logger.debug("ケア記録クリック (Win32): %s", coords)
+        cx, cy = coords
+        user32 = ctypes.windll.user32
+        user32.SetCursorPos(cx, cy)
+        time.sleep(0.05)
+        MOUSEEVENTF_LEFTDOWN = 0x0002
+        MOUSEEVENTF_LEFTUP = 0x0004
+        user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        time.sleep(0.05)
+        user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
         time.sleep(0.5)
 
         # ケア記録メインウィンドウ frmMenu200 を待機
