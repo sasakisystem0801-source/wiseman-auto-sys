@@ -1,0 +1,291 @@
+Control Identifiers:
+
+Dialog - 'ワイズマンシステムSP'    (L324, T21, R1596, B1006)
+['Dialog', 'ワイズマンシステムSPDialog', 'ワイズマンシステムSP']
+child_window(title="ワイズマンシステムSP", auto_id="frmStartUp", control_type="Window")
+   | 
+   | Pane - ''    (L959, T155, R1579, B995)
+   | ['通所・訪問リハビリ管理システム SP(ｹｱ記録)Pane', 'Pane', 'Pane0', 'Pane1', '通所・訪問リハビリ管理システム SP(ｹｱ記録)Pane0', '通所・訪問リハビリ管理システム SP(ｹｱ記録)Pane1']
+   | child_window(auto_id="tabAspInfo", control_type="Pane")
+   |    | 
+   |    | Pane - 'お知らせ'    (L963, T180, R1575, B991)
+   |    | ['Pane2', 'お知らせ', 'お知らせPane']
+   |    | child_window(title="お知らせ", auto_id="4915308", control_type="Pane")
+   |    |    | 
+   |    |    | Edit - ''    (L966, T183, R1572, B988)
+   |    |    | ['通所・訪問リハビリ管理システム SP(ｹｱ記録)Edit', 'Edit']
+   |    |    | child_window(auto_id="2230440", control_type="Edit")
+   |    |    |    | 
+   |    |    |    | ScrollBar - '垂直'    (L1553, T185, R1570, B986)
+   |    |    |    | ['ScrollBar', '垂直', '垂直ScrollBar']
+   |    |    |    | child_window(title="垂直", auto_id="NonClientVerticalScrollBar", control_type="ScrollBar")
+   |    |    |    |    | 
+   |    |    |    |    | Button - '1 行上'    (L1553, T185, R1570, B202)
+   |    |    |    |    | ['1 行上Button', 'Button', '1 行上', 'Button0', 'Button1']
+   |    |    |    |    | child_window(title="1 行上", auto_id="UpButton", control_type="Button")
+   |    |    |    |    | 
+   |    |    |    |    | Thumb - '表示位置'    (L1553, T202, R1570, B706)
+   |    |    |    |    | ['表示位置Thumb', '表示位置', 'Thumb']
+   |    |    |    |    | child_window(title="表示位置", auto_id="ScrollbarThumb", control_type="Thumb")
+   |    |    |    |    | 
+   |    |    |    |    | Button - '下へドラッグ'    (L1553, T706, R1570, B969)
+   |    |    |    |    | ['下へドラッグ', '下へドラッグButton', 'Button2']
+   |    |    |    |    | child_window(title="下へドラッグ", auto_id="DownPageButton", control_type="Button")
+   |    |    |    |    | 
+   |    |    |    |    | Button - '1 行下'    (L1553, T969, R1570, B986)
+   |    |    |    |    | ['1 行下Button', 'Button3', '1 行下']
+   |    |    |    |    | child_window(title="1 行下", auto_id="DownButton", control_type="Button")
+   |    |    |    | 
+   |    |    |    | Hyperlink - 'https://support.wiseman.co.jp/om/?Param=win10'    (L969, T256, R1298, B273)
+   |    |    |    | ['https://support.wiseman.co.jp/om/?Param=win10Hyperlink', 'Hyperlink', 'https://support.wiseman.co.jp/om/?Param=win10', 'Hyperlink0', 'Hyperlink1']
+   |    |    |    | child_window(title="https://support.wiseman.co.jp/om/?Param=win10", control_type="Hyperlink")
+   |    |    |    | 
+   |    |    |    | Hyperlink - 'https://support.wiseman.co.jp/om/?Param=info_qa2604'    (L969, T350, R1337, B367)
+   |    |    |    | ['https://support.wiseman.co.jp/om/?Param=info_qa2604', 'https://support.wiseman.co.jp/om/?Param=info_qa2604Hyperlink', 'Hyperlink2']
+   |    |    |    | child_window(title="https://support.wiseman.co.jp/om/?Param=info_qa2604", control_type="Hyperlink")
+   |    |    |    | 
+   |    |    |    | Hyperlink - 'https://support.wiseman.co.jp/om/?Param=info_ver2086'    (L969, T478, R1343, B495)
+   |    |    |    | ['https://support.wiseman.co.jp/om/?Param=info_ver2086Hyperlink', 'https://support.wiseman.co.jp/om/?Param=info_ver2086', 'Hyperlink3']
+   |    |    |    | child_window(title="https://support.wiseman.co.jp/om/?Param=info_ver2086", control_type="Hyperlink")
+   |    |    |    | 
+   |    |    |    | Hyperlink - 'https://support.wiseman.co.jp/om/?Param=careplandata'    (L969, T565, R1343, B582)
+   |    |    |    | ['https://support.wiseman.co.jp/om/?Param=careplandata', 'https://support.wiseman.co.jp/om/?Param=careplandataHyperlink', 'Hyperlink4']
+   |    |    |    | child_window(title="https://support.wiseman.co.jp/om/?Param=careplandata", control_type="Hyperlink")
+   |    |    |    | 
+   |    |    |    | Hyperlink - 'https://support.wiseman.co.jp/om/?Param=systemnavi'    (L969, T653, R1333, B670)
+   |    |    |    | ['https://support.wiseman.co.jp/om/?Param=systemnavi', 'https://support.wiseman.co.jp/om/?Param=systemnaviHyperlink', 'Hyperlink5']
+   |    |    |    | child_window(title="https://support.wiseman.co.jp/om/?Param=systemnavi", control_type="Hyperlink")
+   |    |    |    | 
+   |    |    |    | Hyperlink - 'https://support.wiseman.co.jp/om/?Param=krgr_sc'    (L0, T0, R0, B0)
+   |    |    |    | ['https://support.wiseman.co.jp/om/?Param=krgr_sc', 'https://support.wiseman.co.jp/om/?Param=krgr_scHyperlink', 'Hyperlink6']
+   |    |    |    | child_window(title="https://support.wiseman.co.jp/om/?Param=krgr_sc", control_type="Hyperlink")
+   |    |    |    | 
+   |    |    |    | Hyperlink - 'https://x.gd/fu2PR'    (L0, T0, R0, B0)
+   |    |    |    | ['https://x.gd/fu2PR', 'https://x.gd/fu2PRHyperlink', 'Hyperlink7']
+   |    |    |    | child_window(title="https://x.gd/fu2PR", control_type="Hyperlink")
+   |    |    |    | 
+   |    |    |    | Hyperlink - 'https://x.gd/125AS'    (L0, T0, R0, B0)
+   |    |    |    | ['https://x.gd/125AS', 'https://x.gd/125ASHyperlink', 'Hyperlink8']
+   |    |    |    | child_window(title="https://x.gd/125AS", control_type="Hyperlink")
+   | 
+   | Pane - ''    (L331, T155, R951, B320)
+   | ['Pane3', '                     システム選択メニューPane', '                     システム選択メニューPane0', '                     システム選択メニューPane1']
+   | child_window(auto_id="tabSystem", control_type="Pane")
+   |    | 
+   |    | Pane - 'メニュー1'    (L335, T180, R947, B316)
+   |    | ['Pane4', 'メニュー1', 'メニュー1Pane']
+   |    | child_window(title="メニュー1", auto_id="2752542", control_type="Pane")
+   |    |    | 
+   |    |    | Pane - ''    (L343, T188, R923, B244)
+   |    |    | ['Pane5', '                     システム選択メニューPane2']
+   |    |    | child_window(auto_id="657694", control_type="Pane")
+   |    |    |    | 
+   |    |    |    | Pane - ''    (L391, T184, R776, B248)
+   |    |    |    | ['Pane6', 'ささき整形外科デイケアセンターPane']
+   |    |    |    | child_window(auto_id="1640452", control_type="Pane")
+   |    |    |    |    | 
+   |    |    |    |    | Static - 'ささき整形外科デイケアセンター'    (L391, T184, R616, B216)
+   |    |    |    |    | ['ささき整形外科デイケアセンター', 'Static', 'ささき整形外科デイケアセンターStatic', 'Static0', 'Static1']
+   |    |    |    |    | child_window(title="ささき整形外科デイケアセンター", auto_id="854304", control_type="Text")
+   |    |    |    |    | 
+   |    |    |    |    | Static - '通所・訪問リハビリ管理システム SP(ｹｱ記録)'    (L391, T216, R776, B248)
+   |    |    |    |    | ['通所・訪問リハビリ管理システム SP(ｹｱ記録)', 'Static2', '通所・訪問リハビリ管理システム SP(ｹｱ記録)Static', '通所・訪問リハビリ管理システム SP(ｹｱ記録)0', '通所・訪問リハビリ管理システム SP(ｹｱ記録)1']
+   |    |    |    |    | child_window(title="通所・訪問リハビリ管理システム SP(ｹｱ記録)", auto_id="2427052", control_type="Text")
+   |    |    |    | 
+   |    |    |    | Pane - '通所・訪問リハビリ管理システム SP(ｹｱ記録)'    (L351, T200, R383, B232)
+   |    |    |    | ['通所・訪問リハビリ管理システム SP(ｹｱ記録)Pane2', 'Pane7', '通所・訪問リハビリ管理システム SP(ｹｱ記録)2']
+   |    |    |    | child_window(title="通所・訪問リハビリ管理システム SP(ｹｱ記録)", auto_id="3342982", control_type="Pane")
+   |    |    | 
+   |    |    | Pane - ''    (L343, T252, R923, B308)
+   |    |    | ['通所・訪問リハビリ管理システム SP(ｹｱ記録)Pane3', 'Pane8']
+   |    |    | child_window(auto_id="592138", control_type="Pane")
+   |    |    |    | 
+   |    |    |    | Pane - ''    (L391, T264, R667, B296)
+   |    |    |    | ['通所・訪問リハビリ管理システム SP(ｹｱ記録)Pane4', 'Pane9']
+   |    |    |    | child_window(auto_id="526568", control_type="Pane")
+   |    |    |    |    | 
+   |    |    |    |    | Static - '医療・介護連携サービス　MeLL+'    (L391, T264, R667, B296)
+   |    |    |    |    | ['医療・介護連携サービス\u3000MeLL+Static', '医療・介護連携サービス\u3000MeLL+', 'Static3', '医療・介護連携サービス\u3000MeLL+0', '医療・介護連携サービス\u3000MeLL+1']
+   |    |    |    |    | child_window(title="医療・介護連携サービス　MeLL+", auto_id="1247430", control_type="Text")
+   |    |    |    | 
+   |    |    |    | Pane - '医療・介護連携サービス　MeLL+'    (L351, T264, R383, B296)
+   |    |    |    | ['Pane10', '医療・介護連携サービス\u3000MeLL+Pane', '医療・介護連携サービス\u3000MeLL+2']
+   |    |    |    | child_window(title="医療・介護連携サービス　MeLL+", auto_id="854158", control_type="Pane")
+   | 
+   | Button - 'ｻﾎﾟｰﾄｻｲﾄ\r\nカルガル'    (L1199, T87, R1327, B139)
+   | ['ｻﾎﾟｰﾄｻｲﾄ\r\nカルガルButton', 'ｻﾎﾟｰﾄｻｲﾄ\r\nカルガル', 'Button4']
+   | child_window(title="ｻﾎﾟｰﾄｻｲﾄ\r\nカルガル", auto_id="btnWebLink1", control_type="Button")
+   | 
+   | Button - 'バージョンＵＰ\r\n情報'    (L1067, T87, R1195, B139)
+   | ['バージョンＵＰ\r\n情報Button', 'バージョンＵＰ\r\n情報', 'Button5']
+   | child_window(title="バージョンＵＰ\r\n情報", auto_id="btnWebLink2", control_type="Button")
+   | 
+   | Button - 'カルガル\r\nＱ＆Ａ'    (L935, T87, R1063, B139)
+   | ['カルガル\r\nＱ＆Ａ', 'Button6', 'カルガル\r\nＱ＆ＡButton']
+   | child_window(title="カルガル\r\nＱ＆Ａ", auto_id="btnWebLink3", control_type="Button")
+   | 
+   | Button - '印　刷'    (L1331, T87, R1459, B139)
+   | ['印\u3000刷Button', 'Button7', '印\u3000刷']
+   | child_window(title="印　刷", auto_id="btnPrint", control_type="Button")
+   | 
+   | Button - '終　了'    (L1463, T87, R1591, B139)
+   | ['終\u3000了Button', '終\u3000了', 'Button8']
+   | child_window(title="終　了", auto_id="btnClose", control_type="Button")
+   | 
+   | Pane - ''    (L327, T83, R1593, B143)
+   | ['Pane11', '                     システム選択メニューPane3']
+   | child_window(auto_id="uscHeader", control_type="Pane")
+   |    | 
+   |    | Static - '                     システム選択メニュー'    (L328, T84, R1592, B142)
+   |    | ['                     システム選択メニューStatic', '                     システム選択メニュー', 'Static4']
+   |    | child_window(title="                     システム選択メニュー", auto_id="lblHeaderTitle", control_type="Text")
+   | 
+   | Toolbar - 'ToolStrip1'    (L327, T47, R1593, B83)
+   | ['ToolStrip1Toolbar', 'Toolbar', 'ToolStrip1']
+   | child_window(title="ToolStrip1", auto_id="tspMenu", control_type="ToolBar")
+   |    | 
+   |    | MenuItem - 'ツール'    (L327, T48, R396, B81)
+   |    | ['ツール', 'MenuItem', 'ツールMenuItem', 'MenuItem0', 'MenuItem1']
+   |    | child_window(title="ツール", control_type="MenuItem")
+   |    |    | 
+   |    |    | MenuItem - 'システム選択メニュー設定'    (L327, T82, R675, B104)
+   |    |    | ['システム選択メニュー設定MenuItem', 'システム選択メニュー設定', 'MenuItem2']
+   |    |    | child_window(title="システム選択メニュー設定", control_type="MenuItem")
+   |    |    | 
+   |    |    | MenuItem - 'セキュリティ設定'    (L327, T104, R595, B126)
+   |    |    | ['セキュリティ設定MenuItem', 'セキュリティ設定', 'MenuItem3']
+   |    |    | child_window(title="セキュリティ設定", control_type="MenuItem")
+   |    |    | 
+   |    |    | MenuItem - 'ログ管理'    (L327, T126, R595, B148)
+   |    |    | ['ログ管理MenuItem', 'MenuItem4', 'ログ管理']
+   |    |    | child_window(title="ログ管理", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - 'ログ抽出'    (L268, T48, R408, B70)
+   |    |    |    | ['MenuItem5', 'ログ抽出MenuItem', 'ログ抽出']
+   |    |    |    | child_window(title="ログ抽出", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - 'ログ削除'    (L268, T70, R408, B92)
+   |    |    |    | ['ログ削除', 'MenuItem6', 'ログ削除MenuItem']
+   |    |    |    | child_window(title="ログ削除", control_type="MenuItem")
+   |    |    | 
+   |    |    | MenuItem - 'サポートサイトカルガル'    (L327, T148, R595, B170)
+   |    |    | ['MenuItem7', 'サポートサイトカルガルMenuItem', 'サポートサイトカルガル']
+   |    |    | child_window(title="サポートサイトカルガル", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '表示'    (L595, T150, R735, B192)
+   |    |    |    | ['表示', '表示MenuItem', 'MenuItem8']
+   |    |    |    | child_window(title="表示", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - '非表示'    (L595, T192, R735, B234)
+   |    |    |    | ['非表示', '非表示MenuItem', 'MenuItem9']
+   |    |    |    | child_window(title="非表示", control_type="MenuItem")
+   |    |    | 
+   |    |    | MenuItem - '外部ツール起動'    (L327, T170, R595, B192)
+   |    |    | ['外部ツール起動', '外部ツール起動MenuItem', 'MenuItem10']
+   |    |    | child_window(title="外部ツール起動", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - 'ON'    (L595, T172, R711, B214)
+   |    |    |    | ['ON', 'MenuItem11', 'ONMenuItem', 'ON0', 'ON1', 'ONMenuItem0', 'ONMenuItem1']
+   |    |    |    | child_window(title="ON", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - 'OFF'    (L595, T214, R711, B256)
+   |    |    |    | ['MenuItem12', 'OFF', 'OFFMenuItem', 'OFF0', 'OFF1', 'OFFMenuItem0', 'OFFMenuItem1']
+   |    |    |    | child_window(title="OFF", control_type="MenuItem")
+   |    |    | 
+   |    |    | MenuItem - '画面サイズ自動調整'    (L327, T192, R675, B214)
+   |    |    | ['MenuItem13', '画面サイズ自動調整MenuItem', '画面サイズ自動調整']
+   |    |    | child_window(title="画面サイズ自動調整", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - 'ON'    (L675, T194, R791, B236)
+   |    |    |    | ['ON2', 'MenuItem14', 'ONMenuItem2']
+   |    |    |    | child_window(title="ON", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - 'OFF'    (L675, T236, R791, B278)
+   |    |    |    | ['MenuItem15', 'OFF2', 'OFFMenuItem2']
+   |    |    |    | child_window(title="OFF", control_type="MenuItem")
+   |    |    | 
+   |    |    | MenuItem - '環境設定'    (L327, T214, R675, B236)
+   |    |    | ['環境設定MenuItem', '環境設定', 'MenuItem16']
+   |    |    | child_window(title="環境設定", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - 'クライアント設定'    (L268, T158, R472, B180)
+   |    |    |    | ['MenuItem17', 'クライアント設定', 'クライアント設定MenuItem']
+   |    |    |    | child_window(title="クライアント設定", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - 'MeLL+同期設定'    (L268, T180, R472, B202)
+   |    |    |    | ['MeLL+同期設定', 'MeLL+同期設定MenuItem', 'MenuItem18']
+   |    |    |    | child_window(title="MeLL+同期設定", control_type="MenuItem")
+   |    |    | 
+   |    |    | MenuItem - 'ケアプラン標準仕様連携ツール'    (L327, T236, R675, B258)
+   |    |    | ['ケアプラン標準仕様連携ツールMenuItem', 'ケアプラン標準仕様連携ツール', 'MenuItem19']
+   |    |    | child_window(title="ケアプラン標準仕様連携ツール", control_type="MenuItem")
+   |    |    | 
+   |    |    | MenuItem - '帳票印刷自動調整'    (L327, T258, R675, B280)
+   |    |    | ['MenuItem20', '帳票印刷自動調整MenuItem', '帳票印刷自動調整']
+   |    |    | child_window(title="帳票印刷自動調整", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - 'ON'    (L675, T260, R791, B302)
+   |    |    |    | ['ON3', 'MenuItem21', 'ONMenuItem3']
+   |    |    |    | child_window(title="ON", control_type="MenuItem")
+   |    |    |    | 
+   |    |    |    | MenuItem - 'OFF'    (L675, T302, R791, B344)
+   |    |    |    | ['MenuItem22', 'OFF3', 'OFFMenuItem3']
+   |    |    |    | child_window(title="OFF", control_type="MenuItem")
+   |    | 
+   |    | Separator - ''    (L396, T47, R402, B83)
+   |    | ['Separator', 'Separator0', 'Separator1']
+   |    | 
+   |    | Button - '暫定請求ツール'    (L402, T48, R526, B81)
+   |    | ['暫定請求ツール', '暫定請求ツールButton', 'Button9']
+   |    | child_window(title="暫定請求ツール", control_type="Button")
+   |    | 
+   |    | Separator - ''    (L526, T47, R532, B83)
+   |    | ['Separator2']
+   |    | 
+   |    | Button - '拡大率 100%'    (L532, T48, R632, B81)
+   |    | ['拡大率 100%Button', '拡大率 100%', 'Button10']
+   |    | child_window(title="拡大率 100%", control_type="Button")
+   |    | 
+   |    | Button - 'バージョン'    (L1500, T48, R1592, B81)
+   |    | ['バージョン', 'バージョンButton', 'Button11']
+   |    | child_window(title="バージョン", control_type="Button")
+   |    | 
+   |    | Separator - ''    (L1494, T47, R1500, B83)
+   |    | ['Separator3']
+   |    | 
+   |    | Button - 'ヘルプ'    (L1434, T48, R1494, B81)
+   |    | ['ヘルプButton', 'ヘルプ', 'Button12']
+   |    | child_window(title="ヘルプ", control_type="Button")
+   |    | 
+   |    | Separator - ''    (L1428, T47, R1434, B83)
+   |    | ['Separator4']
+   |    | 
+   |    | Button - '情報提供ページ'    (L1274, T48, R1428, B81)
+   |    | ['情報提供ページButton', '情報提供ページ', 'Button13']
+   |    | child_window(title="情報提供ページ", control_type="Button")
+   |    | 
+   |    | Separator - ''    (L1268, T47, R1274, B83)
+   |    | ['Separator5']
+   | 
+   | TitleBar - ''    (L343, T24, R1593, B47)
+   | ['TitleBar']
+   |    | 
+   |    | Menu - 'システム'    (L332, T29, R354, B51)
+   |    | ['Menu', 'システム', 'システムMenu', 'システム0', 'システム1']
+   |    | child_window(title="システム", auto_id="MenuBar", control_type="MenuBar")
+   |    |    | 
+   |    |    | MenuItem - 'システム'    (L332, T29, R354, B51)
+   |    |    | ['システム2', 'MenuItem23', 'システムMenuItem']
+   |    |    | child_window(title="システム", control_type="MenuItem")
+   |    | 
+   |    | Button - '最小化'    (L1454, T22, R1501, B47)
+   |    | ['最小化Button', '最小化', 'Button14']
+   |    | child_window(title="最小化", control_type="Button")
+   |    | 
+   |    | Button - '最大化'    (L1501, T22, R1547, B47)
+   |    | ['最大化', '最大化Button', 'Button15']
+   |    | child_window(title="最大化", control_type="Button")
+   |    | 
+   |    | Button - '閉じる'    (L1547, T22, R1594, B47)
+   |    | ['閉じるButton', '閉じる', 'Button16']
+   |    | child_window(title="閉じる", control_type="Button")

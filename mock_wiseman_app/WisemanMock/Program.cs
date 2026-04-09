@@ -10,7 +10,9 @@ namespace WisemanMock
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new LoginForm());
+            // 実機ワイズマンはUSBドングル認証後に「ワイズマンシステムSP」ランチャー(frmStartUp)
+            // が開く。モックも同様にランチャーから起動する（ADR-007）。
+            Application.Run(new LauncherForm());
         }
     }
 }

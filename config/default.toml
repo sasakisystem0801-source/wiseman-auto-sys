@@ -7,13 +7,17 @@ log_level = "INFO"
 log_dir = ""  # 空の場合はカレントディレクトリ
 
 [wiseman]
-exe_path = "C:\\Program Files\\Wiseman\\wiseman.exe"
-username = "operator01"
+# exe_path は環境ごとに変更必須（クライアント配布時は設置先の実パスに書き換える）
+# 実機はデスクトップ上の .lnk ショートカット経由で起動する例:
+#   exe_path = "C:\\Users\\<USER>\\OneDrive\\デスクトップ\\ワイズマンASPサービス起動_O.lnk"
+# .exe を直接指定することも可能:
+#   exe_path = "C:\\Program Files\\Wiseman\\wiseman.exe"
+exe_path = ""  # 環境ごとに設定する
 startup_wait_sec = 15  # 起動・ドングル認証待機秒数
-window_title_pattern = ".*管理システム SP.*"  # メインウィンドウのタイトルパターン
-# パスワードはkeyring (Windows DPAPI) で管理
-# 初回設定:
-#   python -c "import keyring; keyring.set_password('wiseman-hub', 'operator01', 'YOUR_PASSWORD')"
+window_title_pattern = ".*管理システム SP.*"  # ケア記録メインウィンドウのタイトルパターン
+# 認証はUSBドングルのみ。アプリ内ログイン画面は存在しない（ADR-007参照）
+# 起動後は「ワイズマンシステムSP」ランチャー(frmStartUp)が開く。
+# ケア記録システムへは select_care_system() で遷移する。
 
 [schedule]
 enabled = false

@@ -16,7 +16,8 @@ class TestCloseWindow:
 
     def test_close_current_window(self, engine) -> None:
         """MDI子ウィンドウを閉じた後、子ウィンドウが検出されなくなる。"""
-        engine.launch_and_login(str(MOCK_APP_EXE), "testuser", "testpass")
+        engine.launch(str(MOCK_APP_EXE))
+        engine.select_care_system()
         engine.navigate_menu(["ケア記録", "集計表"])
 
         # 子ウィンドウが存在することを確認
@@ -32,7 +33,8 @@ class TestCloseWindow:
 
     def test_close_wiseman(self, engine) -> None:
         """ワイズマン終了後、内部状態がクリアされる。"""
-        engine.launch_and_login(str(MOCK_APP_EXE), "testuser", "testpass")
+        engine.launch(str(MOCK_APP_EXE))
+        engine.select_care_system()
         engine.close_wiseman()
         time.sleep(1)
 

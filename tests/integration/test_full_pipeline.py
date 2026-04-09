@@ -1,4 +1,4 @@
-"""E2E統合テスト: ログイン → メニュー → グリッド読取 → CSV出力 → 閉じる → 終了。"""
+"""E2E統合テスト: 起動 → メニュー → グリッド読取 → CSV出力 → 閉じる → 終了。"""
 
 from __future__ import annotations
 
@@ -17,8 +17,9 @@ class TestFullPipeline:
     def test_full_rpa_pipeline(self, engine, tmp_path: Path) -> None:
         """RPAパイプライン全体が一連で成功する。"""
 
-        # Step 1: ログイン（失敗時はlaunch_and_loginが例外を投げる）
-        engine.launch_and_login(str(MOCK_APP_EXE), "testuser", "testpass")
+        # Step 1: 起動 → ランチャー → ケア記録選択（失敗時は例外を投げる）
+        engine.launch(str(MOCK_APP_EXE))
+        engine.select_care_system()
 
         # Step 2: メニュー遷移
         engine.navigate_menu(["ケア記録", "集計表"])

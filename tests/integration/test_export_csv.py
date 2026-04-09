@@ -16,7 +16,8 @@ class TestExportCsv:
 
     def test_export_csv_creates_file(self, engine, tmp_path: Path) -> None:
         """印刷ボタン → SaveFileDialog → CSVファイルが作成される。"""
-        engine.launch_and_login(str(MOCK_APP_EXE), "testuser", "testpass")
+        engine.launch(str(MOCK_APP_EXE))
+        engine.select_care_system()
         engine.navigate_menu(["ケア記録", "集計表"])
 
         csv_path = engine.export_csv(tmp_path)

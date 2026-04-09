@@ -22,7 +22,6 @@ class TestWisemanHubWithMock:
             '\n'
             '[wiseman]\n'
             'exe_path = "C:\\\\wiseman.exe"\n'
-            'username = "testuser"\n'
             '\n'
             '[reports]\n'
             'targets = [\n'
@@ -51,12 +50,10 @@ class TestWisemanHubWithMock:
         hub = WisemanHub(config_path=config_path, rpa_engine=engine)
         hub.output_dir = tmp_path / "exports"
 
-        # keyringをモックしてパスワード取得をバイパス
-        with patch("keyring.get_password", return_value="mock_password"):
-            hub.run()
+        hub.run()
 
-        # RPAの呼び出し履歴を確認
-        assert any("launch_and_login" in c for c in engine.call_log)
+        # RPAの呼び出し履歴を確認（ADR-007: 認証はUSBドングルのみ）
+        assert any(c.startswith("launch(") for c in engine.call_log)
         assert any("navigate_menu" in c for c in engine.call_log)
         assert any("export_csv" in c for c in engine.call_log)
         assert any("close_current_window" in c for c in engine.call_log)
@@ -69,7 +66,6 @@ class TestWisemanHubWithMock:
         config_path.write_text(
             '[wiseman]\n'
             'exe_path = "C:\\\\wiseman.exe"\n'
-            'username = "testuser"\n'
             '\n'
             '[gcp]\n'
             'project_id = "test-project"\n'
@@ -79,8 +75,7 @@ class TestWisemanHubWithMock:
         engine = MockEngine()
         hub = WisemanHub(config_path=config_path, rpa_engine=engine)
 
-        with patch("keyring.get_password", return_value="mock_password"):
-            hub.run()
+        hub.run()
 
         # upload_filesは呼ばれない（CSVがないため）
         mock_upload.assert_not_called()

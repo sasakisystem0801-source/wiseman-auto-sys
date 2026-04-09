@@ -52,16 +52,17 @@ class WisemanHub:
         logger.info("=== Wiseman Hub 完了 ===")
 
     def _run_pipeline(self) -> None:
-        """ログイン → CSV抽出 → GCSアップロードのパイプライン"""
+        """起動 → CSV抽出 → GCSアップロードのパイプライン
 
-        # Step 1: ワイズマンにログイン
-        logger.info("[Step 1/3] ワイズマンにログイン中...")
-        password = self._get_password()
-        self.rpa.launch_and_login(
-            self.config.wiseman.exe_path,
-            self.config.wiseman.username,
-            password,
-        )
+        ワイズマンはUSBドングル認証のみで、アプリ内ログイン画面は存在しない（ADR-007）。
+        """
+
+        # Step 1: ワイズマン起動 → システム選択ランチャーからケア記録を選択
+        # ADR-007: USBドングル認証後にシステム選択ランチャー(frmStartUp)が開くため
+        # select_care_system() で目的のケア記録システム(frmMenu200)に遷移する
+        logger.info("[Step 1/3] ワイズマン起動中...")
+        self.rpa.launch(self.config.wiseman.exe_path)
+        self.rpa.select_care_system()
 
         # Step 2: CSV抽出
         logger.info("[Step 2/3] CSV帳票を抽出中...")
@@ -87,21 +88,3 @@ class WisemanHub:
             logger.info("  → %s", uri)
 
         logger.info("パイプライン完了")
-
-    def _get_password(self) -> str:
-        """Wisemanパスワードをkeyringから取得する。"""
-        try:
-            import keyring
-
-            password = keyring.get_password("wiseman-hub", self.config.wiseman.username)
-            if password is None:
-                msg = (
-                    f"パスワードが設定されていません。以下のコマンドで設定してください:\n"
-                    f"  python -c \"import keyring; keyring.set_password('wiseman-hub', "
-                    f"'{self.config.wiseman.username}', 'YOUR_PASSWORD')\""
-                )
-                raise RuntimeError(msg)
-            return password
-        except ImportError:
-            msg = "keyringがインストールされていません: pip install keyring"
-            raise RuntimeError(msg) from None
