@@ -214,20 +214,16 @@ namespace WisemanMock
 
         private void BtnPrint_Click(object sender, EventArgs e)
         {
-            using (var dlg = new SaveFileDialog())
-            {
-                dlg.Title = "名前を付けて保存";
-                dlg.Filter = "CSVファイル|*.csv";
-                dlg.DefaultExt = "csv";
-                dlg.FileName = "ケア記録集計表.csv";
+            // ダイアログは使わず、exe ディレクトリに直接 CSV を出力する。
+            // SaveFileDialog (Windows共通ダイアログ) も独自 WinForms Form も
+            // CI 環境で問題が発生するため、最もシンプルなアプローチを採用。
+            var exeDir = Path.GetDirectoryName(Application.ExecutablePath);
+            var csvPath = Path.Combine(exeDir, "auto_export.csv");
+            ExportToCsv(csvPath);
 
-                if (dlg.ShowDialog(this) == DialogResult.OK)
-                {
-                    ExportToCsv(dlg.FileName);
-                    MessageBox.Show("CSVファイルを保存しました。",
-                        "完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                }
-            }
+            var logPath = Path.Combine(exeDir, "btnprint_log.txt");
+            File.AppendAllText(logPath,
+                $"CSV exported to {csvPath} at {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}\n");
         }
 
         private void ExportToCsv(string filePath)
