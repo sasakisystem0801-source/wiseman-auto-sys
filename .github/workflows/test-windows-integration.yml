@@ -31,5 +31,5 @@ jobs:
         run: uv sync --extra dev
 
       - name: Run integration tests
-        run: uv run pytest tests/integration -v -m integration --timeout=120
+        run: uv run pytest tests/integration -v -s -m integration --timeout=120
         timeout-minutes: 5

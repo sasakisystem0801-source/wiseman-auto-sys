@@ -342,15 +342,38 @@ class PywinautoEngine(RPAEngine):
         gc.collect()
         time.sleep(0.1)
         logger.info("印刷ボタン BM_CLICK: hwnd=0x%x", btn_hwnd)
-        _USER32.PostMessageW(btn_hwnd, BM_CLICK, 0, 0)
+        ret = _USER32.PostMessageW(btn_hwnd, BM_CLICK, 0, 0)
+        print(f"[DIAG] PostMessageW(BM_CLICK) hwnd=0x{btn_hwnd:x} ret={ret}", flush=True)
         time.sleep(3)
+
+        # 診断: BtnPrint_Click 発火ログの確認
+        import pathlib as _pl
+        _exe_dir = _pl.Path(self._app.process) if False else None  # noqa
+        try:
+            # mock app exe のディレクトリからログを探す
+            for _p in _pl.Path(__file__).parents:
+                _log = _p / "mock_wiseman_app" / "WisemanMock" / "bin" / "Release" / "btnprint_log.txt"
+                if _log.exists():
+                    print(f"[DIAG] btnprint_log.txt found: {_log.read_text()}", flush=True)
+                    break
+            else:
+                # CI パスでも探す
+                for _ci_root in [_pl.Path(r"D:\a\wiseman-auto-sys\wiseman-auto-sys")]:
+                    _log = _ci_root / "mock_wiseman_app" / "WisemanMock" / "bin" / "Release" / "btnprint_log.txt"
+                    if _log.exists():
+                        print(f"[DIAG] btnprint_log.txt (CI): {_log.read_text()}", flush=True)
+                        break
+                else:
+                    print("[DIAG] btnprint_log.txt NOT FOUND", flush=True)
+        except Exception as _e:
+            print(f"[DIAG] log check error: {_e}", flush=True)
 
         # デバッグ: アプリケーション配下の全ウィンドウを列挙
         try:
             for w in self._app.windows():
-                logger.info("app window: title=%r, handle=0x%x", w.window_text(), w.handle)
-        except Exception:
-            logger.debug("ウィンドウ列挙に失敗")
+                print(f"[DIAG] app window: title={w.window_text()!r}, handle=0x{w.handle:x}", flush=True)
+        except Exception as _e:
+            print(f"[DIAG] window enum error: {_e}", flush=True)
 
         # 保存ダイアログ（独自 WinForms Form）を検出
         try:

@@ -214,6 +214,12 @@ namespace WisemanMock
 
         private void BtnPrint_Click(object sender, EventArgs e)
         {
+            // 診断: クリックイベント発火を記録
+            var logDir = Path.GetDirectoryName(Application.ExecutablePath);
+            var logPath = Path.Combine(logDir, "btnprint_log.txt");
+            File.AppendAllText(logPath,
+                $"BtnPrint_Click fired at {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}\n");
+
             // SaveFileDialog（Windows共通ダイアログ）はpywinautoの
             // Application.window()から検出できないため、独自Formを使用する。
             // modeless (Show) にすることで click_input() がブロックしない。
@@ -227,6 +233,9 @@ namespace WisemanMock
                 dlg.Dispose();
             };
             dlg.Show(this);
+
+            File.AppendAllText(logPath,
+                $"SaveCsvDialog.Show() completed at {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}\n");
         }
 
         private void ExportToCsv(string filePath)
