@@ -286,14 +286,15 @@ class TestExportCsv:
         with pytest.raises(RuntimeError, match="メインウィンドウが未接続"):
             engine.export_csv(Path("/tmp"))
 
-    def test_btnprint_click_input_and_dialog_search(self, engine_with_main: PywinautoEngine) -> None:
-        """btnPrint は click_input() で直接クリックされ、保存ダイアログを検索する"""
+    def test_btnprint_uses_bm_click_postmessage(self, engine_with_main: PywinautoEngine) -> None:
+        """btnPrint は BM_CLICK (PostMessage) でクリックされる"""
         mock_child = MagicMock()
         mock_child.exists.return_value = True
         engine_with_main._main_window.child_window.return_value = mock_child
 
-        mock_btn = MagicMock()
-        mock_child.child_window.return_value = mock_btn
+        mock_btn_wrapper = MagicMock()
+        mock_btn_wrapper.handle = 0xBBBB
+        mock_child.child_window.return_value.wrapper_object.return_value = mock_btn_wrapper
 
         engine_with_main._app.window.side_effect = _ElementNotFoundError("no dialog")
 
@@ -301,7 +302,7 @@ class TestExportCsv:
             result = engine_with_main.export_csv(Path("/tmp/test_out"))
 
         assert result is None
-        mock_btn.click_input.assert_called_once()
+        _mock_user32.PostMessageW.assert_called_with(0xBBBB, 0x00F5, 0, 0)
 
 
 # ── B5/B6: close_wiseman ─────────────────────────────────────────

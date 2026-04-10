@@ -330,11 +330,27 @@ class PywinautoEngine(RPAEngine):
             logger.error("MDI子ウィンドウが見つかりません")
             return None
 
-        # Mock app の保存ダイアログは modeless (Show) で表示されるため
-        # click_input() は即座に戻る。daemon thread や raw mouse click は不要。
-        btn_print = active_child.child_window(auto_id="btnPrint")
-        btn_print.click_input()
-        time.sleep(1)
+        # BM_CLICK (PostMessage) で印刷ボタンをクリック。
+        # click_input() は CI の active desktop 制約で不安定なため、
+        # PostMessage 経由の BM_CLICK を使用する。PostMessage は非同期で
+        # 即座に返るため、modeless ダイアログでも modal でもブロックしない。
+        import gc
+        BM_CLICK = 0x00F5
+        btn_print = active_child.child_window(auto_id="btnPrint").wrapper_object()
+        btn_hwnd = btn_print.handle
+        del btn_print
+        gc.collect()
+        time.sleep(0.1)
+        logger.info("印刷ボタン BM_CLICK: hwnd=0x%x", btn_hwnd)
+        _USER32.PostMessageW(btn_hwnd, BM_CLICK, 0, 0)
+        time.sleep(3)
+
+        # デバッグ: アプリケーション配下の全ウィンドウを列挙
+        try:
+            for w in self._app.windows():
+                logger.info("app window: title=%r, handle=0x%x", w.window_text(), w.handle)
+        except Exception:
+            logger.debug("ウィンドウ列挙に失敗")
 
         # 保存ダイアログ（独自 WinForms Form）を検出
         try:
