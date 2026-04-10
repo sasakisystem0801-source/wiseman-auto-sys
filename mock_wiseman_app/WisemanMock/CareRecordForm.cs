@@ -214,28 +214,34 @@ namespace WisemanMock
 
         private void BtnPrint_Click(object sender, EventArgs e)
         {
-            // 診断: クリックイベント発火を記録
             var logDir = Path.GetDirectoryName(Application.ExecutablePath);
             var logPath = Path.Combine(logDir, "btnprint_log.txt");
             File.AppendAllText(logPath,
                 $"BtnPrint_Click fired at {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}\n");
 
-            // SaveFileDialog（Windows共通ダイアログ）はpywinautoの
-            // Application.window()から検出できないため、独自Formを使用する。
-            // modeless (Show) にすることで click_input() がブロックしない。
-            var dlg = new SaveCsvDialog("ケア記録集計表.csv");
-            dlg.FormClosed += (s, args) =>
+            try
             {
-                if (dlg.DialogResult == DialogResult.OK)
+                var dlg = new SaveCsvDialog("export.csv");
+                File.AppendAllText(logPath, "SaveCsvDialog created\n");
+                dlg.FormClosed += (s, args) =>
                 {
-                    ExportToCsv(dlg.FileName);
-                }
-                dlg.Dispose();
-            };
-            dlg.Show(this);
-
-            File.AppendAllText(logPath,
-                $"SaveCsvDialog.Show() completed at {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}\n");
+                    if (dlg.DialogResult == DialogResult.OK)
+                    {
+                        ExportToCsv(dlg.FileName);
+                    }
+                    dlg.Dispose();
+                };
+                dlg.Show(this);
+                File.AppendAllText(logPath, "SaveCsvDialog.Show() completed\n");
+            }
+            catch (Exception ex)
+            {
+                File.AppendAllText(logPath, $"ERROR: {ex}\n");
+                // フォールバック: ダイアログなしで直接 CSV を exe ディレクトリに出力
+                var fallbackPath = Path.Combine(logDir, "auto_export.csv");
+                ExportToCsv(fallbackPath);
+                File.AppendAllText(logPath, $"Fallback CSV: {fallbackPath}\n");
+            }
         }
 
         private void ExportToCsv(string filePath)

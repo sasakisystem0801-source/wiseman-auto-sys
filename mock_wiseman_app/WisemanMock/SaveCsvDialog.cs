@@ -25,7 +25,7 @@ namespace WisemanMock
 
         private void InitializeComponent(string defaultFileName)
         {
-            this.Text = "名前を付けて保存";
+            this.Text = "Save CSV";
             this.Size = new Size(500, 160);
             this.StartPosition = FormStartPosition.CenterParent;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
