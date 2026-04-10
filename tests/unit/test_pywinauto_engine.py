@@ -286,31 +286,34 @@ class TestExportCsv:
         with pytest.raises(RuntimeError, match="メインウィンドウが未接続"):
             engine.export_csv(Path("/tmp"))
 
-    def test_btnprint_uses_bm_click_via_post_message(self, engine_with_main: PywinautoEngine) -> None:
-        """btnPrint は BM_CLICK(PostMessage) で送信される（WM_LBUTTON ではない）"""
+    def test_btnprint_uses_raw_mouse_click_in_thread(self, engine_with_main: PywinautoEngine) -> None:
+        """btnPrint は daemon thread で raw mouse click される"""
         mock_child = MagicMock()
         mock_child.exists.return_value = True
         engine_with_main._main_window.child_window.return_value = mock_child
 
+        # rectangle() の返り値を模擬
+        mock_rect = MagicMock()
+        mock_rect.left = 100
+        mock_rect.right = 200
+        mock_rect.top = 50
+        mock_rect.bottom = 80
         mock_btn_wrapper = MagicMock()
-        mock_btn_wrapper.handle = 0xFFFF
+        mock_btn_wrapper.rectangle.return_value = mock_rect
         mock_child.child_window.return_value.wrapper_object.return_value = mock_btn_wrapper
 
-        # SaveFileDialog が見つからないケース（ボタンクリック後のフローは別テスト）
         engine_with_main._app.window.side_effect = _ElementNotFoundError("no dialog")
-
-        _mock_user32.PostMessageW.return_value = 1
 
         with patch("time.sleep"):
             result = engine_with_main.export_csv(Path("/tmp/test_out"))
 
-        # export_csv は SaveFileDialog が見つからず None を返すが、
-        # BM_CLICK(0x00F5) が PostMessageW で送信されたことを検証
         assert result is None
-        post_calls = [c for c in _mock_user32.PostMessageW.call_args_list if c.args[0] == 0xFFFF]
-        assert any(c.args[1] == 0x00F5 for c in post_calls)  # BM_CLICK
-        # WM_LBUTTONDOWN(0x0201) が使われていないことを確認
-        assert not any(c.args[1] == 0x0201 for c in post_calls)
+        # SetCursorPos がボタン中心座標で呼ばれること
+        _mock_user32.SetCursorPos.assert_called_with(150, 65)
+        # mouse_event が LEFTDOWN(0x0002) + LEFTUP(0x0004) で呼ばれること
+        me_calls = _mock_user32.mouse_event.call_args_list
+        assert any(c.args[0] == 0x0002 for c in me_calls)  # LEFTDOWN
+        assert any(c.args[0] == 0x0004 for c in me_calls)  # LEFTUP
 
 
 # ── B5/B6: close_wiseman ─────────────────────────────────────────

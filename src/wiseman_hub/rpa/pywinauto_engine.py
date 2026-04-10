@@ -330,19 +330,34 @@ class PywinautoEngine(RPAEngine):
             logger.error("MDI子ウィンドウが見つかりません")
             return None
 
-        # ShowDialog()がUIスレッドをブロックするため、click_input()は戻らない。
-        # BM_CLICK を PostMessage で送信する（click_new_registration と同一パターン）。
-        # WM_LBUTTONDOWN/UP はトップレベルウィンドウのボタンには有効だが、
-        # MDI 子ウィンドウ上のボタンではマウスキャプチャが正しく動作せず
-        # Click ハンドラが発火しないケースがある（CI 環境で再現）。
+        # ShowDialog() が UI スレッドをブロックするため click_input() は戻らない。
+        # また PostMessage (BM_CLICK / WM_LBUTTON) は MDI 子ウィンドウ上のボタン
+        # に対しては CI 環境で Click ハンドラが発火しない。
+        # 解決策: 座標をメインスレッドで事前解決し、daemon thread で raw mouse
+        # click を実行する。COM 呼び出しはスレッドに持ち込まない。
         import gc
+        import threading
         btn_print = active_child.child_window(auto_id="btnPrint").wrapper_object()
-        target_hwnd = btn_print.handle
+        rect = btn_print.rectangle()
         del btn_print
         gc.collect()
-        BM_CLICK = 0x00F5
-        logger.info("印刷 BM_CLICK(Post): hwnd=0x%x", target_hwnd)
-        self._post_message(target_hwnd, BM_CLICK, 0, 0)
+        time.sleep(0.1)
+        cx = (rect.left + rect.right) // 2
+        cy = (rect.top + rect.bottom) // 2
+        logger.info("印刷ボタン raw click: (%d, %d)", cx, cy)
+
+        MOUSEEVENTF_LEFTDOWN = 0x0002
+        MOUSEEVENTF_LEFTUP = 0x0004
+
+        def _raw_click() -> None:
+            _USER32.SetCursorPos(cx, cy)
+            time.sleep(0.05)
+            _USER32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+            time.sleep(0.05)
+            _USER32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+
+        t = threading.Thread(target=_raw_click, daemon=True)
+        t.start()
         time.sleep(3)
 
         # SaveFileDialog を処理
