@@ -10,6 +10,7 @@ import ctypes as _ctypes
 import importlib
 import os
 import sys
+from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock, patch
 
@@ -275,6 +276,41 @@ class TestClickNewRegistration:
         assert any(c.args[1] == 0x00F5 for c in post_calls)  # BM_CLICK
 
         mock_frmkihon.wait.assert_called_with("visible", timeout=10)
+
+
+# ── export_csv ───────────────────────────────────────────────────
+
+
+class TestExportCsv:
+    def test_requires_main_window(self, engine: PywinautoEngine) -> None:
+        with pytest.raises(RuntimeError, match="メインウィンドウが未接続"):
+            engine.export_csv(Path("/tmp"))
+
+    def test_btnprint_uses_bm_click_via_post_message(self, engine_with_main: PywinautoEngine) -> None:
+        """btnPrint は BM_CLICK(PostMessage) で送信される（WM_LBUTTON ではない）"""
+        mock_child = MagicMock()
+        mock_child.exists.return_value = True
+        engine_with_main._main_window.child_window.return_value = mock_child
+
+        mock_btn_wrapper = MagicMock()
+        mock_btn_wrapper.handle = 0xFFFF
+        mock_child.child_window.return_value.wrapper_object.return_value = mock_btn_wrapper
+
+        # SaveFileDialog が見つからないケース（ボタンクリック後のフローは別テスト）
+        engine_with_main._app.window.side_effect = _ElementNotFoundError("no dialog")
+
+        _mock_user32.PostMessageW.return_value = 1
+
+        with patch("time.sleep"):
+            result = engine_with_main.export_csv(Path("/tmp/test_out"))
+
+        # export_csv は SaveFileDialog が見つからず None を返すが、
+        # BM_CLICK(0x00F5) が PostMessageW で送信されたことを検証
+        assert result is None
+        post_calls = [c for c in _mock_user32.PostMessageW.call_args_list if c.args[0] == 0xFFFF]
+        assert any(c.args[1] == 0x00F5 for c in post_calls)  # BM_CLICK
+        # WM_LBUTTONDOWN(0x0201) が使われていないことを確認
+        assert not any(c.args[1] == 0x0201 for c in post_calls)
 
 
 # ── B5/B6: close_wiseman ─────────────────────────────────────────

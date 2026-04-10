@@ -331,12 +331,18 @@ class PywinautoEngine(RPAEngine):
             return None
 
         # ShowDialog()がUIスレッドをブロックするため、click_input()は戻らない。
-        # PostMessageで非同期クリックを送信（キューに入れて即戻る）。
+        # BM_CLICK を PostMessage で送信する（click_new_registration と同一パターン）。
+        # WM_LBUTTONDOWN/UP はトップレベルウィンドウのボタンには有効だが、
+        # MDI 子ウィンドウ上のボタンではマウスキャプチャが正しく動作せず
+        # Click ハンドラが発火しないケースがある（CI 環境で再現）。
+        import gc
         btn_print = active_child.child_window(auto_id="btnPrint").wrapper_object()
-        WM_LBUTTONDOWN, WM_LBUTTONUP = 0x0201, 0x0202
-        self._post_message(btn_print.handle, WM_LBUTTONDOWN, 1, 0)
-        time.sleep(0.05)
-        self._post_message(btn_print.handle, WM_LBUTTONUP, 0, 0)
+        target_hwnd = btn_print.handle
+        del btn_print
+        gc.collect()
+        BM_CLICK = 0x00F5
+        logger.info("印刷 BM_CLICK(Post): hwnd=0x%x", target_hwnd)
+        self._post_message(target_hwnd, BM_CLICK, 0, 0)
         time.sleep(3)
 
         # SaveFileDialog を処理
