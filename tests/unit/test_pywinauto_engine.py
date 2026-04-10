@@ -286,21 +286,14 @@ class TestExportCsv:
         with pytest.raises(RuntimeError, match="メインウィンドウが未接続"):
             engine.export_csv(Path("/tmp"))
 
-    def test_btnprint_uses_raw_mouse_click_in_thread(self, engine_with_main: PywinautoEngine) -> None:
-        """btnPrint は daemon thread で raw mouse click される"""
+    def test_btnprint_click_input_and_dialog_search(self, engine_with_main: PywinautoEngine) -> None:
+        """btnPrint は click_input() で直接クリックされ、保存ダイアログを検索する"""
         mock_child = MagicMock()
         mock_child.exists.return_value = True
         engine_with_main._main_window.child_window.return_value = mock_child
 
-        # rectangle() の返り値を模擬
-        mock_rect = MagicMock()
-        mock_rect.left = 100
-        mock_rect.right = 200
-        mock_rect.top = 50
-        mock_rect.bottom = 80
-        mock_btn_wrapper = MagicMock()
-        mock_btn_wrapper.rectangle.return_value = mock_rect
-        mock_child.child_window.return_value.wrapper_object.return_value = mock_btn_wrapper
+        mock_btn = MagicMock()
+        mock_child.child_window.return_value = mock_btn
 
         engine_with_main._app.window.side_effect = _ElementNotFoundError("no dialog")
 
@@ -308,12 +301,7 @@ class TestExportCsv:
             result = engine_with_main.export_csv(Path("/tmp/test_out"))
 
         assert result is None
-        # SetCursorPos がボタン中心座標で呼ばれること
-        _mock_user32.SetCursorPos.assert_called_with(150, 65)
-        # mouse_event が LEFTDOWN(0x0002) + LEFTUP(0x0004) で呼ばれること
-        me_calls = _mock_user32.mouse_event.call_args_list
-        assert any(c.args[0] == 0x0002 for c in me_calls)  # LEFTDOWN
-        assert any(c.args[0] == 0x0004 for c in me_calls)  # LEFTUP
+        mock_btn.click_input.assert_called_once()
 
 
 # ── B5/B6: close_wiseman ─────────────────────────────────────────

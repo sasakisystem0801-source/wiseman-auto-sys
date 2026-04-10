@@ -330,37 +330,13 @@ class PywinautoEngine(RPAEngine):
             logger.error("MDI子ウィンドウが見つかりません")
             return None
 
-        # ShowDialog() が UI スレッドをブロックするため click_input() は戻らない。
-        # また PostMessage (BM_CLICK / WM_LBUTTON) は MDI 子ウィンドウ上のボタン
-        # に対しては CI 環境で Click ハンドラが発火しない。
-        # 解決策: 座標をメインスレッドで事前解決し、daemon thread で raw mouse
-        # click を実行する。COM 呼び出しはスレッドに持ち込まない。
-        import gc
-        import threading
-        btn_print = active_child.child_window(auto_id="btnPrint").wrapper_object()
-        rect = btn_print.rectangle()
-        del btn_print
-        gc.collect()
-        time.sleep(0.1)
-        cx = (rect.left + rect.right) // 2
-        cy = (rect.top + rect.bottom) // 2
-        logger.info("印刷ボタン raw click: (%d, %d)", cx, cy)
+        # Mock app の保存ダイアログは modeless (Show) で表示されるため
+        # click_input() は即座に戻る。daemon thread や raw mouse click は不要。
+        btn_print = active_child.child_window(auto_id="btnPrint")
+        btn_print.click_input()
+        time.sleep(1)
 
-        MOUSEEVENTF_LEFTDOWN = 0x0002
-        MOUSEEVENTF_LEFTUP = 0x0004
-
-        def _raw_click() -> None:
-            _USER32.SetCursorPos(cx, cy)
-            time.sleep(0.05)
-            _USER32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-            time.sleep(0.05)
-            _USER32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-
-        t = threading.Thread(target=_raw_click, daemon=True)
-        t.start()
-        time.sleep(3)
-
-        # SaveFileDialog を処理
+        # 保存ダイアログ（独自 WinForms Form）を検出
         try:
             save_dlg = self._app.window(title_re=".*保存.*|.*名前.*|.*Save.*")
             save_dlg.wait("visible", timeout=10)
@@ -372,52 +348,22 @@ class PywinautoEngine(RPAEngine):
         csv_path = output_dir / csv_filename
 
         # ファイル名入力欄にパスを設定
-        filename_set = False
-        for selector in [
-            lambda d: d.child_window(auto_id="FileNameControlHost"),
-            lambda d: d.child_window(control_type="Edit"),
-        ]:
-            try:
-                selector(save_dlg).set_edit_text(str(csv_path))
-                filename_set = True
-                break
-            except (ElementNotFoundError, PywinautoTimeoutError, AttributeError):
-                continue
-
-        if not filename_set:
+        try:
+            save_dlg.child_window(auto_id="txtFileName").set_edit_text(str(csv_path))
+        except (ElementNotFoundError, PywinautoTimeoutError):
             logger.warning("ファイル名入力欄が見つかりません")
             return None
 
         time.sleep(0.5)
 
         # [保存] ボタンをクリック
-        save_clicked = False
-        for selector in [
-            lambda d: d.child_window(title_re=".*保存.*", control_type="Button"),
-            lambda d: d.child_window(title="Save", control_type="Button"),
-            lambda d: d.child_window(title="OK", control_type="Button"),
-        ]:
-            try:
-                selector(save_dlg).click_input()
-                save_clicked = True
-                break
-            except (ElementNotFoundError, PywinautoTimeoutError):
-                continue
-
-        if not save_clicked:
+        try:
+            save_dlg.child_window(auto_id="btnSave").click_input()
+        except (ElementNotFoundError, PywinautoTimeoutError):
             logger.warning("保存ボタンが見つかりません")
             return None
 
         time.sleep(1)
-
-        # 保存完了メッセージボックスを検出してOKをクリック
-        try:
-            msg_box = self._app.window(title_re=".*完了.*")
-            msg_box.wait("visible", timeout=5)
-            msg_box.child_window(title="OK", control_type="Button").click_input()
-            logger.info("保存完了ダイアログを閉じました")
-        except (ElementNotFoundError, PywinautoTimeoutError):
-            logger.debug("保存完了ダイアログは表示されませんでした")
 
         if csv_path.exists():
             logger.info("CSVエクスポート成功: %s", csv_path)

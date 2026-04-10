@@ -214,20 +214,19 @@ namespace WisemanMock
 
         private void BtnPrint_Click(object sender, EventArgs e)
         {
-            using (var dlg = new SaveFileDialog())
+            // SaveFileDialog（Windows共通ダイアログ）はpywinautoの
+            // Application.window()から検出できないため、独自Formを使用する。
+            // modeless (Show) にすることで click_input() がブロックしない。
+            var dlg = new SaveCsvDialog("ケア記録集計表.csv");
+            dlg.FormClosed += (s, args) =>
             {
-                dlg.Title = "名前を付けて保存";
-                dlg.Filter = "CSVファイル|*.csv";
-                dlg.DefaultExt = "csv";
-                dlg.FileName = "ケア記録集計表.csv";
-
-                if (dlg.ShowDialog(this) == DialogResult.OK)
+                if (dlg.DialogResult == DialogResult.OK)
                 {
                     ExportToCsv(dlg.FileName);
-                    MessageBox.Show("CSVファイルを保存しました。",
-                        "完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
-            }
+                dlg.Dispose();
+            };
+            dlg.Show(this);
         }
 
         private void ExportToCsv(string filePath)
