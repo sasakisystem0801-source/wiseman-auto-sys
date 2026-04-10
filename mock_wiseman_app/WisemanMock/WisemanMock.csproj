@@ -54,9 +54,6 @@
     <Compile Include="ConfirmDialog.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="SaveCsvDialog.cs">
-      <SubType>Form</SubType>
-    </Compile>
     <Compile Include="MockData.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
