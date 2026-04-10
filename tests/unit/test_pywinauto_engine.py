@@ -296,6 +296,8 @@ class TestExportCsv:
         mock_btn_wrapper.handle = 0xBBBB
         mock_child.child_window.return_value.wrapper_object.return_value = mock_btn_wrapper
 
+        # auto_export.csv が見つからず、ダイアログも見つからないケース
+        engine_with_main._find_auto_export_csv = MagicMock(return_value=None)
         engine_with_main._app.window.side_effect = _ElementNotFoundError("no dialog")
 
         with patch("time.sleep"):

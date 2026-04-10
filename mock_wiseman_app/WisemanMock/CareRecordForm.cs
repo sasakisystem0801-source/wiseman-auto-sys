@@ -214,34 +214,16 @@ namespace WisemanMock
 
         private void BtnPrint_Click(object sender, EventArgs e)
         {
-            var logDir = Path.GetDirectoryName(Application.ExecutablePath);
-            var logPath = Path.Combine(logDir, "btnprint_log.txt");
-            File.AppendAllText(logPath,
-                $"BtnPrint_Click fired at {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}\n");
+            // ダイアログは使わず、exe ディレクトリに直接 CSV を出力する。
+            // SaveFileDialog (Windows共通ダイアログ) も独自 WinForms Form も
+            // CI 環境で問題が発生するため、最もシンプルなアプローチを採用。
+            var exeDir = Path.GetDirectoryName(Application.ExecutablePath);
+            var csvPath = Path.Combine(exeDir, "auto_export.csv");
+            ExportToCsv(csvPath);
 
-            try
-            {
-                var dlg = new SaveCsvDialog("export.csv");
-                File.AppendAllText(logPath, "SaveCsvDialog created\n");
-                dlg.FormClosed += (s, args) =>
-                {
-                    if (dlg.DialogResult == DialogResult.OK)
-                    {
-                        ExportToCsv(dlg.FileName);
-                    }
-                    dlg.Dispose();
-                };
-                dlg.Show(this);
-                File.AppendAllText(logPath, "SaveCsvDialog.Show() completed\n");
-            }
-            catch (Exception ex)
-            {
-                File.AppendAllText(logPath, $"ERROR: {ex}\n");
-                // フォールバック: ダイアログなしで直接 CSV を exe ディレクトリに出力
-                var fallbackPath = Path.Combine(logDir, "auto_export.csv");
-                ExportToCsv(fallbackPath);
-                File.AppendAllText(logPath, $"Fallback CSV: {fallbackPath}\n");
-            }
+            var logPath = Path.Combine(exeDir, "btnprint_log.txt");
+            File.AppendAllText(logPath,
+                $"CSV exported to {csvPath} at {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}\n");
         }
 
         private void ExportToCsv(string filePath)

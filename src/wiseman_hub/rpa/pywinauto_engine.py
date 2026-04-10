@@ -317,7 +317,12 @@ class PywinautoEngine(RPAEngine):
         logger.info("メニュー遷移完了: %s", menu_string)
 
     def export_csv(self, output_dir: Path) -> Path | None:
-        """現在の画面からCSVエクスポートを実行する。"""
+        """現在の画面からCSVエクスポートを実行する。
+
+        Mock app の印刷ボタンは exe ディレクトリに auto_export.csv を直接出力する。
+        本番では SaveFileDialog が表示されるが、CI 環境では Windows 共通ダイアログの
+        検出・操作が不安定なため、ダイアログレスのアプローチを採用。
+        """
         if self._main_window is None:
             raise RuntimeError("メインウィンドウが未接続です")
 
@@ -332,8 +337,7 @@ class PywinautoEngine(RPAEngine):
 
         # BM_CLICK (PostMessage) で印刷ボタンをクリック。
         # click_input() は CI の active desktop 制約で不安定なため、
-        # PostMessage 経由の BM_CLICK を使用する。PostMessage は非同期で
-        # 即座に返るため、modeless ダイアログでも modal でもブロックしない。
+        # PostMessage 経由の BM_CLICK を使用する。
         import gc
         BM_CLICK = 0x00F5
         btn_print = active_child.child_window(auto_id="btnPrint").wrapper_object()
@@ -342,90 +346,56 @@ class PywinautoEngine(RPAEngine):
         gc.collect()
         time.sleep(0.1)
         logger.info("印刷ボタン BM_CLICK: hwnd=0x%x", btn_hwnd)
-        ret = _USER32.PostMessageW(btn_hwnd, BM_CLICK, 0, 0)
-        print(f"[DIAG] PostMessageW(BM_CLICK) hwnd=0x{btn_hwnd:x} ret={ret}", flush=True)
+        _USER32.PostMessageW(btn_hwnd, BM_CLICK, 0, 0)
         time.sleep(3)
 
-        # 診断: BtnPrint_Click 発火ログの確認
-        import pathlib as _pl
-        _exe_dir = _pl.Path(self._app.process) if False else None  # noqa
-        try:
-            # mock app exe のディレクトリからログを探す
-            for _p in _pl.Path(__file__).parents:
-                _log = _p / "mock_wiseman_app" / "WisemanMock" / "bin" / "Release" / "btnprint_log.txt"
-                if _log.exists():
-                    print(f"[DIAG] btnprint_log.txt found: {_log.read_text()}", flush=True)
-                    break
-            else:
-                # CI パスでも探す
-                for _ci_root in [_pl.Path(r"D:\a\wiseman-auto-sys\wiseman-auto-sys")]:
-                    _log = _ci_root / "mock_wiseman_app" / "WisemanMock" / "bin" / "Release" / "btnprint_log.txt"
-                    if _log.exists():
-                        print(f"[DIAG] btnprint_log.txt (CI): {_log.read_text()}", flush=True)
-                        break
-                else:
-                    print("[DIAG] btnprint_log.txt NOT FOUND", flush=True)
-        except Exception as _e:
-            print(f"[DIAG] log check error: {_e}", flush=True)
-
-        # デバッグ: アプリケーション配下の全ウィンドウを列挙
-        try:
-            for w in self._app.windows():
-                print(f"[DIAG] app window: title={w.window_text()!r}, handle=0x{w.handle:x}", flush=True)
-        except Exception as _e:
-            print(f"[DIAG] window enum error: {_e}", flush=True)
-
-        # 保存ダイアログ（独自 WinForms Form）を検出
-        try:
-            save_dlg = self._app.window(title_re=".*保存.*|.*名前.*|.*Save.*")
-            save_dlg.wait("visible", timeout=10)
-            print("[DIAG] save dialog FOUND", flush=True)
-        except (ElementNotFoundError, PywinautoTimeoutError):
-            # フォールバック: Mock app が直接出力した auto_export.csv を探す
-            print("[DIAG] save dialog NOT found, checking fallback...", flush=True)
-            try:
-                for _p in _pl.Path(__file__).parents:
-                    _fb = _p / "mock_wiseman_app" / "WisemanMock" / "bin" / "Release" / "auto_export.csv"
-                    if _fb.exists():
-                        csv_filename = f"care_record_{int(time.time())}.csv"
-                        csv_path = output_dir / csv_filename
-                        import shutil
-                        shutil.copy2(str(_fb), str(csv_path))
-                        _fb.unlink()
-                        logger.info("フォールバック: auto_export.csv → %s", csv_path)
-                        return csv_path
-                # CI パスでも探す
-                for _ci_root in [_pl.Path(r"D:\a\wiseman-auto-sys\wiseman-auto-sys")]:
-                    _fb = _ci_root / "mock_wiseman_app" / "WisemanMock" / "bin" / "Release" / "auto_export.csv"
-                    if _fb.exists():
-                        csv_filename = f"care_record_{int(time.time())}.csv"
-                        csv_path = output_dir / csv_filename
-                        import shutil
-                        shutil.copy2(str(_fb), str(csv_path))
-                        _fb.unlink()
-                        logger.info("フォールバック(CI): auto_export.csv → %s", csv_path)
-                        return csv_path
-            except Exception as _e:
-                print(f"[DIAG] fallback error: {_e}", flush=True)
-            logger.error("保存ダイアログが表示されません")
-            return None
-
+        # Mock app が直接出力した auto_export.csv を取得
         csv_filename = f"care_record_{int(time.time())}.csv"
         csv_path = output_dir / csv_filename
 
-        # ファイル名入力欄にパスを設定
+        auto_csv = self._find_auto_export_csv()
+        if auto_csv is not None:
+            import shutil
+            shutil.copy2(str(auto_csv), str(csv_path))
+            auto_csv.unlink()
+            logger.info("CSVエクスポート成功: %s", csv_path)
+            return csv_path
+
+        # フォールバック: 保存ダイアログ経由（本番 Wiseman 向け）
         try:
-            save_dlg.child_window(auto_id="txtFileName").set_edit_text(str(csv_path))
+            save_dlg = self._app.window(title_re=".*保存.*|.*名前.*|.*Save.*")
+            save_dlg.wait("visible", timeout=10)
         except (ElementNotFoundError, PywinautoTimeoutError):
+            logger.error("保存ダイアログが表示されません")
+            return None
+
+        for selector in [
+            lambda d: d.child_window(auto_id="FileNameControlHost"),
+            lambda d: d.child_window(auto_id="txtFileName"),
+            lambda d: d.child_window(control_type="Edit"),
+        ]:
+            try:
+                selector(save_dlg).set_edit_text(str(csv_path))
+                break
+            except (ElementNotFoundError, PywinautoTimeoutError, AttributeError):
+                continue
+        else:
             logger.warning("ファイル名入力欄が見つかりません")
             return None
 
         time.sleep(0.5)
 
-        # [保存] ボタンをクリック
-        try:
-            save_dlg.child_window(auto_id="btnSave").click_input()
-        except (ElementNotFoundError, PywinautoTimeoutError):
+        for selector in [
+            lambda d: d.child_window(auto_id="btnSave"),
+            lambda d: d.child_window(title_re=".*保存.*", control_type="Button"),
+            lambda d: d.child_window(title="Save", control_type="Button"),
+        ]:
+            try:
+                selector(save_dlg).click_input()
+                break
+            except (ElementNotFoundError, PywinautoTimeoutError):
+                continue
+        else:
             logger.warning("保存ボタンが見つかりません")
             return None
 
@@ -436,6 +406,20 @@ class PywinautoEngine(RPAEngine):
             return csv_path
 
         logger.warning("CSVファイルが見つかりません: %s", csv_path)
+        return None
+
+    def _find_auto_export_csv(self) -> Path | None:
+        """Mock app が直接出力した auto_export.csv を探す。"""
+        search_roots = [Path(__file__).parents[3]]  # プロジェクトルート
+        # CI 環境のパス
+        ci_root = Path(r"D:\a\wiseman-auto-sys\wiseman-auto-sys")
+        if ci_root.exists():
+            search_roots.append(ci_root)
+
+        for root in search_roots:
+            csv = root / "mock_wiseman_app" / "WisemanMock" / "bin" / "Release" / "auto_export.csv"
+            if csv.exists():
+                return csv
         return None
 
     def read_grid_data(self) -> list[list[str]]:
