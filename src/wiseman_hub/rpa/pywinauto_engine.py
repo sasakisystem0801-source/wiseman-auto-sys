@@ -18,11 +18,17 @@ if TYPE_CHECKING:
 if sys.platform != "win32":
     raise ImportError("pywinauto_engine はWindows環境でのみ使用できます")
 
+import ctypes
+
 from pywinauto import Application
 from pywinauto.findwindows import ElementNotFoundError
 from pywinauto.timings import TimeoutError as PywinautoTimeoutError
 
 logger = logging.getLogger(__name__)
+
+# use_last_error=True を付けて user32 をロードしないと ctypes.get_last_error()
+# は他の ctypes 呼び出しの残骸を返すため、失敗時のエラー情報が嘘になる。
+_USER32 = ctypes.WinDLL("user32", use_last_error=True)
 
 
 class PywinautoEngine(RPAEngine):
@@ -48,9 +54,7 @@ class PywinautoEngine(RPAEngine):
         すると、後段の wait("visible") が "ウィンドウが見つからない" という
         誤ったエラーになり調査を誤誘導するため、ここで明示的に検出する。
         """
-        import ctypes
-        user32 = ctypes.windll.user32
-        ok = user32.PostMessageW(hwnd, msg, wparam, lparam)
+        ok = _USER32.PostMessageW(hwnd, msg, wparam, lparam)
         if not ok:
             err = ctypes.get_last_error()
             raise RuntimeError(
@@ -66,11 +70,9 @@ class PywinautoEngine(RPAEngine):
         しても確実ではない。HWND の生存確認のみ事前に行い、以降は呼び出し元が
         後段の状態遷移で検知する責務を持つ。
         """
-        import ctypes
-        user32 = ctypes.windll.user32
-        if not user32.IsWindow(hwnd):
+        if not _USER32.IsWindow(hwnd):
             raise RuntimeError(f"SendMessageW: invalid hwnd=0x{hwnd:x}")
-        return user32.SendMessageW(hwnd, msg, wparam, lparam)
+        return _USER32.SendMessageW(hwnd, msg, wparam, lparam)
 
     def _get_active_mdi_child(self) -> WindowSpecification | None:
         """アクティブなMDI子ウィンドウを取得する。
