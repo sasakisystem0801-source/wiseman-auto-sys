@@ -145,23 +145,20 @@ def _extract_with_exe(
             if not dialog_clicked and 2 <= i <= 20:
                 dialog_clicked = _click_sfx_dialog(proc.pid)
 
-            # PDF チェック
-            new_pdfs = _snapshot_pdfs(*watch_dirs) - before
-            if new_pdfs:
-                logger.info("  → PDF 検出: %s", [p.name for p in new_pdfs])
-                return list(new_pdfs)
-
-            # プロセスが終了していたら少し待ってからチェック
+            # プロセスが終了していたら完了 → PDF を探す
             if proc.poll() is not None:
-                time.sleep(1)
+                logger.info("  → SFX プロセス終了 (exit=%d)", proc.returncode)
+                time.sleep(1)  # 書き込み完了を待つ
                 new_pdfs = _snapshot_pdfs(*watch_dirs) - before
                 if new_pdfs:
-                    logger.info("  → PDF 検出 (プロセス終了後): %s", [p.name for p in new_pdfs])
+                    logger.info("  → PDF 検出: %s", [p.name for p in new_pdfs])
                 return list(new_pdfs)
     finally:
         if proc.poll() is None:
             _terminate_proc(proc)
 
+    # タイムアウト後の最終チェック
+    time.sleep(1)
     return list(_snapshot_pdfs(*watch_dirs) - before)
 
 
