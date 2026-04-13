@@ -569,8 +569,8 @@ class PywinautoEngine(RPAEngine):
         while time.monotonic() < deadline:
             try:
                 os.kill(pid, 0)
-            except (ProcessLookupError, OSError):
-                break  # プロセス終了済み（Windows では OSError になる場合がある）
+            except (ProcessLookupError, OSError, SystemError):
+                break  # プロセス終了済み（Windows では OSError/SystemError になる場合がある）
             except PermissionError:
                 pass  # プロセスは存在するがアクセス権なし → 存在として扱う
             time.sleep(0.5)
