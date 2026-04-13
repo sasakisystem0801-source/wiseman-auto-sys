@@ -88,16 +88,18 @@ class TestExtractWithExe:
         pdf_file = tmp_path / "output.pdf"
 
         mock_proc = MagicMock()
-        # poll() が None を2回返した後、0 を返す（プロセス終了）
-        mock_proc.poll.side_effect = [None, None, 0]
+        mock_proc.returncode = 0
+        # poll(): None(実行中) → None → 0(終了) → 以降も0
+        mock_proc.poll.side_effect = [None, None, 0] + [0] * 10
 
         call_count = 0
 
         def fake_sleep(sec):
             nonlocal call_count
             call_count += 1
-            if call_count == 3:
-                pdf_file.write_bytes(b"%PDF-1.4 dummy")
+            # プロセス「終了」直前にPDFを書き込む
+            if call_count == 2:
+                pdf_file.write_bytes(b"%PDF-1.4 dummy content here")
 
         with (
             patch("subprocess.Popen", return_value=mock_proc),
