@@ -16,12 +16,17 @@
 
 出力: 単一の PDF ファイル + `MergeReport`
 
+書込の原子性: 一時ファイルに書き出してから `os.replace` で差し替える。
+ディスクフル等で失敗しても既存 output_path は破壊されない。
+
 詳細は ADR-008 / docs/handoff/LATEST.md 参照。
 """
 
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,6 +37,8 @@ from wiseman_hub.config import PdfMergeConfig
 logger = logging.getLogger(__name__)
 
 _KNOWN_KINDS = frozenset({"A", "B", "C"})
+# user_name に含まれてはいけない文字（パス操作・ヌルバイト）
+_FORBIDDEN_NAME_CHARS = frozenset("/\\\x00")
 
 
 class PdfMergeError(Exception):
@@ -62,6 +69,10 @@ class MergeReport:
     missing_sources: list[tuple[str, str]]  # [(user_name, "B" | "C")]
     d_appended: bool
 
+    @property
+    def has_missing_sources(self) -> bool:
+        return bool(self.missing_sources)
+
 
 def _validate_concat_order(concat_order: list[str]) -> None:
     if not concat_order:
@@ -73,31 +84,110 @@ def _validate_concat_order(concat_order: list[str]) -> None:
         )
 
 
+def _validate_user_name(user_name: str) -> None:
+    """user_name を B/C ファイル名の埋込値として使うにあたって安全性を検証。
+
+    OCR 由来のため通常は安全だが、誤認識や誤設定で path 脱出文字が入らないよう
+    境界で確認する（defense-in-depth）。
+    """
+    if not user_name or not user_name.strip():
+        raise PdfMergeError("user_name is empty or whitespace-only")
+    if ".." in user_name:
+        raise PdfMergeError(f"user_name contains path traversal: {user_name!r}")
+    bad = sorted({c for c in user_name if c in _FORBIDDEN_NAME_CHARS})
+    if bad:
+        raise PdfMergeError(
+            f"user_name contains forbidden characters {bad}: {user_name!r}"
+        )
+
+
+def _open_pdf_file_or_raise(path: Path, source_label: str) -> fitz.Document:
+    """fitz.open の結果を PDF として安全に検証して返す。
+
+    splitter._open_pdf_or_raise と同じ方針。破損・空・非PDF・暗号化を
+    PdfMergeError に翻訳する。
+    """
+    try:
+        doc = fitz.open(path)
+    except fitz.EmptyFileError as e:
+        raise PdfMergeError(f"Empty PDF for {source_label}: {path}") from e
+    except fitz.FileDataError as e:
+        raise PdfMergeError(f"Corrupted PDF for {source_label}: {path}") from e
+    except Exception as e:
+        raise PdfMergeError(f"Failed to open PDF for {source_label}: {path}: {e}") from e
+
+    try:
+        if not doc.is_pdf:
+            raise PdfMergeError(f"Not a PDF for {source_label}: {path}")
+        if doc.needs_pass or doc.is_encrypted:
+            raise PdfMergeError(
+                f"Encrypted PDF for {source_label}: {path}. "
+                f"Disable password protection before processing."
+            )
+    except Exception:
+        doc.close()
+        raise
+    return doc
+
+
 def _append_pdf_bytes(dst: fitz.Document, pdf_bytes: bytes, source_label: str) -> int:
     """dst に pdf_bytes を追記する。追加ページ数を返す。"""
     try:
         src = fitz.open(stream=pdf_bytes, filetype="pdf")
-    except Exception as e:
-        raise PdfMergeError(f"Failed to open PDF for {source_label}: {e}") from e
+    except fitz.EmptyFileError as e:
+        raise PdfMergeError(f"Empty PDF stream for {source_label}") from e
+    except fitz.FileDataError as e:
+        raise PdfMergeError(f"Corrupted PDF stream for {source_label}") from e
     try:
         added = int(src.page_count)
-        dst.insert_pdf(src)
+        try:
+            dst.insert_pdf(src)
+        except MemoryError:
+            raise
+        except Exception as e:
+            raise PdfMergeError(
+                f"Failed to insert PDF pages for {source_label}: {e}"
+            ) from e
         return added
     finally:
         src.close()
 
 
 def _append_pdf_file(dst: fitz.Document, path: Path, source_label: str) -> int:
-    try:
-        src = fitz.open(path)
-    except Exception as e:
-        raise PdfMergeError(f"Failed to open PDF file {path} for {source_label}: {e}") from e
+    src = _open_pdf_file_or_raise(path, source_label)
     try:
         added = int(src.page_count)
-        dst.insert_pdf(src)
+        try:
+            dst.insert_pdf(src)
+        except MemoryError:
+            raise
+        except Exception as e:
+            raise PdfMergeError(
+                f"Failed to insert PDF pages for {source_label} from {path}: {e}"
+            ) from e
         return added
     finally:
         src.close()
+
+
+def _save_atomically(dst: fitz.Document, output_path: Path) -> None:
+    """一時ファイルに保存してから os.replace で差し替える。
+
+    save 失敗時に既存 output_path を壊さない。
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_fd, tmp_name = tempfile.mkstemp(
+        suffix=".pdf", prefix=".merge-", dir=str(output_path.parent)
+    )
+    os.close(tmp_fd)
+    tmp_path = Path(tmp_name)
+    try:
+        dst.save(str(tmp_path))
+    except Exception as e:
+        tmp_path.unlink(missing_ok=True)
+        logger.error("Failed to save merged PDF to %s: %s", output_path, e)
+        raise PdfMergeError(f"Failed to save merged PDF to {output_path}: {e}") from e
+    os.replace(tmp_path, output_path)
 
 
 def merge_user_pdfs(
@@ -108,19 +198,25 @@ def merge_user_pdfs(
     """利用者ごとに concat_order で A/B/C を結合、末尾に D を1回追加する。
 
     Raises:
-        ValueError: concat_order が空/未知、または出力が0ページになる
+        ValueError: concat_order が空/未知、input_dir 未設定、または出力が0ページ
         FileNotFoundError: D が設定されているが存在しない
-        PdfMergeError: PDF 読込/書込の失敗
+        PdfMergeError: user_name 不正、PDF 読込/書込失敗
     """
     _validate_concat_order(config.concat_order)
+    if not config.input_dir:
+        raise ValueError(
+            "PdfMergeConfig.input_dir is empty; must point to the directory "
+            "containing B/C/D PDF files"
+        )
 
-    input_dir = Path(config.input_dir) if config.input_dir else Path()
+    input_dir = Path(config.input_dir)
     missing: list[tuple[str, str]] = []
     total_pages = 0
 
     dst = fitz.open()
     try:
-        for user in users:
+        for user_idx, user in enumerate(users):
+            _validate_user_name(user.user_name)
             for kind in config.concat_order:
                 if kind == "A":
                     total_pages += _append_pdf_bytes(
@@ -134,8 +230,10 @@ def merge_user_pdfs(
                     path = input_dir / filename
                     if not path.exists():
                         logger.warning(
-                            "Missing %s source for user %r: %s (skipping)",
+                            "Missing %s source for user %d/%d %r: %s (skipping)",
                             kind,
+                            user_idx + 1,
+                            len(users),
                             user.user_name,
                             path,
                         )
@@ -157,8 +255,15 @@ def merge_user_pdfs(
                 "(empty users and no D source configured)"
             )
 
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        dst.save(str(output_path))
+        _save_atomically(dst, output_path)
+        if missing:
+            logger.error(
+                "merge_user_pdfs completed with %d missing sources; "
+                "downstream callers MUST inspect MergeReport.missing_sources. "
+                "First 5: %s",
+                len(missing),
+                missing[:5],
+            )
         logger.info(
             "merge_user_pdfs done: users=%d pages=%d output=%s missing=%d",
             len(users),

@@ -13,6 +13,7 @@ import pytest
 from wiseman_hub.config import PdfMergeConfig
 from wiseman_hub.pdf.merger import (
     MergeReport,
+    PdfMergeError,
     UserPageSource,
     merge_user_pdfs,
 )
@@ -280,4 +281,152 @@ def test_multiple_users_missing_various(
 
     report = merge_user_pdfs([_user("u1"), _user("u2")], config, output_path)
     assert sorted(report.missing_sources) == [("u1", "C"), ("u2", "B")]
+    assert report.has_missing_sources is True
     assert _page_texts(output_path) == ["A:u1", "B1", "A:u2", "C2", "D"]
+
+
+# --- 入力バリデーション（defense-in-depth）-------------------------
+
+
+def test_empty_input_dir_raises() -> None:
+    cfg = PdfMergeConfig(
+        input_dir="",
+        concat_order=["A"],
+        source_d_filename="",
+    )
+    with pytest.raises(ValueError, match="input_dir"):
+        merge_user_pdfs([_user("u1")], cfg, Path("/tmp/out.pdf"))
+
+
+def test_user_name_with_path_separator_rejected(
+    input_dir: Path, output_path: Path, config: PdfMergeConfig
+) -> None:
+    bad = UserPageSource(
+        user_name="../etc/passwd",
+        a_page_pdf_bytes=_make_pdf(["A"]),
+    )
+    with pytest.raises(PdfMergeError, match="traversal|forbidden"):
+        merge_user_pdfs([bad], config, output_path)
+
+
+def test_user_name_with_backslash_rejected(
+    input_dir: Path, output_path: Path, config: PdfMergeConfig
+) -> None:
+    bad = UserPageSource(
+        user_name="a\\b",
+        a_page_pdf_bytes=_make_pdf(["A"]),
+    )
+    with pytest.raises(PdfMergeError, match="forbidden"):
+        merge_user_pdfs([bad], config, output_path)
+
+
+def test_user_name_empty_rejected(
+    output_path: Path, config: PdfMergeConfig
+) -> None:
+    bad = UserPageSource(user_name="   ", a_page_pdf_bytes=_make_pdf(["A"]))
+    with pytest.raises(PdfMergeError, match="empty"):
+        merge_user_pdfs([bad], config, output_path)
+
+
+def test_user_name_with_null_byte_rejected(
+    output_path: Path, config: PdfMergeConfig
+) -> None:
+    bad = UserPageSource(user_name="tar\x00o", a_page_pdf_bytes=_make_pdf(["A"]))
+    with pytest.raises(PdfMergeError, match="forbidden"):
+        merge_user_pdfs([bad], config, output_path)
+
+
+# --- PDF 読込時の破損 / 非PDF（splitter と同じ方針）-------------------
+
+
+def test_corrupted_b_file_raises_pdf_merge_error(
+    input_dir: Path, output_path: Path, config: PdfMergeConfig
+) -> None:
+    (input_dir / "B_u1.pdf").write_bytes(b"%PDF-1.4\ngarbage\n%%EOF")
+    (input_dir / "C_u1.pdf").write_bytes(_make_pdf(["C"]))
+    (input_dir / "D_common.pdf").write_bytes(_make_pdf(["D"]))
+
+    with pytest.raises(PdfMergeError, match="Corrupted|Failed"):
+        merge_user_pdfs([_user("u1")], config, output_path)
+
+
+def test_encrypted_b_file_raises_pdf_merge_error(
+    input_dir: Path, output_path: Path, config: PdfMergeConfig
+) -> None:
+    enc_path = input_dir / "B_u1.pdf"
+    doc = fitz.open()
+    try:
+        doc.new_page(width=595.0, height=842.0).insert_text((50, 50), "x")
+        doc.save(
+            str(enc_path),
+            encryption=fitz.PDF_ENCRYPT_AES_256,
+            owner_pw="o",
+            user_pw="u",
+        )
+    finally:
+        doc.close()
+    (input_dir / "C_u1.pdf").write_bytes(_make_pdf(["C"]))
+    (input_dir / "D_common.pdf").write_bytes(_make_pdf(["D"]))
+
+    with pytest.raises(PdfMergeError, match="Encrypted"):
+        merge_user_pdfs([_user("u1")], config, output_path)
+
+
+# --- save 失敗時のアトミック性 -------------------------------------
+
+
+def test_save_failure_does_not_corrupt_existing_output(
+    input_dir: Path,
+    output_path: Path,
+    config: PdfMergeConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """merger 内部の _save_atomically が失敗しても既存 output_path を破壊しない。"""
+    # fixture PDF と既存出力は monkeypatch 前に作成（_make_pdf は内部で save を呼ぶため）
+    (input_dir / "B_u1.pdf").write_bytes(_make_pdf(["B"]))
+    (input_dir / "C_u1.pdf").write_bytes(_make_pdf(["C"]))
+    (input_dir / "D_common.pdf").write_bytes(_make_pdf(["D"]))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    existing_content = _make_pdf(["EXISTING"])
+    output_path.write_bytes(existing_content)
+    user_source = _user("u1")
+
+    def failing_save(
+        dst: fitz.Document, output: Path
+    ) -> None:
+        raise PdfMergeError(f"Failed to save merged PDF to {output}: disk full simulation")
+
+    monkeypatch.setattr("wiseman_hub.pdf.merger._save_atomically", failing_save)
+
+    with pytest.raises(PdfMergeError, match="save"):
+        merge_user_pdfs([user_source], config, output_path)
+
+    # 既存ファイルは破壊されていない
+    assert output_path.read_bytes() == existing_content
+    # 一時ファイルも残っていない
+    leftover = [p.name for p in output_path.parent.iterdir() if p.name.startswith(".merge-")]
+    assert leftover == []
+
+
+def test_save_atomically_cleans_tempfile_on_save_error(tmp_path: Path) -> None:
+    """_save_atomically の実装を直接テスト: save 失敗時に一時ファイルを掃除する。"""
+    from wiseman_hub.pdf.merger import _save_atomically
+
+    output = tmp_path / "out.pdf"
+    existing = _make_pdf(["EXISTING"])
+    output.write_bytes(existing)
+
+    class FakeDoc:
+        def save(self, path: str) -> None:
+            # 一時ファイルが作られていることを確認してから失敗
+            assert Path(path).exists()
+            raise OSError("disk full")
+
+    with pytest.raises(PdfMergeError, match="save"):
+        _save_atomically(FakeDoc(), output)  # type: ignore[arg-type]
+
+    # 既存ファイル保護
+    assert output.read_bytes() == existing
+    # 一時ファイル削除
+    leftover = [p for p in tmp_path.iterdir() if p.name.startswith(".merge-")]
+    assert leftover == []
