@@ -22,6 +22,8 @@ dependencies = [
     "pandas>=2.2.0",
     # PDF (分割・再結合・画像切出)
     "pymupdf>=1.24.0",
+    # HTTP クライアント (Cloud Run OCR プロキシ呼出)
+    "httpx>=0.27.0",
     # TOML (Python <3.11 fallback)
     "tomli>=2.0.0; python_version < '3.11'",
 ]
