@@ -16,6 +16,7 @@ from wiseman_hub.pdf.ocr_client import (
     ExtractNameResult,
     OcrAuthError,
     OcrClient,
+    OcrClientError,
     OcrResponseError,
     OcrServerError,
 )
@@ -271,4 +272,150 @@ def test_name_wrong_type_raises() -> None:
         )
 
     with _make_client(handler) as client, pytest.raises(OcrResponseError, match="name"):
+        client.extract_name(_DUMMY_PNG)
+
+
+# --- 非遷移エラーはリトライしない（httpx.TransportError 以外）-----------
+
+
+def test_non_transient_httpx_error_not_retried() -> None:
+    """InvalidURL は設定ミスなのでリトライせず即伝播する。"""
+    calls = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
+        calls["count"] += 1
+        return httpx.Response(200, json={"name": None, "confidence": "low", "raw_text": ""})
+
+    def raise_invalid_url(request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        raise httpx.InvalidURL("bad url")
+
+    config = OcrBackendConfig(
+        endpoint_url="https://x.run.app", api_key="k", max_retries=3
+    )
+    transport = httpx.MockTransport(raise_invalid_url)
+    http = httpx.Client(transport=transport)
+    with (
+        OcrClient(config, http_client=http) as client,
+        pytest.raises(httpx.InvalidURL),
+    ):
+        client.extract_name(_DUMMY_PNG)
+    assert calls["count"] == 1  # リトライしていない
+
+
+# --- raw_text の型検証 ---------------------------------------------
+
+
+def test_non_string_raw_text_raises() -> None:
+    """dict の raw_text は silent に空文字列化せず OcrResponseError を上げる。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"name": "X", "confidence": "low", "raw_text": {"unexpected": "dict"}},
+        )
+
+    with _make_client(handler) as client, pytest.raises(OcrResponseError, match="raw_text"):
+        client.extract_name(_DUMMY_PNG)
+
+
+# --- 空白 name の正規化 --------------------------------------------
+
+
+def test_whitespace_only_name_treated_as_none() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"name": "   ", "confidence": "low", "raw_text": ""}
+        )
+
+    with _make_client(handler) as client:
+        result = client.extract_name(_DUMMY_PNG)
+
+    assert result.name is None
+
+
+def test_empty_name_treated_as_none() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"name": "", "confidence": "low", "raw_text": ""}
+        )
+
+    with _make_client(handler) as client:
+        result = client.extract_name(_DUMMY_PNG)
+
+    assert result.name is None
+
+
+# --- ロギング -------------------------------------------------------
+
+
+def test_401_logs_error_before_raising(caplog: pytest.LogCaptureFixture) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, text="bad key")
+
+    import logging
+
+    caplog.set_level(logging.ERROR, logger="wiseman_hub.pdf.ocr_client")
+    with _make_client(handler) as client, pytest.raises(OcrAuthError):
+        client.extract_name(_DUMMY_PNG)
+
+    assert any("401" in r.message for r in caplog.records if r.levelno >= logging.ERROR)
+
+
+def test_retry_exhaustion_logs_error_with_history(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    calls = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        return httpx.Response(503, text="down")
+
+    import logging
+
+    caplog.set_level(logging.ERROR, logger="wiseman_hub.pdf.ocr_client")
+    with _make_client(handler, max_retries=2) as client, pytest.raises(OcrServerError) as exc_info:
+        client.extract_name(_DUMMY_PNG)
+
+    # 全試行の履歴が例外メッセージと logger.error の両方に残る
+    assert "attempt 1" in str(exc_info.value)
+    assert "attempt 3" in str(exc_info.value)
+    error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert any("exhausted" in r.message for r in error_records)
+
+
+def test_unexpected_status_logs_error(caplog: pytest.LogCaptureFixture) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(418, text="teapot")
+
+    import logging
+
+    caplog.set_level(logging.ERROR, logger="wiseman_hub.pdf.ocr_client")
+    with _make_client(handler) as client, pytest.raises(OcrResponseError):
+        client.extract_name(_DUMMY_PNG)
+
+    assert any(
+        "418" in r.message for r in caplog.records if r.levelno >= logging.ERROR
+    )
+
+
+# --- リソース管理 ---------------------------------------------------
+
+
+def test_close_is_idempotent() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"name": None, "confidence": "low", "raw_text": ""})
+
+    client = _make_client(handler)
+    client.close()
+    client.close()  # 二度目でも例外が出ない
+
+
+def test_extract_name_after_close_raises_client_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"name": None, "confidence": "low", "raw_text": ""})
+
+    client = _make_client(handler)
+    client.close()
+    with pytest.raises(OcrClientError, match="closed"):
         client.extract_name(_DUMMY_PNG)
