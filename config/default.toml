@@ -39,3 +39,36 @@ region = "asia-northeast1"
 enabled = false
 check_interval_hours = 1
 release_bucket = ""
+
+# OCRバックエンド（Cloud Runプロキシ）設定。詳細は ADR-008 参照。
+# 本セクションは PDF分割・条件付き再結合機能（src/wiseman_hub/pdf/）で使用する。
+# クライアントに GCP 認証情報を持たせず、Cloud Run プロキシ経由で Vertex AI Gemini 2.5 Flash を利用する。
+# [ocr_backend]
+# endpoint_url = "https://wiseman-ocr-proxy-xxx-an.a.run.app"  # Cloud Run のエンドポイント
+# api_key = ""                                                  # Secret Manager で発行したキーを記入
+# timeout_sec = 30
+# max_retries = 3
+
+# PDF分割・条件付き再結合機能の設定。
+# - input_dir: A(複数利用者PDF), B/C(利用者別PDF), D(共通PDF)を配置するフォルダ
+# - output_dir: 生成された結合PDFの出力先
+# - source_a_filename: 複数利用者がまとまったPDFのファイル名
+# - source_d_filename: 全利用者共通で末尾連結するPDFのファイル名
+# - source_b_pattern / source_c_pattern: 利用者名で展開される、利用者別PDFのファイル名パターン
+# - concat_order: 利用者ごとの並び順（"A","B","C" の並び替え。"D" は必ず末尾）
+# - [pdf_merge.user_name_bbox]: A の各ページから利用者名を切り出す固定矩形（ポイント単位）
+# [pdf_merge]
+# input_dir = ""
+# output_dir = ""
+# source_a_filename = ""
+# source_d_filename = ""
+# source_b_pattern = "B_{name}.pdf"
+# source_c_pattern = "C_{name}.pdf"
+# concat_order = ["A", "B", "C"]
+#
+# [pdf_merge.user_name_bbox]
+# x0 = 0.0
+# y0 = 0.0
+# x1 = 0.0
+# y1 = 0.0
+# dpi = 200
