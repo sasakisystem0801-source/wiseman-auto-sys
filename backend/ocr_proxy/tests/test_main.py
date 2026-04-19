@@ -82,7 +82,8 @@ def test_extract_name_rejects_invalid_api_key(client: TestClient) -> None:
     assert resp.status_code == 401
 
 
-def test_extract_name_success(client: TestClient) -> None:
+def test_extract_name_success_strips_raw_text_by_default(client: TestClient) -> None:
+    """APPI 準拠: include_raw_text 未指定なら raw_text は空で返す（PII 漏洩防止）。"""
     fake = _FakeClient(
         response=ExtractNameResponse(name="佐藤花子", confidence="high", raw_text="氏名: 佐藤花子"),
     )
@@ -95,10 +96,25 @@ def test_extract_name_success(client: TestClient) -> None:
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert body == {"name": "佐藤花子", "confidence": "high", "raw_text": "氏名: 佐藤花子"}
+    # name と confidence は返すが、raw_text は PII のため空に落とされる
+    assert body == {"name": "佐藤花子", "confidence": "high", "raw_text": ""}
     assert len(fake.calls) == 1
     _, mime = fake.calls[0]
     assert mime == "image/png"
+
+
+def test_extract_name_returns_raw_text_when_opted_in(client: TestClient) -> None:
+    """include_raw_text=True で明示的にオプトインした場合のみ raw_text を返す。"""
+    main.set_client(
+        _FakeClient(response=ExtractNameResponse(name="田中", confidence="high", raw_text="氏名: 田中"))
+    )
+    resp = client.post(
+        "/v1/ocr/extract-name",
+        headers={"X-API-Key": "test-key-1"},
+        json={"image_base64": _png_base64(), "include_raw_text": True},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"name": "田中", "confidence": "high", "raw_text": "氏名: 田中"}
 
 
 def test_extract_name_accepts_second_api_key(client: TestClient) -> None:
@@ -141,3 +157,39 @@ def test_extract_name_confidence_low_preserved(client: TestClient) -> None:
     )
     assert resp.status_code == 200
     assert resp.json() == {"name": None, "confidence": "low", "raw_text": ""}
+
+
+def test_lifespan_preserves_injected_client() -> None:
+    """lifespan は既に set_client() で差し替えられたクライアントを上書きしない。
+    これによりテストでは実 Vertex AI 初期化を回避でき、本番では未設定時のみ fail-fast する。"""
+    fake = _FakeClient()
+    main.set_client(fake)
+    with TestClient(main.app) as ctx_client:
+        resp = ctx_client.get("/healthz")
+        assert resp.status_code == 200
+    assert main._client_instance is fake
+
+
+def test_lifespan_fails_fast_without_api_keys() -> None:
+    """API_KEYS が空の場合、lifespan は RuntimeError を上げてコンテナ起動を失敗させる。
+    fail-open（認証無しで稼働）の誤デプロイを構造的に防ぐ。"""
+    from app.config import Settings
+    from fastapi import FastAPI
+
+    # 現在の _settings を退避して API_KEYS 空のものに差し替え
+    original = main._settings
+    main._settings = Settings(
+        api_keys=frozenset(),
+        gcp_project_id="test",
+        gcp_location="asia-northeast1",
+        gemini_model="gemini-2.5-flash",
+        rate_limit="60/minute",
+        log_level="INFO",
+    )
+    try:
+        temp_app = FastAPI(lifespan=main.lifespan)
+        with pytest.raises(RuntimeError, match="API_KEYS"), TestClient(temp_app):
+            pass
+    finally:
+        main._settings = original
+        main.set_client(None)

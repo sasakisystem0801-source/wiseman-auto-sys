@@ -81,7 +81,7 @@ gcloud run deploy wiseman-ocr-proxy \
     --image "${IMAGE}" \
     --region "${REGION}" \
     --service-account "wiseman-ocr-proxy@${PROJECT_ID}.iam.gserviceaccount.com" \
-    --no-allow-unauthenticated \
+    --allow-unauthenticated \
     --min-instances 0 \
     --max-instances 2 \
     --concurrency 10 \
@@ -92,29 +92,50 @@ gcloud run deploy wiseman-ocr-proxy \
     --set-secrets "API_KEYS=wiseman-ocr-api-keys:latest"
 ```
 
-### `--no-allow-unauthenticated` について
+### 認証方針: `--allow-unauthenticated`
 
-クライアントは API Key で認証するため、Cloud Run の IAM 認証は**不要**に見えるが、
-二重防御として推奨。クライアント PC には追加で Identity Token を発行して Authorization ヘッダを付与する必要がある。
+1施設1PC の初期運用のため、Cloud Run の IAM 認証は使わず、アプリケーション層の API Key 認証のみで運用する。
+クライアント（Windows デスクトップアプリ）は `X-API-Key` ヘッダのみで呼び出せば良く、Identity Token の取得は不要。
 
-**1施設1PC の初期運用では、運用簡略化のため `--allow-unauthenticated` を選択する**。
-複数施設展開時に IAM 認証 + Identity Token 方式へ切替する（ADR-008 将来対応）。
+将来複数施設展開する場合は、`--no-allow-unauthenticated` に変更して IAM 認証（`roles/run.invoker`）を追加する。
+そのタイミングで ADR-008 を改訂し、クライアント側に Identity Token 取得フローを実装する。
+
+### レート制限の制約（重要）
+
+`RATE_LIMIT=60/minute` は slowapi の **in-memory 実装**。
+`--max-instances 2` でスケールした場合、実効制限はインスタンス数倍（例: 120/minute）となる。
+1施設1PC の想定トラフィックでは問題にならないが、本格的なコスト暴走防止には以下のいずれかが必要:
+
+- Redis 等の共有ストレージで slowapi を backend 化する
+- API Gateway / Cloud Armor の前段 WAF でレート制限する
+- `--max-instances 1` に絞る（ただしスケール不可）
+
+Cloud Monitoring で日次コストアラートを設定し、二次防衛とする。
 
 ## デプロイ後の確認
 
 ```bash
 URL=$(gcloud run services describe wiseman-ocr-proxy --region asia-northeast1 --format='value(status.url)')
 
-# ヘルスチェック
+# ヘルスチェック（--allow-unauthenticated のため認証ヘッダ不要）
 curl -s "${URL}/healthz"
 # => {"status":"ok"}
 
-# API Key 未指定で 401 を返すこと
+# API Key 未指定で 401 を返すこと（IAM 認証ではなくアプリ層の認証）
 curl -s -o /dev/null -w "%{http_code}\n" \
     -X POST "${URL}/v1/ocr/extract-name" \
     -H "Content-Type: application/json" \
     -d '{"image_base64":"iVBORw0KGgo="}'
 # => 401
+
+# 正しい API Key で 200 を返すこと（画像は 1x1 透明 PNG）
+PNG_B64=$(python -c "import base64; print(base64.b64encode(bytes.fromhex('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6300010000000500010d0a2db40000000049454e44ae426082')).decode())")
+curl -s \
+    -X POST "${URL}/v1/ocr/extract-name" \
+    -H "Content-Type: application/json" \
+    -H "X-API-Key: <API_KEY>" \
+    -d "{\"image_base64\":\"${PNG_B64}\"}"
+# => {"name":null,"confidence":"low","raw_text":""}  # 1x1 画像では文字が読めないので low が正常
 ```
 
 ## ロールバック

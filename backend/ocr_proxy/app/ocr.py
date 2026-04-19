@@ -73,11 +73,17 @@ def _parse_response(text: str) -> ExtractNameResponse:
     """Gemini の JSON レスポンスを ExtractNameResponse にパース。
 
     パースできない場合は low 信頼度で返す（呼び出し元が判断できるように）。
+    プロンプト drift や Gemini API 仕様変更の早期検知のため、パース失敗時は
+    WARNING ではなく ERROR ログを出す（Cloud Logging でアラート対象にする想定）。
     """
     try:
         payload = json.loads(text)
-    except json.JSONDecodeError:
-        logger.warning("Gemini response is not valid JSON, falling back to low confidence")
+    except json.JSONDecodeError as e:
+        logger.error(
+            "Gemini response is not valid JSON (prompt drift or API change): error=%s text_prefix=%r",
+            e,
+            text[:100],
+        )
         return ExtractNameResponse(name=None, confidence="low", raw_text=text[:500])
 
     name = payload.get("name")
@@ -85,7 +91,11 @@ def _parse_response(text: str) -> ExtractNameResponse:
         name = None
 
     confidence_raw = payload.get("confidence", "low")
-    confidence: Confidence = confidence_raw if confidence_raw in ("high", "medium", "low") else "low"
+    if confidence_raw in ("high", "medium", "low"):
+        confidence: Confidence = confidence_raw
+    else:
+        logger.warning("Unexpected confidence value from Gemini: %r (fallback to low)", confidence_raw)
+        confidence = "low"
 
     raw_text = payload.get("raw_text", "")
     if not isinstance(raw_text, str):

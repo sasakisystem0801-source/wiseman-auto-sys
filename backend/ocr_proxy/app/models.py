@@ -26,6 +26,13 @@ class ExtractNameRequest(BaseModel):
         default="v1",
         description="プロンプトのバージョニング（将来の A/B テスト用）",
     )
+    include_raw_text: bool = Field(
+        default=False,
+        description=(
+            "True の場合、レスポンスの raw_text に Gemini が読み取った全テキスト（PII 含む）を含める。"
+            "APPI 準拠のため既定で False。デバッグ用途でのみ有効化すること。"
+        ),
+    )
 
 
 class ExtractNameResponse(BaseModel):

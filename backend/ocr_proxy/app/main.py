@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
@@ -42,7 +44,8 @@ def _build_client() -> GenerativeClient:
     )
 
 
-# Cloud Run コールドスタート時に遅延初期化（テストから差し替え可能）
+# Cloud Run 起動時に lifespan で初期化する。テストは TestClient を `with` で使わない限り lifespan を
+# スキップするため、テスト側は `set_client()` で差し替える。
 _client_instance: GenerativeClient | None = None
 
 
@@ -63,10 +66,48 @@ def get_settings() -> Settings:
     return _settings
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """起動時に設定検証 + Gemini クライアント初期化（fail-fast）。"""
+    global _client_instance
+
+    if not _settings.api_keys:
+        raise RuntimeError(
+            "API_KEYS environment variable is required but empty. Refuse to start with fail-open config."
+        )
+    if not _settings.gcp_project_id:
+        raise RuntimeError("GCP_PROJECT_ID environment variable is required but empty.")
+
+    # テストがクライアントを差し替え済みの場合はそれを尊重する
+    if _client_instance is None:
+        _client_instance = _build_client()
+
+    logger.info(
+        "OCR proxy started: project=%s location=%s model=%s rate_limit=%s api_keys_count=%d",
+        _settings.gcp_project_id,
+        _settings.gcp_location,
+        _settings.gemini_model,
+        _settings.rate_limit,
+        len(_settings.api_keys),
+    )
+    yield
+    logger.info("OCR proxy shutting down")
+
+
+def api_key_dep(
+    settings: Annotated[Settings, Depends(get_settings)],
+    x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None,
+) -> str:
+    """認証を FastAPI 依存として解決する。レート制限より先に評価されるため、
+    未認証リクエストが API Key 枠や IP 枠を消費することを防ぐ。"""
+    return verify_api_key(settings.api_keys, x_api_key)
+
+
 app = FastAPI(
     title="Wiseman OCR Proxy",
     description="PDF 切出画像から利用者名を抽出するプロキシ（Vertex AI Gemini 2.5 Flash）",
     version="0.1.0",
+    lifespan=lifespan,
 )
 app.state.limiter = limiter
 
@@ -88,6 +129,7 @@ def healthz() -> dict[str, str]:
     "/v1/ocr/extract-name",
     response_model=ExtractNameResponse,
     responses={
+        400: {"model": ErrorResponse},
         401: {"model": ErrorResponse},
         429: {"model": ErrorResponse},
         503: {"model": ErrorResponse},
@@ -97,12 +139,9 @@ def healthz() -> dict[str, str]:
 def extract_name(
     request: Request,
     body: ExtractNameRequest,
-    settings: Annotated[Settings, Depends(get_settings)],
     client: Annotated[GenerativeClient, Depends(get_client)],
+    _api_key: Annotated[str, Depends(api_key_dep)],
 ) -> ExtractNameResponse:
-    # Depends 経由で API Key 検証（FastAPI の Header 依存をここで実行）
-    verify_api_key(settings.api_keys, request.headers.get("X-API-Key"))
-
     request_id = str(uuid.uuid4())
     logger.info("extract_name request: id=%s mime=%s", request_id, body.mime_type)
 
@@ -120,6 +159,9 @@ def extract_name(
             detail="OCR backend is temporarily unavailable",
         ) from e
 
-    # PII（利用者名・raw_text）は本番ログに出さない
+    # APPI 準拠: raw_text は PII を含むためデフォルトで返さない。
+    if not body.include_raw_text:
+        result = result.model_copy(update={"raw_text": ""})
+
     logger.info("extract_name done: id=%s confidence=%s", request_id, result.confidence)
     return result
