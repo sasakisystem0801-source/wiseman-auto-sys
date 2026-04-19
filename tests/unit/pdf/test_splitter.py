@@ -13,7 +13,12 @@ import pytest
 from PIL import Image
 
 from wiseman_hub.config import UserNameBBox
-from wiseman_hub.pdf.splitter import SplitPage, split_pdf_with_bbox
+from wiseman_hub.pdf.splitter import (
+    PdfCorruptedError,
+    PdfEncryptedError,
+    SplitPage,
+    split_pdf_with_bbox,
+)
 
 
 def _make_pdf(num_pages: int, page_size: tuple[float, float] = (595.0, 842.0)) -> bytes:
@@ -139,3 +144,101 @@ def test_invalid_dpi_raises(single_page_pdf: Path) -> None:
     zero_dpi = UserNameBBox(x0=40.0, y0=40.0, x1=200.0, y1=80.0, dpi=0)
     with pytest.raises(ValueError, match="dpi"):
         split_pdf_with_bbox(single_page_pdf, zero_dpi)
+
+
+# --- fitz エラー翻訳 ---------------------------------------------------
+
+
+def test_empty_file_raises_corrupted_error(
+    tmp_path: Path, default_bbox: UserNameBBox
+) -> None:
+    path = tmp_path / "empty.pdf"
+    path.write_bytes(b"")
+    with pytest.raises(PdfCorruptedError, match="Empty"):
+        split_pdf_with_bbox(path, default_bbox)
+
+
+def test_corrupted_file_raises_corrupted_error(
+    tmp_path: Path, default_bbox: UserNameBBox
+) -> None:
+    path = tmp_path / "broken.pdf"
+    path.write_bytes(b"%PDF-1.4\nnot really a pdf\n%%EOF")
+    with pytest.raises(PdfCorruptedError, match="Corrupted"):
+        split_pdf_with_bbox(path, default_bbox)
+
+
+def test_non_pdf_file_renamed_raises_corrupted_error(
+    tmp_path: Path, default_bbox: UserNameBBox
+) -> None:
+    """PNG を .pdf にリネームしたファイルは fitz では開けるが is_pdf=False。"""
+    path = tmp_path / "png_masquerading.pdf"
+    # 1x1 透明PNG
+    png_bytes = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+        "0000000a49444154789c6300010000000500010d0a2db40000000049454e44ae426082"
+    )
+    path.write_bytes(png_bytes)
+    with pytest.raises(PdfCorruptedError, match="Not a PDF"):
+        split_pdf_with_bbox(path, default_bbox)
+
+
+def test_encrypted_pdf_raises_encrypted_error(
+    tmp_path: Path, default_bbox: UserNameBBox
+) -> None:
+    path = tmp_path / "encrypted.pdf"
+    doc = fitz.open()
+    try:
+        page = doc.new_page(width=595.0, height=842.0)
+        page.insert_text((50, 50), "secret", fontsize=12)
+        doc.save(
+            str(path),
+            encryption=fitz.PDF_ENCRYPT_AES_256,
+            owner_pw="owner",
+            user_pw="user",
+        )
+    finally:
+        doc.close()
+    with pytest.raises(PdfEncryptedError, match="encrypted"):
+        split_pdf_with_bbox(path, default_bbox)
+
+
+# --- heterogeneous ページサイズ -----------------------------------------
+
+
+def test_heterogeneous_pages_validates_bbox_per_page(
+    tmp_path: Path,
+) -> None:
+    """page 0 はA4、page 1 は半分サイズ。bbox は page 0 にはフィットするが page 1 では範囲外。"""
+    path = tmp_path / "mixed.pdf"
+    doc = fitz.open()
+    try:
+        p0 = doc.new_page(width=595.0, height=842.0)
+        p0.insert_text((50, 50), "large page", fontsize=12)
+        p1 = doc.new_page(width=200.0, height=300.0)
+        p1.insert_text((10, 10), "small page", fontsize=10)
+        path.write_bytes(bytes(doc.tobytes()))
+    finally:
+        doc.close()
+
+    # bbox は page 0 (595x842) にはフィット、page 1 (200x300) では x1=400 が範囲外
+    bbox = UserNameBBox(x0=40.0, y0=40.0, x1=400.0, y1=80.0, dpi=150)
+    with pytest.raises(ValueError, match="page 1"):
+        split_pdf_with_bbox(path, bbox)
+
+
+def test_heterogeneous_pages_succeed_when_bbox_fits_all(tmp_path: Path) -> None:
+    """bbox が全ページ内に収まる場合は正常に処理できる。"""
+    path = tmp_path / "mixed_ok.pdf"
+    doc = fitz.open()
+    try:
+        p0 = doc.new_page(width=595.0, height=842.0)
+        p0.insert_text((50, 50), "large", fontsize=12)
+        p1 = doc.new_page(width=200.0, height=300.0)
+        p1.insert_text((10, 10), "small", fontsize=10)
+        path.write_bytes(bytes(doc.tobytes()))
+    finally:
+        doc.close()
+
+    bbox = UserNameBBox(x0=10.0, y0=10.0, x1=100.0, y1=50.0, dpi=100)
+    result = split_pdf_with_bbox(path, bbox)
+    assert len(result) == 2
