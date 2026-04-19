@@ -47,6 +47,41 @@ class UpdaterConfig:
 
 
 @dataclass
+class OcrBackendConfig:
+    """OCRバックエンド（Cloud Runプロキシ）設定。詳細はADR-008参照。"""
+
+    endpoint_url: str = ""
+    api_key: str = ""
+    timeout_sec: int = 30
+    max_retries: int = 3
+
+
+@dataclass
+class UserNameBBox:
+    """利用者名が印字される固定矩形（PDFページ座標、ポイント単位）。"""
+
+    x0: float = 0.0
+    y0: float = 0.0
+    x1: float = 0.0
+    y1: float = 0.0
+    dpi: int = 200
+
+
+@dataclass
+class PdfMergeConfig:
+    """PDF分割・条件付き再結合機能の設定。"""
+
+    input_dir: str = ""
+    output_dir: str = ""
+    source_a_filename: str = ""
+    source_d_filename: str = ""
+    source_b_pattern: str = "B_{name}.pdf"
+    source_c_pattern: str = "C_{name}.pdf"
+    concat_order: list[str] = field(default_factory=lambda: ["A", "B", "C"])
+    user_name_bbox: UserNameBBox = field(default_factory=UserNameBBox)
+
+
+@dataclass
 class AppConfig:
     version: str = "0.1.0"
     log_level: str = "INFO"
@@ -56,6 +91,8 @@ class AppConfig:
     reports: list[ReportTarget] = field(default_factory=list)
     gcp: GcpConfig = field(default_factory=GcpConfig)
     updater: UpdaterConfig = field(default_factory=UpdaterConfig)
+    ocr_backend: OcrBackendConfig = field(default_factory=OcrBackendConfig)
+    pdf_merge: PdfMergeConfig = field(default_factory=PdfMergeConfig)
 
 
 def load_config(path: Path | None = None) -> AppConfig:
@@ -74,10 +111,15 @@ def load_config(path: Path | None = None) -> AppConfig:
     schedule_data = data.get("schedule", {})
     gcp_data = data.get("gcp", {})
     updater_data = data.get("updater", {})
+    ocr_backend_data = data.get("ocr_backend", {})
+    pdf_merge_data = dict(data.get("pdf_merge", {}))
 
     reports: list[ReportTarget] = []
     for target in data.get("reports", {}).get("targets", []):
         reports.append(ReportTarget(**target))
+
+    bbox_data = pdf_merge_data.pop("user_name_bbox", {})
+    pdf_merge = PdfMergeConfig(**pdf_merge_data, user_name_bbox=UserNameBBox(**bbox_data))
 
     return AppConfig(
         version=app_data.get("version", "0.1.0"),
@@ -88,4 +130,6 @@ def load_config(path: Path | None = None) -> AppConfig:
         reports=reports,
         gcp=GcpConfig(**gcp_data),
         updater=UpdaterConfig(**updater_data),
+        ocr_backend=OcrBackendConfig(**ocr_backend_data),
+        pdf_merge=pdf_merge,
     )
