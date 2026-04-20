@@ -57,6 +57,12 @@ python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
+# strict チェック対象を src/ に限定（CLAUDE.md の「Type check: mypy src/」と整合）
+# `mypy .` と指定しても下記パスは自動除外される（`mypy src/` と同等の結果）:
+# - backend/ocr_proxy: 独立 Cloud Run サービスで別コンテナ。ルートの mypy 対象外
+# - tests/: テストコードでは strict 型アノテーションを必須としない（pytest fixture 等で冗長）
+# - scripts/: 将来の CLI スクリプト配置予定、strict 対象外
+exclude = ["^backend/", "^tests/", "^scripts/"]
 # スタブが存在しないサードパーティライブラリのimportエラーを許容
 # GA移行時にスタブ追加またはstub-onlyパッケージ導入で strict 完全対応する
 disable_error_code = ["import-untyped", "import-not-found"]
