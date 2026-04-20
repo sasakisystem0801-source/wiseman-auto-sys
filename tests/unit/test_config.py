@@ -1,8 +1,9 @@
 """設定ローダーのユニットテスト"""
 
+from dataclasses import replace
 from pathlib import Path
 
-from wiseman_hub.config import AppConfig, load_config
+from wiseman_hub.config import AppConfig, load_config, save_config
 
 
 def test_load_config_default() -> None:
@@ -107,3 +108,196 @@ dpi = 300
     assert config.pdf_merge.user_name_bbox.x1 == 300.0
     assert config.pdf_merge.user_name_bbox.y1 == 130.0
     assert config.pdf_merge.user_name_bbox.dpi == 300
+
+
+class TestSaveConfig:
+    """save_config(): AppConfig を TOML に書き戻すテスト。
+
+    tomlkit でコメント・空行を維持したラウンドトリップを保証する。
+    """
+
+    def test_save_roundtrip_preserves_all_values(self, tmp_path: Path) -> None:
+        """save → load で全フィールドが同じ値になる（ラウンドトリップ）。"""
+        source = tmp_path / "source.toml"
+        source.write_text(
+            """\
+[app]
+version = "1.2.3"
+log_level = "DEBUG"
+log_dir = "/var/log/wiseman"
+
+[wiseman]
+exe_path = "C:\\\\wiseman.exe"
+startup_wait_sec = 20
+window_title_pattern = ".*TEST.*"
+
+[schedule]
+enabled = true
+cron = "0 9 * * *"
+
+[gcp]
+project_id = "my-project"
+bucket_name = "my-bucket"
+service_account_key_path = "sa.json"
+region = "asia-northeast1"
+
+[updater]
+enabled = true
+check_interval_hours = 6
+release_bucket = "releases"
+
+[ocr_backend]
+endpoint_url = "https://ocr.example.com"
+api_key = "secret-key"
+timeout_sec = 45
+max_retries = 4
+
+[pdf_merge]
+input_dir = "/in"
+output_dir = "/out"
+source_a_filename = "A.pdf"
+source_d_filename = "D.pdf"
+source_b_pattern = "B_{name}.pdf"
+source_c_pattern = "C_{name}.pdf"
+concat_order = ["A", "C", "B"]
+
+[pdf_merge.user_name_bbox]
+x0 = 10.0
+y0 = 20.0
+x1 = 200.0
+y1 = 50.0
+dpi = 300
+
+[[reports.targets]]
+name = "帳票1"
+menu_path = ["メニュー", "サブ"]
+output_format = "csv"
+""",
+            encoding="utf-8",
+        )
+        cfg = load_config(source)
+
+        target = tmp_path / "target.toml"
+        save_config(cfg, target)
+
+        reloaded = load_config(target)
+        assert reloaded == cfg
+
+    def test_save_to_new_file_creates_valid_toml(self, tmp_path: Path) -> None:
+        """既存ファイルなしで save → 新規作成、load で同じ値になる。"""
+        cfg = AppConfig()
+        cfg = replace(cfg, log_level="WARNING")
+        cfg.pdf_merge.input_dir = "/tmp/in"
+        cfg.pdf_merge.output_dir = "/tmp/out"
+        cfg.pdf_merge.source_a_filename = "A.pdf"
+        cfg.ocr_backend.endpoint_url = "https://example.com"
+        cfg.ocr_backend.api_key = "xyz"
+
+        target = tmp_path / "new.toml"
+        save_config(cfg, target)
+
+        assert target.exists()
+        reloaded = load_config(target)
+        assert reloaded.log_level == "WARNING"
+        assert reloaded.pdf_merge.input_dir == "/tmp/in"
+        assert reloaded.ocr_backend.api_key == "xyz"
+
+    def test_save_preserves_comments_when_existing_file(self, tmp_path: Path) -> None:
+        """既存 TOML にコメントがある場合、save 後もコメントが残る（tomlkit の機能確認）。"""
+        target = tmp_path / "commented.toml"
+        target.write_text(
+            """\
+# これはトップレベルコメント
+[app]
+version = "0.0.1"  # バージョンコメント
+log_level = "INFO"
+
+# PDF マージ設定
+[pdf_merge]
+input_dir = ""  # 入力フォルダ
+output_dir = ""
+""",
+            encoding="utf-8",
+        )
+        cfg = load_config(target)
+        cfg.pdf_merge.input_dir = "/new/in"
+        save_config(cfg, target)
+
+        written = target.read_text(encoding="utf-8")
+        assert "# これはトップレベルコメント" in written
+        assert "# PDF マージ設定" in written
+        assert "# 入力フォルダ" in written
+        assert '/new/in' in written
+
+    def test_save_overwrites_existing_file(self, tmp_path: Path) -> None:
+        """既存ファイルを save で上書きできる。新しい値がロードされる。"""
+        target = tmp_path / "existing.toml"
+        target.write_text('[app]\nversion = "original"\n', encoding="utf-8")
+
+        cfg = AppConfig()
+        save_config(cfg, target)
+
+        assert target.exists()
+        reloaded = load_config(target)
+        assert reloaded.version == cfg.version
+
+    def test_save_preserves_bbox_nested_section(self, tmp_path: Path) -> None:
+        """ネストセクション [pdf_merge.user_name_bbox] が正しく書き戻される。"""
+        cfg = AppConfig()
+        cfg.pdf_merge.user_name_bbox.x0 = 11.0
+        cfg.pdf_merge.user_name_bbox.y0 = 22.0
+        cfg.pdf_merge.user_name_bbox.x1 = 333.0
+        cfg.pdf_merge.user_name_bbox.y1 = 44.0
+        cfg.pdf_merge.user_name_bbox.dpi = 250
+
+        target = tmp_path / "bbox.toml"
+        save_config(cfg, target)
+
+        reloaded = load_config(target)
+        assert reloaded.pdf_merge.user_name_bbox.x0 == 11.0
+        assert reloaded.pdf_merge.user_name_bbox.y0 == 22.0
+        assert reloaded.pdf_merge.user_name_bbox.x1 == 333.0
+        assert reloaded.pdf_merge.user_name_bbox.y1 == 44.0
+        assert reloaded.pdf_merge.user_name_bbox.dpi == 250
+
+    def test_save_reports_targets_list(self, tmp_path: Path) -> None:
+        """複数の [[reports.targets]] が正しく書き戻される。"""
+        from wiseman_hub.config import ReportTarget
+
+        cfg = AppConfig()
+        cfg.reports.append(
+            ReportTarget(name="報告書1", menu_path=["A", "B"], output_format="csv")
+        )
+        cfg.reports.append(
+            ReportTarget(name="報告書2", menu_path=["X"], output_format="xlsx")
+        )
+
+        target = tmp_path / "reports.toml"
+        save_config(cfg, target)
+
+        reloaded = load_config(target)
+        assert len(reloaded.reports) == 2
+        assert reloaded.reports[0].name == "報告書1"
+        assert reloaded.reports[0].menu_path == ["A", "B"]
+        assert reloaded.reports[1].name == "報告書2"
+        assert reloaded.reports[1].output_format == "xlsx"
+
+    def test_save_creates_parent_directory_if_missing(self, tmp_path: Path) -> None:
+        """保存先の親ディレクトリが存在しない場合、自動作成する。"""
+        cfg = AppConfig()
+        target = tmp_path / "deeply" / "nested" / "config.toml"
+
+        save_config(cfg, target)
+
+        assert target.exists()
+        reloaded = load_config(target)
+        assert reloaded.version == cfg.version
+
+    def test_save_empty_reports_list(self, tmp_path: Path) -> None:
+        """reports が空リストでも [[reports.targets]] を書き戻せる。"""
+        cfg = AppConfig()
+        target = tmp_path / "empty.toml"
+        save_config(cfg, target)
+
+        reloaded = load_config(target)
+        assert reloaded.reports == []

@@ -1,4 +1,4 @@
-"""TOML設定ファイルのローダー"""
+"""TOML設定ファイルのローダー / セーバー"""
 
 from __future__ import annotations
 
@@ -6,9 +6,16 @@ try:
     import tomllib
 except ModuleNotFoundError:
     import tomli as tomllib  # type: ignore[no-redef]
-from dataclasses import dataclass, field
+import contextlib
+import os
+import tempfile
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+import tomlkit
+from tomlkit import TOMLDocument
+from tomlkit.items import Table
 
 
 @dataclass
@@ -133,3 +140,99 @@ def load_config(path: Path | None = None) -> AppConfig:
         ocr_backend=OcrBackendConfig(**ocr_backend_data),
         pdf_merge=pdf_merge,
     )
+
+
+_SCALAR_SECTIONS: tuple[str, ...] = ("wiseman", "schedule", "gcp", "updater", "ocr_backend")
+
+
+def _update_table_from_dataclass(doc: TOMLDocument, section: str, data: dict[str, Any]) -> None:
+    """既存テーブルを in-place 更新（コメント維持）、存在しなければ新規追加。"""
+    if section in doc:
+        table = doc[section]
+        assert isinstance(table, Table)
+        for key, value in data.items():
+            table[key] = value
+    else:
+        doc[section] = data
+
+
+def _update_pdf_merge(doc: TOMLDocument, pdf_merge: PdfMergeConfig) -> None:
+    """[pdf_merge] とネスト [pdf_merge.user_name_bbox] を書き戻す。"""
+    bbox = asdict(pdf_merge.user_name_bbox)
+    pdf_merge_dict = asdict(pdf_merge)
+    pdf_merge_dict.pop("user_name_bbox", None)
+
+    if "pdf_merge" in doc:
+        table = doc["pdf_merge"]
+        assert isinstance(table, Table)
+        for key, value in pdf_merge_dict.items():
+            table[key] = value
+        if "user_name_bbox" in table:
+            bbox_table = table["user_name_bbox"]
+            assert isinstance(bbox_table, Table)
+            for key, value in bbox.items():
+                bbox_table[key] = value
+        else:
+            table["user_name_bbox"] = bbox
+    else:
+        new_table = tomlkit.table()
+        for key, value in pdf_merge_dict.items():
+            new_table[key] = value
+        new_table["user_name_bbox"] = bbox
+        doc["pdf_merge"] = new_table
+
+
+def _update_reports(doc: TOMLDocument, reports: list[ReportTarget]) -> None:
+    """[[reports.targets]] 配列を書き戻す。"""
+    targets_data = [asdict(t) for t in reports]
+    if "reports" in doc:
+        reports_table = doc["reports"]
+        assert isinstance(reports_table, Table)
+        reports_table["targets"] = targets_data
+    else:
+        reports_table = tomlkit.table()
+        aot = tomlkit.aot()
+        for t in targets_data:
+            tbl = tomlkit.table()
+            for key, value in t.items():
+                tbl[key] = value
+            aot.append(tbl)
+        reports_table["targets"] = aot
+        doc["reports"] = reports_table
+
+
+def save_config(cfg: AppConfig, path: Path) -> None:
+    """AppConfig を TOML に書き戻す。
+
+    既存ファイルがあれば tomlkit でパースして値だけ更新し、コメント・空行を維持する。
+    存在しない場合は新規 TOMLDocument を生成。書き込みは tempfile + os.replace で atomic。
+    親ディレクトリが存在しない場合は自動作成する。
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            doc = tomlkit.parse(f.read())
+    except FileNotFoundError:
+        doc = tomlkit.document()
+
+    app_data = {"version": cfg.version, "log_level": cfg.log_level, "log_dir": cfg.log_dir}
+    _update_table_from_dataclass(doc, "app", app_data)
+
+    for section in _SCALAR_SECTIONS:
+        _update_table_from_dataclass(doc, section, asdict(getattr(cfg, section)))
+
+    _update_pdf_merge(doc, cfg.pdf_merge)
+    _update_reports(doc, cfg.reports)
+
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=path.name + ".", suffix=".tmp", dir=str(path.parent)
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(tomlkit.dumps(doc))
+        os.replace(tmp_path, path)
+    except Exception:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp_path)
+        raise
