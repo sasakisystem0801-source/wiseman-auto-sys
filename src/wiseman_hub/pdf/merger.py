@@ -52,11 +52,16 @@ class UserPageSource:
     user_name: OCR で抽出した氏名（B/C ファイル名の `{name}` プレースホルダ解決に使用）
     a_page_pdf_bytes: splitter の `SplitPage.page_pdf_bytes`（A の1ページ分PDF）
     page_index: 元 A のページインデックス（ログ用）
+    matched_b_path / matched_c_path: ConfirmDialog の手動選択や matcher の自動特定で
+        得た B/C の絶対パス。``None`` なら従来通り ``source_b_pattern`` / ``source_c_pattern``
+        で `input_dir` 配下を解決する。指定時はそちらが優先（pattern バイパス）。
     """
 
     user_name: str
     a_page_pdf_bytes: bytes
     page_index: int = 0
+    matched_b_path: str | None = None
+    matched_c_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -170,6 +175,25 @@ def _append_pdf_file(dst: fitz.Document, path: Path, source_label: str) -> int:
         src.close()
 
 
+def _resolve_bc_path(
+    user: UserPageSource,
+    kind: str,
+    input_dir: Path,
+    config: PdfMergeConfig,
+) -> Path:
+    """利用者1名の B/C PDF パスを決定する。
+
+    override（`user.matched_b_path` / `user.matched_c_path`）が指定されていれば
+    それを絶対パスとして採用し、`source_b_pattern` / `source_c_pattern` はバイパスする。
+    override が None なら従来通り `input_dir / pattern.format(name=user.user_name)` を返す。
+    """
+    override = user.matched_b_path if kind == "B" else user.matched_c_path
+    if override is not None:
+        return Path(override)
+    pattern = config.source_b_pattern if kind == "B" else config.source_c_pattern
+    return input_dir / pattern.format(name=user.user_name)
+
+
 def _save_atomically(dst: fitz.Document, output_path: Path) -> None:
     """一時ファイルに保存してから os.replace で差し替える。
 
@@ -223,19 +247,16 @@ def merge_user_pdfs(
                         dst, user.a_page_pdf_bytes, f"A:{user.user_name}"
                     )
                 else:
-                    pattern = (
-                        config.source_b_pattern if kind == "B" else config.source_c_pattern
-                    )
-                    filename = pattern.format(name=user.user_name)
-                    path = input_dir / filename
+                    path = _resolve_bc_path(user, kind, input_dir, config)
                     if not path.exists():
+                        # PII 防御: ログに氏名・パスを出さない（医療介護データ扱いのため）。
+                        # 詳細は MergeReport.missing_sources に記録され、呼出側が
+                        # 画面表示等の適切な経路で利用する。
                         logger.warning(
-                            "Missing %s source for user %d/%d %r: %s (skipping)",
+                            "Missing %s source for user %d/%d (skipping)",
                             kind,
                             user_idx + 1,
                             len(users),
-                            user.user_name,
-                            path,
                         )
                         missing.append((user.user_name, kind))
                         continue
@@ -257,18 +278,20 @@ def merge_user_pdfs(
 
         _save_atomically(dst, output_path)
         if missing:
+            # PII 防御: missing タプルには氏名が含まれるためログ出力しない。件数と kind 別集計のみ。
+            b_missing = sum(1 for _, k in missing if k == "B")
+            c_missing = sum(1 for _, k in missing if k == "C")
             logger.error(
-                "merge_user_pdfs completed with %d missing sources; "
-                "downstream callers MUST inspect MergeReport.missing_sources. "
-                "First 5: %s",
+                "merge_user_pdfs completed with %d missing sources (B=%d, C=%d); "
+                "downstream callers MUST inspect MergeReport.missing_sources.",
                 len(missing),
-                missing[:5],
+                b_missing,
+                c_missing,
             )
         logger.info(
-            "merge_user_pdfs done: users=%d pages=%d output=%s missing=%d",
+            "merge_user_pdfs done: users=%d pages=%d missing=%d",
             len(users),
             total_pages,
-            output_path,
             len(missing),
         )
     finally:

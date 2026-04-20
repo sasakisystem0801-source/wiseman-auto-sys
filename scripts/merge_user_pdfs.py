@@ -1,4 +1,4 @@
-"""PDF 分割・条件付き再結合パイプラインの CLI（Phase A、Issue #36）。
+"""PDF 分割・条件付き再結合パイプラインの CLI（Phase A / Phase B / 確認 UI）。
 
 使い方:
     # 新規実行（config/default.toml を使用、A.pdf は pdf_merge.input_dir 配下）
@@ -16,17 +16,21 @@
     # 不要セッションの破棄（JSON + artifact ディレクトリ削除）
     python scripts/merge_user_pdfs.py --discard <session_id>
 
-本 CLI は Phase A（split → OCR → match）までを担当する。Phase B（merger 実行）と
-確認 UI は別モジュール（scripts/review_ui.py など）として後続で実装される。
+    # 人間確認 UI 起動（NEEDS_REVIEW の候補を解決）
+    python scripts/merge_user_pdfs.py --review <session_id>
 
-依存性注入: `main()` は config_loader / ocr_factory / matcher_factory を受け、
-テストではモック実装を差し込む。
+    # Phase B 実行（READY_TO_MERGE の session を結合して COMPLETED へ）
+    python scripts/merge_user_pdfs.py --merge <session_id>
+
+本 CLI は Phase A / Phase B / 確認 UI を 1 本で担当する。
+依存性注入: `main()` は config_loader / ocr_factory / matcher_factory / dialog_factory を受け、
+テストではモック実装を差し込む。Tkinter は `--review` 実行時のみ lazy import する。
 
 終了コード:
-    0: 成功（READY_TO_MERGE 到達、list-sessions、discard 成功を含む）
-    1: 一般的エラー（config 不備、source_a 不在、OCR 失敗、ロック競合）
+    0: 成功（READY_TO_MERGE 到達、list-sessions、discard 成功、COMPLETED を含む）
+    1: 一般的エラー（config 不備、source_a 不在、OCR 失敗、ロック競合、UI 異常終了、merger 失敗）
     2: argparse が引数エラーと判定した場合（自動割当）
-    3: Phase A 完了したが NEEDS_REVIEW（人間確認必要 → UI タスクで解消）
+    3: Phase A / --review 完了したが NEEDS_REVIEW（人間確認未解決）
     130: KeyboardInterrupt（POSIX 慣例の 128 + SIGINT 2）
 """
 
@@ -39,7 +43,13 @@ import sys
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
+
+if TYPE_CHECKING:
+    # 型のみ参照: confirm_dialog は tkinter を import するため実行時はロードしない
+    # （macOS uv python は Tcl/Tk 非同梱）。実行時の import は _default_dialog_factory
+    # 内部で行い、`--review` 実行時にのみロードする。
+    from wiseman_hub.ui.confirm_dialog import ConfirmDialogResult
 
 from wiseman_hub.config import (
     AppConfig,
@@ -49,8 +59,9 @@ from wiseman_hub.config import (
 )
 from wiseman_hub.pdf.matcher import KanjiMatcher, NameMatcher
 from wiseman_hub.pdf.ocr_client import OcrClient
-from wiseman_hub.pdf.pipeline import OcrClientLike, run_phase_a
+from wiseman_hub.pdf.pipeline import OcrClientLike, run_phase_a, run_phase_b
 from wiseman_hub.pdf.session import (
+    InvalidTransitionError,
     Session,
     SessionCorruptedError,
     SessionError,
@@ -59,6 +70,8 @@ from wiseman_hub.pdf.session import (
     list_sessions,
     load_session,
     remove_session_artifacts,
+    save_session,
+    transition_session,
     validate_session_id,
     with_session_lock,
 )
@@ -86,6 +99,18 @@ class _OcrFactory(Protocol):
         ...
 
 
+class _ConfirmDialogLike(Protocol):
+    """ConfirmDialog のテスト差し替え用インターフェース。"""
+
+    def run(self) -> ConfirmDialogResult:
+        ...
+
+
+class _DialogFactory(Protocol):
+    def __call__(self, session: Session, sessions_dir: Path) -> _ConfirmDialogLike:
+        ...
+
+
 def _default_ocr_factory(config: OcrBackendConfig) -> OcrClientLike:
     return OcrClient(config)
 
@@ -96,6 +121,18 @@ def _default_matcher_factory(config: PdfMergeConfig) -> NameMatcher:
         source_b_pattern=config.source_b_pattern,
         source_c_pattern=config.source_c_pattern,
     )
+
+
+def _default_dialog_factory(
+    session: Session, sessions_dir: Path
+) -> _ConfirmDialogLike:
+    """本番の `ConfirmDialog` を返す（Tkinter は lazy import）。
+
+    macOS uv python は Tcl/Tk 非同梱のため、`--review` を実行しない限り import を避ける。
+    """
+    from wiseman_hub.ui.confirm_dialog import ConfirmDialog
+
+    return ConfirmDialog(session, sessions_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -257,6 +294,201 @@ def _cmd_resume(
     )
 
 
+def _cmd_review(
+    *,
+    sessions_dir: Path,
+    session_id: str,
+    dialog_factory: _DialogFactory,
+) -> int:
+    """確認 UI を起動し、全件解決時に NEEDS_REVIEW → READY_TO_MERGE へ遷移させる。"""
+    try:
+        validate_session_id(session_id)
+    except ValueError as e:
+        print(f"error: invalid session_id: {e}", file=sys.stderr)
+        return EXIT_ERROR
+
+    try:
+        session = load_session(session_id, sessions_dir=sessions_dir)
+    except (SessionNotFoundError, SessionCorruptedError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return EXIT_ERROR
+
+    # 既に READY_TO_MERGE なら確認済みとみなし UI 起動をスキップ（再度の解決作業は不要）。
+    if session.status == SessionStatus.READY_TO_MERGE:
+        print(
+            f"session {session_id}: already READY_TO_MERGE "
+            "(run --merge to produce the final PDF)"
+        )
+        return EXIT_OK
+
+    if session.status != SessionStatus.NEEDS_REVIEW:
+        print(
+            f"error: cannot run --review on session in status {session.status.value} "
+            "(expected needs_review)",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+
+    try:
+        with with_session_lock(sessions_dir, session_id):
+            dialog = dialog_factory(session, sessions_dir)
+            result = dialog.run()
+    except (BlockingIOError, OSError) as e:
+        print(
+            f"error: session {session_id} is locked by another process: {e}",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+
+    # 呼出側契約: aborted=True の場合、メモリ上の session は信頼できない（save 失敗済み）。
+    # 遷移は試みず EXIT_ERROR で return する。次に `--review` を実行したとき、load_session
+    # がディスクから旧状態を再ロードし、未解決候補として再提示する。
+    if result.aborted:
+        print(
+            f"error: review UI aborted for session {session_id}. "
+            "state preserved; rerun --review to resume.",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+
+    # aborted=False の場合、dialog の save は成功している。最新の session は
+    # メモリ上のものとディスクが一致しているため、ここでは再ロードせず遷移する。
+    if not session.all_candidates_resolved:
+        print(
+            f"session {session_id}: {sum(1 for c in session.candidates if not c.is_resolved)} "
+            "candidate(s) still unresolved; rerun --review when ready.",
+            file=sys.stderr,
+        )
+        return EXIT_NEEDS_REVIEW
+
+    # ロック再取得して READY_TO_MERGE へ遷移 + 保存。
+    # 既知リスク: UI 実行中のロック解放とこの再取得の間に別プロセスが同 session を触る
+    # 時間窓がある（例: 別端末からの --discard）。対象規模 1〜3 名の単一 PC 運用では
+    # 発生しない前提で受容。マルチ端末運用に拡張する際は session 再ロード + 状態再検証を
+    # ここに追加する。
+    try:
+        with with_session_lock(sessions_dir, session_id):
+            transition_session(session, SessionStatus.READY_TO_MERGE)
+            save_session(session, sessions_dir=sessions_dir)
+    except (BlockingIOError, OSError) as e:
+        # ここまでで dialog 側 save は既に成功済み（全候補が解決済みで永続化済）。
+        # 遷移だけが失敗したので、再 --review で冪等に READY_TO_MERGE へ進める。
+        print(
+            f"error: resolutions saved but transition to ready_to_merge failed "
+            f"(lock contention): {e}",
+            file=sys.stderr,
+        )
+        print(
+            "note: rerun --review to complete the transition "
+            "(no re-confirmation needed).",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    except InvalidTransitionError as e:
+        # dialog が既に遷移させていた等（二重遷移は invariant 違反）
+        print(f"error: {e}", file=sys.stderr)
+        return EXIT_ERROR
+
+    print(f"session {session_id}: status=ready_to_merge (run --merge to finalize)")
+    return EXIT_OK
+
+
+def _cmd_merge(
+    *,
+    config: AppConfig,
+    sessions_dir: Path,
+    session_id: str,
+) -> int:
+    """Phase B を実行し、session を COMPLETED に遷移させる。"""
+    try:
+        validate_session_id(session_id)
+    except ValueError as e:
+        print(f"error: invalid session_id: {e}", file=sys.stderr)
+        return EXIT_ERROR
+
+    try:
+        session = load_session(session_id, sessions_dir=sessions_dir)
+    except (SessionNotFoundError, SessionCorruptedError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return EXIT_ERROR
+
+    # RUNNING_PHASE_B は正常フローでは一時状態。ディスクに残っているのは、前回の
+    # Phase B 実行中に INTERRUPTED_PHASE_B への保存自体が失敗したケース（disk full
+    # や権限エラー）。そのまま --merge を再実行すると InvalidTransitionError になるだけで
+    # 利用者は対処法が分からないので、明示的に手順を案内する。
+    if session.status == SessionStatus.RUNNING_PHASE_B:
+        print(
+            f"error: session {session_id} is stuck in running_phase_b "
+            "(phase B crashed before saving INTERRUPTED state).",
+            file=sys.stderr,
+        )
+        print(
+            f"note: inspect session JSON at sessions_dir/{session_id}.json, "
+            "then either fix the status manually to interrupted_phase_b or "
+            f"discard via `--discard {session_id}` and rerun phase A.",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+
+    output_path = _resolve_merge_output_path(config, session_id)
+
+    try:
+        result = run_phase_b(
+            session=session,
+            config=config.pdf_merge,
+            sessions_dir=sessions_dir,
+            output_path=output_path,
+        )
+    except InvalidTransitionError as e:
+        # InvalidTransitionError は内部固定文（session.py 生成）で PII を含まない
+        print(f"error: {e}", file=sys.stderr)
+        return EXIT_ERROR
+    except (BlockingIOError, OSError) as e:
+        # PII 防御: errno + session_id のみ。e のメッセージ（OS 由来）にはパス等が入りうる
+        print(
+            f"error: session {session_id} lock contention or I/O "
+            f"({type(e).__name__}).",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    except KeyboardInterrupt:
+        print("interrupted by user (SIGINT)", file=sys.stderr)
+        return EXIT_KEYBOARD_INTERRUPT
+    except Exception as e:
+        # PII 防御: logger.exception は traceback に氏名・path が入りうるため使わない
+        # （confirm_dialog.py と同方針）。画面表示も型名のみ、詳細は session JSON 参照で。
+        logger.error(
+            "run_phase_b failed: session=%s error=%s",
+            session_id,
+            type(e).__name__,
+        )
+        print(
+            f"error: {type(e).__name__} during phase B "
+            f"(session={session_id}); check session JSON for details.",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+
+    print(
+        f"session {session_id}: status={result.status.value} "
+        f"output={result.output_path}"
+    )
+    return EXIT_OK
+
+
+def _resolve_merge_output_path(config: AppConfig, session_id: str) -> Path:
+    """Phase B の出力パス。pdf_merge.output_dir 配下に `merged_<session_id>.pdf` を置く。
+
+    output_dir 未設定時は cwd にフォールバック（開発時用）。
+    """
+    base = (
+        Path(config.pdf_merge.output_dir)
+        if config.pdf_merge.output_dir
+        else Path.cwd()
+    )
+    return base / f"merged_{session_id}.pdf"
+
+
 def _run_phase_a_with_factories(
     *,
     source_a_path: Path,
@@ -341,6 +573,16 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="SESSION_ID",
         help="delete a session JSON and its artifact directory",
     )
+    group.add_argument(
+        "--review",
+        metavar="SESSION_ID",
+        help="launch the confirmation UI for a NEEDS_REVIEW session",
+    )
+    group.add_argument(
+        "--merge",
+        metavar="SESSION_ID",
+        help="run phase B on a READY_TO_MERGE session and produce the final PDF",
+    )
     return parser
 
 
@@ -355,6 +597,7 @@ def main(
     config_loader: Callable[[Path], AppConfig] = load_config,
     ocr_factory: _OcrFactory = _default_ocr_factory,
     matcher_factory: _MatcherFactory = _default_matcher_factory,
+    dialog_factory: _DialogFactory = _default_dialog_factory,
 ) -> int:
     logging.basicConfig(
         level=logging.INFO,
@@ -371,6 +614,18 @@ def main(
         return _cmd_list_sessions(sessions_dir)
     if args.discard is not None:
         return _cmd_discard(sessions_dir, args.discard)
+    if args.review is not None:
+        return _cmd_review(
+            sessions_dir=sessions_dir,
+            session_id=args.review,
+            dialog_factory=dialog_factory,
+        )
+    if args.merge is not None:
+        return _cmd_merge(
+            config=config,
+            sessions_dir=sessions_dir,
+            session_id=args.merge,
+        )
     if args.resume is not None:
         return _cmd_resume(
             config=config,

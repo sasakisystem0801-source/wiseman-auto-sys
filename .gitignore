@@ -45,3 +45,6 @@ data/screenshots/
 # PDF merge pipeline session files (contain OCR 氏名 / matched B/C paths)
 # ADR-010 参照: .sessions/ 配下は個人情報を含むため誤コミット防止
 **/.sessions/
+
+# Claude Code runtime (scheduled_tasks.lock, transient state)
+.claude/

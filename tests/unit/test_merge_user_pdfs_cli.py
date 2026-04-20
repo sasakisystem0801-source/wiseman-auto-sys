@@ -22,6 +22,7 @@ from wiseman_hub.config import AppConfig, OcrBackendConfig, PdfMergeConfig, User
 from wiseman_hub.pdf.matcher import MatchResult, MatchStatus
 from wiseman_hub.pdf.ocr_client import ExtractNameResult
 from wiseman_hub.pdf.session import (
+    PairStatus,
     Session,
     SessionStatus,
     generate_session_id,
@@ -385,3 +386,400 @@ class TestResumeCommand:
         final = load_session(sid, sessions_dir=sdir)
         assert final.status == SessionStatus.READY_TO_MERGE
         assert len(final.candidates) == 2
+
+
+# ---------------------------------------------------------------------------
+# タスク 8C PR #B: --review / --merge
+# ---------------------------------------------------------------------------
+
+
+def _single_page_pdf_bytes(label: str) -> bytes:
+    doc = fitz.open()
+    try:
+        page = doc.new_page(width=595.0, height=842.0)
+        page.insert_text((50, 50), label, fontsize=12)
+        return bytes(doc.tobytes())
+    finally:
+        doc.close()
+
+
+def _make_session_with_candidates(
+    *,
+    tmp_path: Path,
+    status: SessionStatus,
+    candidates: list[Any],
+) -> str:
+    """テスト用: 指定 status + candidates の session を作って session_id を返す。"""
+    sid = generate_session_id()
+    sdir = _sessions_dir(tmp_path)
+    artifact_dir = sdir / f"{sid}-pages"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    # 各 candidate の page_*.pdf を用意（run_phase_b が読むため）
+    for c in candidates:
+        (artifact_dir / f"page_{c.page_index:03d}.pdf").write_bytes(
+            _single_page_pdf_bytes(f"A:{c.user_name_ocr or c.page_index}")
+        )
+
+    s = Session(
+        session_id=sid,
+        status=status,
+        created_at=datetime.now(UTC).isoformat(),
+        updated_at=datetime.now(UTC).isoformat(),
+        config_snapshot={},
+        source_a_path=str(tmp_path / "A.pdf"),
+        candidates=candidates,
+        a_page_pdf_bytes_dir=str(artifact_dir),
+        output_path=None,
+        total_pages_a=len(candidates),
+    )
+    save_session(s, sessions_dir=sdir)
+    return sid
+
+
+class FakeDialog:
+    """ConfirmDialog の DI 用スタブ。run() が返す結果を side_effect で制御。"""
+
+    def __init__(
+        self,
+        session: Session,
+        sessions_dir: Path,
+        *,
+        resolver: Any,
+        aborted: bool = False,
+    ) -> None:
+        self._session = session
+        self._sessions_dir = sessions_dir
+        self._resolver = resolver
+        self._aborted = aborted
+        self.ran = False
+
+    def run(self) -> Any:
+        """resolver で session.candidates を書き換え + save してから結果を返す。"""
+        from wiseman_hub.pdf.session import save_session as _save
+        from wiseman_hub.ui.confirm_dialog import ConfirmDialogResult
+
+        self.ran = True
+        if self._resolver is not None:
+            self._resolver(self._session)
+            _save(self._session, sessions_dir=self._sessions_dir)
+        return ConfirmDialogResult(session=self._session, aborted=self._aborted)
+
+
+def _resolve_all_auto(session: Session) -> None:
+    """全候補を AUTO_MATCHED 相当に解決するリゾルバ（承認操作のスタブ）。"""
+    from wiseman_hub.pdf.session import PairStatus, UserCandidate
+
+    session.candidates = [
+        UserCandidate(
+            page_index=c.page_index,
+            user_name_ocr=c.user_name_ocr,
+            confidence=c.confidence,
+            status=PairStatus.CONFIRMED,
+            matched_b_path=c.matched_b_path,
+            matched_c_path=c.matched_c_path,
+            similar_candidates=[],
+        )
+        for c in session.candidates
+    ]
+
+
+class TestReviewCommand:
+    """AC-CLI-R1〜R3: --review サブコマンド。"""
+
+    def test_review_resolves_and_transitions_to_ready(self, tmp_path: Path) -> None:
+        from wiseman_hub.pdf.session import PairStatus, UserCandidate, load_session
+
+        script = _load_script_module()
+        cfg = _make_config(tmp_path)
+        sid = _make_session_with_candidates(
+            tmp_path=tmp_path,
+            status=SessionStatus.NEEDS_REVIEW,
+            candidates=[
+                UserCandidate(
+                    page_index=0,
+                    user_name_ocr="u0",
+                    confidence="medium",
+                    status=PairStatus.NEEDS_CONFIRMATION,
+                    matched_b_path=None,
+                    matched_c_path=None,
+                    similar_candidates=[],
+                )
+            ],
+        )
+
+        dialog_factory = lambda s, d: FakeDialog(  # noqa: E731
+            s, d, resolver=_resolve_all_auto
+        )
+        exit_code = script.main(
+            ["--review", sid],
+            config_loader=lambda _: cfg,
+            ocr_factory=lambda _: FakeOcr([]),
+            matcher_factory=lambda _: FakeMatcher({}),
+            dialog_factory=dialog_factory,
+        )
+        assert exit_code == 0
+        final = load_session(sid, sessions_dir=_sessions_dir(tmp_path))
+        assert final.status == SessionStatus.READY_TO_MERGE
+
+    def test_review_aborted_leaves_status_unchanged(self, tmp_path: Path) -> None:
+        """aborted=True の場合、呼出側契約どおり session は変更しない。
+
+        EXIT_ERROR (=1) と EXIT_NEEDS_REVIEW (=3) は意味が異なる（aborted は「UI 異常終了
+        のため再実行が必要」、unresolved は「ユーザーが未解決のまま閉じた」）ので等値検証する。
+        """
+        from wiseman_hub.pdf.session import PairStatus, UserCandidate, load_session
+
+        script = _load_script_module()
+        cfg = _make_config(tmp_path)
+        sid = _make_session_with_candidates(
+            tmp_path=tmp_path,
+            status=SessionStatus.NEEDS_REVIEW,
+            candidates=[
+                UserCandidate(
+                    page_index=0,
+                    user_name_ocr="u0",
+                    confidence="medium",
+                    status=PairStatus.NEEDS_CONFIRMATION,
+                    matched_b_path=None,
+                    matched_c_path=None,
+                    similar_candidates=[],
+                )
+            ],
+        )
+
+        dialog_factory = lambda s, d: FakeDialog(s, d, resolver=None, aborted=True)  # noqa: E731
+        exit_code = script.main(
+            ["--review", sid],
+            config_loader=lambda _: cfg,
+            ocr_factory=lambda _: FakeOcr([]),
+            matcher_factory=lambda _: FakeMatcher({}),
+            dialog_factory=dialog_factory,
+        )
+        assert exit_code == script.EXIT_ERROR
+        final = load_session(sid, sessions_dir=_sessions_dir(tmp_path))
+        assert final.status == SessionStatus.NEEDS_REVIEW  # 変更されていない
+
+    def test_review_already_ready_is_idempotent(self, tmp_path: Path) -> None:
+        """READY_TO_MERGE で --review を呼んでも冪等に成功（UI 起動しない）。"""
+        from wiseman_hub.pdf.session import PairStatus, UserCandidate, load_session
+
+        script = _load_script_module()
+        cfg = _make_config(tmp_path)
+        sid = _make_session_with_candidates(
+            tmp_path=tmp_path,
+            status=SessionStatus.READY_TO_MERGE,
+            candidates=[
+                UserCandidate(
+                    page_index=0,
+                    user_name_ocr="u0",
+                    confidence="high",
+                    status=PairStatus.AUTO_MATCHED,
+                    matched_b_path=None,
+                    matched_c_path=None,
+                    similar_candidates=[],
+                )
+            ],
+        )
+
+        called = {"dialog": 0}
+
+        def dialog_factory(s: Any, d: Any) -> Any:
+            called["dialog"] += 1
+            return FakeDialog(s, d, resolver=_resolve_all_auto)
+
+        exit_code = script.main(
+            ["--review", sid],
+            config_loader=lambda _: cfg,
+            ocr_factory=lambda _: FakeOcr([]),
+            matcher_factory=lambda _: FakeMatcher({}),
+            dialog_factory=dialog_factory,
+        )
+        assert exit_code == 0
+        assert called["dialog"] == 0  # UI は起動されていない
+        final = load_session(sid, sessions_dir=_sessions_dir(tmp_path))
+        assert final.status == SessionStatus.READY_TO_MERGE
+
+    def test_review_unresolved_remainder_exits_needs_review(self, tmp_path: Path) -> None:
+        """UI 終了時に未解決が残っていれば EXIT_NEEDS_REVIEW。"""
+        from wiseman_hub.pdf.session import PairStatus, UserCandidate, load_session
+
+        script = _load_script_module()
+        cfg = _make_config(tmp_path)
+        sid = _make_session_with_candidates(
+            tmp_path=tmp_path,
+            status=SessionStatus.NEEDS_REVIEW,
+            candidates=[
+                UserCandidate(
+                    page_index=0,
+                    user_name_ocr="u0",
+                    confidence="medium",
+                    status=PairStatus.NEEDS_CONFIRMATION,
+                    matched_b_path=None,
+                    matched_c_path=None,
+                    similar_candidates=[],
+                )
+            ],
+        )
+
+        # resolver を呼ばないので未解決のまま「閉じる」経路
+        dialog_factory = lambda s, d: FakeDialog(s, d, resolver=None)  # noqa: E731
+        exit_code = script.main(
+            ["--review", sid],
+            config_loader=lambda _: cfg,
+            ocr_factory=lambda _: FakeOcr([]),
+            matcher_factory=lambda _: FakeMatcher({}),
+            dialog_factory=dialog_factory,
+        )
+        assert exit_code == script.EXIT_NEEDS_REVIEW
+        final = load_session(sid, sessions_dir=_sessions_dir(tmp_path))
+        assert final.status == SessionStatus.NEEDS_REVIEW
+
+
+class TestMergeCommand:
+    """AC-CLI-M1〜M2: --merge サブコマンド。"""
+
+    def test_merge_from_ready_produces_pdf_and_completes(self, tmp_path: Path) -> None:
+        from wiseman_hub.pdf.session import PairStatus, UserCandidate, load_session
+
+        script = _load_script_module()
+        cfg = _make_config(tmp_path)
+        (tmp_path / "B_u0.pdf").write_bytes(_single_page_pdf_bytes("B:u0"))
+        (tmp_path / "C_u0.pdf").write_bytes(_single_page_pdf_bytes("C:u0"))
+
+        sid = _make_session_with_candidates(
+            tmp_path=tmp_path,
+            status=SessionStatus.READY_TO_MERGE,
+            candidates=[
+                UserCandidate(
+                    page_index=0,
+                    user_name_ocr="u0",
+                    confidence="high",
+                    status=PairStatus.AUTO_MATCHED,
+                    matched_b_path=None,
+                    matched_c_path=None,
+                    similar_candidates=[],
+                )
+            ],
+        )
+
+        exit_code = script.main(
+            ["--merge", sid],
+            config_loader=lambda _: cfg,
+            ocr_factory=lambda _: FakeOcr([]),
+            matcher_factory=lambda _: FakeMatcher({}),
+        )
+        assert exit_code == 0
+
+        final = load_session(sid, sessions_dir=_sessions_dir(tmp_path))
+        assert final.status == SessionStatus.COMPLETED
+        assert final.output_path is not None
+        assert Path(final.output_path).exists()
+
+    def test_merge_error_stderr_does_not_leak_pii(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """run_phase_b 失敗時、stderr の error メッセージに氏名・path が含まれないこと。
+
+        医療介護分野の PII 防御（confirm_dialog.py の方針に準拠）。
+        merger 由来の PdfMergeError は message に user_name や path を含みうるため、
+        CLI 層で型名 + session_id に抑え込む必要がある。
+        """
+        from wiseman_hub.pdf.session import UserCandidate
+
+        pii_name = "山田太郎"
+        pii_path = "/Users/secret_path/confidential_file.pdf"
+
+        script = _load_script_module()
+        cfg = _make_config(tmp_path)
+        sid = _make_session_with_candidates(
+            tmp_path=tmp_path,
+            status=SessionStatus.READY_TO_MERGE,
+            candidates=[
+                UserCandidate(
+                    page_index=0,
+                    user_name_ocr=pii_name,
+                    confidence="high",
+                    status=PairStatus.AUTO_MATCHED,
+                    matched_b_path=None,
+                    matched_c_path=None,
+                    similar_candidates=[],
+                )
+            ],
+        )
+
+        def leaky_merge(*args: object, **kwargs: object) -> None:
+            # 本番 merger は _validate_user_name や _open_pdf_file_or_raise で
+            # このような PII を含む message を出しうる
+            from wiseman_hub.pdf.merger import PdfMergeError
+
+            raise PdfMergeError(
+                f"Failed to open PDF for B:{pii_name}: {pii_path}: bad file"
+            )
+
+        monkeypatch.setattr("wiseman_hub.pdf.pipeline.merge_user_pdfs", leaky_merge)
+
+        exit_code = script.main(
+            ["--merge", sid],
+            config_loader=lambda _: cfg,
+            ocr_factory=lambda _: FakeOcr([]),
+            matcher_factory=lambda _: FakeMatcher({}),
+        )
+        assert exit_code == script.EXIT_ERROR
+
+        captured = capsys.readouterr()
+        combined = captured.out + captured.err
+        assert pii_name not in combined, "PII (氏名) leaked in CLI output"
+        assert pii_path not in combined, "PII (path) leaked in CLI output"
+        # 最低限 session_id と型名は出すべき
+        assert sid in combined
+        assert "PdfMergeError" in combined
+
+    @pytest.mark.parametrize(
+        "invalid_status,invalid_pair",
+        [
+            (SessionStatus.NEEDS_REVIEW, PairStatus.NEEDS_CONFIRMATION),
+            (SessionStatus.RUNNING_PHASE_A, PairStatus.AUTO_MATCHED),
+            (SessionStatus.COMPLETED, PairStatus.AUTO_MATCHED),
+            (SessionStatus.INTERRUPTED_PHASE_A, PairStatus.AUTO_MATCHED),
+        ],
+    )
+    def test_merge_rejects_invalid_status(
+        self,
+        tmp_path: Path,
+        invalid_status: SessionStatus,
+        invalid_pair: Any,
+    ) -> None:
+        """READY_TO_MERGE / INTERRUPTED_PHASE_B 以外は全て EXIT_ERROR。
+
+        argparse で弾けない異常状態（手動で session JSON を作った等）を CLI 層で防ぐ。
+        """
+        from wiseman_hub.pdf.session import UserCandidate
+
+        script = _load_script_module()
+        cfg = _make_config(tmp_path)
+        sid = _make_session_with_candidates(
+            tmp_path=tmp_path,
+            status=invalid_status,
+            candidates=[
+                UserCandidate(
+                    page_index=0,
+                    user_name_ocr="u0",
+                    confidence="high",
+                    status=invalid_pair,
+                    matched_b_path=None,
+                    matched_c_path=None,
+                    similar_candidates=[],
+                )
+            ],
+        )
+
+        exit_code = script.main(
+            ["--merge", sid],
+            config_loader=lambda _: cfg,
+            ocr_factory=lambda _: FakeOcr([]),
+            matcher_factory=lambda _: FakeMatcher({}),
+        )
+        assert exit_code == script.EXIT_ERROR

@@ -1,12 +1,11 @@
-"""PDF 分割・条件付き再結合パイプラインのオーケストレータ（Phase A）。
+"""PDF 分割・条件付き再結合パイプラインのオーケストレータ（Phase A / Phase B）。
 
 Phase A: split → ページ永続化 → OCR → matcher → candidate 追加 → 遷移判定
+Phase B: session ロード → candidate → UserPageSource 変換 → merger 呼出 → COMPLETED 遷移
 
 設計の根拠:
 - ADR-008: OCR バックエンド
 - ADR-010: 状態遷移図（本モジュールが実装する遷移の source of truth）
-
-Phase B（merger 実行）は本モジュールの範囲外。
 
 設計判断:
 1. OCR `confidence=low` は matcher 結果に関係なく `NEEDS_CONFIRMATION` に昇格する
@@ -16,6 +15,8 @@ Phase B（merger 実行）は本モジュールの範囲外。
 4. Resume 時は source_a を再 split（PyMuPDF の split は高速、OCR が重い部分）
    し、処理済み `page_index` をスキップする。これにより `a_page_pdf_bytes` の
    バイナリを後から読み戻す必要がなくなる
+5. Phase B の REJECTED / SKIPPED 候補は merger 入力から除外する（A ページも出さない）。
+   1〜3 名運用での「一部だけ抜けた PDF」を防ぐ MVP 方針
 """
 
 from __future__ import annotations
@@ -29,8 +30,11 @@ from typing import Any, Protocol
 
 from wiseman_hub.config import PdfMergeConfig
 from wiseman_hub.pdf.matcher import NameMatcher
+from wiseman_hub.pdf.merger import PdfMergeError, UserPageSource, merge_user_pdfs
 from wiseman_hub.pdf.ocr_client import ExtractNameResult
 from wiseman_hub.pdf.session import (
+    OPEN_PAIR_STATUSES,
+    InvalidTransitionError,
     PairStatus,
     Session,
     SessionNotFoundError,
@@ -57,6 +61,32 @@ class OcrClientLike(Protocol):
 
 _RESUMABLE_STATUSES = frozenset(
     {SessionStatus.RUNNING_PHASE_A, SessionStatus.INTERRUPTED_PHASE_A}
+)
+
+# Phase B の開始を許可する状態。READY_TO_MERGE は通常経路、INTERRUPTED_PHASE_B は
+# 前回の merger 失敗からのリトライ経路。どちらも _VALID_TRANSITIONS で
+# RUNNING_PHASE_B への遷移が定義済み（session.py）。
+_PHASE_B_START_STATUSES = frozenset(
+    {SessionStatus.READY_TO_MERGE, SessionStatus.INTERRUPTED_PHASE_B}
+)
+
+# REJECTED / SKIPPED を含まない「merger に渡すべき解決済み」ペア状態の集合。
+# pipeline 側で明示列挙することで、PairStatus に新値が追加されたときに
+# 分類漏れで意図せず merger 入力に含まれる事故を防ぐ（テストで網羅性を検証）。
+_MERGEABLE_PAIR_STATUSES = frozenset(
+    {
+        PairStatus.AUTO_MATCHED,
+        PairStatus.CONFIRMED,
+        PairStatus.MANUALLY_SELECTED,
+    }
+)
+
+# 型レベルの invariant: MERGEABLE は必ず OPEN と素集合（merge 対象に未解決は混入不可）。
+# PairStatus 追加時、新値を MERGEABLE に入れずに OPEN にも入れ忘れた場合の silent drift を
+# import 時点で検知する。
+assert _MERGEABLE_PAIR_STATUSES.isdisjoint(OPEN_PAIR_STATUSES), (
+    "_MERGEABLE_PAIR_STATUSES must not overlap with OPEN_PAIR_STATUSES; "
+    "unresolved status is about to reach the merger"
 )
 
 
@@ -195,9 +225,18 @@ def _build_candidate(
     return candidate
 
 
+def _page_pdf_filename(page_index: int) -> str:
+    """writer (Phase A) と reader (Phase B) で共有する A ページファイル名。
+
+    桁数変更時の silent バグ（reader/writer 不一致で merge が空になる）を防ぐため
+    フォーマットは単一箇所に集約する。
+    """
+    return f"page_{page_index:03d}.pdf"
+
+
 def _save_page_pdf(page_dir: Path, sp: SplitPage) -> None:
     """1 ページ分の PDF バイナリを ``page_NNN.pdf`` として保存する（idempotent）。"""
-    path = page_dir / f"page_{sp.page_index:03d}.pdf"
+    path = page_dir / _page_pdf_filename(sp.page_index)
     # write_bytes は atomic ではないが、split 出力を保存する用途で中断しても
     # 次回の再 split で上書きされるため問題なし。
     path.write_bytes(sp.page_pdf_bytes)
@@ -339,5 +378,148 @@ def run_phase_a(
             session.session_id,
             session.status.value,
             len(session.candidates),
+        )
+        return session
+
+
+# ---------------------------------------------------------------------------
+# Phase B
+# ---------------------------------------------------------------------------
+
+
+def _page_pdf_path(session: Session, page_index: int) -> Path:
+    """session.a_page_pdf_bytes_dir 配下の page_NNN.pdf パスを返す。"""
+    return Path(session.a_page_pdf_bytes_dir) / _page_pdf_filename(page_index)
+
+
+def _unlink_with_warning(path: Path) -> None:
+    """欠損検知時に「未完成の output PDF」を掃除する。失敗しても続行する。
+
+    ディスクに欠損付き PDF が残ると、運用者が誤って配布する事故になる。ただし削除自体の
+    失敗で Phase B を止めるのは過剰なので、残骸警告のみで続行。
+    """
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as e:
+        logger.warning(
+            "failed to remove incomplete output PDF %s: %s (manual cleanup required)",
+            path,
+            type(e).__name__,
+        )
+
+
+def _build_user_page_sources(session: Session) -> list[UserPageSource]:
+    """session.candidates から merger に渡す UserPageSource リストを作る。
+
+    - REJECTED / SKIPPED / OPEN_PAIR_STATUSES は含めない（REJECTED/SKIPPED は利用者
+      ごと除外、OPEN は READY_TO_MERGE 遷移ガードで本来到達しないが defense-in-depth）
+    - a_page_pdf_bytes は session.a_page_pdf_bytes_dir 配下の page_NNN.pdf から読む
+    - matched_b/c_path はそのまま merger へ渡し、MANUALLY_SELECTED 等の override を反映
+    """
+    sources: list[UserPageSource] = []
+    excluded: list[tuple[int, str]] = []
+    for c in session.candidates:
+        if c.status not in _MERGEABLE_PAIR_STATUSES:
+            excluded.append((c.page_index, c.status.value))
+            continue
+        page_bytes = _page_pdf_path(session, c.page_index).read_bytes()
+        sources.append(
+            UserPageSource(
+                user_name=c.user_name_ocr,
+                a_page_pdf_bytes=page_bytes,
+                page_index=c.page_index,
+                matched_b_path=c.matched_b_path,
+                matched_c_path=c.matched_c_path,
+            )
+        )
+    if excluded:
+        logger.info(
+            "run_phase_b: excluded %d candidate(s) from merge input: %s",
+            len(excluded),
+            excluded,
+        )
+    return sources
+
+
+def run_phase_b(
+    *,
+    session: Session,
+    config: PdfMergeConfig,
+    sessions_dir: Path,
+    output_path: Path,
+) -> Session:
+    """Phase B（merger 実行）を走らせて Session を COMPLETED に遷移させる。
+
+    Args:
+        session: `READY_TO_MERGE` または `INTERRUPTED_PHASE_B` の Session。
+        config: PdfMergeConfig（input_dir / concat_order / source_b_pattern 等）。
+        sessions_dir: セッションファイルと artifact の親ディレクトリ。
+        output_path: 結合後 PDF の出力パス。
+
+    Returns:
+        COMPLETED に遷移した Session（`session.output_path` は設定済み）。
+
+    Raises:
+        InvalidTransitionError: session.status が Phase B 開始可能でない。
+        PdfMergeError / FileNotFoundError / OSError: merger 側の失敗。
+            失敗時は session を INTERRUPTED_PHASE_B で保存後、例外を再送出する。
+        BlockingIOError / OSError: 他プロセスが同セッションのロックを保持中。
+    """
+    if session.status not in _PHASE_B_START_STATUSES:
+        raise InvalidTransitionError(
+            f"cannot start phase B from {session.status.value}; expected one of "
+            f"{sorted(s.value for s in _PHASE_B_START_STATUSES)}"
+        )
+
+    logger.info(
+        "run_phase_b: session=%s start_status=%s output=%s",
+        session.session_id,
+        session.status.value,
+        output_path,
+    )
+
+    with with_session_lock(sessions_dir, session.session_id):
+        transition_session(session, SessionStatus.RUNNING_PHASE_B)
+        save_session(session, sessions_dir=sessions_dir)
+
+        try:
+            users = _build_user_page_sources(session)
+            report = merge_user_pdfs(users, config, output_path)
+            if report.has_missing_sources:
+                # PII 防御: 件数のみ、氏名・path は含めない。
+                # 欠損があるまま COMPLETED に進むと「正常終了した」ように見える医療事故
+                # になるため fail-hard。output PDF は生成済みだが、運用者が誤って
+                # 利用しないよう削除する（INTERRUPTED_PHASE_B で session だけ残す）。
+                _unlink_with_warning(output_path)
+                raise PdfMergeError(
+                    f"merge completed with {len(report.missing_sources)} missing B/C "
+                    "source(s); refusing to finalize. "
+                    "Prepare missing files or mark users as rejected/skipped via --review, "
+                    "then rerun --merge."
+                )
+        except (Exception, KeyboardInterrupt):
+            # merger 失敗 (PdfMergeError / FileNotFoundError) や中断は INTERRUPTED_PHASE_B で保存。
+            # SystemExit / GeneratorExit は BaseException 直下なので捕捉せず通過（run_phase_a と同方針）。
+            logger.exception(
+                "run_phase_b interrupted (session=%s)", session.session_id
+            )
+            try:
+                transition_session(session, SessionStatus.INTERRUPTED_PHASE_B)
+                save_session(session, sessions_dir=sessions_dir)
+            except Exception:
+                logger.exception(
+                    "failed to save INTERRUPTED_PHASE_B for session %s",
+                    session.session_id,
+                )
+            raise
+
+        session.output_path = str(output_path)
+        transition_session(session, SessionStatus.COMPLETED)
+        save_session(session, sessions_dir=sessions_dir)
+        logger.info(
+            "run_phase_b done: session=%s output=%s users=%d",
+            session.session_id,
+            output_path,
+            len(users),
         )
         return session
