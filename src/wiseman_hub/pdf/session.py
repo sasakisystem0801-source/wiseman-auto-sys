@@ -19,11 +19,13 @@ import re
 import secrets
 import shutil
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 from wiseman_hub.pdf.matcher import MatchResult, MatchStatus, SourceKind
 from wiseman_hub.pdf.ocr_client import Confidence
@@ -47,6 +49,11 @@ class SessionNotFoundError(SessionError):
 
 class SessionCorruptedError(SessionError):
     """JSON 破損・schema version 不一致・必須フィールド欠落。"""
+
+
+class InvalidTransitionError(SessionError):
+    """ADR-010 の状態遷移図に存在しない遷移、または READY_TO_MERGE 遷移時に未解決
+    候補が残っているなど invariant を破る操作。"""
 
 
 class SessionStatus(StrEnum):
@@ -161,6 +168,9 @@ class Session:
     candidates: list[UserCandidate]
     a_page_pdf_bytes_dir: str
     output_path: str | None
+    # Phase A 完了時の総ページ数。resume 時に「未処理ページ」判定と進捗表示に使う。
+    # optional なので本フィールド導入前の v1 JSON とも互換。
+    total_pages_a: int | None = None
 
     @property
     def all_candidates_resolved(self) -> bool:
@@ -172,19 +182,181 @@ class Session:
 
 
 # ---------------------------------------------------------------------------
+# セッションロック（ADR-010, Issue #46）
+# ---------------------------------------------------------------------------
+
+
+def _lock_path(session_id: str, sessions_dir: Path) -> Path:
+    validate_session_id(session_id)
+    return sessions_dir / f"{session_id}.lock"
+
+
+def _acquire_exclusive_lock(fh: IO[bytes]) -> None:
+    """plat 依存の non-blocking 排他ロック。既に保持されていれば例外。
+
+    Windows: ``msvcrt.locking`` の LK_NBLCK（non-blocking exclusive lock）
+    POSIX: ``fcntl.flock`` の LOCK_EX | LOCK_NB
+    """
+    if os.name == "nt":
+        import msvcrt
+
+        # 1 バイトロックで十分（実体はプロセス間排他のシグナル）
+        # POSIX で mypy を走らせると msvcrt の stub が Windows 限定 attribute を
+        # 認識できないため attr-defined を明示的に抑制する。
+        msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]
+    else:
+        import fcntl
+
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _release_lock(fh: IO[bytes]) -> None:
+    """plat 依存のロック解放。失敗しても例外は伝播させず警告のみ。
+
+    close 時には OS が自動解放するが、明示解放で直後の再取得を安定させる。
+    """
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
+        else:
+            import fcntl
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    except OSError as e:
+        logger.warning("failed to release session lock: %s", e)
+
+
+@contextmanager
+def with_session_lock(sessions_dir: Path, session_id: str) -> Iterator[None]:
+    """セッション単位の排他ロックを取得する。
+
+    Windows exe 二重起動、UI 操作中の自動 GC、resume と discard の競合から
+    セッション JSON の lost update を防ぐ。
+
+    実装: ``{sessions_dir}/{session_id}.lock`` を作成し non-blocking で排他ロック。
+    既にロック保持中のプロセスが存在すれば BlockingIOError / OSError。
+
+    Args:
+        sessions_dir: セッションファイル保存ディレクトリ（存在しなければ作成）
+        session_id: ロック対象のセッション ID
+
+    Raises:
+        ValueError: session_id がパストラバーサル等で不正
+        BlockingIOError / OSError: 既に別プロセスがロック保持中
+    """
+    _ensure_sessions_dir(sessions_dir)
+    path = _lock_path(session_id, sessions_dir)
+
+    # "a+b" は「存在しなければ作成、既存はそのまま」の書込可能モード。
+    # 本ロックはファイル内容を使わないため truncate しない。
+    # SIM115: 本関数自体が @contextmanager でラップされており、finally で必ず close する。
+    fh = open(path, "a+b")  # noqa: SIM115
+    try:
+        _acquire_exclusive_lock(fh)
+    except BaseException:
+        fh.close()
+        raise
+
+    try:
+        yield
+    finally:
+        _release_lock(fh)
+        fh.close()
+
+
+# ---------------------------------------------------------------------------
+# 状態遷移（ADR-010, Issue #47）
+# ---------------------------------------------------------------------------
+
+
+# ADR-010 の state diagram を表にしたもの。ここにない遷移は全て InvalidTransitionError。
+# COMPLETED は終状態（GC 対象）のため出口なし。
+_VALID_TRANSITIONS: dict[SessionStatus, frozenset[SessionStatus]] = {
+    SessionStatus.RUNNING_PHASE_A: frozenset(
+        {
+            SessionStatus.NEEDS_REVIEW,
+            SessionStatus.READY_TO_MERGE,
+            SessionStatus.INTERRUPTED_PHASE_A,
+        }
+    ),
+    SessionStatus.NEEDS_REVIEW: frozenset({SessionStatus.READY_TO_MERGE}),
+    SessionStatus.READY_TO_MERGE: frozenset({SessionStatus.RUNNING_PHASE_B}),
+    SessionStatus.RUNNING_PHASE_B: frozenset(
+        {
+            SessionStatus.COMPLETED,
+            SessionStatus.INTERRUPTED_PHASE_B,
+        }
+    ),
+    SessionStatus.COMPLETED: frozenset(),
+    SessionStatus.INTERRUPTED_PHASE_A: frozenset({SessionStatus.RUNNING_PHASE_A}),
+    SessionStatus.INTERRUPTED_PHASE_B: frozenset({SessionStatus.RUNNING_PHASE_B}),
+}
+
+
+def transition_session(session: Session, next_status: SessionStatus) -> None:
+    """`session.status` を `next_status` に遷移させる。
+
+    ADR-010 の状態遷移図と整合しない遷移は `InvalidTransitionError` を送出する。
+    `READY_TO_MERGE` への遷移は `session.all_candidates_resolved` を追加検証する
+    （未解決候補があるまま merger に進むことを防ぐ）。
+
+    本関数は `save_session` を呼ばない。呼び出し側が必要に応じて保存すること。
+    これは「ロック内で複数状態を組み立ててから一括保存」のような pipeline パターンを
+    許容するため。
+    """
+    allowed = _VALID_TRANSITIONS[session.status]
+    if next_status not in allowed:
+        raise InvalidTransitionError(
+            f"invalid transition: {session.status.value} -> {next_status.value} "
+            f"(allowed: {sorted(s.value for s in allowed)})"
+        )
+
+    if next_status == SessionStatus.READY_TO_MERGE and not session.all_candidates_resolved:
+        unresolved_indexes: list[int] = [
+            c.page_index for c in session.candidates if not c.is_resolved
+        ]
+        detail: str = (
+            f"page_index={unresolved_indexes}"
+            if unresolved_indexes
+            else "no candidates in session"
+        )
+        raise InvalidTransitionError(
+            f"cannot transition to ready_to_merge: unresolved candidates ({detail})"
+        )
+
+    logger.info(
+        "session %s transition: %s -> %s",
+        session.session_id,
+        session.status.value,
+        next_status.value,
+    )
+    session.status = next_status
+
+
+# ---------------------------------------------------------------------------
 # session_id
 # ---------------------------------------------------------------------------
 
 
 def generate_session_id() -> str:
-    """`20260420T001523Z-a1b2` 形式の session_id を生成する。"""
+    """`20260420T001523Z-a1b2c3d4` 形式の session_id を生成する。
+
+    ランダム部は 32bit（token_hex(4)）。同一秒内に大量生成しても衝突確率を十分低く
+    保つため token_hex(2)=16bit から拡張した（Birthday bound: 2^16 の sqrt で
+    ~256 IDs で 50% 衝突、2^32 では ~65k IDs）。
+    """
     now = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    suffix = secrets.token_hex(2)
+    suffix = secrets.token_hex(4)
     return f"{now}-{suffix}"
 
 
-def _validate_session_id(session_id: str) -> None:
-    """パストラバーサル防止。英数字・ハイフン・アンダースコアのみ許可。"""
+def validate_session_id(session_id: str) -> None:
+    """session_id 形式のパストラバーサル防止検証。英数字・ハイフン・アンダースコアのみ許可。
+
+    CLI・UI など外部入力から session_id を受け取る箇所で呼び出す公開 API。
+    """
     if not _SESSION_ID_RE.match(session_id):
         raise ValueError(f"invalid session_id: {session_id!r}")
 
@@ -195,7 +367,7 @@ def _validate_session_id(session_id: str) -> None:
 
 
 def _session_path(session_id: str, sessions_dir: Path) -> Path:
-    _validate_session_id(session_id)
+    validate_session_id(session_id)
     return sessions_dir / f"{session_id}.json"
 
 
@@ -209,19 +381,50 @@ def _to_dict(session: Session) -> dict[str, Any]:
     return d
 
 
-def _ensure_sessions_dir(sessions_dir: Path) -> None:
-    """sessions_dir を作成し、POSIX では所有者のみ読み書き可能（0o700）にする。
+def ensure_private_dir(path: Path) -> None:
+    """``path`` を作成し、POSIX では所有者のみ読み書き可能（0o700）にする。
 
     氏名・B/C パス等の個人情報を含むため、共有 PC 上で他ユーザーから読めない権限を設定する。
     Windows は ACL 継承（ユーザープロファイル配下配置を config で推奨）に委ねる。
+
+    新規作成時だけでなく、既存ディレクトリも mode を検査する（resume で古い運用から
+    引き継いだディレクトリが 0o755 のまま残っているケースを補正するため）。POSIX で
+    chmod 失敗または chmod 後に mode が 0o700 と一致しない場合、APPI 準拠上の問題
+    となるため logger.error で強調ログし stderr 警告を出す（SMB/NFS マウント等で
+    発生しうる）。
     """
-    newly_created = not sessions_dir.exists()
-    sessions_dir.mkdir(parents=True, exist_ok=True)
-    if newly_created and os.name == "posix":
+    path.mkdir(parents=True, exist_ok=True)
+    if os.name == "posix":
         try:
-            os.chmod(sessions_dir, 0o700)
+            current_mode = path.stat().st_mode & 0o777
+            if current_mode != 0o700:
+                os.chmod(path, 0o700)
+                actual_mode = path.stat().st_mode & 0o777
+                if actual_mode != 0o700:
+                    _report_insecure_dir(path, actual_mode)
         except OSError as e:
-            logger.warning("failed to chmod sessions_dir %s: %s", sessions_dir, e)
+            logger.error(
+                "failed to enforce 0o700 on %s: %s. "
+                "PII files inside may be readable by other local users.",
+                path,
+                e,
+            )
+
+
+def _report_insecure_dir(path: Path, actual_mode: int) -> None:
+    import sys as _sys
+
+    msg = (
+        f"WARNING: {path} ended up with mode {oct(actual_mode)} instead of 0o700. "
+        "PII may be readable by other local users (SMB/NFS/ACL-managed FS)."
+    )
+    logger.error(msg)
+    print(msg, file=_sys.stderr)
+
+
+def _ensure_sessions_dir(sessions_dir: Path) -> None:
+    """セッションディレクトリ専用の薄いエイリアス（後方互換）。"""
+    ensure_private_dir(sessions_dir)
 
 
 def save_session(session: Session, *, sessions_dir: Path) -> Path:
@@ -230,7 +433,7 @@ def save_session(session: Session, *, sessions_dir: Path) -> Path:
     副作用: ``session.updated_at`` を現在時刻で上書きする（監査ログと整合させるため）。
     """
     _ensure_sessions_dir(sessions_dir)
-    _validate_session_id(session.session_id)
+    validate_session_id(session.session_id)
 
     session.updated_at = datetime.now(UTC).isoformat()
 
@@ -261,7 +464,7 @@ def save_session(session: Session, *, sessions_dir: Path) -> Path:
 
 def load_session(session_id: str, *, sessions_dir: Path) -> Session:
     """JSON からセッションを復元する。"""
-    _validate_session_id(session_id)
+    validate_session_id(session_id)
     path = _session_path(session_id, sessions_dir)
     if not path.exists():
         raise SessionNotFoundError(f"session not found: {session_id}")
@@ -313,6 +516,13 @@ def _from_dict(data: dict[str, Any], session_id: str) -> Session:
 
     candidates = [_candidate_from_dict(c, session_id) for c in data["candidates"]]
 
+    total_pages_a = data.get("total_pages_a")
+    if total_pages_a is not None and not isinstance(total_pages_a, int):
+        raise SessionCorruptedError(
+            f"total_pages_a must be int or absent in {session_id}: "
+            f"{type(total_pages_a).__name__}"
+        )
+
     return Session(
         session_id=data["session_id"],
         status=status,
@@ -323,6 +533,7 @@ def _from_dict(data: dict[str, Any], session_id: str) -> Session:
         candidates=candidates,
         a_page_pdf_bytes_dir=data["a_page_pdf_bytes_dir"],
         output_path=data.get("output_path"),
+        total_pages_a=total_pages_a,
     )
 
 
@@ -387,7 +598,12 @@ def _candidate_from_dict(data: dict[str, Any], session_id: str) -> UserCandidate
 
 
 def list_sessions(*, sessions_dir: Path) -> list[str]:
-    """sessions_dir 内の全 session_id を返す（ソートなし）。"""
+    """sessions_dir 内の session_id を返す（昇順）。
+
+    不正な stem（スペースや特殊文字を含む手動配置ファイル）は除外する。
+    ``generate_session_id`` が生成する形式に合致するものだけを返すため、
+    呼び出し側で改めて validate する必要はない。
+    """
     if not sessions_dir.exists():
         return []
     result: list[str] = []
@@ -397,6 +613,14 @@ def list_sessions(*, sessions_dir: Path) -> list[str]:
         if path.suffix != ".json":
             continue
         if path.name.startswith("."):
+            continue
+        if not _SESSION_ID_RE.match(path.stem):
+            # 不正な stem は個人情報を含む .json の可能性があるため、運用者が手動
+            # 確認できるよう info ログに出す（警告ではなく、ノイズ低減のため info）。
+            logger.info(
+                "list_sessions skipped non-conforming file: %s (not a valid session_id)",
+                path.name,
+            )
             continue
         result.append(path.stem)
     return sorted(result)
@@ -427,7 +651,15 @@ def gc_old_sessions(*, sessions_dir: Path, older_than_days: int = 30) -> list[st
         try:
             updated = datetime.fromisoformat(s.updated_at)
         except ValueError:
-            logger.warning("skip session with invalid updated_at: %s", session_id)
+            # PII を含む artifact が GC 対象外のまま滞留する。運用者が手動対処できるよう
+            # artifact パスも出力する（詳細ログで追跡可能にする）。
+            logger.warning(
+                "GC skipped session with invalid updated_at: session=%s "
+                "updated_at_raw=%r artifact_dir=%s (manual cleanup required)",
+                session_id,
+                s.updated_at,
+                s.a_page_pdf_bytes_dir,
+            )
             continue
 
         if updated.tzinfo is None:
@@ -436,22 +668,29 @@ def gc_old_sessions(*, sessions_dir: Path, older_than_days: int = 30) -> list[st
         if updated < threshold:
             path = _session_path(session_id, sessions_dir)
             try:
-                _remove_session_artifacts(s, sessions_dir)
+                remove_session_artifacts(s, sessions_dir)
                 path.unlink()
                 removed.append(session_id)
                 logger.info("GC removed completed session: %s", session_id)
-            except OSError as e:
+            except (OSError, SessionError) as e:
+                # 他セッションの GC を阻害しないよう継続する。ただし JSON は残すため
+                # 次回 GC サイクルで再試行される（transient 失敗なら自動回復）。
                 logger.warning("failed to GC session %s: %s", session_id, e)
 
     return removed
 
 
-def _remove_session_artifacts(session: Session, sessions_dir: Path) -> None:
+def remove_session_artifacts(session: Session, sessions_dir: Path) -> None:
     """セッションに紐づく per-page PDF ディレクトリを削除する。
 
     氏名を含む PDF 断片が残ると個人情報が長期残留するため、
     セッション JSON 削除と同時に artifact も除去する。
     安全策として sessions_dir 配下であることを検証してから削除する。
+
+    Raises:
+        OSError: `shutil.rmtree` が失敗した場合。呼び出し側はこれを捕捉して
+            JSON を先消ししないこと（PII 孤児化を防ぐため）。
+        SessionError: artifact パスが sessions_dir 外（改ざん等）。
     """
     artifact_dir = Path(session.a_page_pdf_bytes_dir)
     if not artifact_dir.exists():
@@ -460,16 +699,12 @@ def _remove_session_artifacts(session: Session, sessions_dir: Path) -> None:
         sessions_dir_resolved = sessions_dir.resolve()
         artifact_resolved = artifact_dir.resolve()
         artifact_resolved.relative_to(sessions_dir_resolved)
-    except (OSError, ValueError):
-        # sessions_dir 配下でない artifact は触らない（誤操作防止）
-        logger.warning(
-            "skip removing artifact outside sessions_dir: %s (session=%s)",
-            artifact_dir,
-            session.session_id,
-        )
-        return
-    try:
-        shutil.rmtree(artifact_dir)
-        logger.info("GC removed session artifacts: %s", artifact_dir)
-    except OSError as e:
-        logger.warning("failed to remove artifacts %s: %s", artifact_dir, e)
+    except (OSError, ValueError) as e:
+        # sessions_dir 配下でない artifact は触らない（誤操作防止）。
+        # 呼び出し側は JSON を消さずに停止する判断ができるよう例外で通知する。
+        raise SessionError(
+            f"artifact path is outside sessions_dir: {artifact_dir} "
+            f"(session={session.session_id})"
+        ) from e
+    shutil.rmtree(artifact_dir)
+    logger.info("removed session artifacts: %s", artifact_dir)

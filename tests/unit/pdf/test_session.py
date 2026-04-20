@@ -13,6 +13,7 @@ import pytest
 from wiseman_hub.pdf.matcher import CandidateFile, MatchResult, MatchStatus
 from wiseman_hub.pdf.session import (
     CandidateState,
+    InvalidTransitionError,
     PairStatus,
     Session,
     SessionCorruptedError,
@@ -24,6 +25,8 @@ from wiseman_hub.pdf.session import (
     list_sessions,
     load_session,
     save_session,
+    transition_session,
+    with_session_lock,
 )
 
 # ---------------------------------------------------------------------------
@@ -34,8 +37,8 @@ from wiseman_hub.pdf.session import (
 class TestGenerateSessionId:
     def test_format_is_iso8601_with_suffix(self) -> None:
         sid = generate_session_id()
-        # 例: "20260420T001523Z-a1b2"
-        assert re.match(r"^\d{8}T\d{6}Z-[0-9a-f]{4}$", sid) is not None
+        # 例: "20260420T001523Z-a1b2c3d4"（32bit suffix）
+        assert re.match(r"^\d{8}T\d{6}Z-[0-9a-f]{8}$", sid) is not None
 
     def test_two_consecutive_calls_unique(self) -> None:
         # 同一秒内でも一意
@@ -363,6 +366,21 @@ class TestListSessions:
 
         assert ids == ["a"]
 
+    def test_ignores_malformed_session_id_stems(self, tmp_path: Path) -> None:
+        """手動配置された不正な stem は除外される（evaluator 指摘 LOW）。"""
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        # 正規の stem
+        valid_sid = generate_session_id()
+        s = _make_session(tmp_path, session_id=valid_sid)
+        save_session(s, sessions_dir=sessions_dir)
+        # 不正な stem（スペース含み、日本語、スラッシュ相当の特殊文字）
+        (sessions_dir / "foo bar.json").write_text("{}")
+        (sessions_dir / "日本語.json").write_text("{}")
+
+        ids = list_sessions(sessions_dir=sessions_dir)
+        assert ids == [valid_sid]
+
 
 class TestGcOldSessions:
     def test_removes_completed_older_than_threshold(self, tmp_path: Path) -> None:
@@ -502,10 +520,12 @@ class TestGcOldSessions:
         }
         (sessions_dir / "malicious.json").write_text(json.dumps(old_payload))
 
-        gc_old_sessions(sessions_dir=sessions_dir, older_than_days=30)
+        removed = gc_old_sessions(sessions_dir=sessions_dir, older_than_days=30)
 
-        # session JSON は削除されるが、外部ディレクトリは残る
-        assert not (sessions_dir / "malicious.json").exists()
+        # artifact が sessions_dir 外の場合、JSON も削除されない（改ざんの可能性を
+        # 残すため運用者が手動確認するまで保持）。外部ディレクトリは当然残る。
+        assert "malicious" not in removed
+        assert (sessions_dir / "malicious.json").exists()
         assert outside_dir.exists()
         assert (outside_dir / "important.pdf").exists()
 
@@ -672,3 +692,277 @@ class TestFromMatchResult:
             match_result=mr,
         )
         assert c.status == PairStatus.NO_MATCH
+
+
+# ---------------------------------------------------------------------------
+# transition_session API (ADR-010, Issue #47)
+# ---------------------------------------------------------------------------
+
+
+def _resolved_candidate(page_index: int = 0) -> UserCandidate:
+    return UserCandidate(
+        page_index=page_index,
+        user_name_ocr="塩津 美喜子",
+        confidence="high",
+        status=PairStatus.AUTO_MATCHED,
+        matched_b_path=None,
+        matched_c_path=None,
+        similar_candidates=[],
+    )
+
+
+def _unresolved_candidate(page_index: int = 0) -> UserCandidate:
+    return UserCandidate(
+        page_index=page_index,
+        user_name_ocr="塩津 美貴子",
+        confidence="medium",
+        status=PairStatus.NEEDS_CONFIRMATION,
+        matched_b_path=None,
+        matched_c_path=None,
+        similar_candidates=[],
+    )
+
+
+class TestTransitionSessionValid:
+    """ADR-010 状態遷移図に基づく有効遷移。"""
+
+    def test_running_a_to_needs_review(self, tmp_path: Path) -> None:
+        s = _make_session(
+            tmp_path,
+            status=SessionStatus.RUNNING_PHASE_A,
+            candidates=[_unresolved_candidate()],
+        )
+        transition_session(s, SessionStatus.NEEDS_REVIEW)
+        assert s.status == SessionStatus.NEEDS_REVIEW
+
+    def test_running_a_to_ready_to_merge_all_resolved(self, tmp_path: Path) -> None:
+        s = _make_session(
+            tmp_path,
+            status=SessionStatus.RUNNING_PHASE_A,
+            candidates=[_resolved_candidate()],
+        )
+        transition_session(s, SessionStatus.READY_TO_MERGE)
+        assert s.status == SessionStatus.READY_TO_MERGE
+
+    def test_running_a_to_interrupted_a(self, tmp_path: Path) -> None:
+        s = _make_session(tmp_path, status=SessionStatus.RUNNING_PHASE_A)
+        transition_session(s, SessionStatus.INTERRUPTED_PHASE_A)
+        assert s.status == SessionStatus.INTERRUPTED_PHASE_A
+
+    def test_needs_review_to_ready_when_all_resolved(self, tmp_path: Path) -> None:
+        s = _make_session(
+            tmp_path,
+            status=SessionStatus.NEEDS_REVIEW,
+            candidates=[_resolved_candidate(0), _resolved_candidate(1)],
+        )
+        transition_session(s, SessionStatus.READY_TO_MERGE)
+        assert s.status == SessionStatus.READY_TO_MERGE
+
+    def test_ready_to_merge_to_running_b(self, tmp_path: Path) -> None:
+        s = _make_session(
+            tmp_path,
+            status=SessionStatus.READY_TO_MERGE,
+            candidates=[_resolved_candidate()],
+        )
+        transition_session(s, SessionStatus.RUNNING_PHASE_B)
+        assert s.status == SessionStatus.RUNNING_PHASE_B
+
+    def test_running_b_to_completed(self, tmp_path: Path) -> None:
+        s = _make_session(
+            tmp_path,
+            status=SessionStatus.RUNNING_PHASE_B,
+            candidates=[_resolved_candidate()],
+        )
+        transition_session(s, SessionStatus.COMPLETED)
+        assert s.status == SessionStatus.COMPLETED
+
+    def test_running_b_to_interrupted_b(self, tmp_path: Path) -> None:
+        s = _make_session(tmp_path, status=SessionStatus.RUNNING_PHASE_B)
+        transition_session(s, SessionStatus.INTERRUPTED_PHASE_B)
+        assert s.status == SessionStatus.INTERRUPTED_PHASE_B
+
+    def test_interrupted_a_to_running_a_resume(self, tmp_path: Path) -> None:
+        s = _make_session(tmp_path, status=SessionStatus.INTERRUPTED_PHASE_A)
+        transition_session(s, SessionStatus.RUNNING_PHASE_A)
+        assert s.status == SessionStatus.RUNNING_PHASE_A
+
+    def test_interrupted_b_to_running_b_resume(self, tmp_path: Path) -> None:
+        s = _make_session(tmp_path, status=SessionStatus.INTERRUPTED_PHASE_B)
+        transition_session(s, SessionStatus.RUNNING_PHASE_B)
+        assert s.status == SessionStatus.RUNNING_PHASE_B
+
+
+class TestTransitionSessionInvalid:
+    """ADR-010 状態遷移図にない遷移は InvalidTransitionError。"""
+
+    def test_running_a_to_completed_raises(self, tmp_path: Path) -> None:
+        s = _make_session(tmp_path, status=SessionStatus.RUNNING_PHASE_A)
+        with pytest.raises(InvalidTransitionError):
+            transition_session(s, SessionStatus.COMPLETED)
+
+    def test_running_a_to_running_b_raises(self, tmp_path: Path) -> None:
+        s = _make_session(tmp_path, status=SessionStatus.RUNNING_PHASE_A)
+        with pytest.raises(InvalidTransitionError):
+            transition_session(s, SessionStatus.RUNNING_PHASE_B)
+
+    def test_needs_review_to_completed_raises(self, tmp_path: Path) -> None:
+        s = _make_session(
+            tmp_path,
+            status=SessionStatus.NEEDS_REVIEW,
+            candidates=[_resolved_candidate()],
+        )
+        with pytest.raises(InvalidTransitionError):
+            transition_session(s, SessionStatus.COMPLETED)
+
+    def test_completed_to_any_raises(self, tmp_path: Path) -> None:
+        s = _make_session(tmp_path, status=SessionStatus.COMPLETED)
+        for target in SessionStatus:
+            if target == SessionStatus.COMPLETED:
+                continue
+            with pytest.raises(InvalidTransitionError):
+                transition_session(s, target)
+
+    def test_same_status_self_transition_raises(self, tmp_path: Path) -> None:
+        s = _make_session(tmp_path, status=SessionStatus.RUNNING_PHASE_A)
+        with pytest.raises(InvalidTransitionError):
+            transition_session(s, SessionStatus.RUNNING_PHASE_A)
+
+
+class TestTransitionTableCompleteness:
+    """`_VALID_TRANSITIONS` が全 SessionStatus をキーに持つことを保証する。
+
+    新しい SessionStatus を追加した際にテーブル更新を忘れると、transition_session の
+    `allowed = _VALID_TRANSITIONS[session.status]` で KeyError が起きる。
+    事前にフェイルさせる。
+    """
+
+    def test_all_session_statuses_have_transition_entry(self) -> None:
+        from wiseman_hub.pdf.session import _VALID_TRANSITIONS
+
+        assert set(_VALID_TRANSITIONS.keys()) == set(SessionStatus), (
+            "_VALID_TRANSITIONS must have an entry for every SessionStatus. "
+            "Missing: "
+            f"{set(SessionStatus) - set(_VALID_TRANSITIONS.keys())}"
+        )
+
+
+class TestTransitionSessionReadyGuard:
+    """READY_TO_MERGE 遷移は all_candidates_resolved が必須。"""
+
+    def test_needs_review_to_ready_with_unresolved_raises(
+        self, tmp_path: Path
+    ) -> None:
+        s = _make_session(
+            tmp_path,
+            status=SessionStatus.NEEDS_REVIEW,
+            candidates=[_resolved_candidate(0), _unresolved_candidate(1)],
+        )
+        with pytest.raises(InvalidTransitionError, match="unresolved"):
+            transition_session(s, SessionStatus.READY_TO_MERGE)
+        # 状態は変わらない
+        assert s.status == SessionStatus.NEEDS_REVIEW
+
+    def test_running_a_to_ready_with_unresolved_raises(self, tmp_path: Path) -> None:
+        s = _make_session(
+            tmp_path,
+            status=SessionStatus.RUNNING_PHASE_A,
+            candidates=[_unresolved_candidate()],
+        )
+        with pytest.raises(InvalidTransitionError, match="unresolved"):
+            transition_session(s, SessionStatus.READY_TO_MERGE)
+
+    def test_ready_with_empty_candidates_raises(self, tmp_path: Path) -> None:
+        # all_candidates_resolved は空 list で False を返す
+        s = _make_session(
+            tmp_path, status=SessionStatus.RUNNING_PHASE_A, candidates=[]
+        )
+        with pytest.raises(InvalidTransitionError, match="unresolved"):
+            transition_session(s, SessionStatus.READY_TO_MERGE)
+
+
+# ---------------------------------------------------------------------------
+# with_session_lock (ADR-010, Issue #46)
+# ---------------------------------------------------------------------------
+
+
+class TestWithSessionLock:
+    """Windows exe 二重起動・UI/GC 競合対策のセッションロック。"""
+
+    def test_lock_creates_lock_file(self, tmp_path: Path) -> None:
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        sid = generate_session_id()
+        with with_session_lock(sessions_dir, sid):
+            lock_path = sessions_dir / f"{sid}.lock"
+            assert lock_path.exists()
+
+    def test_lock_released_after_context(self, tmp_path: Path) -> None:
+        """with 抜けでロック解放 → 別取得が成功する。"""
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        sid = generate_session_id()
+
+        with with_session_lock(sessions_dir, sid):
+            pass
+
+        # 2回目取得が成功すること
+        with with_session_lock(sessions_dir, sid):
+            pass
+
+    def test_second_acquire_same_process_raises(self, tmp_path: Path) -> None:
+        """既にロックを保持しているプロセスから再取得は失敗する（non-blocking）。
+
+        POSIX の flock は同一プロセス内の同一ファイルディスクリプタには
+        再ロックを許す実装があるため、本テストは「別 fd でも失敗する」
+        ことを確認する（ロックファイルパスは同じ）。
+        """
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        sid = generate_session_id()
+
+        with (
+            with_session_lock(sessions_dir, sid),
+            pytest.raises((BlockingIOError, OSError)),
+            with_session_lock(sessions_dir, sid),
+        ):
+            pass
+
+    def test_lock_auto_creates_sessions_dir(self, tmp_path: Path) -> None:
+        """sessions_dir が無い場合も自動作成される。"""
+        sessions_dir = tmp_path / ".sessions"
+        sid = generate_session_id()
+        assert not sessions_dir.exists()
+        with with_session_lock(sessions_dir, sid):
+            assert sessions_dir.exists()
+
+    def test_lock_validates_session_id(self, tmp_path: Path) -> None:
+        """不正な session_id はパストラバーサル防止で拒否。"""
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        with pytest.raises(ValueError), with_session_lock(sessions_dir, "../evil"):
+            pass
+
+    def test_different_sessions_lock_independently(self, tmp_path: Path) -> None:
+        """異なる session_id のロックは相互に独立（並行処理可能）。"""
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        sid1 = generate_session_id()
+        sid2 = generate_session_id()
+        assert sid1 != sid2
+
+        with with_session_lock(sessions_dir, sid1), with_session_lock(sessions_dir, sid2):
+            # 両方取得できる
+            pass
+
+    def test_exception_in_context_releases_lock(self, tmp_path: Path) -> None:
+        """例外発生時もロックは解放される。"""
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        sid = generate_session_id()
+
+        with pytest.raises(RuntimeError), with_session_lock(sessions_dir, sid):
+            raise RuntimeError("boom")
+
+        # 解放されていれば再取得が成功
+        with with_session_lock(sessions_dir, sid):
+            pass
