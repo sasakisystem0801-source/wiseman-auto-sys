@@ -150,8 +150,33 @@ UI に提示する」方針を優先し、種別バランス（B と C を各 N 
 ### 同時実行制御
 
 - 1セッション = 1プロセス前提
-- Phase A 実行中に同一 session_id を別プロセスが触ると破損リスク → セッションディレクトリ内 `lock` ファイル（`msvcrt.locking` / `fcntl.flock`）で排他
+- Phase A 実行中に同一 session_id を別プロセスが触ると破損リスク → セッションディレクトリ内 `<session_id>.lock` ファイル（`msvcrt.locking` / `fcntl.flock`）で排他
 - 本機能の利用頻度（月数回）から、シンプルな排他ロックで十分と判断
+
+### 実装済み API（タスク 8B、Issue #46 / #47）
+
+以下の API を `src/wiseman_hub/pdf/session.py` で提供する。
+
+#### `transition_session(session, next_status)` — 状態遷移ガード
+
+ADR 本文の状態遷移図を `_VALID_TRANSITIONS` テーブルとして符号化し、
+表にない遷移は `InvalidTransitionError` を送出する。`READY_TO_MERGE` への遷移は
+追加で `session.all_candidates_resolved == True` を必須検証する（未解決候補が
+残ったまま merger に進む invariant 違反を防ぐ）。
+
+pipeline / UI は `session.status = ...` の直接代入を避け、必ず本関数経由で遷移させる。
+
+#### `with_session_lock(sessions_dir, session_id)` — セッションロック
+
+Windows exe 二重起動、UI 操作中の自動 GC、resume と discard の競合から
+セッション JSON の lost update を防ぐ non-blocking 排他ロック。
+`pipeline.run_phase_a` はロック取得後に状態遷移と save_session を実行する。
+
+### スキーマ追加フィールド（タスク 8B、schema_version v1 維持）
+
+- **`total_pages_a`** (optional, int): Phase A 完了時の総ページ数。resume 時に
+  「未処理ページ」を判定するため。本フィールドは optional として読み込まれるため、
+  既存 v1 JSON との後方互換性は保たれる（schema_version のインクリメント不要）。
 
 ## 代替案と却下理由
 
