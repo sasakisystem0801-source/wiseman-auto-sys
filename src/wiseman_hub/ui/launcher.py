@@ -62,14 +62,16 @@ def validate_config_ready(config: AppConfig) -> bool:
     """必須設定がすべて入力済みかチェック。
 
     必須: input_dir / output_dir / source_a_filename / ocr_backend.endpoint_url / api_key
+    空白のみの入力は未設定扱い（TOML 編集ミス・コピペ事故を早期検出）。
     """
-    return bool(
-        config.pdf_merge.input_dir
-        and config.pdf_merge.output_dir
-        and config.pdf_merge.source_a_filename
-        and config.ocr_backend.endpoint_url
-        and config.ocr_backend.api_key
+    required = (
+        config.pdf_merge.input_dir,
+        config.pdf_merge.output_dir,
+        config.pdf_merge.source_a_filename,
+        config.ocr_backend.endpoint_url,
+        config.ocr_backend.api_key,
     )
+    return all(bool(v.strip()) for v in required)
 
 
 class Launcher:
@@ -103,6 +105,10 @@ class Launcher:
 
         self._owns_root = root is None
         self._root = root if root is not None else tk.Tk()
+        # Tk 既定は callback 例外を stderr に traceback 出力して mainloop 継続。
+        # Phase A 統合時に OCR/ファイル I/O 例外が氏名・パスを含みうるため、
+        # ConfirmDialog と同じく型名のみログに残し、UI には sanitized メッセージで通知する。
+        self._root.report_callback_exception = self._on_callback_exception
 
         self._build_ui()
 
@@ -159,6 +165,8 @@ class Launcher:
                     _TITLE_SETTINGS_PLACEHOLDER,
                     _MSG_SETTINGS_PLACEHOLDER,
                 )
+            case _:
+                raise ValueError(f"Unhandled LauncherAction: {action}")
 
     def run(self) -> None:
         """mainloop を起動する。"""
@@ -174,8 +182,10 @@ class Launcher:
             logger.info("PDF merge requested but config is incomplete")
             if self._on_config_missing is not None:
                 self._on_config_missing()
-            else:
-                self._messagebox.showerror(_TITLE_CONFIG_MISSING, _MSG_CONFIG_MISSING)
+                return
+            self._messagebox.showerror(_TITLE_CONFIG_MISSING, _MSG_CONFIG_MISSING)
+            # AC-L-4「設定 GUI へ誘導」: エラーダイアログ確認後、設定アクションを続けて起動する。
+            self.invoke_action(LauncherAction.OPEN_SETTINGS)
             return
 
         self._invoke_or_show(
@@ -190,3 +200,21 @@ class Launcher:
             callback()
         else:
             self._messagebox.showinfo(title, message)
+
+    def _on_callback_exception(
+        self,
+        exc_type: type[BaseException],
+        exc_value: BaseException,
+        exc_tb: object,
+    ) -> None:
+        """Tk callback 内の未捕捉例外を fail-fast でハンドルする（PII 防御）。
+
+        logger には型名のみを残す（exc_value は PDF パスや氏名を含みうる）。
+        画面には sanitized なメッセージで通知し、ユーザーに ErrorDialog として示す。
+        """
+        logger.error("launcher callback exception: %s", exc_type.__name__)
+        self._messagebox.showerror(
+            "内部エラー",
+            "処理中にエラーが発生しました。詳細はログを確認してください。\n\n"
+            f"{exc_type.__name__}",
+        )

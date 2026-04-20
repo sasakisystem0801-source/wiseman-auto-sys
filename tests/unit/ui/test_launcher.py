@@ -98,6 +98,17 @@ class TestValidateConfigReady:
         cfg = AppConfig()
         assert validate_config_ready(cfg) is False
 
+    def test_whitespace_only_values_return_false(self) -> None:
+        """空白のみの文字列は未設定として扱う（TOML 編集ミス検出）。"""
+        cfg = AppConfig()
+        cfg.pdf_merge.input_dir = "   "
+        cfg.pdf_merge.output_dir = "/out"
+        cfg.pdf_merge.source_a_filename = "A.pdf"
+        cfg.ocr_backend.endpoint_url = "https://example.com"
+        cfg.ocr_backend.api_key = "key"
+
+        assert validate_config_ready(cfg) is False
+
 
 class TestLauncherAction:
     """LauncherAction enum / 操作名を扱うロジック。"""
@@ -297,16 +308,77 @@ class TestLauncherUI:
         assert len(shown) == 1
         assert "設定" in shown[0][0]
 
-    def test_default_on_config_missing_shows_error_dialog(
+    def test_default_on_config_missing_shows_error_and_opens_settings(
         self, tmp_path: Path
     ) -> None:
-        """on_config_missing 未指定時、既定のエラーダイアログが showerror で表示される。"""
+        """AC-L-4: 設定未完了時 showerror → 設定 GUI 誘導（OPEN_SETTINGS 起動）。"""
         import tkinter as tk
 
         config_path = tmp_path / "config.toml"
         config_path.write_text("", encoding="utf-8")
 
-        shown_errors: list[tuple[str, str]] = []
+        shown: list[tuple[str, str, str]] = []  # (type, title, message)
+
+        class FakeMessageBox:
+            def askyesno(self, title: str, message: str) -> bool:
+                return True
+
+            def showinfo(self, title: str, message: str) -> None:
+                shown.append(("info", title, message))
+
+            def showerror(self, title: str, message: str) -> None:
+                shown.append(("error", title, message))
+
+        settings_opened: list[str] = []
+
+        root = tk.Tk()
+        try:
+            launcher = Launcher(
+                config=AppConfig(),
+                config_path=config_path,
+                root=root,
+                messagebox_fn=FakeMessageBox(),
+                on_open_settings=lambda: settings_opened.append("open"),
+            )
+            launcher.invoke_action(LauncherAction.RUN_PDF_MERGE)
+        finally:
+            root.destroy()
+
+        assert shown[0][0] == "error"
+        assert "設定" in shown[0][2]
+        assert settings_opened == ["open"]
+
+    def test_invoke_action_unhandled_value_raises(self, tmp_path: Path) -> None:
+        """将来 LauncherAction に値追加 → match default で silent バグ防止。"""
+        import tkinter as tk
+
+        config_path = tmp_path / "config.toml"
+        config_path.write_text("", encoding="utf-8")
+
+        root = tk.Tk()
+        try:
+            launcher = Launcher(
+                config=AppConfig(),
+                config_path=config_path,
+                root=root,
+            )
+            sentinel = object()
+            with pytest.raises(ValueError, match="Unhandled LauncherAction"):
+                launcher.invoke_action(sentinel)  # type: ignore[arg-type]
+        finally:
+            root.destroy()
+
+    def test_callback_exception_is_sanitized_in_log(
+        self, tmp_path: Path, caplog: Any
+    ) -> None:
+        """Tk callback 例外のログには例外型名のみ、message（PII を含みうる）は出ない。"""
+        import logging
+        import tkinter as tk
+
+        config_path = tmp_path / "config.toml"
+        config_path.write_text("", encoding="utf-8")
+
+        shown: list[tuple[str, str]] = []
 
         class FakeMessageBox:
             def askyesno(self, title: str, message: str) -> bool:
@@ -316,7 +388,7 @@ class TestLauncherUI:
                 pass
 
             def showerror(self, title: str, message: str) -> None:
-                shown_errors.append((title, message))
+                shown.append((title, message))
 
         root = tk.Tk()
         try:
@@ -326,9 +398,16 @@ class TestLauncherUI:
                 root=root,
                 messagebox_fn=FakeMessageBox(),
             )
-            launcher.invoke_action(LauncherAction.RUN_PDF_MERGE)
+            with caplog.at_level(logging.ERROR, logger="wiseman_hub.ui.launcher"):
+                launcher._on_callback_exception(  # type: ignore[arg-type]
+                    ValueError,
+                    ValueError("/sensitive/path/to/山田太郎.pdf"),
+                    None,
+                )
         finally:
             root.destroy()
 
-        assert len(shown_errors) == 1
-        assert "設定" in shown_errors[0][1]
+        logged = " ".join(r.getMessage() for r in caplog.records)
+        assert "ValueError" in logged
+        assert "山田太郎" not in logged
+        assert "/sensitive/path" not in logged
