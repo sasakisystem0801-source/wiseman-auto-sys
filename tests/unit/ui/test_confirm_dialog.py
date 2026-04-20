@@ -369,8 +369,15 @@ class TestLogOperation:
         assert "confidence=" in text
 
     def test_all_operation_names_logged(self, caplog: pytest.LogCaptureFixture) -> None:
+        """attempt / outcome 両方のログ名を検証（監査証跡完全性）"""
         cand = _needs_confirmation_candidate(page_index=1)
-        for op in ("approved", "rejected", "manually_selected", "skipped"):
+        ops = (
+            "approved_attempt", "approved",
+            "rejected_attempt", "rejected",
+            "manually_selected_attempt", "manually_selected",
+            "skipped_attempt", "skipped",
+        )
+        for op in ops:
             caplog.clear()
             with caplog.at_level(logging.INFO, logger="wiseman_hub.ui.confirm_dialog"):
                 log_operation("sess-1", cand, op)
@@ -502,10 +509,58 @@ class TestHelpers:
 
 class TestResult:
     def test_result_is_frozen(self) -> None:
+        """session フィールドは dataclass(frozen=True) で再代入不可"""
         session = _make_session(candidates=[_needs_confirmation_candidate()])
-        r = ConfirmDialogResult(resolved_all=True, session=session)
+        r = ConfirmDialogResult(session=session)
         with pytest.raises((AttributeError, TypeError)):  # FrozenInstanceError
+            r.session = _make_session()  # type: ignore[misc]
+
+    def test_resolved_all_is_property_not_stored(self) -> None:
+        """resolved_all は派生値（property）。session 変更で値が追従する"""
+        session = _make_session(
+            candidates=[_needs_confirmation_candidate(page_index=1)]
+        )
+        r = ConfirmDialogResult(session=session)
+        assert r.resolved_all is False
+
+        resolve_candidate(
+            session, 1, status=PairStatus.CONFIRMED, matched_b="/b", matched_c="/c"
+        )
+        # UI 終了後に呼出側が session を変更しても resolved_all は追従する（二重真実なし）
+        assert r.resolved_all is True
+
+        # property のため setter は存在しない
+        with pytest.raises(AttributeError):
             r.resolved_all = False  # type: ignore[misc]
+
+    def test_aborted_forces_resolved_all_false(self) -> None:
+        """aborted=True なら候補が全解決済みでも resolved_all は False（業務事故防止）
+
+        save 失敗で callback 例外 → mainloop 異常終了 → メモリ上は全件解決でも
+        ディスクは旧状態。呼出側が READY_TO_MERGE に遷移するのを防ぐ safety net。
+        """
+        session = _make_session(
+            candidates=[
+                UserCandidate(
+                    page_index=1,
+                    user_name_ocr="X",
+                    confidence="high",
+                    status=PairStatus.CONFIRMED,  # メモリ上は解決済み
+                    matched_b_path="/b",
+                    matched_c_path="/c",
+                    similar_candidates=[],
+                )
+            ]
+        )
+        assert session.all_candidates_resolved is True
+
+        # 通常終了なら resolved_all=True
+        ok = ConfirmDialogResult(session=session, aborted=False)
+        assert ok.resolved_all is True
+
+        # aborted=True なら resolved_all=False（安全網）
+        aborted = ConfirmDialogResult(session=session, aborted=True)
+        assert aborted.resolved_all is False
 
 
 # ---------------------------------------------------------------------------
@@ -513,13 +568,46 @@ class TestResult:
 # ---------------------------------------------------------------------------
 
 
+class TestMainThreadEnforcement:
+    """Tkinter は thread-safe でないため worker thread から ConfirmDialog を構築できない。
+
+    Tk 不要のテスト（`__init__` が thread 検証で例外を投げる地点までしか到達しない）。
+    """
+
+    def test_worker_thread_construction_raises(self) -> None:
+        import threading as _threading
+
+        session = _make_session(
+            candidates=[_needs_confirmation_candidate(page_index=1)]
+        )
+        error: list[BaseException] = []
+
+        def _try_construct() -> None:
+            try:
+                ConfirmDialog(session, Path("/tmp/.sessions"))
+            except BaseException as e:
+                error.append(e)
+
+        t = _threading.Thread(target=_try_construct)
+        t.start()
+        t.join()
+
+        assert len(error) == 1
+        assert isinstance(error[0], RuntimeError)
+        assert "main thread" in str(error[0])
+
+
 class TestStdlibOnly:
-    def test_no_third_party_imports(self) -> None:
-        """ADR-009: PyInstaller hook 不要化のため third-party UI ライブラリ禁止"""
-        src = Path(cd_mod.__file__).read_text(encoding="utf-8")
+    def test_no_third_party_imports_across_ui_package(self) -> None:
+        """ADR-009: PyInstaller hook 不要化のため third-party UI ライブラリ禁止（ui/ 全体）"""
+        ui_dir = Path(cd_mod.__file__).parent
+        py_files = list(ui_dir.rglob("*.py"))
+        assert py_files, "ui package has no .py files (fixture broken)"
         forbidden = ("PySide6", "PyQt5", "PyQt6", "flet", "DearPyGui", "wxPython", "kivy")
-        for f in forbidden:
-            assert f not in src, f"forbidden third-party import found: {f}"
+        for f in py_files:
+            text = f.read_text(encoding="utf-8")
+            for lib in forbidden:
+                assert lib not in text, f"forbidden third-party import {lib!r} in {f}"
 
 
 # ===========================================================================
@@ -553,6 +641,7 @@ class _FakeMessageBox:
     yesno_return: bool = True
     showinfo_calls: list[tuple[str, str]] = field(default_factory=list)
     askyesno_calls: list[tuple[str, str]] = field(default_factory=list)
+    showerror_calls: list[tuple[str, str]] = field(default_factory=list)
 
     def askyesno(self, title: str, message: str) -> bool:
         self.askyesno_calls.append((title, message))
@@ -560,6 +649,9 @@ class _FakeMessageBox:
 
     def showinfo(self, title: str, message: str) -> None:
         self.showinfo_calls.append((title, message))
+
+    def showerror(self, title: str, message: str) -> None:
+        self.showerror_calls.append((title, message))
 
 
 class _SaveSessionSpy:
@@ -646,7 +738,11 @@ class TestConfirmDialogConstruction:
 @_skip_if_no_tk
 class TestPersistenceFailFast:
     def test_save_called_each_operation(self, tk_root: tk.Tk) -> None:
-        """AC-UI-6 (UI level): 4 操作 → save_session 3 回呼ばれる"""
+        """AC-UI-6 (UI level): 承認・却下・スキップの 3 操作 → save_session 3 回呼ばれる
+
+        手動選択（``_on_manual_select``）の save 呼出は :class:`TestManualSelectWiring` で
+        spy を使って別途検証する（filedialog の DI が必要なためテストを分離）。
+        """
         session = _make_session(
             candidates=[
                 _needs_confirmation_candidate(page_index=1),
@@ -683,6 +779,25 @@ class TestPersistenceFailFast:
             dialog._on_approve()
 
         assert failing.calls == 1
+
+    def test_save_error_leaves_memory_ahead_of_disk(self, tk_root: tk.Tk) -> None:
+        """AC-UI-10 補足: save 失敗時のメモリ/ディスク不整合を契約として明示する。
+
+        resolve_candidate が save 前に in-place 更新するため、save 失敗後のメモリは
+        新 status になる（ディスクは旧 status）。呼出側はメモリ上の session を破棄し
+        再ロードする責務がある（confirm_dialog.py の _apply_update docstring で規定）。
+        """
+        session = _make_session(candidates=[_needs_confirmation_candidate(page_index=1)])
+        failing = _FailingSaveSession(OSError("disk full"))
+        dialog, _, _ = _build_dialog(session, tk_root, save_spy=failing)
+        dialog._tree.selection_set("1")
+        dialog._on_select(None)
+
+        with pytest.raises(OSError):
+            dialog._on_approve()
+
+        # メモリ上は更新済み（契約上の期待値）
+        assert session.candidates[0].status == PairStatus.CONFIRMED
 
 
 @_skip_if_no_tk
@@ -734,11 +849,13 @@ class TestCloseBehavior:
 @_skip_if_no_tk
 class TestManualSelectWiring:
     def test_both_b_and_c_selected(self, tk_root: tk.Tk) -> None:
+        """AC-UI-4 + AC-UI-6 (UI level): 両方選択 → MANUALLY_SELECTED + save_session 呼出"""
         session = _make_session(candidates=[_no_match_candidate(page_index=2)])
         picks = iter(["/manual/B.pdf", "/manual/C.pdf"])
         dialog, spy, _ = _build_dialog(
             session, tk_root, askopenfilename_fn=lambda **_: next(picks)
         )
+        assert isinstance(spy, _SaveSessionSpy)
         dialog._tree.selection_set("2")
         dialog._on_select(None)
 
@@ -748,6 +865,8 @@ class TestManualSelectWiring:
         assert cand.status == PairStatus.MANUALLY_SELECTED
         assert cand.matched_b_path == "/manual/B.pdf"
         assert cand.matched_c_path == "/manual/C.pdf"
+        # 手動選択も他操作と同様に save_session が 1 回呼ばれること（AC-UI-6 補完）
+        assert len(spy.calls) == 1
 
     def test_both_cancelled_is_noop(self, tk_root: tk.Tk) -> None:
         session = _make_session(candidates=[_no_match_candidate(page_index=2)])
@@ -762,3 +881,160 @@ class TestManualSelectWiring:
 
         assert session.candidates[0].status == PairStatus.NO_MATCH
         assert len(spy.calls) == 0
+
+    def test_partial_selection_asks_confirm_yes(self, tk_root: tk.Tk) -> None:
+        """片側のみ選択 → askyesno → yes → MANUALLY_SELECTED で確定"""
+        session = _make_session(candidates=[_no_match_candidate(page_index=2)])
+        picks = iter(["/manual/B.pdf", ""])  # C はキャンセル
+        mb = _FakeMessageBox(yesno_return=True)
+        dialog, spy, _ = _build_dialog(
+            session,
+            tk_root,
+            askopenfilename_fn=lambda **_: next(picks),
+            messagebox=mb,
+        )
+        assert isinstance(spy, _SaveSessionSpy)
+        dialog._tree.selection_set("2")
+        dialog._on_select(None)
+
+        dialog._on_manual_select()
+
+        assert len(mb.askyesno_calls) == 1
+        assert session.candidates[0].status == PairStatus.MANUALLY_SELECTED
+        assert session.candidates[0].matched_b_path == "/manual/B.pdf"
+        assert session.candidates[0].matched_c_path is None
+
+    def test_partial_selection_asks_confirm_no(self, tk_root: tk.Tk) -> None:
+        """片側のみ選択 → askyesno → no → no-op（save 呼出なし）"""
+        session = _make_session(candidates=[_no_match_candidate(page_index=2)])
+        picks = iter(["", "/manual/C.pdf"])  # B はキャンセル
+        mb = _FakeMessageBox(yesno_return=False)
+        dialog, spy, _ = _build_dialog(
+            session,
+            tk_root,
+            askopenfilename_fn=lambda **_: next(picks),
+            messagebox=mb,
+        )
+        assert isinstance(spy, _SaveSessionSpy)
+        dialog._tree.selection_set("2")
+        dialog._on_select(None)
+
+        dialog._on_manual_select()
+
+        assert len(mb.askyesno_calls) == 1
+        assert session.candidates[0].status == PairStatus.NO_MATCH
+        assert len(spy.calls) == 0
+
+    def test_filedialog_tclerror_shows_error_and_skips(self, tk_root: tk.Tk) -> None:
+        """askopenfilename が TclError 送出 → showerror 表示 + その kind は未選択扱い"""
+        session = _make_session(candidates=[_no_match_candidate(page_index=2)])
+
+        def _raise(**_: object) -> str:
+            raise tk.TclError("display connection lost")
+
+        mb = _FakeMessageBox()
+        dialog, spy, _ = _build_dialog(
+            session, tk_root, askopenfilename_fn=_raise, messagebox=mb
+        )
+        assert isinstance(spy, _SaveSessionSpy)
+        dialog._tree.selection_set("2")
+        dialog._on_select(None)
+
+        dialog._on_manual_select()
+
+        # 両方 TclError → 両方未選択 → no-op（save 呼出ゼロ）
+        assert len(mb.showerror_calls) == 2
+        assert session.candidates[0].status == PairStatus.NO_MATCH
+        assert len(spy.calls) == 0
+
+
+@_skip_if_no_tk
+class TestCallbackException:
+    """Tk `report_callback_exception` 経路のテスト（CRITICAL: fail-fast の core）"""
+
+    def test_callback_exception_shows_error_and_sets_aborted(
+        self, tk_root: tk.Tk
+    ) -> None:
+        """save_session 失敗が Tk callback 経由 → showerror + aborted=True + quit"""
+        session = _make_session(candidates=[_needs_confirmation_candidate(page_index=1)])
+        failing = _FailingSaveSession(OSError("disk full"))
+        mb = _FakeMessageBox()
+        dialog, _, _ = _build_dialog(
+            session, tk_root, save_spy=failing, messagebox=mb
+        )
+
+        # Tk callback が設定されていることの確認
+        assert dialog._root.report_callback_exception == dialog._on_callback_exception
+
+        # callback exception ハンドラを直接発火し副作用を検証
+        try:
+            raise OSError("disk full")
+        except OSError as e:
+            dialog._on_callback_exception(OSError, e, None)
+
+        assert len(mb.showerror_calls) == 1
+        title, msg = mb.showerror_calls[0]
+        assert "内部エラー" in title
+        assert "OSError" in msg
+        assert "disk full" in msg  # 画面は PII 露出可
+
+        # aborted が伝搬すれば最終結果 resolved_all は False 固定
+        assert dialog._aborted is True
+
+    def test_callback_exception_does_not_leak_path_to_log(
+        self, tk_root: tk.Tk, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """PII 防御: 例外 message 内のファイルパスがログに流出しないこと
+
+        OSError 等の例外文字列にファイルパスが含まれても、logger には型名のみ出力する。
+        本テストは「`logger.exception` で traceback が出るとファイルパスが漏れる」
+        という既知リスク（Codex review で検出）を回帰防止する。
+        """
+        session = _make_session(candidates=[_needs_confirmation_candidate(page_index=1)])
+        dialog, _, _ = _build_dialog(session, tk_root)
+
+        pii_path = "/secret/利用者_塩津美貴子.pdf"
+        with caplog.at_level(logging.DEBUG, logger="wiseman_hub.ui.confirm_dialog"):
+            try:
+                raise PermissionError(f"[Errno 13] denied: '{pii_path}'")
+            except PermissionError as e:
+                dialog._on_callback_exception(PermissionError, e, None)
+
+        # ログに session_id と型名は含むが、PII パスは含まない
+        joined = caplog.text
+        assert session.session_id in joined
+        assert "PermissionError" in joined
+        assert "塩津" not in joined, f"PII leaked to log: {joined}"
+        assert "利用者" not in joined
+        assert pii_path not in joined
+
+
+@_skip_if_no_tk
+class TestRefreshTreeSelection:
+    """_refresh_tree の selection-cleared 経路（操作連打で stale selection を防ぐ）"""
+
+    def test_refresh_clears_selection_when_resolved_row_disappears(
+        self, tk_root: tk.Tk
+    ) -> None:
+        """承認後に Treeview から該当行が消え、detail/buttons がクリアされる"""
+        session = _make_session(
+            candidates=[
+                _needs_confirmation_candidate(page_index=1),
+                _no_match_candidate(page_index=2),
+            ]
+        )
+        dialog, _, _ = _build_dialog(session, tk_root)
+        dialog._tree.selection_set("1")
+        dialog._on_select(None)
+        assert dialog._btn_approve.instate(["!disabled"])  # 承認ボタン有効
+
+        dialog._on_approve()  # 承認 → row 1 が消える
+
+        # row 1 が消えている
+        assert "1" not in dialog._tree.get_children()
+        # detail がクリア・全ボタンが disabled
+        assert dialog._detail_var.get() == "候補を選択してください。"
+        assert dialog._btn_approve.instate(["disabled"])
+        assert dialog._btn_reject.instate(["disabled"])
+        assert dialog._btn_manual.instate(["disabled"])
+        assert dialog._btn_skip.instate(["disabled"])

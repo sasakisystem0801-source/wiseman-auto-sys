@@ -13,7 +13,8 @@
 - 呼び出し側（PR #B `run_phase_b` / `scripts/review_ui.py`）が `with_session_lock` 取得済み
 - 対象 session は `status == NEEDS_REVIEW`
 - session.candidates に `NEEDS_CONFIRMATION` または `NO_MATCH` が 1 件以上存在
-- PyInstaller 追加依存なし（stdlib `tkinter` のみ）
+- **main thread から呼び出す**（tkinter filedialog / messagebox / mainloop は thread-safe でない。違反時 `ConfirmDialog.__init__` が `RuntimeError`）
+- PyInstaller 追加依存なし（stdlib `tkinter` のみ。macOS 開発機での Tcl/Tk ランタイム制約は §10.1 参照）
 
 ## 2. UI レイアウト
 
@@ -39,7 +40,7 @@
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-- ウィンドウサイズ: 800x500（`geometry("800x500")`）、リサイズ可能
+- ウィンドウサイズ: 900x520（`geometry("900x520")`）、リサイズ可能（Treeview の列幅合計 + scrollbar + padding の実測から決定。列幅は実装の `_COLUMNS` が単一の真実）
 - タイトル: `f"利用者ペア確認 - Session {session_id}"`
 - 中央 Treeview は `NEEDS_CONFIRMATION` / `NO_MATCH` のみ表示（既に解決済みの行は隠す）
 
@@ -90,8 +91,14 @@
 ```python
 @dataclass(frozen=True)
 class ConfirmDialogResult:
-    resolved_all: bool
-    session: Session
+    session: Session  # UI 終了時点の session（所有は呼出側）
+    aborted: bool = False  # Tk callback 例外で mainloop 異常終了時 True
+
+    @property
+    def resolved_all(self) -> bool:
+        # aborted=True なら常に False（save 失敗後のメモリ全解決状態で READY_TO_MERGE に進むのを防ぐ）
+        # それ以外は session.all_candidates_resolved の派生値（二重真実を避けるため property）
+        ...
 
 class ConfirmDialog:
     def __init__(
@@ -100,9 +107,9 @@ class ConfirmDialog:
         sessions_dir: Path,
         *,
         root: tk.Tk | None = None,  # テスト時に外から注入
-        save_session_fn: Callable[[Path, Session], None] = save_session,  # テストスタブ
+        save_session_fn: Callable[..., Path] = save_session,  # テストスタブ
         askopenfilename_fn: Callable[..., str] = filedialog.askopenfilename,
-        messagebox_fn: MessageBoxLike = _default_messagebox,
+        messagebox_fn: MessageBoxLike | None = None,  # None なら _DefaultMessageBox
     ) -> None: ...
 
     def run(self) -> ConfirmDialogResult: ...
@@ -110,6 +117,8 @@ class ConfirmDialog:
 
 - `root` は通常 `None`（内部で `tk.Tk()` 生成）、テスト時に外から渡す
 - `save_session_fn` / `askopenfilename_fn` / `messagebox_fn` は依存性注入でテスト可能に
+  - `save_session_fn` の実シグネチャは `save_session(session, *, sessions_dir: Path) -> Path`
+  - `messagebox_fn` は `MessageBoxLike` Protocol 準拠（`askyesno` / `showinfo` / `showerror`）
 - `run()` は `mainloop()` を呼び、閉じた時点で `ConfirmDialogResult` 返却
 
 ## 5. エラー処理
@@ -118,15 +127,18 @@ class ConfirmDialog:
 |------|-----|
 | session.status != NEEDS_REVIEW | `ValueError` 送出（呼出側契約違反） |
 | candidates に未解決がない | `ValueError` 送出（起動する意味がない） |
-| save_session が失敗 | 例外伝播。UI は `try/except` で拾わず、そのまま mainloop 抜けて呼出元に再送出 |
-| filedialog キャンセル | 該当フィールドは更新せず（B だけ選べば matched_b_path のみ更新） |
+| worker thread から呼出 | `RuntimeError` 送出（main thread 必須） |
+| save_session が失敗 | Tk callback 経由の未捕捉例外は `_on_callback_exception` が受けて `logger.error`（PII 防御で型名のみ）+ `messagebox.showerror`（画面は PII 露出可）+ `root.quit()`。`ConfirmDialogResult.aborted=True` で返り、`resolved_all` は False 固定。**メモリ上の session は破棄** し on-disk から再ロードすること（resolve_candidate の in-place 更新分が反映されていないため） |
+| filedialog が例外を送出（TclError/OSError） | `showerror` 表示後、そのファイル選択だけキャンセル扱い（ダイアログは継続）。業務データ破損なし |
+| filedialog キャンセル | 該当フィールドは更新せず（B だけ選べば matched_b_path のみ更新）。片側のみ選択時は `messagebox.askyesno` で「片方のみで確定しますか？」確認 |
 | 承認ボタン: similar_candidates が空 | ボタンは disabled。誤って呼ばれた場合は no-op（アサートせず静かに無視） |
 
 ## 6. PII 保護
 
-- `logger.info` / `logger.warning` / `logger.error` 全てで `user_name_ocr`, `matched_b_path`, `matched_c_path` を含めない
-- ログに出せるのは `session_id`, `page_index`, `confidence`, 操作名（`approved` / `rejected` / `manually_selected` / `skipped`）, PairStatus 名
-- Tkinter ウィンドウ内は PII 表示可（本来の目的）
+- `logger.info` / `logger.warning` / `logger.error` / `logger.debug` 全てで `user_name_ocr`, `matched_b_path`, `matched_c_path` を含めない
+- 例外オブジェクトの **文字列表現（`str(e)`）はファイルパスを含みうる** ため、ログには `type(e).__name__` のみを出す（`logger.exception` は traceback に path を含むので不可）
+- ログに出せるのは `session_id`, `page_index`, `confidence`, 操作名（`approved` / `approved_attempt` / `rejected` / `rejected_attempt` / `manually_selected` / `manually_selected_attempt` / `skipped` / `skipped_attempt`）, PairStatus 名, 例外型名
+- Tkinter ウィンドウ内（messagebox / Label / Treeview）は PII 表示可（本来の目的、ローカルウィンドウ）
 
 ## 7. テスト戦略
 

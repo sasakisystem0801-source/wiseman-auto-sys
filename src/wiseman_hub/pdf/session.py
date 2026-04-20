@@ -90,6 +90,15 @@ _RESOLVED_PAIR_STATUSES = frozenset(
 # 解決済み集合の補集合（= 人間確認が必要な状態）。UI モジュール等から参照される。
 OPEN_PAIR_STATUSES = frozenset(PairStatus) - _RESOLVED_PAIR_STATUSES
 
+# 網羅性 invariant: PairStatus に新値を追加した際、どちらの集合にも入れ忘れたら
+# import 時点で落ちる（静かな分類漏れを防ぐ）。
+assert _RESOLVED_PAIR_STATUSES.isdisjoint(OPEN_PAIR_STATUSES), (
+    "RESOLVED と OPEN 集合が重複している"
+)
+assert frozenset(PairStatus) == _RESOLVED_PAIR_STATUSES | OPEN_PAIR_STATUSES, (
+    "PairStatus を RESOLVED / OPEN のいずれにも分類し忘れている"
+)
+
 
 @dataclass(frozen=True)
 class CandidateState:

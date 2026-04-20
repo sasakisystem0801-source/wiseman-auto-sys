@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import threading
 import tkinter as tk
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -46,14 +47,27 @@ logger = logging.getLogger(__name__)
 class ConfirmDialogResult:
     """UI クローズ時の返却値。
 
+    ``resolved_all`` は ``session.all_candidates_resolved`` の派生値で二重真実を避けるため
+    property 化している。呼出側が UI 終了後に session を変更しても一貫性が保たれる。
+
+    ``aborted`` が True の場合 ``resolved_all`` は常に False を返す（`_on_callback_exception`
+    経由で mainloop が異常終了した場合、メモリ上は全件解決済みでも save に失敗しており
+    ディスクは旧状態。呼出側が READY_TO_MERGE に進むのを防ぐ安全網）。
+
     Attributes:
-        resolved_all: 全候補が解決状態（呼出側は True のときのみ
-            ``transition_session(READY_TO_MERGE)`` を実行する）。
         session: UI 操作後の最新 session。
+        aborted: Tk callback 例外で mainloop が異常終了した場合 True。
+            呼出側は `aborted=True` 時はメモリ上の session を破棄し on-disk から再ロードする。
     """
 
-    resolved_all: bool
     session: Session
+    aborted: bool = False
+
+    @property
+    def resolved_all(self) -> bool:
+        if self.aborted:
+            return False
+        return self.session.all_candidates_resolved
 
 
 class MessageBoxLike(Protocol):
@@ -62,6 +76,8 @@ class MessageBoxLike(Protocol):
     def askyesno(self, title: str, message: str) -> bool: ...
 
     def showinfo(self, title: str, message: str) -> None: ...
+
+    def showerror(self, title: str, message: str) -> None: ...
 
 
 class _DefaultMessageBox:
@@ -72,6 +88,9 @@ class _DefaultMessageBox:
 
     def showinfo(self, title: str, message: str) -> None:
         messagebox.showinfo(title, message)
+
+    def showerror(self, title: str, message: str) -> None:
+        messagebox.showerror(title, message)
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +116,22 @@ _TITLE_ALL_RESOLVED = "全件解決"
 _MSG_ALL_RESOLVED = "すべて解決しました。閉じて結合へ進みます。"
 _TITLE_CLOSE_UNRESOLVED = "未解決のまま閉じる"
 _MSG_CLOSE_UNRESOLVED = "未解決の候補が残っています。後で再開できます。\n本当に閉じますか？"
+_TITLE_INTERNAL_ERROR = "内部エラー"
+_MSG_INTERNAL_ERROR_FMT = (
+    "処理中に回復不能なエラーが発生しました。\n"
+    "セッションは保存前の状態で保持されています。再開してやり直してください。\n"
+    "詳細はログを確認してください。\n\n{type}: {msg}"
+)
+_TITLE_PARTIAL_MANUAL = "手動選択"
+_MSG_PARTIAL_MANUAL = (
+    "B 側と C 側のいずれか片方のみが選択されました。\n"
+    "このまま確定しますか？（キャンセルすると両方未選択に戻ります）"
+)
+_TITLE_FILEDIALOG_ERROR = "ファイル選択エラー"
+_MSG_FILEDIALOG_ERROR_FMT = (
+    "ファイル選択ダイアログが失敗しました。\n"
+    "手動選択をキャンセル扱いとします。\n\n{type}: {msg}"
+)
 
 _SOURCE_KIND_B: SourceKind = "B"
 _SOURCE_KIND_C: SourceKind = "C"
@@ -130,14 +165,22 @@ class ConfirmDialog:
         askopenfilename_fn: Callable[..., str] = filedialog.askopenfilename,
         messagebox_fn: MessageBoxLike | None = None,
     ) -> None:
+        # Tkinter（filedialog / messagebox / mainloop）は main thread 非安全。worker
+        # thread からの呼出は Windows 本番でハング/TclError を起こしうるため fail-fast。
+        if threading.current_thread() is not threading.main_thread():
+            raise RuntimeError(
+                "ConfirmDialog must be instantiated on the main thread "
+                "(tkinter filedialog/messagebox/mainloop are not thread-safe)"
+            )
         if session.status != SessionStatus.NEEDS_REVIEW:
             raise ValueError(
                 f"ConfirmDialog requires session.status == NEEDS_REVIEW "
-                f"(got {session.status.value})"
+                f"(got {session.status.value}, session_id={session.session_id})"
             )
         if not any(c.status in OPEN_PAIR_STATUSES for c in session.candidates):
             raise ValueError(
-                "ConfirmDialog requires at least one unresolved candidate"
+                "ConfirmDialog requires at least one unresolved candidate "
+                f"(session_id={session.session_id})"
             )
 
         self._session = session
@@ -145,6 +188,9 @@ class ConfirmDialog:
         self._save_session_fn = save_session_fn
         self._askopenfilename_fn = askopenfilename_fn
         self._messagebox = messagebox_fn or _DefaultMessageBox()
+        # Tk callback 例外で mainloop が異常終了したかを追跡。ConfirmDialogResult に伝搬する
+        # ことで、save 失敗後のメモリ全解決状態でも呼出側が READY_TO_MERGE に進むのを防ぐ。
+        self._aborted = False
 
         self._owns_root = root is None
         self._root = root if root is not None else tk.Tk()
@@ -158,6 +204,10 @@ class ConfirmDialog:
         root.title(f"利用者ペア確認 - Session {self._session.session_id}")
         root.geometry("900x520")
         root.protocol("WM_DELETE_WINDOW", self._on_close_button)
+        # Tkinter 既定は callback 例外を stderr 出力 + mainloop 継続 → fail-fast の骨抜き。
+        # save_session 失敗等を「成功したように見せかけない」ため全 callback 例外をここで
+        # 捕捉し、ユーザーに明示通知 + mainloop 停止する（医療介護事故防止）。
+        root.report_callback_exception = self._on_callback_exception
 
         self._progress_var = tk.StringVar(value=self._progress_text())
         ttk.Label(root, textvariable=self._progress_var, anchor="w", padding=8).pack(
@@ -181,7 +231,6 @@ class ConfirmDialog:
         self._tree.configure(yscrollcommand=scroll.set)
         self._tree.bind("<<TreeviewSelect>>", self._on_select)
 
-        # 詳細表示（選択中）
         self._detail_var = tk.StringVar(value="候補を選択してください。")
         ttk.Label(
             root,
@@ -191,7 +240,6 @@ class ConfirmDialog:
             justify="left",
         ).pack(fill="x")
 
-        # 操作ボタン群
         btn_frame = ttk.Frame(root, padding=8)
         btn_frame.pack(fill="x")
         self._btn_approve = ttk.Button(
@@ -218,12 +266,14 @@ class ConfirmDialog:
             self._root.mainloop()
         finally:
             if self._owns_root:
-                with contextlib.suppress(tk.TclError):
+                try:
                     self._root.destroy()
-        return ConfirmDialogResult(
-            resolved_all=self._session.all_candidates_resolved,
-            session=self._session,
-        )
+                except tk.TclError as e:
+                    # destroy 失敗は benign（二重 destroy、子ウィジェット破棄順序等）。
+                    # 業務データには影響しないため debug ログに留める（PII 防御で型名のみ）。
+                    logger.debug("session %s destroy failed (benign): %s",
+                                 self._session.session_id, type(e).__name__)
+        return ConfirmDialogResult(session=self._session, aborted=self._aborted)
 
     # -- Treeview management ------------------------------------------------
 
@@ -282,29 +332,18 @@ class ConfirmDialog:
         self._set_buttons_for(cand)
 
     def _set_buttons_for(self, cand: UserCandidate | None) -> None:
-        if cand is None:
-            for btn in (
-                self._btn_approve,
-                self._btn_reject,
-                self._btn_manual,
-                self._btn_skip,
-            ):
-                btn.state(["disabled"])  # type: ignore[no-untyped-call]  # noqa: E501
-            return
-
-        # 承認は NEEDS_CONFIRMATION かつ similar_candidates に B or C があるときのみ
-        has_similar_bc = (
-            _pick_first_by_kind(cand.similar_candidates, _SOURCE_KIND_B) is not None
-            or _pick_first_by_kind(cand.similar_candidates, _SOURCE_KIND_C) is not None
+        can_others = cand is not None
+        # 承認は NEEDS_CONFIRMATION かつ similar に B or C がある場合のみ可能
+        # （compute_approve_decision と同一ルールで真の単一情報源）
+        can_approve = cand is not None and compute_approve_decision(cand) is not None
+        states = (
+            (self._btn_approve, can_approve),
+            (self._btn_reject, can_others),
+            (self._btn_manual, can_others),
+            (self._btn_skip, can_others),
         )
-        can_approve = cand.status == PairStatus.NEEDS_CONFIRMATION and has_similar_bc
-        self._btn_approve.state(  # type: ignore[no-untyped-call]
-            ["!disabled"] if can_approve else ["disabled"]
-        )
-
-        # 却下 / 手動 / スキップは NEEDS_CONFIRMATION / NO_MATCH 両方で有効
-        for btn in (self._btn_reject, self._btn_manual, self._btn_skip):
-            btn.state(["!disabled"])  # type: ignore[no-untyped-call]
+        for btn, ok in states:
+            btn.state(["!disabled"] if ok else ["disabled"])  # type: ignore[no-untyped-call]
 
     # -- Operations ---------------------------------------------------------
 
@@ -316,6 +355,7 @@ class ConfirmDialog:
         if decision is None:
             return
         first_b, first_c = decision
+        self._log_operation("approved_attempt", cand)
         self._apply_update(
             cand.page_index,
             status=PairStatus.CONFIRMED,
@@ -328,6 +368,7 @@ class ConfirmDialog:
         cand = self._selected_candidate()
         if cand is None or cand.status not in OPEN_PAIR_STATUSES:
             return
+        self._log_operation("rejected_attempt", cand)
         self._apply_update(
             cand.page_index,
             status=PairStatus.REJECTED,
@@ -342,21 +383,20 @@ class ConfirmDialog:
         if cand is None or cand.status not in OPEN_PAIR_STATUSES:
             return
 
-        b_path = self._askopenfilename_fn(
-            title="B 側 PDF を選択（キャンセル可）",
-            filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
-        )
-        c_path = self._askopenfilename_fn(
-            title="C 側 PDF を選択（キャンセル可）",
-            filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
-        )
+        chosen_b = self._ask_manual_path("B 側 PDF を選択（キャンセル可）")
+        chosen_c = self._ask_manual_path("C 側 PDF を選択（キャンセル可）")
 
-        chosen_b = b_path if b_path else None
-        chosen_c = c_path if c_path else None
         if chosen_b is None and chosen_c is None:
-            # どちらも選ばれなかった場合は何もしない
             return
 
+        # 片側のみ選択は「片肺状態の無言確定」を避けるため明示確認を挟む。
+        partial = (chosen_b is None) ^ (chosen_c is None)
+        if partial and not self._messagebox.askyesno(
+            _TITLE_PARTIAL_MANUAL, _MSG_PARTIAL_MANUAL
+        ):
+            return
+
+        self._log_operation("manually_selected_attempt", cand)
         self._apply_update(
             cand.page_index,
             status=PairStatus.MANUALLY_SELECTED,
@@ -365,10 +405,37 @@ class ConfirmDialog:
         )
         self._log_operation("manually_selected", cand)
 
+    def _ask_manual_path(self, title: str) -> str | None:
+        """filedialog を呼び、キャンセル時は ``None``、失敗時は警告表示して ``None`` を返す。
+
+        Tk 環境障害（DISPLAY 切断・TclError 等）で askopenfilename 自体が失敗する
+        可能性があるため、fail-fast ではなく「キャンセル相当扱い」にする。
+        この失敗で業務データは破損しない（未選択のまま操作を継続できる）。
+        """
+        try:
+            path = self._askopenfilename_fn(
+                title=title,
+                filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
+            )
+        except (tk.TclError, OSError) as e:
+            # PII 防御: ログには型名のみ（例外 message はファイルパスを含む可能性）。
+            logger.warning(
+                "session %s filedialog failed: %s",
+                self._session.session_id,
+                type(e).__name__,
+            )
+            self._messagebox.showerror(
+                _TITLE_FILEDIALOG_ERROR,
+                _MSG_FILEDIALOG_ERROR_FMT.format(type=type(e).__name__, msg=str(e)),
+            )
+            return None
+        return path if path else None
+
     def _on_skip(self) -> None:
         cand = self._selected_candidate()
         if cand is None or cand.status not in OPEN_PAIR_STATUSES:
             return
+        self._log_operation("skipped_attempt", cand)
         self._apply_update(
             cand.page_index,
             status=PairStatus.SKIPPED,
@@ -390,10 +457,17 @@ class ConfirmDialog:
     ) -> None:
         """candidate 更新 → fail-fast 永続化 → Tree リフレッシュ → 全件解決検知。
 
-        純粋なロジック部分は :func:`resolve_candidate` に切り出してあるため
-        Tk ランタイム非依存でユニットテスト可能。本メソッドは UI wiring のみ。
+        純粋なロジックは :func:`resolve_candidate` に切り出してあり Tk 非依存。本メソッドは
+        永続化・UI 更新・終了検知の orchestration を担当する。
 
-        save_session 失敗時は例外を伝播（UI 握り潰し禁止、PII 孤児化回避）。
+        **save_session 失敗時の契約**:
+        - `resolve_candidate` は save 前に session.candidates を in-place 更新するため、
+          save が失敗した場合 **メモリ上は新 status / ディスクは旧 status** の不整合になる。
+        - 例外は呼出元に伝播する（UI 握り潰し禁止、PII 孤児化回避）。
+        - Tk callback 経由で送出された例外は :meth:`_on_callback_exception` が捕捉し、
+          ユーザー通知 + mainloop 停止する。
+        - 呼出側は UI 終了後にセッションを **必ず再ロード** し、メモリ上の session を捨てること。
+          これで on-disk の旧状態から再開できる（未解決扱いで再提示される）。
         """
         resolve_candidate(
             self._session,
@@ -415,6 +489,45 @@ class ConfirmDialog:
             return
         self._messagebox.showinfo(_TITLE_ALL_RESOLVED, _MSG_ALL_RESOLVED)
         self._root.quit()
+
+    # -- Tk callback exception handling -------------------------------------
+
+    def _on_callback_exception(
+        self,
+        exc_type: type[BaseException],
+        exc_value: BaseException,
+        exc_tb: object,
+    ) -> None:
+        """Tk callback 内で発生した未捕捉例外を fail-fast でハンドルする。
+
+        通常は ``save_session`` の `OSError` / `PermissionError` / `json` 系例外がここに来る。
+        PII（ファイルパス等）が例外文字列に含まれる可能性があるため、ログには型名と
+        session_id のみ出力する。例外詳細は messagebox で画面表示のみに留める。
+        mainloop 停止後 ``run()`` は ``aborted=True`` を含む ``ConfirmDialogResult`` を返す。
+        """
+        # PII 防御: logger には type 名と session_id のみ（str(exc_value) はパスを含み得る）。
+        logger.error(
+            "session %s callback exception: %s",
+            self._session.session_id,
+            exc_type.__name__,
+        )
+        self._aborted = True
+        # 画面表示は PII 露出可（本人・担当者のみが見る、ローカルウィンドウ）
+        detail = _MSG_INTERNAL_ERROR_FMT.format(
+            type=exc_type.__name__, msg=str(exc_value) or "(no detail)"
+        )
+        try:
+            self._messagebox.showerror(_TITLE_INTERNAL_ERROR, detail)
+        except Exception as e:  # noqa: BLE001 — showerror 二次失敗は握り潰し可
+            # 二次例外のログも type 名のみ（message に PII 含みうるため）
+            logger.warning(
+                "session %s showerror failed during callback exception: %s",
+                self._session.session_id,
+                type(e).__name__,
+            )
+        # mainloop 停止。destroy は run() の finally で実施。
+        with contextlib.suppress(tk.TclError):
+            self._root.quit()
 
     # -- Close handling -----------------------------------------------------
 
@@ -538,7 +651,7 @@ def _short_path(path: str | None, max_len: int = 30) -> str:
     name = Path(path).name
     if len(name) <= max_len:
         return name
-    return "..." + name[-(max_len - 3) :]
+    return "..." + name[-(max_len - 3):]
 
 
 def _format_detail(cand: UserCandidate) -> str:
