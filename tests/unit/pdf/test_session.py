@@ -283,6 +283,28 @@ class TestLoadErrors:
         with pytest.raises(SessionCorruptedError, match="missing required fields"):
             load_session("missing-page", sessions_dir=sessions_dir)
 
+    def test_session_id_mismatch_raises(self, tmp_path: Path) -> None:
+        """ファイル名の session_id と JSON 内部の session_id が一致しない場合、破損扱い。"""
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        payload = {
+            "schema_version": 1,
+            "session_id": "internal-B",
+            "status": "completed",
+            "created_at": "2026-04-20T00:00:00+00:00",
+            "updated_at": "2026-04-20T00:00:00+00:00",
+            "config_snapshot": {},
+            "source_a_path": str(tmp_path / "A.pdf"),
+            "candidates": [],
+            "a_page_pdf_bytes_dir": str(tmp_path / ".pages"),
+            "output_path": None,
+        }
+        # ファイル名は "file-A" だが内部は "internal-B"
+        (sessions_dir / "file-A.json").write_text(json.dumps(payload))
+
+        with pytest.raises(SessionCorruptedError, match="session_id mismatch"):
+            load_session("file-A", sessions_dir=sessions_dir)
+
     def test_missing_similar_candidate_field_raises(self, tmp_path: Path) -> None:
         """similar_candidate 内の必須フィールド欠落で SessionCorruptedError を発する。"""
         sessions_dir = tmp_path / ".sessions"
@@ -428,6 +450,64 @@ class TestGcOldSessions:
         assert removed == ["old-ok"]
         assert (sessions_dir / "broken.json").exists()
         assert not (sessions_dir / "old-ok.json").exists()
+
+    def test_removes_artifact_directory_under_sessions_dir(self, tmp_path: Path) -> None:
+        """GC で session JSON だけでなく a_page_pdf_bytes_dir も削除される（個人情報残留防止）。"""
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        artifact_dir = sessions_dir / "old-with-artifact-pages"
+        artifact_dir.mkdir()
+        (artifact_dir / "page_0.pdf").write_bytes(b"%PDF-1.4\n%fake\n")
+
+        old_payload = {
+            "schema_version": 1,
+            "session_id": "old-with-artifact",
+            "status": "completed",
+            "created_at": "2020-01-01T00:00:00+00:00",
+            "updated_at": "2020-01-01T00:00:00+00:00",
+            "config_snapshot": {},
+            "source_a_path": str(tmp_path / "A.pdf"),
+            "candidates": [],
+            "a_page_pdf_bytes_dir": str(artifact_dir),
+            "output_path": None,
+        }
+        (sessions_dir / "old-with-artifact.json").write_text(json.dumps(old_payload))
+
+        removed = gc_old_sessions(sessions_dir=sessions_dir, older_than_days=30)
+
+        assert "old-with-artifact" in removed
+        assert not artifact_dir.exists()
+        assert not (sessions_dir / "old-with-artifact.json").exists()
+
+    def test_skips_artifact_outside_sessions_dir(self, tmp_path: Path) -> None:
+        """sessions_dir 配下にない artifact ディレクトリは GC で削除しない（安全策）。"""
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        # sessions_dir の外にディレクトリを作成
+        outside_dir = tmp_path / "outside-artifact"
+        outside_dir.mkdir()
+        (outside_dir / "important.pdf").write_bytes(b"%PDF")
+
+        old_payload = {
+            "schema_version": 1,
+            "session_id": "malicious",
+            "status": "completed",
+            "created_at": "2020-01-01T00:00:00+00:00",
+            "updated_at": "2020-01-01T00:00:00+00:00",
+            "config_snapshot": {},
+            "source_a_path": str(tmp_path / "A.pdf"),
+            "candidates": [],
+            "a_page_pdf_bytes_dir": str(outside_dir),
+            "output_path": None,
+        }
+        (sessions_dir / "malicious.json").write_text(json.dumps(old_payload))
+
+        gc_old_sessions(sessions_dir=sessions_dir, older_than_days=30)
+
+        # session JSON は削除されるが、外部ディレクトリは残る
+        assert not (sessions_dir / "malicious.json").exists()
+        assert outside_dir.exists()
+        assert (outside_dir / "important.pdf").exists()
 
     def test_skips_invalid_updated_at_format(self, tmp_path: Path) -> None:
         """updated_at が ISO 8601 でない completed セッションは GC 対象外（手動対処に委ねる）。"""

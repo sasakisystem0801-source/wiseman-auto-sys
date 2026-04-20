@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import secrets
+import shutil
 import tempfile
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -208,12 +209,27 @@ def _to_dict(session: Session) -> dict[str, Any]:
     return d
 
 
+def _ensure_sessions_dir(sessions_dir: Path) -> None:
+    """sessions_dir を作成し、POSIX では所有者のみ読み書き可能（0o700）にする。
+
+    氏名・B/C パス等の個人情報を含むため、共有 PC 上で他ユーザーから読めない権限を設定する。
+    Windows は ACL 継承（ユーザープロファイル配下配置を config で推奨）に委ねる。
+    """
+    newly_created = not sessions_dir.exists()
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    if newly_created and os.name == "posix":
+        try:
+            os.chmod(sessions_dir, 0o700)
+        except OSError as e:
+            logger.warning("failed to chmod sessions_dir %s: %s", sessions_dir, e)
+
+
 def save_session(session: Session, *, sessions_dir: Path) -> Path:
     """セッションを JSON としてアトミックに保存する。
 
     副作用: ``session.updated_at`` を現在時刻で上書きする（監査ログと整合させるため）。
     """
-    sessions_dir.mkdir(parents=True, exist_ok=True)
+    _ensure_sessions_dir(sessions_dir)
     _validate_session_id(session.session_id)
 
     session.updated_at = datetime.now(UTC).isoformat()
@@ -265,6 +281,13 @@ def _from_dict(data: dict[str, Any], session_id: str) -> Session:
         raise SessionCorruptedError(
             f"unsupported schema_version for {session_id}: "
             f"got {schema_version!r}, expected {SCHEMA_VERSION}"
+        )
+
+    # ファイル名の session_id と JSON 内部の session_id が一致することを検証
+    # （ファイルコピー・手動復旧・破損時の取り違いを防ぐ）
+    if data.get("session_id") != session_id:
+        raise SessionCorruptedError(
+            f"session_id mismatch: file={session_id!r}, content={data.get('session_id')!r}"
         )
 
     required = [
@@ -413,6 +436,7 @@ def gc_old_sessions(*, sessions_dir: Path, older_than_days: int = 30) -> list[st
         if updated < threshold:
             path = _session_path(session_id, sessions_dir)
             try:
+                _remove_session_artifacts(s, sessions_dir)
                 path.unlink()
                 removed.append(session_id)
                 logger.info("GC removed completed session: %s", session_id)
@@ -420,3 +444,32 @@ def gc_old_sessions(*, sessions_dir: Path, older_than_days: int = 30) -> list[st
                 logger.warning("failed to GC session %s: %s", session_id, e)
 
     return removed
+
+
+def _remove_session_artifacts(session: Session, sessions_dir: Path) -> None:
+    """セッションに紐づく per-page PDF ディレクトリを削除する。
+
+    氏名を含む PDF 断片が残ると個人情報が長期残留するため、
+    セッション JSON 削除と同時に artifact も除去する。
+    安全策として sessions_dir 配下であることを検証してから削除する。
+    """
+    artifact_dir = Path(session.a_page_pdf_bytes_dir)
+    if not artifact_dir.exists():
+        return
+    try:
+        sessions_dir_resolved = sessions_dir.resolve()
+        artifact_resolved = artifact_dir.resolve()
+        artifact_resolved.relative_to(sessions_dir_resolved)
+    except (OSError, ValueError):
+        # sessions_dir 配下でない artifact は触らない（誤操作防止）
+        logger.warning(
+            "skip removing artifact outside sessions_dir: %s (session=%s)",
+            artifact_dir,
+            session.session_id,
+        )
+        return
+    try:
+        shutil.rmtree(artifact_dir)
+        logger.info("GC removed session artifacts: %s", artifact_dir)
+    except OSError as e:
+        logger.warning("failed to remove artifacts %s: %s", artifact_dir, e)
