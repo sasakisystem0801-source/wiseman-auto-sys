@@ -10,6 +10,7 @@ import logging
 import os
 import tempfile
 from dataclasses import asdict, dataclass, field
+from glob import glob
 from pathlib import Path
 from typing import Any
 
@@ -226,23 +227,38 @@ def _update_reports(doc: TOMLDocument, reports: list[ReportTarget]) -> None:
         doc["reports"] = reports_table
 
 
+def _sweep_stale_tmp(path: Path) -> None:
+    """同じ path 用に過去のクラッシュで残った tmp ファイルを削除する。
+
+    API key やパスを含むため、平文 tmp 残置を防ぐ。unlink に失敗したファイルは
+    warning も出さない（ログに tmp パスが乗るのを避けるため、件数のみ記録）。
+    """
+    pattern = str(path.parent / f"{path.name}.*.tmp")
+    stale = glob(pattern)
+    failed = 0
+    for p in stale:
+        try:
+            os.unlink(p)
+        except OSError:
+            failed += 1
+    if failed:
+        logger.warning("Failed to remove %d stale tmp file(s) in config directory", failed)
+
+
 def save_config(cfg: AppConfig, path: Path, *, create_if_missing: bool = False) -> None:
     """AppConfig を TOML に書き戻す。
 
     既存ファイルがあれば tomlkit でパースして値だけ更新し、コメント・空行を維持する。
     書き込みは tempfile + os.replace で atomic（クラッシュ時の partial write を防止）。
-    親ディレクトリが存在しない場合は自動作成する。
 
     既存ファイルがない場合の挙動は `create_if_missing` で制御する:
     - False（既定）: FileNotFoundError を呼び出し元に伝播。誤 path の silent 新規作成を防ぐ
-    - True: 新規 TOMLDocument を作成して書き出す（初期生成フロー向け）
+    - True: 新規 TOMLDocument を作成して書き出し、親ディレクトリも自動作成する
 
     排他制御は行わない（単一プロセスからの呼び出しを前提）。複数プロセスが同じ path に
     同時書き込みした場合は「最後の os.replace 勝ち」になる。
     既存 [[reports.targets]] 配列内のコメントは置換時に失われる（要素間書式の保持は未対応）。
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-
     try:
         with path.open("r", encoding="utf-8") as f:
             doc = tomlkit.parse(f.read())
@@ -250,7 +266,11 @@ def save_config(cfg: AppConfig, path: Path, *, create_if_missing: bool = False) 
         if not create_if_missing:
             raise
         logger.warning("Config file not found at %s, creating new document", path)
+        path.parent.mkdir(parents=True, exist_ok=True)
         doc = tomlkit.document()
+
+    # API key / PII を含む平文 tmp がクラッシュ時に残ることがあるため、書き込み前に掃除
+    _sweep_stale_tmp(path)
 
     app_data = {field: getattr(cfg, field) for field in _APP_FIELDS}
     _update_table_from_dataclass(doc, "app", app_data)
@@ -270,11 +290,11 @@ def save_config(cfg: AppConfig, path: Path, *, create_if_missing: bool = False) 
         os.replace(tmp_path, path)
     except Exception:
         # Windows では他プロセスがハンドル保持時に unlink が PermissionError になりうる。
-        # OSError 全般を suppress しつつ、tmp leak は warning で可視化する。
+        # PII/API key を含みうるため、ログには tmp path を出さない（basename のみ・失敗種別のみ）。
         try:
             os.unlink(tmp_path)
         except FileNotFoundError:
             pass
         except OSError as cleanup_err:
-            logger.warning("Failed to unlink tmp file %s: %s", tmp_path, cleanup_err)
+            logger.warning("Failed to unlink tmp config file: %s", type(cleanup_err).__name__)
         raise

@@ -404,3 +404,53 @@ output_dir = ""
         written = target.read_text(encoding="utf-8")
         assert "original-value-zzz" not in written
         assert cfg.version in written
+
+    def test_save_sweeps_stale_tmp_files_before_write(self, tmp_path: Path) -> None:
+        """過去のクラッシュで残った {name}.*.tmp が save 実行時に削除される。"""
+        target = tmp_path / "config.toml"
+        target.write_text('[app]\nversion = "0.1.0"\n', encoding="utf-8")
+
+        stale1 = tmp_path / "config.toml.abc123.tmp"
+        stale2 = tmp_path / "config.toml.xyz789.tmp"
+        stale1.write_text("PII=山田太郎 api_key=leaked", encoding="utf-8")
+        stale2.write_text("PII=/施設/patient/report.pdf", encoding="utf-8")
+
+        cfg = AppConfig()
+        save_config(cfg, target)
+
+        assert not stale1.exists()
+        assert not stale2.exists()
+
+    def test_save_cleanup_warning_does_not_leak_path_or_pii(
+        self, tmp_path: Path, monkeypatch: Any, caplog: Any
+    ) -> None:
+        """os.replace 失敗時の cleanup warning にパスや PII が含まれない。"""
+        import logging
+
+        import pytest
+
+        target = tmp_path / "config.toml"
+        target.write_text('[app]\nversion = "0.1.0"\n', encoding="utf-8")
+
+        cfg = AppConfig()
+        cfg.pdf_merge.input_dir = "/private/施設A/patient/山田太郎"
+
+        def _fail_replace(src: str, dst: str) -> None:
+            raise PermissionError("simulated Windows file lock")
+
+        def _fail_unlink(_: str) -> None:
+            raise PermissionError("simulated unlink failure")
+
+        monkeypatch.setattr("wiseman_hub.config.os.replace", _fail_replace)
+        monkeypatch.setattr("wiseman_hub.config.os.unlink", _fail_unlink)
+
+        with caplog.at_level(logging.WARNING, logger="wiseman_hub.config"), pytest.raises(
+            PermissionError
+        ):
+            save_config(cfg, target)
+
+        logged = " ".join(r.getMessage() for r in caplog.records)
+        assert "山田太郎" not in logged
+        assert "施設A" not in logged
+        assert str(tmp_path) not in logged
+        assert ".tmp" not in logged

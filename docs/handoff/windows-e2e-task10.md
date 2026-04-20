@@ -16,19 +16,26 @@ Region      : asia-northeast1
 Project     : wiseman-hub-prod
 ```
 
-### API Key の取得
+### API Key の取得と配布フロー
 
-API Key は Secret Manager で管理しており、このドキュメントには**平文で記載しない**。
-設定時は以下のコマンドで取得する（gcloud 認証済み環境が必要）:
+**原則**: 現場端末（Wiseman 実機）に GCP 認証情報や `gcloud` CLI を配置しない。
+API Key は**運用者（管理者）が自分の端末で取得**し、以下のいずれかで現場端末に渡す:
 
+1. 設定 GUI（タスク 12B 完成後）から運用者が入力 → TOML に保存
+2. 現段階では運用者が `config\default.toml` を手動編集
+
+**運用者端末（管理者のみ）で実行:**
 ```bash
 gcloud secrets versions access latest \
     --secret=wiseman-ocr-api-keys \
     --project=wiseman-hub-prod
 ```
 
-取得したキーは `config/default.toml` の `ocr_backend.api_key` に設定する。
-キーローテーションは `backend/ocr_proxy/deploy.md` の「キーローテーション」節を参照。
+**キーローテーション時の現場再設定:**
+- Secret Manager で新バージョン追加 → 旧バージョン disable（30 日グレース推奨）
+- グレース期間中に運用者が全現場端末の `config\default.toml` を更新
+- グレース期間終了前に全クライアント更新完了を確認
+- 詳細: `backend/ocr_proxy/deploy.md` の「キーローテーション」節
 
 ## Windows 実機準備
 
@@ -94,7 +101,7 @@ dpi = 200
 ### テスト 1: Phase A（PDF 分割 + OCR + マッチング）
 
 ```powershell
-python scripts\merge_user_pdfs.py
+uv run python scripts\merge_user_pdfs.py
 ```
 
 **期待結果**:
@@ -106,13 +113,13 @@ python scripts\merge_user_pdfs.py
 
 **セッション一覧確認**:
 ```powershell
-python scripts\merge_user_pdfs.py --list-sessions
+uv run python scripts\merge_user_pdfs.py --list-sessions
 ```
 
 ### テスト 2: Phase B 確認 UI（Tkinter 実描画）— **AC-UI-6〜10 検証**
 
 ```powershell
-python scripts\merge_user_pdfs.py --review <session_id>
+uv run python scripts\merge_user_pdfs.py --review <session_id>
 ```
 
 **確認項目（チェックリスト）**:
@@ -126,7 +133,7 @@ python scripts\merge_user_pdfs.py --review <session_id>
 ### テスト 3: Phase B 結合実行 — **AC-PB-1〜5 検証**
 
 ```powershell
-python scripts\merge_user_pdfs.py --merge <session_id>
+uv run python scripts\merge_user_pdfs.py --merge <session_id>
 ```
 
 **期待結果**:
@@ -146,7 +153,7 @@ python scripts\merge_user_pdfs.py --merge <session_id>
 `B_山田太郎.pdf` だけ削除して `--merge` 再実行:
 
 ```powershell
-python scripts\merge_user_pdfs.py --merge <session_id>
+uv run python scripts\merge_user_pdfs.py --merge <session_id>
 ```
 
 **期待結果**:
@@ -158,17 +165,17 @@ python scripts\merge_user_pdfs.py --merge <session_id>
 
 ```powershell
 # 中断後の再開
-python scripts\merge_user_pdfs.py --resume <session_id>
+uv run python scripts\merge_user_pdfs.py --resume <session_id>
 
 # セッション破棄
-python scripts\merge_user_pdfs.py --discard <session_id>
+uv run python scripts\merge_user_pdfs.py --discard <session_id>
 ```
 
 ## 問題発生時のログ取得
 
 ### クライアント側
 ```powershell
-python scripts\merge_user_pdfs.py 2>&1 | Tee-Object -FilePath client.log
+uv run python scripts\merge_user_pdfs.py 2>&1 | Tee-Object -FilePath client.log
 ```
 
 ### Cloud Run 側
