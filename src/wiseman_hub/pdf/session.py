@@ -232,7 +232,9 @@ def save_session(session: Session, *, sessions_dir: Path) -> Path:
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_path, target)
-    except Exception:
+    except (OSError, ValueError):
+        # BaseException 派生（KeyboardInterrupt / MemoryError / SystemExit）は伝播させ、
+        # 本モジュールが扱う IO/値エラーのみ tmp クリーンアップして再送出する。
         try:
             tmp_path.unlink(missing_ok=True)
         except OSError as e:
@@ -301,25 +303,45 @@ def _from_dict(data: dict[str, Any], session_id: str) -> Session:
     )
 
 
+_CANDIDATE_REQUIRED = ("page_index", "user_name_ocr", "confidence", "status")
+_SIMILAR_REQUIRED = ("path", "kind", "distance", "extracted_name")
+_VALID_CONFIDENCE = ("high", "medium", "low")
+
+
 def _candidate_from_dict(data: dict[str, Any], session_id: str) -> UserCandidate:
+    missing = [k for k in _CANDIDATE_REQUIRED if k not in data]
+    if missing:
+        raise SessionCorruptedError(
+            f"candidate in {session_id} missing required fields: {missing}"
+        )
+
     try:
         status = PairStatus(data["status"])
-    except (KeyError, ValueError) as e:
+    except ValueError as e:
         raise SessionCorruptedError(
             f"invalid candidate status in {session_id}: {e}"
         ) from e
 
+    if data["confidence"] not in _VALID_CONFIDENCE:
+        raise SessionCorruptedError(
+            f"invalid confidence in {session_id}: {data['confidence']!r}"
+        )
+
     similar = []
     for c in data.get("similar_candidates", []):
-        kind = c.get("kind")
-        if kind not in ("B", "C"):
+        sim_missing = [k for k in _SIMILAR_REQUIRED if k not in c]
+        if sim_missing:
             raise SessionCorruptedError(
-                f"invalid similar_candidate kind in {session_id}: {kind!r}"
+                f"similar_candidate in {session_id} missing required fields: {sim_missing}"
+            )
+        if c["kind"] not in ("B", "C"):
+            raise SessionCorruptedError(
+                f"invalid similar_candidate kind in {session_id}: {c['kind']!r}"
             )
         similar.append(
             CandidateState(
                 path=c["path"],
-                kind=kind,
+                kind=c["kind"],
                 distance=c["distance"],
                 extracted_name=c["extracted_name"],
             )

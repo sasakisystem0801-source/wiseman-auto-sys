@@ -68,7 +68,7 @@ class TestKanjiMatcherExact:
         assert result.status == MatchStatus.AUTO_MATCHED
         assert result.matched_b_path == tmp_path / "B_塩津美喜子.pdf"
         assert result.matched_c_path == tmp_path / "C_塩津美喜子.pdf"
-        assert result.similar_candidates == []
+        assert result.similar_candidates == ()
 
     def test_exact_match_space_in_filename(self, tmp_path: Path) -> None:
         _touch(tmp_path / "B_塩津 美喜子.pdf")
@@ -96,16 +96,28 @@ class TestKanjiMatcherExact:
 
         result = matcher.match("塩津 美喜子")
 
-        # AC4: B/C 欠損は merger 側で WARN 処理。matcher は「片方一致」でも auto_matched
-        # ただし欠損フラグは立てる
         assert result.status == MatchStatus.AUTO_MATCHED
         assert result.matched_b_path == tmp_path / "B_塩津美喜子.pdf"
         assert result.matched_c_path is None
 
+    def test_only_c_exists_exact(self, tmp_path: Path) -> None:
+        _touch(tmp_path / "C_塩津美喜子.pdf")
+
+        matcher = KanjiMatcher(
+            input_dir=tmp_path,
+            source_b_pattern="B_{name}.pdf",
+            source_c_pattern="C_{name}.pdf",
+        )
+
+        result = matcher.match("塩津 美喜子")
+
+        assert result.status == MatchStatus.AUTO_MATCHED
+        assert result.matched_b_path is None
+        assert result.matched_c_path == tmp_path / "C_塩津美喜子.pdf"
+
 
 class TestKanjiMatcherNeedsConfirmation:
     def test_one_char_diff_returns_needs_confirmation(self, tmp_path: Path) -> None:
-        # 美喜子 vs 美貴子 = distance 1
         _touch(tmp_path / "B_塩津美喜子.pdf")
         _touch(tmp_path / "C_塩津美喜子.pdf")
 
@@ -121,13 +133,11 @@ class TestKanjiMatcherNeedsConfirmation:
         assert result.matched_b_path is None
         assert result.matched_c_path is None
         assert len(result.similar_candidates) >= 1
-        # B と C 両方が候補として出る
         kinds = {c.kind for c in result.similar_candidates}
         assert "B" in kinds
         assert "C" in kinds
 
     def test_two_char_diff_still_needs_confirmation(self, tmp_path: Path) -> None:
-        # 距離 2 (境界値)
         _touch(tmp_path / "B_山田太郎.pdf")
 
         matcher = KanjiMatcher(
@@ -136,12 +146,11 @@ class TestKanjiMatcherNeedsConfirmation:
             source_c_pattern="C_{name}.pdf",
         )
 
-        result = matcher.match("山中二郎")  # 山田->山中(1) + 太->二(1) = distance 2
+        result = matcher.match("山中二郎")
 
         assert result.status == MatchStatus.NEEDS_CONFIRMATION
 
     def test_distance_three_is_no_match(self, tmp_path: Path) -> None:
-        # 距離 3 は候補から除外
         _touch(tmp_path / "B_山田太郎.pdf")
 
         matcher = KanjiMatcher(
@@ -153,12 +162,12 @@ class TestKanjiMatcherNeedsConfirmation:
         result = matcher.match("佐藤花子")
 
         assert result.status == MatchStatus.NO_MATCH
-        assert result.similar_candidates == []
+        assert result.similar_candidates == ()
 
     def test_similar_candidates_sorted_by_distance(self, tmp_path: Path) -> None:
-        _touch(tmp_path / "B_塩津美喜子.pdf")  # distance 1 from 塩津美貴子
-        _touch(tmp_path / "B_潮津美貴子.pdf")  # distance 1 from 塩津美貴子 (塩→潮)
-        _touch(tmp_path / "B_塩田美貴子.pdf")  # distance 1 from 塩津美貴子 (津→田)
+        _touch(tmp_path / "B_塩津美喜子.pdf")
+        _touch(tmp_path / "B_潮津美貴子.pdf")
+        _touch(tmp_path / "B_塩田美貴子.pdf")
 
         matcher = KanjiMatcher(
             input_dir=tmp_path,
@@ -169,14 +178,11 @@ class TestKanjiMatcherNeedsConfirmation:
         result = matcher.match("塩津 美貴子")
 
         assert result.status == MatchStatus.NEEDS_CONFIRMATION
-        # 全 distance 1、上位N件が返る。最大3件制限
         assert len(result.similar_candidates) <= 3
-        # 距離昇順
         distances = [c.distance for c in result.similar_candidates]
         assert distances == sorted(distances)
 
     def test_limit_top_3_candidates(self, tmp_path: Path) -> None:
-        # 5つの類似候補を用意（target「塩津 美貴子」に対し全て distance 1-2、完全一致なし）
         for name in ["塩津美喜子", "塩津美代子", "塩田美貴子", "潮津美貴子", "塩中美貴子"]:
             _touch(tmp_path / f"B_{name}.pdf")
 
@@ -188,9 +194,27 @@ class TestKanjiMatcherNeedsConfirmation:
 
         result = matcher.match("塩津 美貴子")
 
-        # 全候補が距離 1 か 2 なので needs_confirmation、最大 3 件
         assert result.status == MatchStatus.NEEDS_CONFIRMATION
         assert len(result.similar_candidates) == 3
+
+    def test_similar_candidate_sort_stable_for_equal_distance(self, tmp_path: Path) -> None:
+        # 同距離の B/C 混在で順序契約を固定（距離昇順 → kind 昇順 → name 昇順）
+        _touch(tmp_path / "B_塩津美喜子.pdf")
+        _touch(tmp_path / "C_塩津美喜子.pdf")
+        _touch(tmp_path / "B_塩津美代子.pdf")
+        _touch(tmp_path / "C_塩津美代子.pdf")
+
+        matcher = KanjiMatcher(
+            input_dir=tmp_path,
+            source_b_pattern="B_{name}.pdf",
+            source_c_pattern="C_{name}.pdf",
+        )
+
+        result = matcher.match("塩津 美貴子")
+
+        # 上位3件の順序が決定論的: 距離同じなら B が先、name 昇順
+        kinds_names = [(c.kind, c.extracted_name) for c in result.similar_candidates]
+        assert kinds_names == sorted(kinds_names)
 
 
 class TestKanjiMatcherNoMatch:
@@ -206,7 +230,7 @@ class TestKanjiMatcherNoMatch:
         assert result.status == MatchStatus.NO_MATCH
         assert result.matched_b_path is None
         assert result.matched_c_path is None
-        assert result.similar_candidates == []
+        assert result.similar_candidates == ()
 
     def test_no_similar_candidates(self, tmp_path: Path) -> None:
         _touch(tmp_path / "B_全然違う名前.pdf")
@@ -222,7 +246,6 @@ class TestKanjiMatcherNoMatch:
         assert result.status == MatchStatus.NO_MATCH
 
     def test_ignores_unrelated_files(self, tmp_path: Path) -> None:
-        # パターンにマッチしないファイル
         _touch(tmp_path / "readme.txt")
         _touch(tmp_path / "A.pdf")
         _touch(tmp_path / "common.pdf")
@@ -274,29 +297,26 @@ class TestKanjiMatcherEdgeCases:
         with pytest.raises(ValueError, match=r"\{name\}"):
             KanjiMatcher(
                 input_dir=tmp_path,
-                source_b_pattern="B_fixed.pdf",  # {name} なし
+                source_b_pattern="B_fixed.pdf",
                 source_c_pattern="C_{name}.pdf",
             )
 
     def test_regex_special_chars_in_pattern_literal(self, tmp_path: Path) -> None:
-        """パターンに正規表現特殊文字（.）が含まれても literal として扱う。"""
         _touch(tmp_path / "B.塩津美喜子.pdf")
 
         matcher = KanjiMatcher(
             input_dir=tmp_path,
-            source_b_pattern="B.{name}.pdf",  # "." はリテラルとして扱う
+            source_b_pattern="B.{name}.pdf",
             source_c_pattern="C_{name}.pdf",
         )
 
         result = matcher.match("塩津 美喜子")
 
-        # B.xxx.pdf がマッチする
         assert result.matched_b_path == tmp_path / "B.塩津美喜子.pdf"
 
 
 class TestKanjiMatcherProtocol:
     def test_kanji_matcher_satisfies_name_matcher_protocol(self) -> None:
-        # Protocol 準拠を確認（型チェッカー的な確認）
         def _accepts_matcher(m: NameMatcher) -> None:
             _ = m
 
@@ -306,7 +326,7 @@ class TestKanjiMatcherProtocol:
             source_b_pattern="B_{name}.pdf",
             source_c_pattern="C_{name}.pdf",
         )
-        _accepts_matcher(matcher)  # 実行時エラーにならなければ OK
+        _accepts_matcher(matcher)
 
 
 class TestCandidateFile:
@@ -352,23 +372,14 @@ class TestKanjiMatcherFilenameEdgeCases:
         result = matcher.match("塩津美喜子")
         assert result.status == MatchStatus.NO_MATCH
 
-    def test_duplicate_exact_match_deterministic(self, tmp_path: Path) -> None:
-        """同姓同名の事故的命名では sorted 順で最初のファイルが採用される。"""
-        # サブディレクトリに置いて path 順を決定論化
-        (tmp_path / "subdir1").mkdir()
-        (tmp_path / "subdir2").mkdir()
-        # iterdir は sorted で走査されるため "B_A.pdf" -> "B_B.pdf" の順
-        _touch(tmp_path / "B_A_塩津美喜子.pdf")
-        _touch(tmp_path / "B_B_塩津美喜子.pdf")
+    def test_repeated_match_is_deterministic(self, tmp_path: Path) -> None:
+        # OS 依存の iterdir 順序に左右されず、複数回の match が同じ結果を返すこと
+        _touch(tmp_path / "B_塩津美喜子.pdf")
+        _touch(tmp_path / "B_塩津美代子.pdf")
 
-        # ただしこのテストは B_{name}.pdf パターンなので上記は別名扱い
-        # 真に同名のファイルを別ディレクトリに置いて確認するのは難しいため、
-        # 同一 iterdir 結果の決定論性を mock で検証する別アプローチが必要。
-        # ここでは matcher が OS 依存の順序に依存しないことを間接的に保証する意味で、
-        # 複数回呼んで結果が安定していることを確認する。
         matcher = KanjiMatcher(
             input_dir=tmp_path,
-            source_b_pattern="B_A_{name}.pdf",
+            source_b_pattern="B_{name}.pdf",
             source_c_pattern="C_{name}.pdf",
         )
         r1 = matcher.match("塩津美喜子")

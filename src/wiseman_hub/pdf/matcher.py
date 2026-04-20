@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal, Protocol
@@ -38,8 +38,6 @@ SourceKind = Literal["B", "C"]
 
 @dataclass(frozen=True)
 class CandidateFile:
-    """類似候補ファイル（needs_confirmation 時に UI 提示する対象）。"""
-
     path: Path
     kind: SourceKind
     distance: int
@@ -51,7 +49,7 @@ class MatchResult:
     status: MatchStatus
     matched_b_path: Path | None
     matched_c_path: Path | None
-    similar_candidates: list[CandidateFile] = field(default_factory=list)
+    similar_candidates: tuple[CandidateFile, ...] = ()
 
     @property
     def has_any_match(self) -> bool:
@@ -59,8 +57,6 @@ class MatchResult:
 
 
 class NameMatcher(Protocol):
-    """将来の FuriganaMatcher 等と互換性を持たせる Protocol。"""
-
     def match(self, user_name: str) -> MatchResult:
         ...
 
@@ -89,7 +85,7 @@ def normalize_name(name: str) -> str:
 
 
 def _levenshtein(a: str, b: str) -> int:
-    """純粋 Python 実装（外部依存なし、数百文字までなら十分高速）。"""
+    """外部依存なしの Python 実装（氏名10文字程度・候補数十件想定）。"""
     if a == b:
         return 0
     if not a:
@@ -177,16 +173,14 @@ class KanjiMatcher:
                 status=MatchStatus.AUTO_MATCHED,
                 matched_b_path=exact_b.path if exact_b else None,
                 matched_c_path=exact_c.path if exact_c else None,
-                similar_candidates=[],
+                similar_candidates=(),
             )
 
-        # 類似候補を収集（B/C 合算）
-        similar = [
-            c for c in (b_files + c_files)
-            if 0 < c.distance <= self._similar_threshold
-        ]
-        similar.sort(key=lambda c: (c.distance, c.kind, c.extracted_name))
-        top = similar[: self._max_candidates]
+        similar = sorted(
+            (c for c in (b_files + c_files) if 0 < c.distance <= self._similar_threshold),
+            key=lambda c: (c.distance, c.kind, c.extracted_name),
+        )
+        top = tuple(similar[: self._max_candidates])
 
         if top:
             return MatchResult(
@@ -200,7 +194,7 @@ class KanjiMatcher:
             status=MatchStatus.NO_MATCH,
             matched_b_path=None,
             matched_c_path=None,
-            similar_candidates=[],
+            similar_candidates=(),
         )
 
     def _collect_candidates(

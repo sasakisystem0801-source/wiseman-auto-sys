@@ -135,6 +135,34 @@ class TestSaveLoad:
         assert loaded2.status == SessionStatus.NEEDS_REVIEW
         assert loaded2.updated_at >= loaded1.updated_at
 
+    def test_save_failure_cleans_tmp_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """os.replace が失敗しても .tmp ファイルが残らないこと。"""
+        import os
+
+        from wiseman_hub.pdf import session as session_mod
+
+        sessions_dir = tmp_path / ".sessions"
+        s = _make_session(tmp_path)
+
+        real_replace = os.replace
+
+        def failing_replace(src: str, dst: str) -> None:
+            raise OSError("simulated disk full")
+
+        monkeypatch.setattr(session_mod.os, "replace", failing_replace)
+
+        with pytest.raises(OSError, match="simulated disk full"):
+            save_session(s, sessions_dir=sessions_dir)
+
+        # tmp ファイルが残っていないこと
+        monkeypatch.setattr(session_mod.os, "replace", real_replace)
+        tmp_files = list(sessions_dir.glob("*.tmp*"))
+        assert tmp_files == []
+        # 本体ファイルも作られていない
+        assert not (sessions_dir / f"{s.session_id}.json").exists()
+
 
 class TestLoadErrors:
     def test_missing_session_raises(self, tmp_path: Path) -> None:
@@ -173,38 +201,110 @@ class TestLoadErrors:
         with pytest.raises(SessionCorruptedError, match="missing required fields"):
             load_session("partial", sessions_dir=sessions_dir)
 
-    def test_invalid_candidate_kind_raises(self, tmp_path: Path) -> None:
-        """similar_candidates 内の kind が B/C 以外の場合、破損扱いで拒否する。"""
-        sessions_dir = tmp_path / ".sessions"
-        sessions_dir.mkdir()
-        payload = {
+    def _candidate_payload(self, tmp_path: Path, candidate: dict) -> dict:
+        return {
             "schema_version": 1,
-            "session_id": "bad-kind",
+            "session_id": "corrupt",
             "status": "needs_review",
             "created_at": "2026-04-20T00:00:00+00:00",
             "updated_at": "2026-04-20T00:00:00+00:00",
             "config_snapshot": {},
             "source_a_path": str(tmp_path / "A.pdf"),
-            "candidates": [
-                {
-                    "page_index": 0,
-                    "user_name_ocr": "x",
-                    "confidence": "high",
-                    "status": "needs_confirmation",
-                    "matched_b_path": None,
-                    "matched_c_path": None,
-                    "similar_candidates": [
-                        {"path": "/tmp/a.pdf", "kind": "X", "distance": 1, "extracted_name": "a"}
-                    ],
-                }
-            ],
+            "candidates": [candidate],
             "a_page_pdf_bytes_dir": str(tmp_path / ".pages"),
             "output_path": None,
         }
+
+    def test_invalid_candidate_kind_raises(self, tmp_path: Path) -> None:
+        """similar_candidates 内の kind が B/C 以外の場合、破損扱いで拒否する。"""
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        payload = self._candidate_payload(
+            tmp_path,
+            {
+                "page_index": 0,
+                "user_name_ocr": "x",
+                "confidence": "high",
+                "status": "needs_confirmation",
+                "matched_b_path": None,
+                "matched_c_path": None,
+                "similar_candidates": [
+                    {"path": "/tmp/a.pdf", "kind": "X", "distance": 1, "extracted_name": "a"}
+                ],
+            },
+        )
+        payload["session_id"] = "bad-kind"
         (sessions_dir / "bad-kind.json").write_text(json.dumps(payload))
 
         with pytest.raises(SessionCorruptedError, match="kind"):
             load_session("bad-kind", sessions_dir=sessions_dir)
+
+    def test_invalid_confidence_raises(self, tmp_path: Path) -> None:
+        """confidence が high/medium/low 以外の場合、破損扱いで拒否する。"""
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        payload = self._candidate_payload(
+            tmp_path,
+            {
+                "page_index": 0,
+                "user_name_ocr": "x",
+                "confidence": "INVALID",
+                "status": "auto_matched",
+                "matched_b_path": None,
+                "matched_c_path": None,
+                "similar_candidates": [],
+            },
+        )
+        payload["session_id"] = "bad-conf"
+        (sessions_dir / "bad-conf.json").write_text(json.dumps(payload))
+
+        with pytest.raises(SessionCorruptedError, match="confidence"):
+            load_session("bad-conf", sessions_dir=sessions_dir)
+
+    def test_missing_candidate_required_field_raises(self, tmp_path: Path) -> None:
+        """candidate の必須フィールド欠落で KeyError ではなく SessionCorruptedError を発する。"""
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        # page_index 欠落
+        payload = self._candidate_payload(
+            tmp_path,
+            {
+                "user_name_ocr": "x",
+                "confidence": "high",
+                "status": "auto_matched",
+                "matched_b_path": None,
+                "matched_c_path": None,
+                "similar_candidates": [],
+            },
+        )
+        payload["session_id"] = "missing-page"
+        (sessions_dir / "missing-page.json").write_text(json.dumps(payload))
+
+        with pytest.raises(SessionCorruptedError, match="missing required fields"):
+            load_session("missing-page", sessions_dir=sessions_dir)
+
+    def test_missing_similar_candidate_field_raises(self, tmp_path: Path) -> None:
+        """similar_candidate 内の必須フィールド欠落で SessionCorruptedError を発する。"""
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        payload = self._candidate_payload(
+            tmp_path,
+            {
+                "page_index": 0,
+                "user_name_ocr": "x",
+                "confidence": "medium",
+                "status": "needs_confirmation",
+                "matched_b_path": None,
+                "matched_c_path": None,
+                # extracted_name 欠落
+                "similar_candidates": [{"path": "/tmp/a.pdf", "kind": "B", "distance": 1}],
+            },
+        )
+        payload["session_id"] = "missing-name"
+        (sessions_dir / "missing-name.json").write_text(json.dumps(payload))
+
+        with pytest.raises(SessionCorruptedError, match="similar_candidate"):
+            load_session("missing-name", sessions_dir=sessions_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +402,55 @@ class TestGcOldSessions:
 
         assert removed == []
         assert (sessions_dir / "old-interrupted.json").exists()
+
+    def test_skips_corrupted_session_without_losing_others(self, tmp_path: Path) -> None:
+        """破損セッション混在時、GC が異常終了せず他の正常セッションを処理する。"""
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        (sessions_dir / "broken.json").write_text("not json {{")
+        old_ok_payload = {
+            "schema_version": 1,
+            "session_id": "old-ok",
+            "status": "completed",
+            "created_at": "2020-01-01T00:00:00+00:00",
+            "updated_at": "2020-01-01T00:00:00+00:00",
+            "config_snapshot": {},
+            "source_a_path": str(tmp_path / "A.pdf"),
+            "candidates": [],
+            "a_page_pdf_bytes_dir": str(tmp_path / ".pages"),
+            "output_path": None,
+        }
+        (sessions_dir / "old-ok.json").write_text(json.dumps(old_ok_payload))
+
+        removed = gc_old_sessions(sessions_dir=sessions_dir, older_than_days=30)
+
+        # 破損は保全、正常な古い完了セッションのみ削除される
+        assert removed == ["old-ok"]
+        assert (sessions_dir / "broken.json").exists()
+        assert not (sessions_dir / "old-ok.json").exists()
+
+    def test_skips_invalid_updated_at_format(self, tmp_path: Path) -> None:
+        """updated_at が ISO 8601 でない completed セッションは GC 対象外（手動対処に委ねる）。"""
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        bad_payload = {
+            "schema_version": 1,
+            "session_id": "bad-date",
+            "status": "completed",
+            "created_at": "not-a-date",
+            "updated_at": "not-a-date",
+            "config_snapshot": {},
+            "source_a_path": str(tmp_path / "A.pdf"),
+            "candidates": [],
+            "a_page_pdf_bytes_dir": str(tmp_path / ".pages"),
+            "output_path": None,
+        }
+        (sessions_dir / "bad-date.json").write_text(json.dumps(bad_payload))
+
+        removed = gc_old_sessions(sessions_dir=sessions_dir, older_than_days=30)
+
+        assert removed == []
+        assert (sessions_dir / "bad-date.json").exists()
 
 
 class TestSessionStatusTransitions:
