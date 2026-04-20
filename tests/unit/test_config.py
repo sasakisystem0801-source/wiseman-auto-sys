@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from wiseman_hub.config import AppConfig, load_config, save_config
 
@@ -178,13 +179,13 @@ output_format = "csv"
         cfg = load_config(source)
 
         target = tmp_path / "target.toml"
-        save_config(cfg, target)
+        save_config(cfg, target, create_if_missing=True)
 
         reloaded = load_config(target)
         assert reloaded == cfg
 
     def test_save_to_new_file_creates_valid_toml(self, tmp_path: Path) -> None:
-        """既存ファイルなしで save → 新規作成、load で同じ値になる。"""
+        """既存ファイルなしで save(create_if_missing=True) → 新規作成、load で同じ値。"""
         cfg = AppConfig()
         cfg = replace(cfg, log_level="WARNING")
         cfg.pdf_merge.input_dir = "/tmp/in"
@@ -194,13 +195,24 @@ output_format = "csv"
         cfg.ocr_backend.api_key = "xyz"
 
         target = tmp_path / "new.toml"
-        save_config(cfg, target)
+        save_config(cfg, target, create_if_missing=True)
 
         assert target.exists()
         reloaded = load_config(target)
         assert reloaded.log_level == "WARNING"
         assert reloaded.pdf_merge.input_dir == "/tmp/in"
         assert reloaded.ocr_backend.api_key == "xyz"
+
+    def test_save_raises_file_not_found_by_default(self, tmp_path: Path) -> None:
+        """create_if_missing=False（既定）で存在しないファイル → FileNotFoundError。"""
+        import pytest
+
+        cfg = AppConfig()
+        target = tmp_path / "missing.toml"
+
+        with pytest.raises(FileNotFoundError):
+            save_config(cfg, target)
+        assert not target.exists()
 
     def test_save_preserves_comments_when_existing_file(self, tmp_path: Path) -> None:
         """既存 TOML にコメントがある場合、save 後もコメントが残る（tomlkit の機能確認）。"""
@@ -251,7 +263,7 @@ output_dir = ""
         cfg.pdf_merge.user_name_bbox.dpi = 250
 
         target = tmp_path / "bbox.toml"
-        save_config(cfg, target)
+        save_config(cfg, target, create_if_missing=True)
 
         reloaded = load_config(target)
         assert reloaded.pdf_merge.user_name_bbox.x0 == 11.0
@@ -273,7 +285,7 @@ output_dir = ""
         )
 
         target = tmp_path / "reports.toml"
-        save_config(cfg, target)
+        save_config(cfg, target, create_if_missing=True)
 
         reloaded = load_config(target)
         assert len(reloaded.reports) == 2
@@ -287,7 +299,7 @@ output_dir = ""
         cfg = AppConfig()
         target = tmp_path / "deeply" / "nested" / "config.toml"
 
-        save_config(cfg, target)
+        save_config(cfg, target, create_if_missing=True)
 
         assert target.exists()
         reloaded = load_config(target)
@@ -297,7 +309,7 @@ output_dir = ""
         """reports が空リストでも [[reports.targets]] を書き戻せる。"""
         cfg = AppConfig()
         target = tmp_path / "empty.toml"
-        save_config(cfg, target)
+        save_config(cfg, target, create_if_missing=True)
 
         reloaded = load_config(target)
         assert reloaded.reports == []
@@ -329,3 +341,66 @@ output_dir = ""
         cfg = AppConfig()
         with pytest.raises(TypeError, match="is not a table"):
             save_config(cfg, target)
+
+    def test_save_atomic_rollback_on_dump_error(
+        self, tmp_path: Path, monkeypatch: Any
+    ) -> None:
+        """tomlkit.dumps が例外を上げた場合、元ファイルが保たれ tmp は残らない。"""
+        import pytest
+
+        target = tmp_path / "target.toml"
+        original = '[app]\nversion = "keep-this"\n'
+        target.write_text(original, encoding="utf-8")
+
+        def _raise(_doc: Any) -> str:
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr("wiseman_hub.config.tomlkit.dumps", _raise)
+
+        cfg = AppConfig()
+        with pytest.raises(RuntimeError, match="boom"):
+            save_config(cfg, target)
+
+        assert target.read_text(encoding="utf-8") == original
+        assert not any(p.suffix == ".tmp" for p in tmp_path.iterdir())
+
+    def test_save_unicode_names_preserved_in_file(self, tmp_path: Path) -> None:
+        """日本語氏名が UTF-8 で実ファイルに保存されている（生バイト確認）。"""
+        from wiseman_hub.config import ReportTarget
+
+        cfg = AppConfig()
+        cfg.reports.append(ReportTarget(name="山田太郎", menu_path=["集計"]))
+        target = tmp_path / "unicode.toml"
+        save_config(cfg, target, create_if_missing=True)
+
+        written = target.read_text(encoding="utf-8")
+        assert "山田太郎" in written
+        assert "集計" in written
+
+    def test_save_concat_order_reorder(self, tmp_path: Path) -> None:
+        """concat_order を並び替えても save/load で順序が保存される。"""
+        target = tmp_path / "order.toml"
+        target.write_text(
+            "[pdf_merge]\nconcat_order = [\"A\", \"B\", \"C\"]\n", encoding="utf-8"
+        )
+        cfg = load_config(target)
+        cfg.pdf_merge.concat_order = ["C", "A", "B"]
+
+        save_config(cfg, target)
+
+        reloaded = load_config(target)
+        assert reloaded.pdf_merge.concat_order == ["C", "A", "B"]
+
+    def test_save_overwrites_existing_file_value_actually_changes(
+        self, tmp_path: Path
+    ) -> None:
+        """save 後に元の値が文字列として残っていない（強い overwrite 保証）。"""
+        target = tmp_path / "overwrite.toml"
+        target.write_text('[app]\nversion = "original-value-zzz"\n', encoding="utf-8")
+
+        cfg = AppConfig()
+        save_config(cfg, target)
+
+        written = target.read_text(encoding="utf-8")
+        assert "original-value-zzz" not in written
+        assert cfg.version in written

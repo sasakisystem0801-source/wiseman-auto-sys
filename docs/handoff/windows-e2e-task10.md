@@ -12,13 +12,23 @@ Cloud Run にデプロイ済みの OCR プロキシと Windows 実機の CLI を
 
 ```
 Service URL : https://wiseman-ocr-proxy-v45l5ocwma-an.a.run.app
-API Key     : 2c_kXFliCo5cUC6Af9GkWf1hz_ffGWZlUuCqLgzkQ4c
 Region      : asia-northeast1
 Project     : wiseman-hub-prod
 ```
 
-> **注意**: API Key は Secret Manager でローテーション可能（`deploy.md` 参照）。
-> このキーを設定 GUI 完成後は GUI から再入力できる想定。
+### API Key の取得
+
+API Key は Secret Manager で管理しており、このドキュメントには**平文で記載しない**。
+設定時は以下のコマンドで取得する（gcloud 認証済み環境が必要）:
+
+```bash
+gcloud secrets versions access latest \
+    --secret=wiseman-ocr-api-keys \
+    --project=wiseman-hub-prod
+```
+
+取得したキーは `config/default.toml` の `ocr_backend.api_key` に設定する。
+キーローテーションは `backend/ocr_proxy/deploy.md` の「キーローテーション」節を参照。
 
 ## Windows 実機準備
 
@@ -46,7 +56,7 @@ uv sync
 ```toml
 [ocr_backend]
 endpoint_url = "https://wiseman-ocr-proxy-v45l5ocwma-an.a.run.app"
-api_key = "2c_kXFliCo5cUC6Af9GkWf1hz_ffGWZlUuCqLgzkQ4c"
+api_key = "<上記コマンドで取得した API Key>"
 timeout_sec = 30
 max_retries = 3
 
