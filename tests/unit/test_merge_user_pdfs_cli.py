@@ -675,6 +675,68 @@ class TestMergeCommand:
         assert final.output_path is not None
         assert Path(final.output_path).exists()
 
+    def test_merge_error_stderr_does_not_leak_pii(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """run_phase_b 失敗時、stderr の error メッセージに氏名・path が含まれないこと。
+
+        医療介護分野の PII 防御（confirm_dialog.py の方針に準拠）。
+        merger 由来の PdfMergeError は message に user_name や path を含みうるため、
+        CLI 層で型名 + session_id に抑え込む必要がある。
+        """
+        from wiseman_hub.pdf.session import UserCandidate
+
+        pii_name = "山田太郎"
+        pii_path = "/Users/secret_path/confidential_file.pdf"
+
+        script = _load_script_module()
+        cfg = _make_config(tmp_path)
+        sid = _make_session_with_candidates(
+            tmp_path=tmp_path,
+            status=SessionStatus.READY_TO_MERGE,
+            candidates=[
+                UserCandidate(
+                    page_index=0,
+                    user_name_ocr=pii_name,
+                    confidence="high",
+                    status=PairStatus.AUTO_MATCHED,
+                    matched_b_path=None,
+                    matched_c_path=None,
+                    similar_candidates=[],
+                )
+            ],
+        )
+
+        def leaky_merge(*args: object, **kwargs: object) -> None:
+            # 本番 merger は _validate_user_name や _open_pdf_file_or_raise で
+            # このような PII を含む message を出しうる
+            from wiseman_hub.pdf.merger import PdfMergeError
+
+            raise PdfMergeError(
+                f"Failed to open PDF for B:{pii_name}: {pii_path}: bad file"
+            )
+
+        monkeypatch.setattr("wiseman_hub.pdf.pipeline.merge_user_pdfs", leaky_merge)
+
+        exit_code = script.main(
+            ["--merge", sid],
+            config_loader=lambda _: cfg,
+            ocr_factory=lambda _: FakeOcr([]),
+            matcher_factory=lambda _: FakeMatcher({}),
+        )
+        assert exit_code == script.EXIT_ERROR
+
+        captured = capsys.readouterr()
+        combined = captured.out + captured.err
+        assert pii_name not in combined, "PII (氏名) leaked in CLI output"
+        assert pii_path not in combined, "PII (path) leaked in CLI output"
+        # 最低限 session_id と型名は出すべき
+        assert sid in combined
+        assert "PdfMergeError" in combined
+
     @pytest.mark.parametrize(
         "invalid_status,invalid_pair",
         [

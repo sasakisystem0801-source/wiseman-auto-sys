@@ -440,11 +440,14 @@ def _cmd_merge(
             output_path=output_path,
         )
     except InvalidTransitionError as e:
+        # InvalidTransitionError は内部固定文（session.py 生成）で PII を含まない
         print(f"error: {e}", file=sys.stderr)
         return EXIT_ERROR
     except (BlockingIOError, OSError) as e:
+        # PII 防御: errno + session_id のみ。e のメッセージ（OS 由来）にはパス等が入りうる
         print(
-            f"error: session {session_id} lock contention or I/O: {e}",
+            f"error: session {session_id} lock contention or I/O "
+            f"({type(e).__name__}).",
             file=sys.stderr,
         )
         return EXIT_ERROR
@@ -452,8 +455,18 @@ def _cmd_merge(
         print("interrupted by user (SIGINT)", file=sys.stderr)
         return EXIT_KEYBOARD_INTERRUPT
     except Exception as e:
-        logger.exception("run_phase_b failed")
-        print(f"error: {type(e).__name__}: {e}", file=sys.stderr)
+        # PII 防御: logger.exception は traceback に氏名・path が入りうるため使わない
+        # （confirm_dialog.py と同方針）。画面表示も型名のみ、詳細は session JSON 参照で。
+        logger.error(
+            "run_phase_b failed: session=%s error=%s",
+            session_id,
+            type(e).__name__,
+        )
+        print(
+            f"error: {type(e).__name__} during phase B "
+            f"(session={session_id}); check session JSON for details.",
+            file=sys.stderr,
+        )
         return EXIT_ERROR
 
     print(

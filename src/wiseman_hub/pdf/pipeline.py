@@ -30,7 +30,7 @@ from typing import Any, Protocol
 
 from wiseman_hub.config import PdfMergeConfig
 from wiseman_hub.pdf.matcher import NameMatcher
-from wiseman_hub.pdf.merger import UserPageSource, merge_user_pdfs
+from wiseman_hub.pdf.merger import PdfMergeError, UserPageSource, merge_user_pdfs
 from wiseman_hub.pdf.ocr_client import ExtractNameResult
 from wiseman_hub.pdf.session import (
     OPEN_PAIR_STATUSES,
@@ -392,6 +392,22 @@ def _page_pdf_path(session: Session, page_index: int) -> Path:
     return Path(session.a_page_pdf_bytes_dir) / _page_pdf_filename(page_index)
 
 
+def _unlink_with_warning(path: Path) -> None:
+    """欠損検知時に「未完成の output PDF」を掃除する。失敗しても続行する。
+
+    ディスクに欠損付き PDF が残ると、運用者が誤って配布する事故になる。ただし削除自体の
+    失敗で Phase B を止めるのは過剰なので、残骸警告のみで続行。
+    """
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as e:
+        logger.warning(
+            "failed to remove incomplete output PDF %s: %s (manual cleanup required)",
+            path,
+            type(e).__name__,
+        )
+
+
 def _build_user_page_sources(session: Session) -> list[UserPageSource]:
     """session.candidates から merger に渡す UserPageSource リストを作る。
 
@@ -468,7 +484,19 @@ def run_phase_b(
 
         try:
             users = _build_user_page_sources(session)
-            merge_user_pdfs(users, config, output_path)
+            report = merge_user_pdfs(users, config, output_path)
+            if report.has_missing_sources:
+                # PII 防御: 件数のみ、氏名・path は含めない。
+                # 欠損があるまま COMPLETED に進むと「正常終了した」ように見える医療事故
+                # になるため fail-hard。output PDF は生成済みだが、運用者が誤って
+                # 利用しないよう削除する（INTERRUPTED_PHASE_B で session だけ残す）。
+                _unlink_with_warning(output_path)
+                raise PdfMergeError(
+                    f"merge completed with {len(report.missing_sources)} missing B/C "
+                    "source(s); refusing to finalize. "
+                    "Prepare missing files or mark users as rejected/skipped via --review, "
+                    "then rerun --merge."
+                )
         except (Exception, KeyboardInterrupt):
             # merger 失敗 (PdfMergeError / FileNotFoundError) や中断は INTERRUPTED_PHASE_B で保存。
             # SystemExit / GeneratorExit は BaseException 直下なので捕捉せず通過（run_phase_a と同方針）。

@@ -855,6 +855,38 @@ class TestRunPhaseBInterrupted:
         # 失敗時 output_path は設定されてはならない（成功時のみ set される契約）
         assert reloaded.output_path is None
 
+    def test_missing_b_source_is_fatal_and_removes_output(
+        self, tmp_path: Path
+    ) -> None:
+        """欠損 B/C があるとき、COMPLETED に進まず INTERRUPTED_PHASE_B で停止。
+        既に書き出された不完全 output PDF は削除される（PII 配布事故防止）。"""
+        from wiseman_hub.pdf.merger import PdfMergeError
+
+        sessions_dir = tmp_path / ".sessions"
+        # B_u0.pdf を作らない = 欠損
+        (tmp_path / "C_u0.pdf").write_bytes(_single_page_pdf_bytes("C:u0"))
+        session = _make_phase_b_session(
+            tmp_path=tmp_path,
+            sessions_dir=sessions_dir,
+            status=SessionStatus.READY_TO_MERGE,
+            candidates=[_cand(page_index=0, name="u0", status=PairStatus.AUTO_MATCHED)],
+        )
+
+        output = tmp_path / "merged.pdf"
+        with pytest.raises(PdfMergeError, match="missing B/C"):
+            run_phase_b(
+                session=session,
+                config=_config(tmp_path),
+                sessions_dir=sessions_dir,
+                output_path=output,
+            )
+
+        # 出力 PDF は削除される（残骸で運用者が誤使用する事故を防ぐ）
+        assert not output.exists()
+        reloaded = load_session(session.session_id, sessions_dir=sessions_dir)
+        assert reloaded.status == SessionStatus.INTERRUPTED_PHASE_B
+        assert reloaded.output_path is None
+
     def test_retry_from_interrupted_reaches_completed(self, tmp_path: Path) -> None:
         sessions_dir = tmp_path / ".sessions"
         (tmp_path / "B_u0.pdf").write_bytes(_single_page_pdf_bytes("B:u0"))

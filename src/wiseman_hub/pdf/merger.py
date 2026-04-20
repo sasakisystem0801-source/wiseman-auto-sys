@@ -249,13 +249,14 @@ def merge_user_pdfs(
                 else:
                     path = _resolve_bc_path(user, kind, input_dir, config)
                     if not path.exists():
+                        # PII 防御: ログに氏名・パスを出さない（医療介護データ扱いのため）。
+                        # 詳細は MergeReport.missing_sources に記録され、呼出側が
+                        # 画面表示等の適切な経路で利用する。
                         logger.warning(
-                            "Missing %s source for user %d/%d %r: %s (skipping)",
+                            "Missing %s source for user %d/%d (skipping)",
                             kind,
                             user_idx + 1,
                             len(users),
-                            user.user_name,
-                            path,
                         )
                         missing.append((user.user_name, kind))
                         continue
@@ -277,18 +278,20 @@ def merge_user_pdfs(
 
         _save_atomically(dst, output_path)
         if missing:
+            # PII 防御: missing タプルには氏名が含まれるためログ出力しない。件数と kind 別集計のみ。
+            b_missing = sum(1 for _, k in missing if k == "B")
+            c_missing = sum(1 for _, k in missing if k == "C")
             logger.error(
-                "merge_user_pdfs completed with %d missing sources; "
-                "downstream callers MUST inspect MergeReport.missing_sources. "
-                "First 5: %s",
+                "merge_user_pdfs completed with %d missing sources (B=%d, C=%d); "
+                "downstream callers MUST inspect MergeReport.missing_sources.",
                 len(missing),
-                missing[:5],
+                b_missing,
+                c_missing,
             )
         logger.info(
-            "merge_user_pdfs done: users=%d pages=%d output=%s missing=%d",
+            "merge_user_pdfs done: users=%d pages=%d missing=%d",
             len(users),
             total_pages,
-            output_path,
             len(missing),
         )
     finally:
