@@ -25,17 +25,17 @@ def mod():
 class TestFindSubfolderMatch:
     def test_match_kinari(self, mod):
         folders = ["きなり", "太子の郷", "太子町地域包括支援センター"]
-        filename = "202603_提供実績_ささき整形外科デイケアセンター(2814101271)_居宅介護支援事業所　きなり(2874101146)_20260409.ex_"
+        filename = "202603_提供実績_ささき整形外科デイケアセンター(2814101271)_居宅介護支援事業所　きなり(2874101146)_20260409.ex_"  # noqa: E501
         assert mod.find_subfolder_match(filename, folders) == "きなり"
 
     def test_match_taishi_no_sato(self, mod):
         folders = ["きなり", "太子の郷", "太子町地域包括支援センター"]
-        filename = "202603_提供実績_ささき整形外科デイケアセンター(2814101271)_太子の郷　居宅介護支援事業所(2874100080)_20260409.ex_"
+        filename = "202603_提供実績_ささき整形外科デイケアセンター(2814101271)_太子の郷　居宅介護支援事業所(2874100080)_20260409.ex_"  # noqa: E501
         assert mod.find_subfolder_match(filename, folders) == "太子の郷"
 
     def test_match_taishi_houkatsu(self, mod):
         folders = ["きなり", "太子の郷", "太子町地域包括支援センター"]
-        filename = "202603_提供実績_ささき整形外科デイケアセンター(2814101271)_太子町地域包括支援センター(2804100010)_20260409.ex_"
+        filename = "202603_提供実績_ささき整形外科デイケアセンター(2814101271)_太子町地域包括支援センター(2804100010)_20260409.ex_"  # noqa: E501
         assert mod.find_subfolder_match(filename, folders) == "太子町地域包括支援センター"
 
     def test_no_match(self, mod):
