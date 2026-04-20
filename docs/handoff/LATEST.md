@@ -162,7 +162,7 @@ cat docs/handoff/LATEST.md
   - `src/wiseman_hub/pdf/splitter.py`
   - `src/wiseman_hub/pdf/ocr_client.py`
   - `src/wiseman_hub/pdf/merger.py`
-- テスト: `tests/unit/pdf/test_{splitter,ocr_client,merger}.py`（56件）
+- テスト: `tests/unit/pdf/test_{splitter,ocr_client,merger}.py`（65件）
 - OCR プロキシ: `backend/ocr_proxy/app/`
 - デプロイ手順: `backend/ocr_proxy/deploy.md`
 - sample TOML: `config/default.toml:42-75`
