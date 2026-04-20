@@ -313,8 +313,7 @@ def _cmd_review(
         print(f"error: {e}", file=sys.stderr)
         return EXIT_ERROR
 
-    # 冪等: 既に READY_TO_MERGE なら UI を起動しない（誤操作で NEEDS_REVIEW 方向への
-    # 遷移は _VALID_TRANSITIONS に存在しないので無意味）
+    # 既に READY_TO_MERGE なら確認済みとみなし UI 起動をスキップ（再度の解決作業は不要）。
     if session.status == SessionStatus.READY_TO_MERGE:
         print(
             f"session {session_id}: already READY_TO_MERGE "
@@ -372,8 +371,16 @@ def _cmd_review(
             transition_session(session, SessionStatus.READY_TO_MERGE)
             save_session(session, sessions_dir=sessions_dir)
     except (BlockingIOError, OSError) as e:
+        # ここまでで dialog 側 save は既に成功済み（全候補が解決済みで永続化済）。
+        # 遷移だけが失敗したので、再 --review で冪等に READY_TO_MERGE へ進める。
         print(
-            f"error: session {session_id} lock contention during transition: {e}",
+            f"error: resolutions saved but transition to ready_to_merge failed "
+            f"(lock contention): {e}",
+            file=sys.stderr,
+        )
+        print(
+            "note: rerun --review to complete the transition "
+            "(no re-confirmation needed).",
             file=sys.stderr,
         )
         return EXIT_ERROR
@@ -403,6 +410,24 @@ def _cmd_merge(
         session = load_session(session_id, sessions_dir=sessions_dir)
     except (SessionNotFoundError, SessionCorruptedError) as e:
         print(f"error: {e}", file=sys.stderr)
+        return EXIT_ERROR
+
+    # RUNNING_PHASE_B は正常フローでは一時状態。ディスクに残っているのは、前回の
+    # Phase B 実行中に INTERRUPTED_PHASE_B への保存自体が失敗したケース（disk full
+    # や権限エラー）。そのまま --merge を再実行すると InvalidTransitionError になるだけで
+    # 利用者は対処法が分からないので、明示的に手順を案内する。
+    if session.status == SessionStatus.RUNNING_PHASE_B:
+        print(
+            f"error: session {session_id} is stuck in running_phase_b "
+            "(phase B crashed before saving INTERRUPTED state).",
+            file=sys.stderr,
+        )
+        print(
+            f"note: inspect session JSON at sessions_dir/{session_id}.json, "
+            "then either fix the status manually to interrupted_phase_b or "
+            f"discard via `--discard {session_id}` and rerun phase A.",
+            file=sys.stderr,
+        )
         return EXIT_ERROR
 
     output_path = _resolve_merge_output_path(config, session_id)

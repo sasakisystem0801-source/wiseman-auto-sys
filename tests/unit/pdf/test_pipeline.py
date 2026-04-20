@@ -803,8 +803,23 @@ class TestRunPhaseBInterrupted:
     """AC-PB-2: merger 失敗時 INTERRUPTED_PHASE_B で保存 + 例外再送出。
     AC-PB-5: INTERRUPTED_PHASE_B からのリトライ。"""
 
+    @pytest.mark.parametrize(
+        "injected_exc,exc_match",
+        [
+            pytest.param(
+                "PdfMergeError", "disk full", id="pdf_merge_error"
+            ),
+            pytest.param(
+                "FileNotFoundError", "D source", id="file_not_found_from_merger"
+            ),
+        ],
+    )
     def test_merger_failure_sets_interrupted_and_reraises(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        injected_exc: str,
+        exc_match: str,
     ) -> None:
         sessions_dir = tmp_path / ".sessions"
         (tmp_path / "B_u0.pdf").write_bytes(_single_page_pdf_bytes("B"))
@@ -818,12 +833,16 @@ class TestRunPhaseBInterrupted:
 
         from wiseman_hub.pdf.merger import PdfMergeError
 
+        exc_class: type[Exception] = (
+            PdfMergeError if injected_exc == "PdfMergeError" else FileNotFoundError
+        )
+
         def failing_merge(*args: object, **kwargs: object) -> None:
-            raise PdfMergeError("disk full simulation")
+            raise exc_class(f"{exc_match} simulation")
 
         monkeypatch.setattr("wiseman_hub.pdf.pipeline.merge_user_pdfs", failing_merge)
 
-        with pytest.raises(PdfMergeError, match="disk full"):
+        with pytest.raises(exc_class, match=exc_match):
             run_phase_b(
                 session=session,
                 config=_config(tmp_path),
@@ -833,6 +852,8 @@ class TestRunPhaseBInterrupted:
 
         reloaded = load_session(session.session_id, sessions_dir=sessions_dir)
         assert reloaded.status == SessionStatus.INTERRUPTED_PHASE_B
+        # 失敗時 output_path は設定されてはならない（成功時のみ set される契約）
+        assert reloaded.output_path is None
 
     def test_retry_from_interrupted_reaches_completed(self, tmp_path: Path) -> None:
         sessions_dir = tmp_path / ".sessions"

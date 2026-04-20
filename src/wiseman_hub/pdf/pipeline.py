@@ -33,6 +33,7 @@ from wiseman_hub.pdf.matcher import NameMatcher
 from wiseman_hub.pdf.merger import UserPageSource, merge_user_pdfs
 from wiseman_hub.pdf.ocr_client import ExtractNameResult
 from wiseman_hub.pdf.session import (
+    OPEN_PAIR_STATUSES,
     InvalidTransitionError,
     PairStatus,
     Session,
@@ -78,6 +79,14 @@ _MERGEABLE_PAIR_STATUSES = frozenset(
         PairStatus.CONFIRMED,
         PairStatus.MANUALLY_SELECTED,
     }
+)
+
+# 型レベルの invariant: MERGEABLE は必ず OPEN と素集合（merge 対象に未解決は混入不可）。
+# PairStatus 追加時、新値を MERGEABLE に入れずに OPEN にも入れ忘れた場合の silent drift を
+# import 時点で検知する。
+assert _MERGEABLE_PAIR_STATUSES.isdisjoint(OPEN_PAIR_STATUSES), (
+    "_MERGEABLE_PAIR_STATUSES must not overlap with OPEN_PAIR_STATUSES; "
+    "unresolved status is about to reach the merger"
 )
 
 
@@ -392,13 +401,10 @@ def _build_user_page_sources(session: Session) -> list[UserPageSource]:
     - matched_b/c_path はそのまま merger へ渡し、MANUALLY_SELECTED 等の override を反映
     """
     sources: list[UserPageSource] = []
+    excluded: list[tuple[int, str]] = []
     for c in session.candidates:
         if c.status not in _MERGEABLE_PAIR_STATUSES:
-            logger.info(
-                "run_phase_b: excluding page_index=%d status=%s from merge input",
-                c.page_index,
-                c.status.value,
-            )
+            excluded.append((c.page_index, c.status.value))
             continue
         page_bytes = _page_pdf_path(session, c.page_index).read_bytes()
         sources.append(
@@ -409,6 +415,12 @@ def _build_user_page_sources(session: Session) -> list[UserPageSource]:
                 matched_b_path=c.matched_b_path,
                 matched_c_path=c.matched_c_path,
             )
+        )
+    if excluded:
+        logger.info(
+            "run_phase_b: excluded %d candidate(s) from merge input: %s",
+            len(excluded),
+            excluded,
         )
     return sources
 
