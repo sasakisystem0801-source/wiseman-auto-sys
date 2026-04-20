@@ -55,7 +55,6 @@ class UserPageSource:
     matched_b_path / matched_c_path: ConfirmDialog の手動選択や matcher の自動特定で
         得た B/C の絶対パス。``None`` なら従来通り ``source_b_pattern`` / ``source_c_pattern``
         で `input_dir` 配下を解決する。指定時はそちらが優先（pattern バイパス）。
-        MANUALLY_SELECTED のカスタムパスを反映する経路として追加（タスク 8C PR #B）。
     """
 
     user_name: str

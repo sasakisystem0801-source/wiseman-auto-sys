@@ -43,7 +43,13 @@ import sys
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
+
+if TYPE_CHECKING:
+    # 型のみ参照: confirm_dialog は tkinter を import するため実行時はロードしない
+    # （macOS uv python は Tcl/Tk 非同梱）。実行時の import は _default_dialog_factory
+    # 内部で行い、`--review` 実行時にのみロードする。
+    from wiseman_hub.ui.confirm_dialog import ConfirmDialogResult
 
 from wiseman_hub.config import (
     AppConfig,
@@ -94,9 +100,9 @@ class _OcrFactory(Protocol):
 
 
 class _ConfirmDialogLike(Protocol):
-    """ConfirmDialog のテスト差し替え用の最小インターフェース。"""
+    """ConfirmDialog のテスト差し替え用インターフェース。"""
 
-    def run(self) -> object:
+    def run(self) -> ConfirmDialogResult:
         ...
 
 
@@ -337,7 +343,7 @@ def _cmd_review(
 
     # 呼出側契約: aborted=True の場合、メモリ上の session は信頼できない（save 失敗済み）。
     # ディスクから再ロードし、遷移は試みない。ユーザーは再度 --review で再開する。
-    if getattr(result, "aborted", False):
+    if result.aborted:
         print(
             f"error: review UI aborted for session {session_id}. "
             "state preserved; rerun --review to resume.",

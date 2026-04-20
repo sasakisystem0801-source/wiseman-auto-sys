@@ -216,9 +216,18 @@ def _build_candidate(
     return candidate
 
 
+def _page_pdf_filename(page_index: int) -> str:
+    """writer (Phase A) と reader (Phase B) で共有する A ページファイル名。
+
+    桁数変更時の silent バグ（reader/writer 不一致で merge が空になる）を防ぐため
+    フォーマットは単一箇所に集約する。
+    """
+    return f"page_{page_index:03d}.pdf"
+
+
 def _save_page_pdf(page_dir: Path, sp: SplitPage) -> None:
     """1 ページ分の PDF バイナリを ``page_NNN.pdf`` として保存する（idempotent）。"""
-    path = page_dir / f"page_{sp.page_index:03d}.pdf"
+    path = page_dir / _page_pdf_filename(sp.page_index)
     # write_bytes は atomic ではないが、split 出力を保存する用途で中断しても
     # 次回の再 split で上書きされるため問題なし。
     path.write_bytes(sp.page_pdf_bytes)
@@ -371,7 +380,7 @@ def run_phase_a(
 
 def _page_pdf_path(session: Session, page_index: int) -> Path:
     """session.a_page_pdf_bytes_dir 配下の page_NNN.pdf パスを返す。"""
-    return Path(session.a_page_pdf_bytes_dir) / f"page_{page_index:03d}.pdf"
+    return Path(session.a_page_pdf_bytes_dir) / _page_pdf_filename(page_index)
 
 
 def _build_user_page_sources(session: Session) -> list[UserPageSource]:
