@@ -15,7 +15,9 @@ from typing import Any
 
 import tomlkit
 from tomlkit import TOMLDocument
-from tomlkit.items import Table
+from tomlkit.items import InlineTable, Table
+
+_TableLike = (Table, InlineTable)
 
 
 @dataclass
@@ -142,14 +144,19 @@ def load_config(path: Path | None = None) -> AppConfig:
     )
 
 
+_APP_FIELDS: tuple[str, ...] = ("version", "log_level", "log_dir")
 _SCALAR_SECTIONS: tuple[str, ...] = ("wiseman", "schedule", "gcp", "updater", "ocr_backend")
 
 
 def _update_table_from_dataclass(doc: TOMLDocument, section: str, data: dict[str, Any]) -> None:
-    """既存テーブルを in-place 更新（コメント維持）、存在しなければ新規追加。"""
+    """既存テーブルを in-place 更新（コメント維持）、存在しなければ新規追加。
+
+    標準ブロック記法 `[section]` およびインラインテーブル `section = {...}` の両方に対応。
+    """
     if section in doc:
         table = doc[section]
-        assert isinstance(table, Table)
+        if not isinstance(table, _TableLike):
+            raise TypeError(f"TOML key '{section}' is not a table (got {type(table).__name__})")
         for key, value in data.items():
             table[key] = value
     else:
@@ -164,12 +171,17 @@ def _update_pdf_merge(doc: TOMLDocument, pdf_merge: PdfMergeConfig) -> None:
 
     if "pdf_merge" in doc:
         table = doc["pdf_merge"]
-        assert isinstance(table, Table)
+        if not isinstance(table, _TableLike):
+            raise TypeError(f"TOML key 'pdf_merge' is not a table (got {type(table).__name__})")
         for key, value in pdf_merge_dict.items():
             table[key] = value
         if "user_name_bbox" in table:
             bbox_table = table["user_name_bbox"]
-            assert isinstance(bbox_table, Table)
+            if not isinstance(bbox_table, _TableLike):
+                raise TypeError(
+                    f"TOML key 'pdf_merge.user_name_bbox' is not a table "
+                    f"(got {type(bbox_table).__name__})"
+                )
             for key, value in bbox.items():
                 bbox_table[key] = value
         else:
@@ -183,11 +195,17 @@ def _update_pdf_merge(doc: TOMLDocument, pdf_merge: PdfMergeConfig) -> None:
 
 
 def _update_reports(doc: TOMLDocument, reports: list[ReportTarget]) -> None:
-    """[[reports.targets]] 配列を書き戻す。"""
+    """[[reports.targets]] 配列を書き戻す。
+
+    既存の targets 配列はインラインコメントごと置換される（要素間の書式保持は未対応）。
+    """
     targets_data = [asdict(t) for t in reports]
     if "reports" in doc:
         reports_table = doc["reports"]
-        assert isinstance(reports_table, Table)
+        if not isinstance(reports_table, _TableLike):
+            raise TypeError(
+                f"TOML key 'reports' is not a table (got {type(reports_table).__name__})"
+            )
         reports_table["targets"] = targets_data
     else:
         reports_table = tomlkit.table()
@@ -207,6 +225,10 @@ def save_config(cfg: AppConfig, path: Path) -> None:
     既存ファイルがあれば tomlkit でパースして値だけ更新し、コメント・空行を維持する。
     存在しない場合は新規 TOMLDocument を生成。書き込みは tempfile + os.replace で atomic。
     親ディレクトリが存在しない場合は自動作成する。
+
+    排他制御は行わない（単一プロセスからの呼び出しを前提）。複数プロセスが同じ path に
+    同時書き込みした場合は「最後の os.replace 勝ち」になる。
+    既存 [[reports.targets]] 配列内のコメントは置換時に失われる（要素間書式の保持は未対応）。
     """
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -216,7 +238,7 @@ def save_config(cfg: AppConfig, path: Path) -> None:
     except FileNotFoundError:
         doc = tomlkit.document()
 
-    app_data = {"version": cfg.version, "log_level": cfg.log_level, "log_dir": cfg.log_dir}
+    app_data = {field: getattr(cfg, field) for field in _APP_FIELDS}
     _update_table_from_dataclass(doc, "app", app_data)
 
     for section in _SCALAR_SECTIONS:

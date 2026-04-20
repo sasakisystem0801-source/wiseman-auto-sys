@@ -301,3 +301,31 @@ output_dir = ""
 
         reloaded = load_config(target)
         assert reloaded.reports == []
+
+    def test_save_with_inline_table_notation(self, tmp_path: Path) -> None:
+        """既存 TOML がインラインテーブル記法 `section = {...}` でも save できる。"""
+        target = tmp_path / "inline.toml"
+        target.write_text(
+            'wiseman = {exe_path = "C:\\\\foo.exe", startup_wait_sec = 10, '
+            'window_title_pattern = ".*"}\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(target)
+        cfg.wiseman.startup_wait_sec = 25
+
+        save_config(cfg, target)
+
+        reloaded = load_config(target)
+        assert reloaded.wiseman.startup_wait_sec == 25
+        assert reloaded.wiseman.exe_path == "C:\\foo.exe"
+
+    def test_save_raises_type_error_when_section_is_not_table(self, tmp_path: Path) -> None:
+        """section に table 以外（整数等）が入っている不正 TOML では TypeError を返す。"""
+        import pytest
+
+        target = tmp_path / "bad.toml"
+        target.write_text("wiseman = 42\n", encoding="utf-8")
+
+        cfg = AppConfig()
+        with pytest.raises(TypeError, match="is not a table"):
+            save_config(cfg, target)
