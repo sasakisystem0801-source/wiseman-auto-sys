@@ -36,8 +36,7 @@ from wiseman_hub.ui.confirm_dialog import (  # noqa: E402
     ConfirmDialog,
     ConfirmDialogResult,
     _format_detail,
-    _pick_first_b,
-    _pick_first_c,
+    _pick_first_by_kind,
     _short_path,
     compute_approve_decision,
     log_operation,
@@ -385,12 +384,12 @@ class TestLogOperation:
 
 class TestOpenStatuses:
     def test_filter_logic_matches_spec(self) -> None:
-        """AC-UI-1 の定数: _OPEN_STATUSES = {NEEDS_CONFIRMATION, NO_MATCH}"""
-        from wiseman_hub.ui.confirm_dialog import _OPEN_STATUSES
+        """AC-UI-1 の定数: OPEN_PAIR_STATUSES = {NEEDS_CONFIRMATION, NO_MATCH}"""
+        from wiseman_hub.pdf.session import OPEN_PAIR_STATUSES
 
         assert frozenset(
             {PairStatus.NEEDS_CONFIRMATION, PairStatus.NO_MATCH}
-        ) == _OPEN_STATUSES
+        ) == OPEN_PAIR_STATUSES
         # 解決済み状態は含まれない
         for resolved in (
             PairStatus.AUTO_MATCHED,
@@ -399,7 +398,7 @@ class TestOpenStatuses:
             PairStatus.MANUALLY_SELECTED,
             PairStatus.SKIPPED,
         ):
-            assert resolved not in _OPEN_STATUSES
+            assert resolved not in OPEN_PAIR_STATUSES
 
 
 # ---------------------------------------------------------------------------
@@ -459,20 +458,20 @@ class TestAllResolvedDetection:
 
 
 class TestHelpers:
-    def test_pick_first_b_returns_b_only(self) -> None:
+    def test_pick_first_by_kind_b(self) -> None:
         similar = [
             CandidateState(path="/c.pdf", kind="C", distance=0, extracted_name="x"),
             CandidateState(path="/b1.pdf", kind="B", distance=1, extracted_name="x"),
             CandidateState(path="/b2.pdf", kind="B", distance=2, extracted_name="x"),
         ]
-        assert _pick_first_b(similar) == "/b1.pdf"
-        assert _pick_first_c(similar) == "/c.pdf"
+        assert _pick_first_by_kind(similar, "B") == "/b1.pdf"
+        assert _pick_first_by_kind(similar, "C") == "/c.pdf"
 
-    def test_pick_returns_none_when_missing(self) -> None:
-        assert _pick_first_b([]) is None
-        assert _pick_first_c([]) is None
+    def test_pick_first_by_kind_missing(self) -> None:
+        assert _pick_first_by_kind([], "B") is None
+        assert _pick_first_by_kind([], "C") is None
         only_b = [CandidateState(path="/b.pdf", kind="B", distance=0, extracted_name="x")]
-        assert _pick_first_c(only_b) is None
+        assert _pick_first_by_kind(only_b, "C") is None
 
     def test_short_path_variations(self) -> None:
         assert _short_path(None) == ""
@@ -701,7 +700,7 @@ class TestCloseBehavior:
 
         dialog._on_close_button()
 
-        assert dialog._closed_all_resolved is False
+        assert dialog._session.all_candidates_resolved is False
         assert len(mb.askyesno_calls) == 1
 
     def test_close_all_resolved_shows_info(self, tk_root: tk.Tk) -> None:
@@ -717,7 +716,7 @@ class TestCloseBehavior:
         dialog._on_approve()
 
         assert len(mb.showinfo_calls) == 1
-        assert dialog._closed_all_resolved is True
+        assert dialog._session.all_candidates_resolved is True
 
     def test_close_declined_keeps_dialog_open(self, tk_root: tk.Tk) -> None:
         """AC-UI-7 (UI level): 「いいえ」選択でダイアログ継続"""
@@ -729,7 +728,7 @@ class TestCloseBehavior:
 
         dialog._on_close_button()
 
-        assert dialog._closed_all_resolved is False
+        assert dialog._session.all_candidates_resolved is False
 
 
 @_skip_if_no_tk

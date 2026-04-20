@@ -87,6 +87,9 @@ _RESOLVED_PAIR_STATUSES = frozenset(
     }
 )
 
+# 解決済み集合の補集合（= 人間確認が必要な状態）。UI モジュール等から参照される。
+OPEN_PAIR_STATUSES = frozenset(PairStatus) - _RESOLVED_PAIR_STATUSES
+
 
 @dataclass(frozen=True)
 class CandidateState:
