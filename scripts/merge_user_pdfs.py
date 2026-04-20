@@ -342,7 +342,8 @@ def _cmd_review(
         return EXIT_ERROR
 
     # 呼出側契約: aborted=True の場合、メモリ上の session は信頼できない（save 失敗済み）。
-    # ディスクから再ロードし、遷移は試みない。ユーザーは再度 --review で再開する。
+    # 遷移は試みず EXIT_ERROR で return する。次に `--review` を実行したとき、load_session
+    # がディスクから旧状態を再ロードし、未解決候補として再提示する。
     if result.aborted:
         print(
             f"error: review UI aborted for session {session_id}. "
