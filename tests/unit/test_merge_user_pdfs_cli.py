@@ -22,6 +22,7 @@ from wiseman_hub.config import AppConfig, OcrBackendConfig, PdfMergeConfig, User
 from wiseman_hub.pdf.matcher import MatchResult, MatchStatus
 from wiseman_hub.pdf.ocr_client import ExtractNameResult
 from wiseman_hub.pdf.session import (
+    PairStatus,
     Session,
     SessionStatus,
     generate_session_id,
@@ -521,7 +522,11 @@ class TestReviewCommand:
         assert final.status == SessionStatus.READY_TO_MERGE
 
     def test_review_aborted_leaves_status_unchanged(self, tmp_path: Path) -> None:
-        """aborted=True の場合、呼出側契約どおり session は変更しない。"""
+        """aborted=True の場合、呼出側契約どおり session は変更しない。
+
+        EXIT_ERROR (=1) と EXIT_NEEDS_REVIEW (=3) は意味が異なる（aborted は「UI 異常終了
+        のため再実行が必要」、unresolved は「ユーザーが未解決のまま閉じた」）ので等値検証する。
+        """
         from wiseman_hub.pdf.session import PairStatus, UserCandidate, load_session
 
         script = _load_script_module()
@@ -550,7 +555,7 @@ class TestReviewCommand:
             matcher_factory=lambda _: FakeMatcher({}),
             dialog_factory=dialog_factory,
         )
-        assert exit_code != 0  # aborted は EXIT_ERROR
+        assert exit_code == script.EXIT_ERROR
         final = load_session(sid, sessions_dir=_sessions_dir(tmp_path))
         assert final.status == SessionStatus.NEEDS_REVIEW  # 変更されていない
 
@@ -625,7 +630,7 @@ class TestReviewCommand:
             matcher_factory=lambda _: FakeMatcher({}),
             dialog_factory=dialog_factory,
         )
-        assert exit_code == 3  # EXIT_NEEDS_REVIEW
+        assert exit_code == script.EXIT_NEEDS_REVIEW
         final = load_session(sid, sessions_dir=_sessions_dir(tmp_path))
         assert final.status == SessionStatus.NEEDS_REVIEW
 
@@ -670,20 +675,38 @@ class TestMergeCommand:
         assert final.output_path is not None
         assert Path(final.output_path).exists()
 
-    def test_merge_rejects_needs_review_status(self, tmp_path: Path) -> None:
-        from wiseman_hub.pdf.session import PairStatus, UserCandidate
+    @pytest.mark.parametrize(
+        "invalid_status,invalid_pair",
+        [
+            (SessionStatus.NEEDS_REVIEW, PairStatus.NEEDS_CONFIRMATION),
+            (SessionStatus.RUNNING_PHASE_A, PairStatus.AUTO_MATCHED),
+            (SessionStatus.COMPLETED, PairStatus.AUTO_MATCHED),
+            (SessionStatus.INTERRUPTED_PHASE_A, PairStatus.AUTO_MATCHED),
+        ],
+    )
+    def test_merge_rejects_invalid_status(
+        self,
+        tmp_path: Path,
+        invalid_status: SessionStatus,
+        invalid_pair: Any,
+    ) -> None:
+        """READY_TO_MERGE / INTERRUPTED_PHASE_B 以外は全て EXIT_ERROR。
+
+        argparse で弾けない異常状態（手動で session JSON を作った等）を CLI 層で防ぐ。
+        """
+        from wiseman_hub.pdf.session import UserCandidate
 
         script = _load_script_module()
         cfg = _make_config(tmp_path)
         sid = _make_session_with_candidates(
             tmp_path=tmp_path,
-            status=SessionStatus.NEEDS_REVIEW,
+            status=invalid_status,
             candidates=[
                 UserCandidate(
                     page_index=0,
                     user_name_ocr="u0",
-                    confidence="medium",
-                    status=PairStatus.NEEDS_CONFIRMATION,
+                    confidence="high",
+                    status=invalid_pair,
                     matched_b_path=None,
                     matched_c_path=None,
                     similar_candidates=[],
@@ -697,4 +720,4 @@ class TestMergeCommand:
             ocr_factory=lambda _: FakeOcr([]),
             matcher_factory=lambda _: FakeMatcher({}),
         )
-        assert exit_code != 0
+        assert exit_code == script.EXIT_ERROR

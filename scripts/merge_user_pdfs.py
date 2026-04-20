@@ -362,7 +362,11 @@ def _cmd_review(
         )
         return EXIT_NEEDS_REVIEW
 
-    # ロック再取得して READY_TO_MERGE へ遷移 + 保存
+    # ロック再取得して READY_TO_MERGE へ遷移 + 保存。
+    # 既知リスク: UI 実行中のロック解放とこの再取得の間に別プロセスが同 session を触る
+    # 時間窓がある（例: 別端末からの --discard）。対象規模 1〜3 名の単一 PC 運用では
+    # 発生しない前提で受容。マルチ端末運用に拡張する際は session 再ロード + 状態再検証を
+    # ここに追加する。
     try:
         with with_session_lock(sessions_dir, session_id):
             transition_session(session, SessionStatus.READY_TO_MERGE)
