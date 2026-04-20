@@ -430,3 +430,91 @@ def test_save_atomically_cleans_tempfile_on_save_error(tmp_path: Path) -> None:
     # 一時ファイル削除
     leftover = [p for p in tmp_path.iterdir() if p.name.startswith(".merge-")]
     assert leftover == []
+
+
+# --- matched_b_path / matched_c_path override (タスク 8C PR #B) -----
+#
+# ConfirmDialog の手動選択 (MANUALLY_SELECTED) で選ばれたカスタムパスや、matcher が
+# 自動特定したパスを merger に渡すための仕組み。指定があれば source_b_pattern 解決を
+# バイパスし、そのパスから B/C を読み込む。指定無し (None) なら従来通り pattern 解決。
+
+
+def _user_with_override(
+    name: str,
+    *,
+    matched_b_path: str | None = None,
+    matched_c_path: str | None = None,
+) -> UserPageSource:
+    return UserPageSource(
+        user_name=name,
+        a_page_pdf_bytes=_make_pdf([f"A:{name}"]),
+        page_index=0,
+        matched_b_path=matched_b_path,
+        matched_c_path=matched_c_path,
+    )
+
+
+def test_matched_b_path_override_bypasses_pattern(
+    input_dir: Path, tmp_path: Path, output_path: Path, config: PdfMergeConfig
+) -> None:
+    """user.matched_b_path 指定時は source_b_pattern を使わず指定パスから B を読む。"""
+    # パターン解決で見つかるはずの B_u1.pdf はわざと作らない
+    custom_b = tmp_path / "elsewhere" / "手動選択B.pdf"
+    custom_b.parent.mkdir()
+    custom_b.write_bytes(_make_pdf(["CUSTOM-B"]))
+    (input_dir / "C_u1.pdf").write_bytes(_make_pdf(["C:u1"]))
+    (input_dir / "D_common.pdf").write_bytes(_make_pdf(["D"]))
+
+    user = _user_with_override("u1", matched_b_path=str(custom_b))
+    report = merge_user_pdfs([user], config, output_path)
+
+    assert report.missing_sources == []
+    assert _page_texts(output_path) == ["A:u1", "CUSTOM-B", "C:u1", "D"]
+
+
+def test_matched_c_path_override_bypasses_pattern(
+    input_dir: Path, tmp_path: Path, output_path: Path, config: PdfMergeConfig
+) -> None:
+    custom_c = tmp_path / "elsewhere" / "C_override.pdf"
+    custom_c.parent.mkdir()
+    custom_c.write_bytes(_make_pdf(["CUSTOM-C"]))
+    (input_dir / "B_u1.pdf").write_bytes(_make_pdf(["B:u1"]))
+    (input_dir / "D_common.pdf").write_bytes(_make_pdf(["D"]))
+
+    user = _user_with_override("u1", matched_c_path=str(custom_c))
+    merge_user_pdfs([user], config, output_path)
+
+    assert _page_texts(output_path) == ["A:u1", "B:u1", "CUSTOM-C", "D"]
+
+
+def test_matched_path_none_falls_back_to_pattern(
+    input_dir: Path, output_path: Path, config: PdfMergeConfig
+) -> None:
+    """matched_b_path/c_path=None なら従来通り pattern 解決（後方互換）。"""
+    (input_dir / "B_u1.pdf").write_bytes(_make_pdf(["B:u1"]))
+    (input_dir / "C_u1.pdf").write_bytes(_make_pdf(["C:u1"]))
+    (input_dir / "D_common.pdf").write_bytes(_make_pdf(["D"]))
+
+    user = _user_with_override("u1")  # override 両方 None
+    merge_user_pdfs([user], config, output_path)
+
+    assert _page_texts(output_path) == ["A:u1", "B:u1", "C:u1", "D"]
+
+
+def test_matched_path_override_missing_file_recorded_as_missing(
+    input_dir: Path, tmp_path: Path, output_path: Path, config: PdfMergeConfig
+) -> None:
+    """override 指定したがファイルが存在しない場合は missing_sources に記録（WARN）。
+
+    pattern 解決でファイルが無い場合と同じ扱い。ConfirmDialog 終了後に該当ファイルが
+    移動・削除された稀なケースを想定。
+    """
+    nonexistent = tmp_path / "moved-away.pdf"
+    (input_dir / "C_u1.pdf").write_bytes(_make_pdf(["C:u1"]))
+    (input_dir / "D_common.pdf").write_bytes(_make_pdf(["D"]))
+
+    user = _user_with_override("u1", matched_b_path=str(nonexistent))
+    report = merge_user_pdfs([user], config, output_path)
+
+    assert report.missing_sources == [("u1", "B")]
+    assert _page_texts(output_path) == ["A:u1", "C:u1", "D"]

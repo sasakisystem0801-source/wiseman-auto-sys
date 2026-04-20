@@ -20,13 +20,16 @@ from wiseman_hub.pdf.matcher import (
     MatchStatus,
 )
 from wiseman_hub.pdf.ocr_client import ExtractNameResult
-from wiseman_hub.pdf.pipeline import run_phase_a
+from wiseman_hub.pdf.pipeline import run_phase_a, run_phase_b
 from wiseman_hub.pdf.session import (
+    InvalidTransitionError,
     PairStatus,
     Session,
     SessionStatus,
+    UserCandidate,
     list_sessions,
     load_session,
+    save_session,
 )
 
 # ---------------------------------------------------------------------------
@@ -569,3 +572,285 @@ class TestLockIntegration:
                 sessions_dir=sessions_dir,
                 session=pre_session,
             )
+
+
+# ---------------------------------------------------------------------------
+# run_phase_b テスト（タスク 8C PR #B）
+# ---------------------------------------------------------------------------
+
+
+def _single_page_pdf_bytes(label: str) -> bytes:
+    doc = fitz.open()
+    try:
+        page = doc.new_page(width=595.0, height=842.0)
+        page.insert_text((50, 50), label, fontsize=12)
+        return bytes(doc.tobytes())
+    finally:
+        doc.close()
+
+
+def _make_phase_b_session(
+    *,
+    tmp_path: Path,
+    sessions_dir: Path,
+    status: SessionStatus,
+    candidates: list[UserCandidate],
+    output_path_field: str | None = None,
+) -> Session:
+    """Phase B のテスト用セッションをディスクに用意する。
+
+    各 candidate の page_{index:03d}.pdf を a_page_pdf_bytes_dir に書き出す（run_phase_b は
+    file から読む契約）。
+    """
+    from datetime import UTC, datetime
+
+    from wiseman_hub.pdf.session import generate_session_id
+
+    sid = generate_session_id()
+    now = datetime.now(UTC).isoformat()
+    pages_dir = sessions_dir / f"{sid}-pages"
+    pages_dir.mkdir(parents=True, exist_ok=True)
+    for c in candidates:
+        page_path = pages_dir / f"page_{c.page_index:03d}.pdf"
+        page_path.write_bytes(_single_page_pdf_bytes(f"A:{c.user_name_ocr or c.page_index}"))
+
+    session = Session(
+        session_id=sid,
+        status=status,
+        created_at=now,
+        updated_at=now,
+        config_snapshot={},
+        source_a_path=str(tmp_path / "A.pdf"),
+        candidates=candidates,
+        a_page_pdf_bytes_dir=str(pages_dir),
+        output_path=output_path_field,
+        total_pages_a=len(candidates),
+    )
+    save_session(session, sessions_dir=sessions_dir)
+    return session
+
+
+def _cand(
+    *,
+    page_index: int,
+    name: str,
+    status: PairStatus,
+    matched_b: str | None = None,
+    matched_c: str | None = None,
+) -> UserCandidate:
+    return UserCandidate(
+        page_index=page_index,
+        user_name_ocr=name,
+        confidence="high",
+        status=status,
+        matched_b_path=matched_b,
+        matched_c_path=matched_c,
+        similar_candidates=[],
+    )
+
+
+def _page_texts(path: Path) -> list[str]:
+    doc = fitz.open(path)
+    try:
+        return [doc[i].get_text().strip() for i in range(doc.page_count)]
+    finally:
+        doc.close()
+
+
+class TestRunPhaseBStateGuard:
+    """AC-P6: run_phase_b は READY_TO_MERGE / INTERRUPTED_PHASE_B のみ実行可。"""
+
+    @pytest.mark.parametrize(
+        "status",
+        [
+            SessionStatus.RUNNING_PHASE_A,
+            SessionStatus.NEEDS_REVIEW,
+            SessionStatus.RUNNING_PHASE_B,
+            SessionStatus.COMPLETED,
+            SessionStatus.INTERRUPTED_PHASE_A,
+        ],
+    )
+    def test_rejects_non_mergeable_status(
+        self, tmp_path: Path, status: SessionStatus
+    ) -> None:
+        sessions_dir = tmp_path / ".sessions"
+        session = _make_phase_b_session(
+            tmp_path=tmp_path,
+            sessions_dir=sessions_dir,
+            status=status,
+            candidates=[_cand(page_index=0, name="u0", status=PairStatus.AUTO_MATCHED)],
+        )
+
+        with pytest.raises((InvalidTransitionError, ValueError)):
+            run_phase_b(
+                session=session,
+                config=_config(tmp_path),
+                sessions_dir=sessions_dir,
+                output_path=tmp_path / "merged.pdf",
+            )
+
+
+class TestRunPhaseBHappyPath:
+    """AC-PB-1: READY_TO_MERGE → COMPLETED, output PDF 生成。"""
+
+    def test_merges_auto_matched_users_and_sets_completed(
+        self, tmp_path: Path
+    ) -> None:
+        sessions_dir = tmp_path / ".sessions"
+        (tmp_path / "B_u0.pdf").write_bytes(_single_page_pdf_bytes("B:u0"))
+        (tmp_path / "C_u0.pdf").write_bytes(_single_page_pdf_bytes("C:u0"))
+        (tmp_path / "B_u1.pdf").write_bytes(_single_page_pdf_bytes("B:u1"))
+        (tmp_path / "C_u1.pdf").write_bytes(_single_page_pdf_bytes("C:u1"))
+        session = _make_phase_b_session(
+            tmp_path=tmp_path,
+            sessions_dir=sessions_dir,
+            status=SessionStatus.READY_TO_MERGE,
+            candidates=[
+                _cand(page_index=0, name="u0", status=PairStatus.AUTO_MATCHED),
+                _cand(page_index=1, name="u1", status=PairStatus.AUTO_MATCHED),
+            ],
+        )
+
+        output = tmp_path / "out" / "merged.pdf"
+        result = run_phase_b(
+            session=session,
+            config=_config(tmp_path),
+            sessions_dir=sessions_dir,
+            output_path=output,
+        )
+
+        assert result.status == SessionStatus.COMPLETED
+        assert result.output_path == str(output)
+        assert output.exists()
+        texts = _page_texts(output)
+        # concat_order = [A, B, C]、D 無し
+        assert texts == ["A:u0", "B:u0", "C:u0", "A:u1", "B:u1", "C:u1"]
+        # ディスクの session も COMPLETED で永続化されている
+        reloaded = load_session(session.session_id, sessions_dir=sessions_dir)
+        assert reloaded.status == SessionStatus.COMPLETED
+        assert reloaded.output_path == str(output)
+
+
+class TestRunPhaseBExclusion:
+    """AC-PB-3: REJECTED / SKIPPED 候補は merger 入力から除外される。"""
+
+    def test_rejected_and_skipped_users_excluded(self, tmp_path: Path) -> None:
+        sessions_dir = tmp_path / ".sessions"
+        (tmp_path / "B_u0.pdf").write_bytes(_single_page_pdf_bytes("B:u0"))
+        (tmp_path / "C_u0.pdf").write_bytes(_single_page_pdf_bytes("C:u0"))
+        session = _make_phase_b_session(
+            tmp_path=tmp_path,
+            sessions_dir=sessions_dir,
+            status=SessionStatus.READY_TO_MERGE,
+            candidates=[
+                _cand(page_index=0, name="u0", status=PairStatus.AUTO_MATCHED),
+                _cand(page_index=1, name="u_rejected", status=PairStatus.REJECTED),
+                _cand(page_index=2, name="u_skipped", status=PairStatus.SKIPPED),
+            ],
+        )
+
+        output = tmp_path / "merged.pdf"
+        run_phase_b(
+            session=session,
+            config=_config(tmp_path),
+            sessions_dir=sessions_dir,
+            output_path=output,
+        )
+
+        assert _page_texts(output) == ["A:u0", "B:u0", "C:u0"]
+
+
+class TestRunPhaseBManualSelected:
+    """AC-PB-4: MANUALLY_SELECTED の matched_b_path がカスタムパスの場合、そのパスを使う。"""
+
+    def test_manually_selected_custom_path_wins_over_pattern(
+        self, tmp_path: Path
+    ) -> None:
+        sessions_dir = tmp_path / ".sessions"
+        custom = tmp_path / "elsewhere" / "any-name.pdf"
+        custom.parent.mkdir()
+        custom.write_bytes(_single_page_pdf_bytes("CUSTOM-B"))
+        # pattern 解決されるはずの B_misread.pdf はわざと作らない（override が優先されることの証明）。
+        # 日本語名は fitz デフォルトフォント (Helvetica) で描画できないため ASCII 名でテスト。
+        (tmp_path / "C_misread.pdf").write_bytes(_single_page_pdf_bytes("C:misread"))
+
+        session = _make_phase_b_session(
+            tmp_path=tmp_path,
+            sessions_dir=sessions_dir,
+            status=SessionStatus.READY_TO_MERGE,
+            candidates=[
+                _cand(
+                    page_index=0,
+                    name="misread",
+                    status=PairStatus.MANUALLY_SELECTED,
+                    matched_b=str(custom),
+                ),
+            ],
+        )
+
+        output = tmp_path / "merged.pdf"
+        run_phase_b(
+            session=session,
+            config=_config(tmp_path),
+            sessions_dir=sessions_dir,
+            output_path=output,
+        )
+
+        assert _page_texts(output) == ["A:misread", "CUSTOM-B", "C:misread"]
+
+
+class TestRunPhaseBInterrupted:
+    """AC-PB-2: merger 失敗時 INTERRUPTED_PHASE_B で保存 + 例外再送出。
+    AC-PB-5: INTERRUPTED_PHASE_B からのリトライ。"""
+
+    def test_merger_failure_sets_interrupted_and_reraises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sessions_dir = tmp_path / ".sessions"
+        (tmp_path / "B_u0.pdf").write_bytes(_single_page_pdf_bytes("B"))
+        (tmp_path / "C_u0.pdf").write_bytes(_single_page_pdf_bytes("C"))
+        session = _make_phase_b_session(
+            tmp_path=tmp_path,
+            sessions_dir=sessions_dir,
+            status=SessionStatus.READY_TO_MERGE,
+            candidates=[_cand(page_index=0, name="u0", status=PairStatus.AUTO_MATCHED)],
+        )
+
+        from wiseman_hub.pdf.merger import PdfMergeError
+
+        def failing_merge(*args: object, **kwargs: object) -> None:
+            raise PdfMergeError("disk full simulation")
+
+        monkeypatch.setattr("wiseman_hub.pdf.pipeline.merge_user_pdfs", failing_merge)
+
+        with pytest.raises(PdfMergeError, match="disk full"):
+            run_phase_b(
+                session=session,
+                config=_config(tmp_path),
+                sessions_dir=sessions_dir,
+                output_path=tmp_path / "merged.pdf",
+            )
+
+        reloaded = load_session(session.session_id, sessions_dir=sessions_dir)
+        assert reloaded.status == SessionStatus.INTERRUPTED_PHASE_B
+
+    def test_retry_from_interrupted_reaches_completed(self, tmp_path: Path) -> None:
+        sessions_dir = tmp_path / ".sessions"
+        (tmp_path / "B_u0.pdf").write_bytes(_single_page_pdf_bytes("B:u0"))
+        (tmp_path / "C_u0.pdf").write_bytes(_single_page_pdf_bytes("C:u0"))
+        session = _make_phase_b_session(
+            tmp_path=tmp_path,
+            sessions_dir=sessions_dir,
+            status=SessionStatus.INTERRUPTED_PHASE_B,
+            candidates=[_cand(page_index=0, name="u0", status=PairStatus.AUTO_MATCHED)],
+        )
+
+        output = tmp_path / "merged.pdf"
+        result = run_phase_b(
+            session=session,
+            config=_config(tmp_path),
+            sessions_dir=sessions_dir,
+            output_path=output,
+        )
+        assert result.status == SessionStatus.COMPLETED
+        assert output.exists()
