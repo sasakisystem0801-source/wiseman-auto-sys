@@ -1,4 +1,4 @@
-"""TOML設定ファイルのローダー"""
+"""TOML設定ファイルのローダー / セーバー"""
 
 from __future__ import annotations
 
@@ -6,9 +6,34 @@ try:
     import tomllib
 except ModuleNotFoundError:
     import tomli as tomllib  # type: ignore[no-redef]
-from dataclasses import dataclass, field
+import logging
+import os
+import tempfile
+from dataclasses import asdict, dataclass, field
+from glob import glob
 from pathlib import Path
 from typing import Any
+
+import tomlkit
+from tomlkit import TOMLDocument
+from tomlkit.items import InlineTable, Table
+
+logger = logging.getLogger(__name__)
+
+TableLike = Table | InlineTable
+_TABLE_LIKE_TYPES: tuple[type, ...] = (Table, InlineTable)
+
+
+def _require_table(container: Any, key: str) -> TableLike:
+    """container[key] が table (Block or Inline) であることを保証して返す。
+
+    TOML スキーマ違反（例: section が整数や文字列）を TypeError で明示する。
+    """
+    item = container[key]
+    if not isinstance(item, _TABLE_LIKE_TYPES):
+        raise TypeError(f"TOML key '{key}' is not a table (got {type(item).__name__})")
+    assert isinstance(item, (Table, InlineTable))
+    return item
 
 
 @dataclass
@@ -133,3 +158,143 @@ def load_config(path: Path | None = None) -> AppConfig:
         ocr_backend=OcrBackendConfig(**ocr_backend_data),
         pdf_merge=pdf_merge,
     )
+
+
+# AppConfig に新フィールド追加時は対応する tuple に追記すること（save_config のラウンドトリップ対象）
+_APP_FIELDS: tuple[str, ...] = ("version", "log_level", "log_dir")
+_SCALAR_SECTIONS: tuple[str, ...] = ("wiseman", "schedule", "gcp", "updater", "ocr_backend")
+
+
+def _update_table_from_dataclass(doc: TOMLDocument, section: str, data: dict[str, Any]) -> None:
+    """既存テーブルを in-place 更新（コメント維持）、存在しなければ新規追加。
+
+    標準ブロック記法 `[section]` およびインラインテーブル `section = {...}` の両方に対応。
+    """
+    if section in doc:
+        table = _require_table(doc, section)
+        for key, value in data.items():
+            table[key] = value
+    else:
+        doc[section] = data
+
+
+def _update_pdf_merge(doc: TOMLDocument, pdf_merge: PdfMergeConfig) -> None:
+    """[pdf_merge] とネスト [pdf_merge.user_name_bbox] を書き戻す。
+
+    user_name_bbox はネスト dataclass なので _update_table_from_dataclass では扱えず、
+    親 table の key/value 更新と bbox の 2 段階処理が必要。
+    """
+    bbox = asdict(pdf_merge.user_name_bbox)
+    pdf_merge_dict = asdict(pdf_merge)
+    pdf_merge_dict.pop("user_name_bbox", None)
+
+    if "pdf_merge" in doc:
+        table = _require_table(doc, "pdf_merge")
+        for key, value in pdf_merge_dict.items():
+            table[key] = value
+        if "user_name_bbox" in table:
+            bbox_table = _require_table(table, "user_name_bbox")
+            for key, value in bbox.items():
+                bbox_table[key] = value
+        else:
+            table["user_name_bbox"] = bbox
+    else:
+        new_table = tomlkit.table()
+        for key, value in pdf_merge_dict.items():
+            new_table[key] = value
+        new_table["user_name_bbox"] = bbox
+        doc["pdf_merge"] = new_table
+
+
+def _update_reports(doc: TOMLDocument, reports: list[ReportTarget]) -> None:
+    """[[reports.targets]] 配列を書き戻す。
+
+    既存の targets 配列はインラインコメントごと置換される（要素間の書式保持は未対応）。
+    """
+    targets_data = [asdict(t) for t in reports]
+    if "reports" in doc:
+        reports_table = _require_table(doc, "reports")
+        reports_table["targets"] = targets_data
+    else:
+        reports_table = tomlkit.table()
+        aot = tomlkit.aot()
+        for t in targets_data:
+            tbl = tomlkit.table()
+            for key, value in t.items():
+                tbl[key] = value
+            aot.append(tbl)
+        reports_table["targets"] = aot
+        doc["reports"] = reports_table
+
+
+def _sweep_stale_tmp(path: Path) -> None:
+    """同じ path 用に過去のクラッシュで残った tmp ファイルを削除する。
+
+    API key やパスを含むため、平文 tmp 残置を防ぐ。unlink に失敗したファイルは
+    warning も出さない（ログに tmp パスが乗るのを避けるため、件数のみ記録）。
+    """
+    pattern = str(path.parent / f"{path.name}.*.tmp")
+    stale = glob(pattern)
+    failed = 0
+    for p in stale:
+        try:
+            os.unlink(p)
+        except OSError:
+            failed += 1
+    if failed:
+        logger.warning("Failed to remove %d stale tmp file(s) in config directory", failed)
+
+
+def save_config(cfg: AppConfig, path: Path, *, create_if_missing: bool = False) -> None:
+    """AppConfig を TOML に書き戻す。
+
+    既存ファイルがあれば tomlkit でパースして値だけ更新し、コメント・空行を維持する。
+    書き込みは tempfile + os.replace で atomic（クラッシュ時の partial write を防止）。
+
+    既存ファイルがない場合の挙動は `create_if_missing` で制御する:
+    - False（既定）: FileNotFoundError を呼び出し元に伝播。誤 path の silent 新規作成を防ぐ
+    - True: 新規 TOMLDocument を作成して書き出し、親ディレクトリも自動作成する
+
+    排他制御は行わない（単一プロセスからの呼び出しを前提）。複数プロセスが同じ path に
+    同時書き込みした場合は「最後の os.replace 勝ち」になる。
+    既存 [[reports.targets]] 配列内のコメントは置換時に失われる（要素間書式の保持は未対応）。
+    """
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            doc = tomlkit.parse(f.read())
+    except FileNotFoundError:
+        if not create_if_missing:
+            raise
+        logger.warning("Config file not found at %s, creating new document", path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        doc = tomlkit.document()
+
+    # API key / PII を含む平文 tmp がクラッシュ時に残ることがあるため、書き込み前に掃除
+    _sweep_stale_tmp(path)
+
+    app_data = {field: getattr(cfg, field) for field in _APP_FIELDS}
+    _update_table_from_dataclass(doc, "app", app_data)
+
+    for section in _SCALAR_SECTIONS:
+        _update_table_from_dataclass(doc, section, asdict(getattr(cfg, section)))
+
+    _update_pdf_merge(doc, cfg.pdf_merge)
+    _update_reports(doc, cfg.reports)
+
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=path.name + ".", suffix=".tmp", dir=str(path.parent)
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(tomlkit.dumps(doc))
+        os.replace(tmp_path, path)
+    except Exception:
+        # Windows では他プロセスがハンドル保持時に unlink が PermissionError になりうる。
+        # PII/API key を含みうるため、ログには tmp path を出さない（basename のみ・失敗種別のみ）。
+        try:
+            os.unlink(tmp_path)
+        except FileNotFoundError:
+            pass
+        except OSError as cleanup_err:
+            logger.warning("Failed to unlink tmp config file: %s", type(cleanup_err).__name__)
+        raise

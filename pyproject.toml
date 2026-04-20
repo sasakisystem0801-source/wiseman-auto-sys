@@ -26,6 +26,8 @@ dependencies = [
     "httpx>=0.27.0",
     # TOML (Python <3.11 fallback)
     "tomli>=2.0.0; python_version < '3.11'",
+    # TOML 書き戻し（設定 GUI から TOML を保存、コメント維持）
+    "tomlkit>=0.13.0",
 ]
 
 [project.optional-dependencies]
