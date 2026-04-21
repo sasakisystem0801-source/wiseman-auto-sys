@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import pytest
 
+from wiseman_hub.config import AppConfig
+
 
 def pytest_configure(config: pytest.Config) -> None:
     """``@pytest.mark.tk_required`` マーカーを登録（`--strict-markers` 対応）。"""
@@ -47,3 +49,40 @@ def _skip_if_tk_unavailable(
     """``@pytest.mark.tk_required`` が付いたテストを Tk 非利用環境で skip する。"""
     if request.node.get_closest_marker("tk_required") and not _tk_available:
         pytest.skip("Tk runtime not available")
+
+
+# ---------------------------------------------------------------------------
+# Launcher テスト共通 helper（Phase A/B integration テストで重複していたものを統合）
+# ---------------------------------------------------------------------------
+
+
+class FakeMessageBox:
+    """``MessageBoxLike`` を満たす最小 stub。呼出履歴を ``calls`` に記録。
+
+    形式: ``(kind, title, message)`` で ``kind`` は ``"info" | "error" | "yesno"``。
+    """
+
+    def __init__(self, *, yesno_return: bool = True) -> None:
+        self.calls: list[tuple[str, str, str]] = []
+        self._yesno_return = yesno_return
+
+    def askyesno(self, title: str, message: str) -> bool:
+        self.calls.append(("yesno", title, message))
+        return self._yesno_return
+
+    def showinfo(self, title: str, message: str) -> None:
+        self.calls.append(("info", title, message))
+
+    def showerror(self, title: str, message: str) -> None:
+        self.calls.append(("error", title, message))
+
+
+def make_configured_appconfig() -> AppConfig:
+    """Launcher の ``validate_config_ready`` を通過する最小構成の AppConfig。"""
+    cfg = AppConfig()
+    cfg.pdf_merge.input_dir = "/in"
+    cfg.pdf_merge.output_dir = "/out"
+    cfg.pdf_merge.source_a_filename = "A.pdf"
+    cfg.ocr_backend.endpoint_url = "https://example.com"
+    cfg.ocr_backend.api_key = "key"
+    return cfg
