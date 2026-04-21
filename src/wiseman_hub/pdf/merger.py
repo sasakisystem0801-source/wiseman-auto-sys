@@ -95,15 +95,15 @@ def _validate_user_name(user_name: str) -> None:
     OCR 由来のため通常は安全だが、誤認識や誤設定で path 脱出文字が入らないよう
     境界で確認する（defense-in-depth）。
     """
+    # PII 防御: user_name 自体は氏名 = PII のため message に含めない（Issue #76）。
+    # 保証範囲: PdfMergeError.__str__ から user_name を除外。
+    # キーワード (empty/traversal/forbidden) は既存テスト互換のため保持。
     if not user_name or not user_name.strip():
         raise PdfMergeError("user_name is empty or whitespace-only")
     if ".." in user_name:
-        raise PdfMergeError(f"user_name contains path traversal: {user_name!r}")
-    bad = sorted({c for c in user_name if c in _FORBIDDEN_NAME_CHARS})
-    if bad:
-        raise PdfMergeError(
-            f"user_name contains forbidden characters {bad}: {user_name!r}"
-        )
+        raise PdfMergeError("user_name contains path traversal")
+    if any(c in _FORBIDDEN_NAME_CHARS for c in user_name):
+        raise PdfMergeError("user_name contains forbidden characters")
 
 
 def _open_pdf_file_or_raise(path: Path, source_label: str) -> fitz.Document:
@@ -111,22 +111,27 @@ def _open_pdf_file_or_raise(path: Path, source_label: str) -> fitz.Document:
 
     splitter._open_pdf_or_raise と同じ方針。破損・空・非PDF・暗号化を
     PdfMergeError に翻訳する。
+
+    PII 防御（Issue #76）: path は氏名を含むパス運用で PII を含みうる。
+    `source_label` は呼出側で kind (A/B/C/D) のみに制限してあるため安全。
+    `{path}` / `{e}` は message から除外し、型名のみ残す（PR #77 _save_atomically 同パターン）。
+    詳細が必要な場合は `__cause__` 経由で呼出側が取得する。
     """
     try:
         doc = fitz.open(path)
     except fitz.EmptyFileError as e:
-        raise PdfMergeError(f"Empty PDF for {source_label}: {path}") from e
+        raise PdfMergeError(f"Empty PDF for {source_label} ({type(e).__name__})") from e
     except fitz.FileDataError as e:
-        raise PdfMergeError(f"Corrupted PDF for {source_label}: {path}") from e
+        raise PdfMergeError(f"Corrupted PDF for {source_label} ({type(e).__name__})") from e
     except Exception as e:
-        raise PdfMergeError(f"Failed to open PDF for {source_label}: {path}: {e}") from e
+        raise PdfMergeError(f"Failed to open PDF for {source_label} ({type(e).__name__})") from e
 
     try:
         if not doc.is_pdf:
-            raise PdfMergeError(f"Not a PDF for {source_label}: {path}")
+            raise PdfMergeError(f"Not a PDF for {source_label}")
         if doc.needs_pass or doc.is_encrypted:
             raise PdfMergeError(
-                f"Encrypted PDF for {source_label}: {path}. "
+                f"Encrypted PDF for {source_label}. "
                 f"Disable password protection before processing."
             )
     except Exception:
@@ -136,13 +141,21 @@ def _open_pdf_file_or_raise(path: Path, source_label: str) -> fitz.Document:
 
 
 def _append_pdf_bytes(dst: fitz.Document, pdf_bytes: bytes, source_label: str) -> int:
-    """dst に pdf_bytes を追記する。追加ページ数を返す。"""
+    """dst に pdf_bytes を追記する。追加ページ数を返す。
+
+    PII 防御（Issue #76）: `source_label` は呼出側で kind のみに制限済。
+    `{e}` は型名に置換（PR #77 同パターン）。
+    """
     try:
         src = fitz.open(stream=pdf_bytes, filetype="pdf")
     except fitz.EmptyFileError as e:
-        raise PdfMergeError(f"Empty PDF stream for {source_label}") from e
+        raise PdfMergeError(
+            f"Empty PDF stream for {source_label} ({type(e).__name__})"
+        ) from e
     except fitz.FileDataError as e:
-        raise PdfMergeError(f"Corrupted PDF stream for {source_label}") from e
+        raise PdfMergeError(
+            f"Corrupted PDF stream for {source_label} ({type(e).__name__})"
+        ) from e
     try:
         added = int(src.page_count)
         try:
@@ -151,7 +164,7 @@ def _append_pdf_bytes(dst: fitz.Document, pdf_bytes: bytes, source_label: str) -
             raise
         except Exception as e:
             raise PdfMergeError(
-                f"Failed to insert PDF pages for {source_label}: {e}"
+                f"Failed to insert PDF pages for {source_label} ({type(e).__name__})"
             ) from e
         return added
     finally:
@@ -159,6 +172,10 @@ def _append_pdf_bytes(dst: fitz.Document, pdf_bytes: bytes, source_label: str) -
 
 
 def _append_pdf_file(dst: fitz.Document, path: Path, source_label: str) -> int:
+    """PDF ファイルを dst に追記する。
+
+    PII 防御（Issue #76）: `path` / `{e}` は message から除外し、kind のみ残す。
+    """
     src = _open_pdf_file_or_raise(path, source_label)
     try:
         added = int(src.page_count)
@@ -168,7 +185,7 @@ def _append_pdf_file(dst: fitz.Document, path: Path, source_label: str) -> int:
             raise
         except Exception as e:
             raise PdfMergeError(
-                f"Failed to insert PDF pages for {source_label} from {path}: {e}"
+                f"Failed to insert PDF pages for {source_label} ({type(e).__name__})"
             ) from e
         return added
     finally:
@@ -257,9 +274,11 @@ def merge_user_pdfs(
         for user_idx, user in enumerate(users):
             _validate_user_name(user.user_name)
             for kind in config.concat_order:
+                # PII 防御 (Issue #76): source_label は kind (A/B/C/D) のみに制限。
+                # user_name を埋め込むと PdfMergeError message 経由で漏洩しうる。
                 if kind == "A":
                     total_pages += _append_pdf_bytes(
-                        dst, user.a_page_pdf_bytes, f"A:{user.user_name}"
+                        dst, user.a_page_pdf_bytes, "A"
                     )
                 else:
                     path = _resolve_bc_path(user, kind, input_dir, config)
@@ -275,7 +294,7 @@ def merge_user_pdfs(
                         )
                         missing.append((user.user_name, kind))
                         continue
-                    total_pages += _append_pdf_file(dst, path, f"{kind}:{user.user_name}")
+                    total_pages += _append_pdf_file(dst, path, kind)
 
         d_appended = False
         if config.source_d_filename:
