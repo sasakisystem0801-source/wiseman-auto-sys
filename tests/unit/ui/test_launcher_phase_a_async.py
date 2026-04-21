@@ -11,7 +11,6 @@ from __future__ import annotations
 import logging
 import os
 import threading
-import time
 from pathlib import Path
 from typing import Any
 
@@ -75,8 +74,6 @@ class TestPhaseAWorkerThread:
             )
             launcher.invoke_action(LauncherAction.RUN_PDF_MERGE)
             launcher.wait_until_idle(timeout=5.0)
-            # pending after() を処理
-            root.update()
         finally:
             root.destroy()
 
@@ -124,7 +121,6 @@ class TestRepeatedClickIgnored:
             launcher.invoke_action(LauncherAction.RUN_PDF_MERGE)
             proceed.set()
             launcher.wait_until_idle(timeout=5.0)
-            root.update()
         finally:
             root.destroy()
 
@@ -174,11 +170,6 @@ class TestButtonStatesWhileBusy:
             )
             proceed.set()
             launcher.wait_until_idle(timeout=5.0)
-            # 完了後の after(0,...) を pump
-            deadline = time.monotonic() + 3.0
-            while time.monotonic() < deadline and launcher._busy:
-                root.update()
-                time.sleep(0.01)
             final_states = (
                 "disabled" in launcher._btn_run.state(),
                 "disabled" in launcher._btn_review.state(),
@@ -218,10 +209,6 @@ class TestCompletionNotifications:
             )
             launcher.invoke_action(LauncherAction.RUN_PDF_MERGE)
             launcher.wait_until_idle(timeout=5.0)
-            deadline = time.monotonic() + 3.0
-            while time.monotonic() < deadline and launcher._busy:
-                root.update()
-                time.sleep(0.01)
         finally:
             root.destroy()
 
@@ -254,10 +241,6 @@ class TestCompletionNotifications:
                 )
                 launcher.invoke_action(LauncherAction.RUN_PDF_MERGE)
                 launcher.wait_until_idle(timeout=5.0)
-                deadline = time.monotonic() + 3.0
-                while time.monotonic() < deadline and launcher._busy:
-                    root.update()
-                    time.sleep(0.01)
         finally:
             root.destroy()
 

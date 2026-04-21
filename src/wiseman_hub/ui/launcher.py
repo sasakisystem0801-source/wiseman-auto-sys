@@ -19,6 +19,7 @@ import concurrent.futures
 import contextlib
 import enum
 import logging
+import time
 import tkinter as tk
 from collections.abc import Callable
 from pathlib import Path
@@ -195,25 +196,41 @@ class Launcher:
         try:
             self._root.mainloop()
         finally:
-            # executor は run 終了時に必ず shutdown する（Daemon thread 化していないため
-            # 残留すると Python プロセス終了を妨げる）
-            self._executor.shutdown(wait=False, cancel_futures=True)
+            self._shutdown_executor()
             if self._owns_root:
                 with contextlib.suppress(tk.TclError):
                     self._root.destroy()
 
-    def wait_until_idle(self, timeout: float) -> None:
-        """実行中の Phase A が完了するまで待機する（テスト用）。
+    def __del__(self) -> None:
+        # ``run()`` を呼ばずに Launcher インスタンスが破棄されるパス（テストで
+        # __init__ 後に root.destroy() で抜ける等）でも worker thread がプロセス
+        # 終了を阻害しないよう、GC 時にも shutdown を保証する。
+        self._shutdown_executor()
 
-        ``_on_phase_a_done`` は ``root.after(0, ...)`` で main thread に
-        再スケジュールされるため、呼出側は続けて ``root.update()`` を呼んで
-        after コールバックを pump すること。
+    def _shutdown_executor(self) -> None:
+        executor = getattr(self, "_executor", None)
+        if executor is None:
+            return
+        with contextlib.suppress(Exception):
+            executor.shutdown(wait=False, cancel_futures=True)
+
+    def wait_until_idle(self, timeout: float) -> None:
+        """実行中の Phase A が完了し、完了処理が main thread で pump されるまで待機する（テスト用）。
+
+        ``_on_phase_a_done`` は ``root.after(0, ...)`` で main thread に再スケジュール
+        されるため、本 helper 内で ``root.update()`` を呼んで pump する。呼び出し元は
+        追加の event loop 操作なしに busy=False まで確認できる。
         """
         future = self._current_future
         if future is None:
             return
+        deadline = time.monotonic() + timeout
         with contextlib.suppress(concurrent.futures.TimeoutError):
             future.result(timeout=timeout)
+        while self._busy and time.monotonic() < deadline:
+            with contextlib.suppress(tk.TclError):
+                self._root.update()
+            time.sleep(0.01)
 
     def _handle_run_pdf_merge(self) -> None:
         if self._busy:
@@ -231,7 +248,7 @@ class Launcher:
             return
 
         if self._on_run_pdf_merge is None:
-            # Phase A コールバック未注入時は 13A 互換のプレースホルダ挙動を維持。
+            # コールバック未注入時のプレースホルダ（テスト環境や未統合状態のみ発生）。
             self._messagebox.showinfo(
                 _TITLE_UNIMPL,
                 "PDF マージ処理の統合は後続タスクで実装予定です。",
@@ -249,7 +266,7 @@ class Launcher:
     ) -> None:
         """worker thread → main thread 遷移（Tk は main thread 以外から触れない）。"""
         try:
-            self._root.after(0, lambda: self._on_phase_a_done(future))
+            self._root.after(0, self._on_phase_a_done, future)
         except RuntimeError as e:
             # root が既に destroy 済みなら after は RuntimeError。PII 防御で型名のみ。
             logger.warning(
@@ -264,7 +281,7 @@ class Launcher:
         self._current_future = None
         try:
             future.result()
-        except BaseException as exc:  # noqa: BLE001 — worker thread 例外は全種類を捕捉
+        except Exception as exc:
             # PII 防御: logger には型名のみ（exc の message はパス/氏名を含みうる）。
             logger.error("phase A callback failed: %s", type(exc).__name__)
             self._messagebox.showerror(
