@@ -18,22 +18,22 @@
 
 デスクトップの「**Wiseman PDF ツール**」アイコンをダブルクリックします。ランチャー画面（3 ボタン）が表示されれば起動成功です。
 
-初回起動時の SmartScreen 警告が出る場合は [14c-deploy.md §5](docs/handoff/14c-deploy.md) の手順に従ってください。
+初回起動時の SmartScreen 警告が出る場合は [14c-deploy.md §5 SmartScreen / Windows Defender への対応](docs/handoff/14c-deploy.md#5-smartscreen--windows-defender-への対応) の手順に従ってください。
 
 ### 設定
 
 初期セットアップ時のみ、`config\default.toml` をテキストエディタで編集して施設別パラメータ（GCP 認証キーのパス、PDF 入出力フォルダ、利用者名 OCR の切り出し矩形等）を設定します。
 
-- サンプルファイル: **[`config/default.toml.sample`](config/default.toml.sample)** — コピーして `default.toml` にリネームし、`■ 必須` 行を編集
+- サンプルファイル: **[`config/default.toml.sample`](config/default.toml.sample)** — コピーして `default.toml` という名前で保存し、`■ 必須` 行を編集（`default.toml.sample` はリネームせず残す）
 - 本体起動後は**「設定」ボタン**から GUI で編集できます（以降は手動編集不要）
 
 ### よくあるエラー
 
 | 現象 | 対処 |
 |------|------|
-| デスクトップアイコンをダブルクリックしてもアプリが起動しない | [14c-deploy.md §7.2](docs/handoff/14c-deploy.md) のログ取得手順（`startup.log`）に従い、弊社へ連絡 |
-| SmartScreen 警告で進めない | [14c-deploy.md §5](docs/handoff/14c-deploy.md) の「詳細情報 → 実行」で回避 |
-| アイコンが表示されない | [14c-deploy.md §7.3](docs/handoff/14c-deploy.md) のキャッシュ再生成手順 |
+| デスクトップアイコンをダブルクリックしてもアプリが起動しない | [14c-deploy.md §7.2 ダブルクリックでアプリが起動しない](docs/handoff/14c-deploy.md#72-ダブルクリックでアプリが起動しない) のログ取得手順（`startup.log`）に従い、弊社へ連絡 |
+| SmartScreen 警告で進めない | [14c-deploy.md §5](docs/handoff/14c-deploy.md#5-smartscreen--windows-defender-への対応) の「詳細情報 → 実行」で回避 |
+| アイコンが表示されない | [14c-deploy.md §7.3 「Wiseman PDF ツール」のアイコンが表示されない](docs/handoff/14c-deploy.md#73-wiseman-pdf-ツールのアイコンが表示されない) のキャッシュ再生成手順 |
 | 設定ファイル読込エラー | `config\default.toml` が UTF-8（BOM なし）で保存されているか確認 |
 
 上記で解決しない場合、`%USERPROFILE%\wiseman-hub\startup.log` を弊社担当へ送付してください。送付前に、ログ内に利用者氏名等の個人情報が含まれていないか目視で確認願います。

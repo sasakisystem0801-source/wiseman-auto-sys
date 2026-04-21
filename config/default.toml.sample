@@ -14,7 +14,11 @@
 #   - [wiseman] exe_path                       : ワイズマンショートカットまたは exe のパス
 #   - [gcp] service_account_key_path           : GCP サービスアカウントキーのパス（受領した sa-key.json の置き場所）
 #   - [ocr_backend]                            : Cloud Run プロキシ情報（弊社から別途受領）
-#   - [pdf_merge]                              : PDF 結合の入出力フォルダと施設別パラメータ
+#   - [pdf_merge] input_dir / output_dir /
+#     source_a_filename / user_name_bbox       : PDF 結合の入出力フォルダと施設別パラメータ
+#
+# ■ 通常はそのまま（全施設共通、弊社側で管理）
+#   - [gcp] project_id / bucket_name / region  : 弊社 GCP プロジェクト固定（MVP は単一プロジェクト運用）
 #
 # ■ 更新時の注意
 #   配布 ZIP を更新する際、`default.toml.sample` は上書き更新されますが、
@@ -36,12 +40,14 @@ log_dir = ""               # 空の場合はカレントディレクトリに出
 # -------------------------------------------------------------------------
 [wiseman]
 # ワイズマンの起動方法（.lnk または .exe）を施設の環境に合わせて設定してください。
+# デスクトップショートカット経由の起動を推奨します（.exe 直接指定は通常不要）。
 #
-# 例 1: デスクトップ上のショートカット経由で起動（最も一般的）
+# 例: デスクトップ上のショートカット経由で起動（最も一般的）
 #   exe_path = "C:\\Users\\<USER>\\OneDrive\\デスクトップ\\ワイズマンASPサービス起動_O.lnk"
 #
-# 例 2: .exe を直接起動
-#   exe_path = "C:\\Program Files\\Wiseman\\wiseman.exe"
+# 注: ワイズマンの実体 exe は既定で
+#   C:\\Users\\<USER>\\AppData\\Local\\Programs\\WISEMAN\\WISEMANVSYSTEM\\
+# 配下にインストールされます（.exe 直接指定する場合のみ参考）。
 exe_path = ""              # ■ 必須: ショートカットまたは exe のフルパス
 startup_wait_sec = 15      # 起動・USB ドングル認証の待機秒数（通常はそのまま）
 window_title_pattern = ".*管理システム SP.*"
@@ -65,13 +71,15 @@ menu_path = ["ケア記録", "集計表"]
 output_format = "csv"
 
 # -------------------------------------------------------------------------
-# [gcp] GCP 接続設定（■ 必須編集: service_account_key_path）
+# [gcp] GCP 接続設定（■ 必須編集: service_account_key_path のみ）
 # -------------------------------------------------------------------------
+# project_id / bucket_name / region は全施設共通で固定（MVP 運用）。
+# 施設ごとに変更するのは sa-key.json の配置パスのみです。
 [gcp]
-project_id = "wiseman-hub-prod"
-bucket_name = "wiseman-hub-prod-datalake"
+project_id = "wiseman-hub-prod"                    # 通常はそのまま（弊社 GCP プロジェクト）
+bucket_name = "wiseman-hub-prod-datalake"          # 通常はそのまま（データ転送先バケット）
 service_account_key_path = "config/sa-key.json"   # ■ 必須: 受領した sa-key.json の配置パス
-region = "asia-northeast1"                         # 東京リージョン（APPI 準拠、ADR-003）
+region = "asia-northeast1"                         # 東京リージョン固定（APPI 準拠、ADR-003）
 
 # -------------------------------------------------------------------------
 # [updater] 自動更新（通常はそのまま）
@@ -94,7 +102,8 @@ timeout_sec = 30
 max_retries = 3
 
 # -------------------------------------------------------------------------
-# [pdf_merge] PDF 分割・結合（■ 必須編集: input_dir / output_dir / user_name_bbox）
+# [pdf_merge] PDF 分割・結合
+#   ■ 必須編集: input_dir / output_dir / source_a_filename / user_name_bbox
 # -------------------------------------------------------------------------
 # フォルダ構成と命名規則:
 #   - input_dir     : A(複数利用者 PDF) / B・C(利用者別 PDF) / D(共通 PDF) を配置するフォルダ
