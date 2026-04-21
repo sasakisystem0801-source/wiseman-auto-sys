@@ -1,7 +1,7 @@
-"""ランチャー GUI（3 ボタン骨格）。
+"""ランチャー GUI（3 ボタン骨格 + Phase A 非同期実行）。
 
 アプリ起動時にユーザーが最初に見る画面。3 ボタンを提供する:
-1. PDF マージ処理を実行（コールバック DI）
+1. PDF マージ処理を実行（コールバック DI、worker thread で非同期実行）
 2. 確認待ちセッション（コールバック DI）
 3. 設定（コールバック DI、未注入時はプレースホルダメッセージ）
 
@@ -9,10 +9,13 @@
 - 全コールバックを DI で差替え可能（テスト容易性）
 - 設定未完了時は ``on_config_missing`` を呼ぶ（PDF マージ処理押下時のみ）
 - PII（氏名・パス）は logger に出さない
+- Phase A 実行中は全ボタン disable + 2 回目クリック無視（Issue #62 / AC-L-2-Async, NoDouble）
+- worker thread → main thread 遷移は ``root.after(0, ...)`` で安全に（Tk は main thread only）
 """
 
 from __future__ import annotations
 
+import concurrent.futures
 import contextlib
 import enum
 import logging
@@ -48,13 +51,23 @@ _MSG_CONFIG_MISSING = (
 )
 
 _TITLE_UNIMPL = "未実装"
-_MSG_PDF_MERGE_UNIMPL = "PDF マージ処理の統合は後続タスクで実装予定です。"
 _MSG_REVIEW_UNIMPL = "確認待ちセッション機能は後続タスクで実装予定です。"
 
 _TITLE_SETTINGS_PLACEHOLDER = "設定画面（未実装）"
 _MSG_SETTINGS_PLACEHOLDER = (
     "設定画面は後続タスクで実装予定です。\n"
     "現状は config/default.toml を直接編集してください。"
+)
+
+_TITLE_PHASE_A_DONE = "Phase A 完了"
+_MSG_PHASE_A_DONE = (
+    "PDF マージ処理（Phase A）が完了しました。\n"
+    "確認待ちセッションがある場合は「確認待ちセッション」ボタンから処理してください。"
+)
+_TITLE_PHASE_A_ERROR = "Phase A 実行エラー"
+_MSG_PHASE_A_ERROR_FMT = (
+    "PDF マージ処理中にエラーが発生しました。\n"
+    "詳細はログを確認してください。\n\n{type}"
 )
 
 
@@ -78,6 +91,7 @@ class Launcher:
     """3 ボタン構成のメインランチャー GUI。
 
     コールバック省略時は既定のプレースホルダメッセージを表示する。
+    Phase A は worker thread で実行し、busy 中は全ボタン disable + 2 回目クリック無視。
     """
 
     def __init__(
@@ -109,6 +123,14 @@ class Launcher:
         # Phase A 統合時に OCR/ファイル I/O 例外が氏名・パスを含みうるため、
         # ConfirmDialog と同じく型名のみログに残し、UI には sanitized メッセージで通知する。
         self._root.report_callback_exception = self._on_callback_exception
+
+        # Phase A 非同期実行用。max_workers=1 で Phase A の直列実行を保証
+        # （Phase A は session lock で他プロセスとは競合しないが、同プロセス内の二重起動を防ぐ）。
+        self._executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="phase-a"
+        )
+        self._busy = False
+        self._current_future: concurrent.futures.Future[None] | None = None
 
         self._build_ui()
 
@@ -173,11 +195,31 @@ class Launcher:
         try:
             self._root.mainloop()
         finally:
+            # executor は run 終了時に必ず shutdown する（Daemon thread 化していないため
+            # 残留すると Python プロセス終了を妨げる）
+            self._executor.shutdown(wait=False, cancel_futures=True)
             if self._owns_root:
                 with contextlib.suppress(tk.TclError):
                     self._root.destroy()
 
+    def wait_until_idle(self, timeout: float) -> None:
+        """実行中の Phase A が完了するまで待機する（テスト用）。
+
+        ``_on_phase_a_done`` は ``root.after(0, ...)`` で main thread に
+        再スケジュールされるため、呼出側は続けて ``root.update()`` を呼んで
+        after コールバックを pump すること。
+        """
+        future = self._current_future
+        if future is None:
+            return
+        with contextlib.suppress(concurrent.futures.TimeoutError):
+            future.result(timeout=timeout)
+
     def _handle_run_pdf_merge(self) -> None:
+        if self._busy:
+            logger.info("PDF merge requested but launcher is busy; ignored")
+            return
+
         if not validate_config_ready(self._config):
             logger.info("PDF merge requested but config is incomplete")
             if self._on_config_missing is not None:
@@ -188,9 +230,55 @@ class Launcher:
             self.invoke_action(LauncherAction.OPEN_SETTINGS)
             return
 
-        self._invoke_or_show(
-            self._on_run_pdf_merge, _TITLE_UNIMPL, _MSG_PDF_MERGE_UNIMPL
-        )
+        if self._on_run_pdf_merge is None:
+            # Phase A コールバック未注入時は 13A 互換のプレースホルダ挙動を維持。
+            self._messagebox.showinfo(
+                _TITLE_UNIMPL,
+                "PDF マージ処理の統合は後続タスクで実装予定です。",
+            )
+            return
+
+        self._set_busy(True)
+        callback = self._on_run_pdf_merge
+        future = self._executor.submit(callback)
+        self._current_future = future
+        future.add_done_callback(self._schedule_phase_a_done)
+
+    def _schedule_phase_a_done(
+        self, future: concurrent.futures.Future[None]
+    ) -> None:
+        """worker thread → main thread 遷移（Tk は main thread 以外から触れない）。"""
+        try:
+            self._root.after(0, lambda: self._on_phase_a_done(future))
+        except RuntimeError as e:
+            # root が既に destroy 済みなら after は RuntimeError。PII 防御で型名のみ。
+            logger.warning(
+                "launcher after() failed after root destroy: %s", type(e).__name__
+            )
+
+    def _on_phase_a_done(
+        self, future: concurrent.futures.Future[None]
+    ) -> None:
+        """Phase A 完了後処理（main thread で実行）。成功/失敗を通知しボタンを再有効化。"""
+        self._set_busy(False)
+        self._current_future = None
+        try:
+            future.result()
+        except BaseException as exc:  # noqa: BLE001 — worker thread 例外は全種類を捕捉
+            # PII 防御: logger には型名のみ（exc の message はパス/氏名を含みうる）。
+            logger.error("phase A callback failed: %s", type(exc).__name__)
+            self._messagebox.showerror(
+                _TITLE_PHASE_A_ERROR,
+                _MSG_PHASE_A_ERROR_FMT.format(type=type(exc).__name__),
+            )
+            return
+        self._messagebox.showinfo(_TITLE_PHASE_A_DONE, _MSG_PHASE_A_DONE)
+
+    def _set_busy(self, busy: bool) -> None:
+        self._busy = busy
+        state = ["disabled"] if busy else ["!disabled"]
+        for btn in (self._btn_run, self._btn_review, self._btn_settings):
+            btn.state(state)  # type: ignore[no-untyped-call]
 
     def _invoke_or_show(
         self, callback: Callable[[], None] | None, title: str, message: str
