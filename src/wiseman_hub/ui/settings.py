@@ -146,6 +146,9 @@ def validate_form(form: SettingsForm) -> list[str]:
     if not form.ocr_api_key.strip():
         errors.append("OCR API キーを入力してください。")
 
+    # エラーメッセージに入力値 (raw) を埋め込まない。フィールド間のコピペ誤入力
+    # （例: API Key を URL 欄に貼付けて数値エラーになる）で PII が表示に露出する
+    # のを防ぐ（PII 防御）。
     for label, raw in (
         ("bbox x0", form.bbox_x0),
         ("bbox y0", form.bbox_y0),
@@ -155,14 +158,14 @@ def validate_form(form: SettingsForm) -> list[str]:
         try:
             float(raw)
         except ValueError:
-            errors.append(f"{label} は数値で入力してください（入力値: {raw!r}）。")
+            errors.append(f"{label} は数値で入力してください。")
 
     try:
         dpi = int(form.bbox_dpi)
         if dpi <= 0:
             errors.append("bbox dpi は正の整数で入力してください。")
     except ValueError:
-        errors.append(f"bbox dpi は整数で入力してください（入力値: {form.bbox_dpi!r}）。")
+        errors.append("bbox dpi は整数で入力してください。")
 
     order_tokens = [s.strip() for s in form.concat_order.split(",") if s.strip()]
     if not order_tokens:

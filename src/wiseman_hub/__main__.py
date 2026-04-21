@@ -136,16 +136,24 @@ def main() -> None:
             # 設定コールバックで後から Launcher を参照する必要があるため、
             # クロージャで双方向バインディングする（Launcher インスタンス生成前に
             # コールバックを作る必要がある一方、コールバックは Launcher のメソッドを呼ぶ）。
-            launcher_ref: list[Launcher] = []
+            # ``list[Launcher | None] = [None]`` で初期化し、参照時 assert で
+            # 未初期化（将来スレッド化した場合の race）を fail-fast に検出する。
+            launcher_ref: list[Launcher | None] = [None]
+
+            def _get_launcher() -> Launcher:
+                instance = launcher_ref[0]
+                assert instance is not None, "launcher accessed before initialization"
+                return instance
+
             launcher = Launcher(
                 config=config,
                 config_path=config_path,
                 on_run_pdf_merge=_make_phase_a_callback(config_path),
                 on_open_settings=_make_settings_callback(
-                    config_path, lambda: launcher_ref[0]
+                    config_path, _get_launcher
                 ),
             )
-            launcher_ref.append(launcher)
+            launcher_ref[0] = launcher
             launcher.run()
     except KeyboardInterrupt:
         logger.info("シャットダウン（Ctrl+C）")
