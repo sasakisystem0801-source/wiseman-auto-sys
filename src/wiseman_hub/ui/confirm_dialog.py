@@ -278,10 +278,16 @@ class ConfirmDialog:
     def _close_dialog(self) -> None:
         """モードに応じて dialog を閉じる。
 
-        - Toplevel モード: ``destroy()`` で window を閉じる（親 mainloop は継続）
+        - Toplevel モード: grab_release → ``destroy()`` で window を閉じる（親 mainloop は継続）
         - Standalone モード: ``quit()`` で mainloop を止める（``run()`` の finally で destroy）
+
+        Windows では destroy 単独だと grab が残留するパスが観測されており、明示的に
+        grab_release を呼んでから destroy する（Codex MEDIUM 指摘）。
         """
         if self._is_toplevel:
+            with contextlib.suppress(tk.TclError):
+                if self._root.grab_current() is self._root:  # type: ignore[no-untyped-call]
+                    self._root.grab_release()
             with contextlib.suppress(tk.TclError):
                 self._root.destroy()
         else:

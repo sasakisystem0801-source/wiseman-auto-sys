@@ -448,13 +448,20 @@ class SettingsDialog:
     def _close_dialog(self) -> None:
         """Toplevel / standalone 両モードで dialog を閉じる共通処理。
 
-        - Toplevel: ``destroy()`` で wait_window が return → 親の mainloop 継続
+        - Toplevel: grab_release → ``destroy()`` で wait_window が return → 親 mainloop 継続
         - Standalone: ``quit()`` で自前 mainloop を終了
+
+        Windows での grab 残留を防ぐため、Toplevel モード時は destroy 前に明示的に
+        grab_release する（Codex MEDIUM 指摘、ConfirmDialog / SessionPicker と統一）。
         """
-        with contextlib.suppress(tk.TclError):
-            if self._is_toplevel:
+        if self._is_toplevel:
+            with contextlib.suppress(tk.TclError):
+                if self._root.grab_current() is self._root:  # type: ignore[no-untyped-call]
+                    self._root.grab_release()
+            with contextlib.suppress(tk.TclError):
                 self._root.destroy()
-            else:
+        else:
+            with contextlib.suppress(tk.TclError):
                 self._root.quit()
 
     def pick_folder(self, field_name: str) -> None:

@@ -169,10 +169,36 @@ def _make_review_callback(
             # 未解決残り → Phase B に進まない（ユーザーは再度確認 UI を開いて続行）
             return None
 
+        # HIGH (Codex 指摘): ConfirmDialog 実行後に lock 解放 → 再取得する間、
+        # 他プロセスがセッションを discard / COMPLETED 遷移 / JSON 削除する可能性がある。
+        # メモリ上の stale session で save_session すると古い内容で復活保存され不整合に
+        # なるため、2 回目のロック内で必ず再ロードし、許可する状態のみ遷移する。
+        # 許可: (a) NEEDS_REVIEW かつ all_candidates_resolved → READY_TO_MERGE へ遷移
+        #       (b) 既に READY_TO_MERGE → 冪等で session_id 返却（InvalidTransition に揃える）
+        # それ以外は競合として停止（CLI 側 _cmd_review と方針統一、Issue #72 準備）。
         try:
             with with_session_lock(sessions_dir, session_id):
-                transition_session(session, SessionStatus.READY_TO_MERGE)
-                save_session(session, sessions_dir=sessions_dir)
+                fresh = load_session(session_id, sessions_dir=sessions_dir)
+                if fresh.status == SessionStatus.READY_TO_MERGE:
+                    return session_id
+                if (
+                    fresh.status != SessionStatus.NEEDS_REVIEW
+                    or not fresh.all_candidates_resolved
+                ):
+                    logger.warning(
+                        "session %s concurrent modification detected (status=%s): "
+                        "abort transition",
+                        session_id,
+                        fresh.status.value,
+                    )
+                    messagebox.showerror(
+                        "セッション競合",
+                        "別のプロセスがセッションを変更したため遷移を中止しました。"
+                        "「確認待ちセッション」から再度開いてください。",
+                    )
+                    return None
+                transition_session(fresh, SessionStatus.READY_TO_MERGE)
+                save_session(fresh, sessions_dir=sessions_dir)
         except (BlockingIOError, OSError) as exc:
             logger.error(
                 "session %s transition save failed: %s",
@@ -187,13 +213,20 @@ def _make_review_callback(
             )
             return None
         except InvalidTransitionError as exc:
-            # 二重遷移（既に READY_TO_MERGE 等）。picker が load 直後に他プロセスが触った可能性。
+            # fresh.status チェックで弾くはずだが、状態機械の race で到達する可能性に備えた
+            # 最終安全網。既に READY_TO_MERGE なら冪等で session_id 返却、それ以外は停止
+            # （CLI _cmd_review 方針と揃える、Codex MEDIUM 指摘）。
             logger.warning(
-                "session %s already transitioned: %s",
+                "session %s invalid transition: %s",
                 session_id,
                 type(exc).__name__,
             )
-            return session_id  # 既に進行可能状態なので Phase B に進める
+            messagebox.showerror(
+                "セッション状態エラー",
+                "セッションの状態が予期しないものです。ログを確認してください。"
+                f"\n\n{type(exc).__name__}",
+            )
+            return None
 
         return session_id
 

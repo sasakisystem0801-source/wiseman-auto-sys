@@ -253,6 +253,13 @@ class SessionPicker:
         self._close_dialog()
 
     def _close_dialog(self) -> None:
-        """Toplevel を閉じる（親 mainloop は継続）。"""
+        """Toplevel を閉じる（親 mainloop は継続）。
+
+        Windows で grab 残留が発生しないよう、destroy 前に明示的に grab_release する
+        （Codex MEDIUM 指摘）。
+        """
+        with contextlib.suppress(tk.TclError):
+            if self._root.grab_current() is self._root:  # type: ignore[no-untyped-call]
+                self._root.grab_release()
         with contextlib.suppress(tk.TclError):
             self._root.destroy()
