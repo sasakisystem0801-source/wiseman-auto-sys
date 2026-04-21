@@ -123,7 +123,7 @@ def test_settings_callback_reloads_launcher_on_save(
         def run(self) -> Any:
             from wiseman_hub.ui.settings import SettingsDialogResult
 
-            return SettingsDialogResult(saved=True, config=saved_config)
+            return SettingsDialogResult(config=saved_config)
 
     monkeypatch.setattr("wiseman_hub.ui.settings.SettingsDialog", FakeDialog)
     monkeypatch.setattr(
@@ -163,7 +163,7 @@ def test_settings_callback_does_not_reload_on_cancel(
         def run(self) -> Any:
             from wiseman_hub.ui.settings import SettingsDialogResult
 
-            return SettingsDialogResult(saved=False)
+            return SettingsDialogResult()
 
     monkeypatch.setattr("wiseman_hub.ui.settings.SettingsDialog", FakeDialog)
     monkeypatch.setattr(

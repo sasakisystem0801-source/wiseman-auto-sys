@@ -12,11 +12,25 @@ import logging
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from wiseman_hub.config import AppConfig
+
+
+class _LauncherLike(Protocol):
+    """``_make_settings_callback`` が必要とする Launcher の最小インターフェース。
+
+    import 循環と Tk 依存を避けるため Protocol で表現し、Launcher 実体を直接
+    参照しない（テストで FakeLauncher を差し替えやすくする副次効果もある）。
+    """
+
+    def reload_config(self, config: AppConfig) -> None: ...
 
 
 def _make_settings_callback(
     config_path: Path,
-    get_launcher: Callable[[], object],
+    get_launcher: Callable[[], _LauncherLike],
 ) -> Callable[[], None]:
     """Launcher に注入する「設定」コールバックを組み立てる。
 
@@ -31,11 +45,8 @@ def _make_settings_callback(
         config = load_config(config_path)
         dialog = SettingsDialog(config=config, config_path=config_path)
         result = dialog.run()
-        if result.saved and result.config is not None:
-            launcher = get_launcher()
-            reload = getattr(launcher, "reload_config", None)
-            if callable(reload):
-                reload(result.config)
+        if result.config is not None:
+            get_launcher().reload_config(result.config)
 
     return open_settings
 

@@ -63,10 +63,19 @@ class SettingsForm:
 
 @dataclass(frozen=True)
 class SettingsDialogResult:
-    """``SettingsDialog.run()`` の返却値。"""
+    """``SettingsDialog.run()`` の返却値。
 
-    saved: bool
+    ``config is not None`` が成立する iff 保存が成功した。``saved`` property は
+    単一真実源である ``config`` から派生させ、bool と optional を同期させる二重
+    表現を避ける（呼出側が ``saved=True`` かつ ``config is None`` を誤って扱う
+    ケースを構造的に排除）。
+    """
+
     config: AppConfig | None = None
+
+    @property
+    def saved(self) -> bool:
+        return self.config is not None
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +235,7 @@ class SettingsDialog:
         self._root = root if root is not None else tk.Tk()
         self._root.report_callback_exception = self._on_callback_exception
 
-        self._result: SettingsDialogResult = SettingsDialogResult(saved=False)
+        self._result: SettingsDialogResult = SettingsDialogResult()
         self._vars: dict[str, tk.StringVar] = {}
 
         self._build_ui()
@@ -300,6 +309,7 @@ class SettingsDialog:
         initial: str,
         *,
         show: str | None = None,
+        columnspan: int = 2,
     ) -> ttk.Entry:
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=3)
         var = tk.StringVar(value=initial)
@@ -307,7 +317,9 @@ class SettingsDialog:
         entry = ttk.Entry(parent, textvariable=var)
         if show is not None:
             entry.configure(show=show)
-        entry.grid(row=row, column=1, columnspan=2, sticky="ew", padx=(6, 0), pady=3)
+        entry.grid(
+            row=row, column=1, columnspan=columnspan, sticky="ew", padx=(6, 0), pady=3
+        )
         return entry
 
     def _add_folder_row(
@@ -319,11 +331,7 @@ class SettingsDialog:
         initial: str,
         folder_key: _FolderKey,
     ) -> None:
-        self._add_entry_row(parent, row, label, field_name, initial)
-        # 2列目の entry を 1列使い、3列目にボタン配置のため entry の colspan を 1 に縮める
-        entry_col1 = parent.grid_slaves(row=row, column=1)
-        if entry_col1:
-            entry_col1[0].grid_configure(columnspan=1)
+        self._add_entry_row(parent, row, label, field_name, initial, columnspan=1)
         target = folder_key.value
         ttk.Button(
             parent,
@@ -339,10 +347,7 @@ class SettingsDialog:
         field_name: str,
         initial: str,
     ) -> None:
-        self._add_entry_row(parent, row, label, field_name, initial)
-        entry_col1 = parent.grid_slaves(row=row, column=1)
-        if entry_col1:
-            entry_col1[0].grid_configure(columnspan=1)
+        self._add_entry_row(parent, row, label, field_name, initial, columnspan=1)
         ttk.Button(
             parent,
             text="選択...",
@@ -373,7 +378,7 @@ class SettingsDialog:
                 _TITLE_VALIDATION_ERROR,
                 _MSG_VALIDATION_HEADER + "\n".join(f"・{e}" for e in errors),
             )
-            return SettingsDialogResult(saved=False)
+            return SettingsDialogResult()
 
         try:
             new_config = form_to_config(form, self._config)
@@ -387,15 +392,15 @@ class SettingsDialog:
                 _TITLE_SAVE_ERROR,
                 _MSG_SAVE_ERROR_FMT.format(type=type(exc).__name__),
             )
-            return SettingsDialogResult(saved=False)
+            return SettingsDialogResult()
 
-        self._result = SettingsDialogResult(saved=True, config=new_config)
+        self._result = SettingsDialogResult(config=new_config)
         with contextlib.suppress(tk.TclError):
             self._root.quit()
         return self._result
 
     def cancel(self) -> SettingsDialogResult:
-        self._result = SettingsDialogResult(saved=False)
+        self._result = SettingsDialogResult()
         with contextlib.suppress(tk.TclError):
             self._root.quit()
         return self._result
