@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import threading
 import tkinter as tk
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -34,6 +33,7 @@ from wiseman_hub.pdf.session import (
     UserCandidate,
     save_session,
 )
+from wiseman_hub.ui.common import assert_main_thread
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +91,11 @@ class _DefaultMessageBox:
 
     def showerror(self, title: str, message: str) -> None:
         messagebox.showerror(title, message)
+
+
+def default_messagebox() -> MessageBoxLike:
+    """`tkinter.messagebox` を使う既定実装を返す（他 UI モジュールから再利用可能）。"""
+    return _DefaultMessageBox()
 
 
 # ---------------------------------------------------------------------------
@@ -165,13 +170,7 @@ class ConfirmDialog:
         askopenfilename_fn: Callable[..., str] = filedialog.askopenfilename,
         messagebox_fn: MessageBoxLike | None = None,
     ) -> None:
-        # Tkinter（filedialog / messagebox / mainloop）は main thread 非安全。worker
-        # thread からの呼出は Windows 本番でハング/TclError を起こしうるため fail-fast。
-        if threading.current_thread() is not threading.main_thread():
-            raise RuntimeError(
-                "ConfirmDialog must be instantiated on the main thread "
-                "(tkinter filedialog/messagebox/mainloop are not thread-safe)"
-            )
+        assert_main_thread("ConfirmDialog")
         if session.status != SessionStatus.NEEDS_REVIEW:
             raise ValueError(
                 f"ConfirmDialog requires session.status == NEEDS_REVIEW "

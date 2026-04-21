@@ -1,171 +1,244 @@
 # Handoff: "使える Windows デスクトップアプリ" 完成化計画（Session 7 終了時点）
 
 **更新日**: 2026-04-21
-**ブランチ**: feature/task-12a-toml-writeback (PR #60, CI 待ち)
-**main ブランチ**: PR #60 マージ後に同期
+**ブランチ**: feature/task-13a-launcher-gui (PR #61, CI 完了後マージ待ち)
+**main**: 5f00d18 (PR #60 squash merged: タスク 10-1 + 12A + 14B)
 
 ## セッション 7 の成果
 
-### 完了したタスク
-- **タスク 10-1**: Cloud Run デプロイ（asia-northeast1、Gemini 2.5 Flash、allow-unauthenticated + X-API-Key、AC-DEPLOY-1 代替検証 PASS）
-- **タスク 12A**: `save_config()` 実装（tomlkit、atomic write、create_if_missing=False 既定、InlineTable 対応、_require_table helper）
-- **タスク 14B**: デスクトップアイコン生成（Pillow、6 サイズ ICO、`assets/icon.ico`）
-- **タスク 10-2 準備**: Windows 実機 E2E 手順書（`docs/handoff/windows-e2e-task10.md`）
+### マージ済み
+- **PR #60**: タスク 10-1（Cloud Run デプロイ + 疎通確認）+ 12A（TOML 書き戻し）+ 14B（デスクトップアイコン）
 
-### セキュリティ対応（Codex 指摘）
-- 初回 API Key 漏洩 → Secret Manager v1 disable + v2 rotation、平文削除
-- `_sweep_stale_tmp()` 追加: クラッシュ時 PII 残置防止
-- cleanup warning log を型名のみに抑制（PII/tmp path 漏洩防止）
-- Windows 手順書を `uv run python` 統一、`gcloud` は運用者端末のみに変更
+### マージ待ち（次セッション冒頭で確認→マージ）
+- **PR #61**: タスク 13A（ランチャー GUI 骨格、3 ボタン、コールバック DI）
 
-### Quality Gate 通過
-- `/simplify` 3 並列 / `/safe-refactor` / Evaluator 分離 / `/review-pr` 6 Agent / `/codex review`
-- 324 tests passed / ruff clean / mypy clean
+## 次セッションの着手手順
 
-## 次のセッション着手ポイント
-
-### 優先 1: PR #60 のマージ確認
 ```bash
-gh pr checks 60
-gh pr view 60
-# すべて green なら:
-gh pr merge 60 --squash --delete-branch
+cd /Users/yyyhhh/Projects/wiseman_auto_sys
+# 1. catchup で状況把握
+# 2. PR #61 CI 確認
+gh pr checks 61
+gh pr view 61
+# 3. CI 通過していればマージ
+gh pr merge 61 --squash --delete-branch
 git checkout main
 git reset --hard origin/main
+# 4. タスク 13B 着手（Issue #62 対応含む）
+git checkout -b feature/task-13b-phase-a-integration
 ```
 
-### 優先 2: タスク 13A（ランチャー GUI 骨格）
+## 次タスク優先順位
 
-**新規ファイル**: `src/wiseman_hub/ui/launcher.py`
+### 優先 1: タスク 13B（ランチャー ↔ Phase A 統合）
 
-**設計方針（確定済）**:
-- Tkinter/ttk で 3 ボタンのシンプルなランチャー画面
-- **3 ボタン構成**:
-  1. **「PDF マージ処理を実行」**: `scripts/merge_user_pdfs.py` の `run_phase_a` を subprocess ではなく関数直呼びで実行（進捗ダイアログ、NEEDS_REVIEW セッションは一覧遷移）
-  2. **「確認待ちセッション」**: 既存 session から NEEDS_REVIEW を一覧 → 選択 → `ConfirmDialog` → `run_phase_b`
-  3. **「設定」**: タスク 12B で実装予定、13A ではプレースホルダ（"未実装" メッセージ）
+**スコープ**:
+- `Launcher.__init__` の `on_run_pdf_merge` に `run_phase_a` 呼出を注入
+- **Issue #62 対応必須**: Worker thread 化 + repeated-click 防止
+  - `concurrent.futures.ThreadPoolExecutor(max_workers=1)` を Launcher に保持
+  - Tk 更新は `root.after()` 経由
+  - 実行中は全 3 ボタン disable
+- 進捗ダイアログ（Phase A 中のステータス表示）
+- 完了時に NEEDS_REVIEW セッション一覧を通知（完了通知 → 次の確認ボタン押下を促す）
 
-**既存資産の活用**:
-- `src/wiseman_hub/ui/confirm_dialog.py`: タスク 8C PR #A で実装済（ConfirmDialog 本体）
-- `src/wiseman_hub/pdf/pipeline.py:254 run_phase_a` / `:444 run_phase_b`: Phase 実行関数
-- `src/wiseman_hub/pdf/session.py`: `load_session` / `save_session` / `with_session_lock` / `transition_session`
-- `scripts/merge_user_pdfs.py`: CLI 1 本、`--review` / `--merge` 等（参考実装）
+**Acceptance Criteria**:
+- AC-L-2: Phase A 実行、完了通知、NEEDS_REVIEW があれば一覧遷移
+- AC-L-2-Async: Phase A 実行中も mainloop が応答（Windows「応答なし」防止）
+- AC-L-2-NoDouble: 実行中の 2 回目 click が無視される
 
-**`__main__.py` の変更**:
-- 現在: `WisemanHub.run()` を直接呼ぶ（RPA パイプライン）
-- 変更後: CLI 引数で `--rpa`（従来 RPA 起動）/ デフォルト（ランチャー GUI）を切替
-- `python -m wiseman_hub` → ランチャー GUI が立ち上がる
+**TDD の流れ**:
+1. `tests/unit/ui/test_launcher_phase_a_integration.py` を Red で作成
+2. `Launcher` に `_run_phase_a_async()` を最小実装で Green
+3. worker thread + busy flag を段階的に追加
+4. caplog で PII 漏洩しないことを確認
 
-**Acceptance Criteria（再掲）**:
-- AC-L-1: アプリ起動 → 3 ボタン画面表示（検証: 目視 + smoke test）
-- AC-L-2: 「処理開始」押下 → `run_phase_a` 実行、進捗表示、完了通知、NEEDS_REVIEW セッションがあれば一覧遷移（検証: Windows 実機）
-- AC-L-3: 「確認待ち一覧」押下 → セッション一覧、選択 → ConfirmDialog → 完了時 `run_phase_b` → 出力 PDF 生成（検証: Windows 実機）
-- AC-L-4: 設定未完了時に「処理開始」押下 → エラーダイアログ + 設定 GUI へ誘導（検証: 手動）
+### 優先 2: タスク 12B（設定 GUI）
 
-**TDD 手順**:
-1. `tests/unit/ui/test_launcher.py` を Red で作成（AC-L-1〜3 に対応）
-2. `ui/launcher.py` 最小実装で Green
-3. 3 ボタンそれぞれの click ハンドラを段階的に追加
-4. ConfirmDialog と同様、DI 設計（`run_phase_a_fn` / `confirm_dialog_factory` を注入可能に）
-
-**PR 分割**:
-- **PR #Z-1 (13A)**: ランチャー骨格 + `__main__.py` 切替（CLI mode / GUI mode）+ 最小 smoke test
-- **PR #Z-2 (13B)**: Phase A 統合（ボタン 1 の実装 + 進捗ダイアログ）
-- **PR #Z-3 (13C)**: Phase B / 確認 UI 統合（ボタン 2 の実装）
-
-### 優先 3: タスク 12B（設定 GUI）
-PR #60 で `save_config()` が完成したので、12B 着手可能。
+**スコープ**:
 - `src/wiseman_hub/ui/settings.py` 新規
-- パス選択ダイアログ（`filedialog.askdirectory`）
-- バリデーション（input_dir/output_dir 存在チェック、TOML セクション不備）
-- Save ボタン → `save_config(cfg, path)` → 成功メッセージ
+- 必須設定 5 項目 + optional 設定を Tkinter フォームで編集
+- Save → `save_config(cfg, path)` 呼出（PR #60 で完成済）
+- `ui/launcher.py` の `on_open_settings` に注入
 
-### 優先 4: タスク 15（GitHub Actions + WIF）
-**推奨構成**（前セッションで合意済）:
-- Workload Identity Pool + Provider（GitHub OIDC 信頼）
-- Deploy 用 SA: `roles/run.admin`, `roles/artifactregistry.writer`, `roles/iam.serviceAccountUser`
-- `.github/workflows/deploy.yml`: `google-github-actions/auth@v2` でフェデレーション
-- SA key 不要、push から自動デプロイ
+### 優先 3: タスク 13C（ランチャー ↔ 確認 UI / Phase B 統合）
 
-**別 PR（#Z の後で）**:
-- 現在ローカル `gcloud` でのみデプロイ可能。CI 化は重要だが MVP 動作確認優先
+**スコープ**:
+- `on_open_review` に NEEDS_REVIEW セッション一覧 → ConfirmDialog → run_phase_b
+- Phase B 完了時の出力 PDF 通知
+
+### 優先 4: タスク 14A（PyInstaller spec + icon 埋め込み）
+
+**Issue #59 対応**: `--icon assets/icon.ico` 指定、生成 exe の resource 検証
+
+### 優先 5: タスク 10-2（Windows 実機 E2E、本田さん実施）
+
+`docs/handoff/windows-e2e-task10.md` に従って TeamViewer で実施。
+
+### 優先 6: タスク 14C/14D/15/11
+
+- 14C: PowerShell ショートカット作成スクリプト
+- 14D: ADR-011（配布形態決定）
+- 15: GitHub Actions + WIF（Issue #63 CI Tk 対応含むかも）
+- 11: README + sample TOML（最後）
 
 ## 積み残し Issue
 
-### 新規追加（Session 7）
-- **#58**: `/healthz` が Cloud Run GFE intercept（実害なし、P2）
-- **#59**: PyInstaller spec で icon 埋め込み（タスク 14A スコープ、P2）
+### Session 7 で新規追加
+- **#58**: `/healthz` Cloud Run GFE intercept（P2、実害なし）
+- **#59**: PyInstaller icon 埋め込み（P2、14A スコープ）
+- **#62**: 13B worker thread + repeated-click（P1、13B 必須）
+- **#63**: Linux CI Tk wiring skip（P2、15 / 別 PR）
+- **#64**: `--config` 存在しないパス警告（P2）
 
-### 既存（MVP スコープ外、維持）
-- **#51** Windows msvcrt / 跨プロセスロック / 0 ページ PDF (P1 だが単一 PC では発生せず)
-- **#49** resume 時 candidates 妥当性検証 (P2)
-- **#50** `--list-sessions` で corrupted 件数表示 (P2)
-- **#38** atomic_io ユーティリティ抽出 (P2) — config.py / session.py / merger.py で重複、save_config も含めて統合検討
-- **#44 #45 #40 #39 #27 #29 #17 #16 #14 #11 #6**: 各種改善系
+### 継続
+- **#51** Windows msvcrt / 跨プロセスロック / 0 ページ PDF (P1、単一 PC では発生せず)
+- **#38** atomic_io ユーティリティ抽出（P2、config.py / session.py / merger.py / 新 save_config で重複）
+- **#27 #29 #49 #50 #40 #39 #44 #45 #17 #16 #14 #11 #6**: 各種改善
 
-## 全体進捗（impl-plan 対応）
+## impl-plan 進捗（Session 7 終了時点）
 
 | タスク | 状態 | PR |
 |--------|------|-----|
-| 10-1 Cloud Run デプロイ + 疎通確認 | ✅ | PR #60 |
+| 10-1 Cloud Run デプロイ + 疎通確認 | ✅ merged | #60 |
 | 10-2 Windows 実機 E2E | ⏳ 本田さん実施待ち | - |
-| 12A TOML 書き戻し機能 | ✅ | PR #60 |
-| 12B 設定 GUI | ⏳ 次セッション以降 | - |
+| 12A TOML 書き戻し機能 | ✅ merged | #60 |
+| 12B 設定 GUI | ⏳ 優先 2 | - |
 | 12C 初回起動ウィザード | ⏳ 12B 後 | - |
-| 13A ランチャー GUI 骨格 | ⏳ **次セッション最優先** | - |
-| 13B ランチャー ↔ Phase A 統合 | ⏳ | - |
+| **13A ランチャー GUI 骨格** | 🔄 CI 通過待ち、次セッションでマージ | **#61** |
+| **13B ランチャー ↔ Phase A 統合** | ⏳ **次セッション最優先** | - |
 | 13C ランチャー ↔ 確認 UI 統合 | ⏳ | - |
 | 14A PyInstaller spec | ⏳ GUI 完成後 | - |
-| 14B アイコン生成 | ✅ | PR #60 |
+| 14B アイコン生成 | ✅ merged | #60 |
 | 14C ショートカット配布手順 | ⏳ 14A 後 | - |
 | 14D ADR-011 執筆 | ⏳ 14A 完了時 | - |
 | 15 GitHub Actions + WIF | ⏳ GUI 安定後 | - |
 | 11 README + sample TOML | ⏳ 最後 | - |
 
-## セッション再開手順
+## 本セッションで確定した設計判断
+
+### 配布形態
+- ダブルクリック起動の .exe（PyInstaller + 青背景 "W" アイコン + デスクトップショートカット）
+- Windows 11 単一 PC、USB ドングル認証、PII 医療介護データ
+
+### 認証レイヤ（再確認）
+- **Cloud Run → Vertex AI**: attached SA（キーレス）✅
+- **Windows クライアント → Cloud Run**: X-API-Key（ADR-008 維持）✅
+- **開発/デプロイ → GCP**: WIF（タスク 15、GitHub Actions OIDC）⏳
+
+### PII 防御パターン
+- logger には例外型名のみ（message は path/氏名を含みうる）
+- tmp ファイル cleanup の warning は basename すら出さない
+- `root.report_callback_exception` で PII 防御 sanitize（ConfirmDialog / Launcher 共通）
+- API Key は Secret Manager で rotation、docs には平文記載しない
+
+### Quality Gate の実効性（Session 2-7 累積）
+- **/simplify**: 各 PR で 6-8 件の DRY / stringly-typed / unnecessary comments を修正
+- **Evaluator**: 実装スコープ宣言と AC の齟齬検出に有効（例: AC-L-4「設定誘導」の欠落）
+- **Codex セカンドオピニオン**: PII 漏洩経路・運用経路・worker thread 化を 6 セッション連続検出
+- **/review-pr**: 6 Agent 並列で観点網羅
+
+## セッション再開手順（コピペ可）
 
 ```bash
 cd /Users/yyyhhh/Projects/wiseman_auto_sys
-# catchup 実行で現状把握
-# gh pr view 60 で CI 確認 → マージ
-# git checkout main && git reset --hard origin/main
-# 13A 着手: mkdir -p src/wiseman_hub/ui と新規 launcher.py
+# PR #61 確認
+gh pr checks 61
+
+# 全て green ならマージ
+gh pr merge 61 --squash --delete-branch
+git checkout main
+git reset --hard origin/main
+
+# 13B 着手
+git checkout -b feature/task-13b-phase-a-integration
+
+# TDD: まず Red
+# tests/unit/ui/test_launcher_phase_a_integration.py 新規
 ```
 
-## 主要ファイル参照
+## 13B 設計メモ（詳細）
 
-### 今セッションで追加・変更
-- `src/wiseman_hub/config.py`: `save_config()` + helpers（+130 行）
-- `tests/unit/test_config.py`: TestSaveConfig 20 テスト
-- `scripts/generate_icon.py`: アイコン生成スクリプト
-- `assets/icon.ico`: 6 サイズ ICO
-- `docs/handoff/windows-e2e-task10.md`: Windows 実機 E2E 手順書
+### Worker thread 化パターン（Issue #62）
 
-### 13A で参照する既存ファイル
-- `src/wiseman_hub/__main__.py`: 9 行のエントリポイント、ランチャー起動に変更
-- `src/wiseman_hub/app.py`: `WisemanHub` (RPA オーケストレータ)、13A では呼び出し側
-- `src/wiseman_hub/ui/confirm_dialog.py`: タスク 8C PR #A で完成、13C で再利用
-- `src/wiseman_hub/pdf/pipeline.py`: `run_phase_a` / `run_phase_b` 関数
-- `scripts/merge_user_pdfs.py`: CLI、13A-13C の参考実装
+```python
+# launcher.py
+import concurrent.futures
+from typing import Callable
 
-## Session 7 の学び
+class Launcher:
+    def __init__(self, ...):
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        self._busy = False
 
-### Codex セカンドオピニオンの一貫した価値
-Session 3/4/5/6 に続き Session 7 も、Codex が Claude 6 Agent + Evaluator 全員が見落とした問題を検出:
-- **CRITICAL/HIGH**: API Key 平文コミット（comment-analyzer は検出、Codex は別経路でも再検出）
-- **HIGH**: クラッシュ時の tmp 平文残置で PII/API Key が `{config}.{random}.tmp` に残る
-- **HIGH**: cleanup warning log に tmp path + PII が漏れる
-- **HIGH**: Windows 手順書の `python` 直接呼び出しで venv 迂回
-- **HIGH**: `gcloud secrets` を現場端末で実行する前提の運用破綻
+    def _handle_run_pdf_merge(self) -> None:
+        if self._busy:
+            return  # repeated-click 防止
+        if not validate_config_ready(self._config):
+            # ... エラー + 誘導 (既存)
+            return
+        if self._on_run_pdf_merge is None:
+            self._invoke_or_show(None, ...)
+            return
 
-Codex は「データフロー全体 + ログ集約 + 運用経路」を俯瞰するレビューが一貫して強い。
+        self._set_busy(True)
+        future = self._executor.submit(self._on_run_pdf_merge)
+        future.add_done_callback(lambda f: self._root.after(0, self._on_phase_a_done, f))
 
-### 本番デプロイ時の permission classifier
-- Auto mode でも本番 GCP 操作は都度明示承認が必要（classifier で block される）
-- 最初の `/permissions add` で CLI 権限は通せるが、classifier 層は「操作単位」で追加承認要求
-- 今回は「wiseman-hub-prod へ Cloud Build + Cloud Run デプロイを承認します」の明示文で通過
+    def _on_phase_a_done(self, future: concurrent.futures.Future) -> None:
+        self._set_busy(False)
+        try:
+            future.result()
+        except Exception:  # PII 防御
+            logger.error("phase_a failed: %s", type(sys.exc_info()[1]).__name__)
+            self._messagebox.showerror("エラー", "Phase A 実行中にエラー...")
+            return
+        self._messagebox.showinfo("完了", "Phase A 完了")
 
-### MVP 配布形態の確定
-- ダブルクリック起動の .exe が最終形（タスク 14A）
-- PyInstaller + icon 埋め込み + デスクトップショートカット配布
-- Workload Identity Federation は「層 3: GitHub Actions からのデプロイ」に適用予定（層 2: Windows クライアント → Cloud Run は WIF 不適用、X-API-Key 継続）
+    def _set_busy(self, busy: bool) -> None:
+        self._busy = busy
+        state = ["disabled"] if busy else ["!disabled"]
+        for btn in (self._btn_run, self._btn_review, self._btn_settings):
+            btn.state(state)
+```
+
+### テストパターン（Phase A Async）
+
+```python
+def test_phase_a_runs_in_worker_thread(self, tmp_path):
+    # run_phase_a が main thread 以外で呼ばれることを確認
+    thread_ids = []
+    def fake_phase_a():
+        thread_ids.append(threading.get_ident())
+
+    launcher = Launcher(..., on_run_pdf_merge=fake_phase_a)
+    main_id = threading.get_ident()
+    launcher.invoke_action(LauncherAction.RUN_PDF_MERGE)
+    # future.result() を待って確認
+    launcher._executor.shutdown(wait=True)
+    assert thread_ids[0] != main_id
+
+def test_repeated_click_ignored_while_busy(self, tmp_path):
+    # busy 中の invoke_action は何もしない
+    blocker = threading.Event()
+    def slow():
+        blocker.wait(timeout=5)
+
+    launcher = Launcher(..., on_run_pdf_merge=slow)
+    launcher.invoke_action(LauncherAction.RUN_PDF_MERGE)
+    launcher.invoke_action(LauncherAction.RUN_PDF_MERGE)  # 2 回目、無視期待
+    blocker.set()
+    launcher._executor.shutdown(wait=True)
+    # slow の呼出回数が 1 回であることを確認
+```
+
+## 参照ファイル（次セッション用）
+
+### 実装対象
+- `src/wiseman_hub/ui/launcher.py`: `_handle_run_pdf_merge` を async 化
+- `src/wiseman_hub/pdf/pipeline.py:254 run_phase_a`: 直接呼び出し対象（dict パラメータ）
+- `scripts/merge_user_pdfs.py`: 既存 CLI 実装の参考
+
+### 既存資産
+- `src/wiseman_hub/ui/confirm_dialog.py`: `_on_callback_exception` パターン
+- `src/wiseman_hub/ui/common.py`: `assert_main_thread`
+- `src/wiseman_hub/config.py`: `save_config` (12B で使用)
