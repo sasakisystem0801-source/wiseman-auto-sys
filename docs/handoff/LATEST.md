@@ -1,35 +1,28 @@
 # Handoff: "使える Windows デスクトップアプリ" 完成化計画（Session 8 終了時点）
 
 **更新日**: 2026-04-21
-**ブランチ**: feature/task-12b-settings-gui (PR #66, CI 進行中)
-**main**: 707237b (PR #65 squash merged: タスク 13B)
+**ブランチ**: main（clean、全 PR マージ済）
+**main**: a85eef5 (PR #66 squash merged: タスク 12B)
 
 ## セッション 8 の成果
 
 ### マージ済み
 - **PR #61**: タスク 13A（ランチャー GUI 骨格、3 ボタン）
-- **PR #65**: タスク 13B（Launcher ↔ Phase A 非同期統合、Issue #62 対応）
-
-### マージ待ち（次セッション冒頭で確認→マージ）
+- **PR #65**: タスク 13B（Launcher ↔ Phase A 非同期統合、Issue #62 対応 → close）
 - **PR #66**: タスク 12B（設定 GUI、SettingsDialog + Toplevel モーダル化）
-  - 343 passed / 44 skipped ローカル通過
+  - 343 passed / 44 skipped
   - /simplify 3 並列 + Evaluator APPROVE
   - 6 Agent + Codex 二段レビュー → CRITICAL 3 件 + IMPORTANT 2 件反映済
-  - CI 進行中（test-unit 3.11/3.12 + test-integration）
+  - CI: test-unit 3.11/3.12 + test-integration 全 pass
 
 ## 次セッションの着手手順
 
 ```bash
 cd /Users/yyyhhh/Projects/wiseman_auto_sys
 # 1. catchup で状況把握
-# 2. PR #66 CI 確認
-gh pr checks 66
-gh pr view 66
-# 3. CI 通過していればマージ
-gh pr merge 66 --squash --delete-branch
+# 2. 13C 着手（ランチャー ↔ 確認 UI / Phase B 統合）
 git checkout main
-git reset --hard origin/main
-# 4. タスク 13C 着手（ランチャー ↔ 確認 UI / Phase B 統合）
+git pull --ff-only
 git checkout -b feature/task-13c-phase-b-integration
 ```
 
@@ -60,11 +53,12 @@ git checkout -b feature/task-13c-phase-b-integration
 
 ## 積み残し Issue / 技術負債
 
-### Session 8 で新規識別（12B レビューで発覚）
-- **type-design**: `validate_form` 戻り値 `list[str]` を error code enum 化（i18n / テスト結合リスク）
-- **type-design**: `form_to_config` に `ValidatedForm` newtype 導入（illegal-state-unrepresentable）
+### Session 8 で新規 Issue 化
+- **#67**: `_on_callback_exception` を `install_tk_exception_guard` に共通化（P2、13C 着手前に対応で SessionPicker でも再利用可能）
+- **#68**: `validate_form` 戻り値を error code enum 化 + `ValidatedForm` newtype（P2、i18n + illegal-state-unrepresentable）
+
+### Session 8 で識別（Issue 未化、記録のみ）
 - **type-design**: `SettingsDialogResult.config` が AppConfig（frozen でない）で mutation 可能。deepcopy on construction 検討
-- **reuse**: `_on_callback_exception` が ConfirmDialog / Launcher / SettingsDialog で 3 重実装。`ui/common.py` に `install_tk_exception_guard` 抽出（次 PR スコープ）
 - **test**: 重複 `concat_order` "A,A,B" の仕様判断（許可 or 検出）
 - **test**: `reload_config` + `validate_config_ready` の結合遷移テスト（AC-L-4 の実運用フロー検証）
 - **security**: API Key 平文が StringVar / Tcl interpreter / clipboard に残る（`show="*"` だけでは不十分な脅威モデル）
@@ -88,8 +82,8 @@ git checkout -b feature/task-13c-phase-b-integration
 | 10-1 Cloud Run デプロイ + 疎通確認 | ✅ merged | #60 |
 | 10-2 Windows 実機 E2E | ⏳ 本田さん実施待ち | - |
 | 12A TOML 書き戻し機能 | ✅ merged | #60 |
-| **12B 設定 GUI** | 🔄 **CI 通過待ち、次セッションでマージ** | **#66** |
-| 12C 初回起動ウィザード | ⏳ 12B 後 | - |
+| 12B 設定 GUI | ✅ merged | #66 |
+| 12C 初回起動ウィザード | ⏳ 優先度低（12B で必須設定編集カバー） | - |
 | 13A ランチャー GUI 骨格 | ✅ merged | #61 |
 | 13B ランチャー ↔ Phase A 統合 | ✅ merged | #65 |
 | **13C ランチャー ↔ 確認 UI 統合** | ⏳ **次セッション最優先** | - |
@@ -129,13 +123,9 @@ git checkout -b feature/task-13c-phase-b-integration
 
 ```bash
 cd /Users/yyyhhh/Projects/wiseman_auto_sys
-# PR #66 確認
-gh pr checks 66
-
-# 全て green ならマージ
-gh pr merge 66 --squash --delete-branch
+# main 同期確認（全 PR マージ済）
 git checkout main
-git reset --hard origin/main
+git pull --ff-only
 
 # 13C 着手
 git checkout -b feature/task-13c-phase-b-integration
