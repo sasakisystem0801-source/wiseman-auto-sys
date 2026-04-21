@@ -12,7 +12,7 @@ ADR-002（PyInstaller 選定）で「Python アプリを PyInstaller で exe 化
 - **対象規模**: 1 施設 / 1 PC / 1-3 名 per batch の MVP 運用（ADR-008 / PRD）
 - **配布経路**: 弊社担当が USB で直接持参 → Windows 11 PC の `C:\Program Files\wiseman-hub\` 等に配置
 - **認証**: USB ドングル（ADR-007）、クラウドアカウント不要
-- **更新頻度**: 低（機能追加 or バグ修正時のみ、自動更新は不要、ADR-004 の自動更新方針は保留中）
+- **更新頻度**: 低（機能追加 or バグ修正時のみ）。ADR-004（GCS manifest ポーリング）は Accepted だが MVP 段階では未実装のため、当面は手動配布（USB 持参）で運用する。
 - **ネットワーク**: Cloud Run OCR（ADR-008）へのアウトバウンドのみ、インバウンド不要
 - **セキュリティ**: 医療介護 PII を扱うため署名・検疫体制が理想だが、コードサイニング証明書は購入コスト大
 
@@ -26,7 +26,7 @@ ADR-002（PyInstaller 選定）で「Python アプリを PyInstaller で exe 化
 | ウィンドウモード | `--windowed`（`console=False`）| Launcher GUI がユーザー接点、コンソール窓不要 |
 | アイコン | `assets/icon.ico` | 14B で生成済、Windows taskbar/alt-tab で識別可能 |
 | UPX 圧縮 | 無効 | Windows Defender / SmartScreen の誤検知リスク、介護施設 PC で検疫フラグ立つと運用停止 |
-| コードサイニング | 未実施（保留） | 証明書コスト vs 実害（SmartScreen の警告ダイアログ 1 回のみ）のトレードオフ、14D で再検討 |
+| コードサイニング | 未実施（保留、条件付き） | 証明書コストのトレードオフ、14D で再検討。**重要**: SmartScreen の「警告 1 回のみ」は個人 PC + 既知 publisher reputation 前提の理想論。現実には (1) 新ビルドごとに file hash reputation がリセット、(2) Enterprise policy（Microsoft Defender for Endpoint / WDAC）適用端末で「実行」導線が消えて配布停止の可能性、(3) Mark-of-the-Web 付き ZIP 配布で SmartScreen のチェックが強化される。下記「運用補強」で緩和する。 |
 
 ### 配布レイアウト
 
@@ -82,6 +82,16 @@ wiseman-hub/                    # 配布 ZIP を展開した結果
 - 短所: DigiCert / Sectigo の証明書 1 年 3-5 万円、更新手続きコスト、EV 証明書はさらに高額
 - 判断: MVP スコープ外、14D で運用開始後の問題発生頻度を見て再検討。
 
+### 運用補強（サイニングなしで配布する場合の必須手順）
+
+- **事前 hash 共有**: 配布 ZIP / exe の SHA256 を施設 IT 担当に事前連絡（改竄検知）
+- **Microsoft Security Intelligence 提出**: 新ビルドごとに [Submit a file for malware analysis](https://www.microsoft.com/wdsi/filesubmission) から提出 → Defender Cloud の誤検知をプロアクティブに解除
+- **施設 IT allowlist**: 施設の MDE / EDR で `wiseman_hub.exe` のハッシュまたはパスを allowlist 登録（事前相談ベース）
+- **配布形式**: Mark-of-the-Web 付加を避けるため、インターネット経由ではなく USB 直接配布を優先
+- **SmartScreen 警告手順**: 施設 IT 担当が「実行」押下できない端末（Enterprise policy で導線消失）では配布停止、署名購入を検討
+
+MVP 1 施設運用ではこの補強で十分。2 施設目以降はコードサイニング投資が合理的になる閾値として 14D で再評価する。
+
 ## 影響
 
 ### 肯定的
@@ -109,8 +119,18 @@ wiseman-hub/                    # 配布 ZIP を展開した結果
 - **14D**: 本 ADR を Accepted に昇格、コードサイニング要否の運用判断を追記
 - **10-2**: Windows 実機ビルド + E2E 検証（本田さん実施）、SmartScreen 挙動記録
 
+## 14D Accepted 昇格条件
+
+以下を全て満たした時点で本 ADR を Accepted に昇格する:
+1. 10-2 で Windows 11 実機にて `wiseman_hub.exe` ビルド + Launcher GUI 起動成功
+2. Launcher の 3 ボタン（PDF マージ処理 / 確認待ちセッション / 設定）が実機で動作
+3. SmartScreen 初回警告の挙動記録（Enterprise 環境での挙動含む）
+4. コードサイニング要否の 14D 判断記録
+
 ## 参考
 
 - ADR-002: PyInstaller 選定
+- ADR-004: 自動更新機構（GCS manifest ポーリング、Accepted / 未実装）
 - ADR-007: USB ドングル認証（認証状態を exe に埋め込まない設計）
+- ADR-008: OCR バックエンド（Cloud Run、介護施設 PC からアウトバウンドのみ）
 - Issue #59: PyInstaller spec で assets/icon.ico を --icon で埋め込み

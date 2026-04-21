@@ -37,7 +37,9 @@ dev = [
     "pytest>=8.3.0",
     "pytest-cov>=6.0.0",
     "pytest-timeout>=2.2.0",
-    "pyinstaller>=6.11.0",
+    # v7.0 で onefile+BUNDLE error 化 / win_no_prefer_redirects 削除等の破壊的変更
+    # が予告されているため、14A の spec を安定して使うため当面 6.x に固定する（Codex MEDIUM 指摘）。
+    "pyinstaller>=6.11.0,<7.0",
 ]
 
 [project.scripts]

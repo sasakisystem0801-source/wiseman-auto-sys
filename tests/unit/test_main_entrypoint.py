@@ -238,3 +238,54 @@ def test_phase_a_callback_reloads_config_and_runs_phase_a(
     _, kwargs = run_phase_a_mock.call_args
     assert kwargs["source_a_path"] == tmp_path / "in" / "A.pdf"
     assert kwargs["sessions_dir"] == tmp_path / "out" / ".sessions"
+
+
+# ===========================================================================
+# _default_config_path: Codex HIGH 指摘対応（exe ショートカット起動での CWD 相対バグ）
+# ===========================================================================
+
+
+class TestDefaultConfigPath:
+    """exe 配布時の config 解決が CWD 依存で破綻しないことを回帰固定。"""
+
+    def test_uses_env_var_when_set(
+        self, tmp_path: Path, monkeypatch: Any
+    ) -> None:
+        """WISEMAN_HUB_CONFIG 環境変数があれば最優先（運用でのオーバーライド）。"""
+        from wiseman_hub.__main__ import _default_config_path
+
+        override = tmp_path / "custom" / "my.toml"
+        monkeypatch.setenv("WISEMAN_HUB_CONFIG", str(override))
+        assert _default_config_path() == override
+
+    def test_uses_executable_parent_when_frozen(self, monkeypatch: Any) -> None:
+        """PyInstaller onefile 起動時は sys.executable 隣の config/default.toml を使う。
+
+        Codex HIGH 再現: frozen + CWD=別ディレクトリでも同階層の config を解決できる。
+        """
+        from wiseman_hub.__main__ import _default_config_path
+
+        monkeypatch.delenv("WISEMAN_HUB_CONFIG", raising=False)
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        monkeypatch.setattr(
+            sys, "executable", "/opt/wiseman/wiseman_hub.exe", raising=False
+        )
+        result = _default_config_path()
+        assert result == Path("/opt/wiseman/config/default.toml")
+
+    def test_uses_cwd_relative_when_not_frozen(self, monkeypatch: Any) -> None:
+        """通常実行（ソース起動）は従来互換の相対パス（プロジェクトルート前提）。"""
+        from wiseman_hub.__main__ import _default_config_path
+
+        monkeypatch.delenv("WISEMAN_HUB_CONFIG", raising=False)
+        monkeypatch.setattr(sys, "frozen", False, raising=False)
+        assert _default_config_path() == Path("config/default.toml")
+
+    def test_env_var_wins_over_frozen(self, monkeypatch: Any) -> None:
+        """frozen + 環境変数 の場合は環境変数が優先（明示的オーバーライド）。"""
+        from wiseman_hub.__main__ import _default_config_path
+
+        monkeypatch.setenv("WISEMAN_HUB_CONFIG", "/explicit/path.toml")
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        monkeypatch.setattr(sys, "executable", "/opt/wiseman/wiseman_hub.exe", raising=False)
+        assert _default_config_path() == Path("/explicit/path.toml")

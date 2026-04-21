@@ -22,9 +22,13 @@ ADR-002 参照。
 
 from pathlib import Path
 
-# PyInstaller はプロジェクトルートから `uv run pyinstaller wiseman_hub.spec` で
-# 起動する前提（CWD = ROOT）。他 dir から実行すると src/ / assets/ 解決が破綻する。
-ROOT = Path.cwd()
+# PyInstaller の spec グローバル（Analysis/EXE/BUNDLE 等）は実行時に注入される。
+# 静的解析を通すため明示的に名前を列挙（flake8 / ruff の F821 回避）。
+# ruff: noqa: F821
+
+# SPECPATH は PyInstaller が spec ファイルの絶対パスを注入するグローバル変数。
+# CWD 依存を排除し、任意 dir からの実行でも安定して動く（Claude comment-analyzer 指摘）。
+ROOT = Path(SPECPATH)  # noqa: F821 — SPECPATH は PyInstaller が spec 実行時に注入
 
 
 block_cipher = None
@@ -70,8 +74,8 @@ a = Analysis(
         "mypy",
         "ruff",
     ],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
+    # `win_no_prefer_redirects` / `win_private_assemblies` は PyInstaller 6.x で
+    # 非推奨扱い。v7 で signature から削除予定のため渡さない（Codex MEDIUM 指摘）。
     cipher=block_cipher,
     noarchive=False,
 )

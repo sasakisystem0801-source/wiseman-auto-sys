@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import logging
+import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -20,6 +21,26 @@ if TYPE_CHECKING:
     from wiseman_hub.config import AppConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _default_config_path() -> Path:
+    """既定の config/default.toml の絶対パスを返す。
+
+    exe 配布（PyInstaller onefile）のショートカット起動等で CWD が
+    別ディレクトリになるケースを考慮し、優先順位は以下:
+    1. ``WISEMAN_HUB_CONFIG`` 環境変数（運用側で明示指定）
+    2. frozen 実行時: ``sys.executable`` と同階層の ``config/default.toml``
+    3. 通常実行: ソースツリー相対 ``config/default.toml`` （CWD = プロジェクトルート前提）
+
+    frozen 時に CWD 相対で解決すると、ショートカットの "Start in" 未設定や
+    別ディレクトリからの起動で空設定が読み込まれる致命バグになる（Codex HIGH 指摘）。
+    """
+    override = os.environ.get("WISEMAN_HUB_CONFIG")
+    if override:
+        return Path(override)
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent / "config" / "default.toml"
+    return Path("config/default.toml")
 
 
 class _LauncherLike(Protocol):
@@ -341,7 +362,7 @@ def main() -> None:
             from wiseman_hub.ui.launcher import Launcher
 
             config_path = (
-                args.config if args.config is not None else Path("config/default.toml")
+                args.config if args.config is not None else _default_config_path()
             )
             config = load_config(config_path)
             # 設定コールバックで後から Launcher を参照する必要があるため、

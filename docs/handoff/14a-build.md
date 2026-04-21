@@ -60,7 +60,12 @@ dist/
     └── default.toml
 ```
 
-未配置時は Launcher の `--config` なし起動で `config/default.toml` を探し、存在しなければエラー表示（挙動は `__main__.py` 参照）。
+**パス解決ロジック**（`__main__._default_config_path`、Codex HIGH 指摘反映）:
+1. 環境変数 `WISEMAN_HUB_CONFIG` がセット済 → そのパス
+2. frozen 実行（exe）時 → `sys.executable` 同階層 `config/default.toml`（CWD に依存しない）
+3. 通常実行時 → `config/default.toml`（CWD = プロジェクトルート前提）
+
+exe ショートカット起動で CWD が別ディレクトリになっても設定を見失わない設計。運用者が `WISEMAN_HUB_CONFIG` で明示的にオーバーライドも可能。
 
 ## Windows Defender / SmartScreen 対応
 
@@ -78,8 +83,10 @@ dist/
 
 - **原因候補 1**: Tk ランタイム未バンドル → `--windowed` の cold start 失敗
   - 対応: spec の `hiddenimports` に `tkinter.ttk`, `tkinter.filedialog`, `tkinter.messagebox` が入っているか確認
-- **原因候補 2**: tomlkit / httpx / fitz の hidden import 不足
-  - 対応: `--console` で一時ビルドして stderr traceback を確認（`console=True` に変更してリビルド）
+- **原因候補 2**: hidden import 検出漏れ
+  - `tomlkit` と `wiseman_hub.*` は spec で明示列挙済
+  - `httpx` / `fitz` (pymupdf) は PyInstaller 自動検出に任せる設計。失敗時は spec の `hiddenimports` に追加
+  - デバッグ: `console=True` に一時変更してリビルドし、stderr traceback を確認
 - **原因候補 3**: `config/default.toml` 未配置
   - 対応: exe と同階層に `config/default.toml` を置く
 
