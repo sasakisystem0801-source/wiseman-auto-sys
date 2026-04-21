@@ -14,6 +14,32 @@ from collections.abc import Callable
 from pathlib import Path
 
 
+def _make_settings_callback(
+    config_path: Path,
+    get_launcher: Callable[[], object],
+) -> Callable[[], None]:
+    """Launcher に注入する「設定」コールバックを組み立てる。
+
+    設定保存成功時は ``Launcher.reload_config`` を呼び、以降の
+    ``validate_config_ready`` 判定が新値で行われるようにする（再起動不要）。
+    """
+
+    def open_settings() -> None:
+        from wiseman_hub.config import load_config
+        from wiseman_hub.ui.settings import SettingsDialog
+
+        config = load_config(config_path)
+        dialog = SettingsDialog(config=config, config_path=config_path)
+        result = dialog.run()
+        if result.saved and result.config is not None:
+            launcher = get_launcher()
+            reload = getattr(launcher, "reload_config", None)
+            if callable(reload):
+                reload(result.config)
+
+    return open_settings
+
+
 def _make_phase_a_callback(
     config_path: Path,
 ) -> Callable[[], None]:
@@ -96,11 +122,20 @@ def main() -> None:
                 args.config if args.config is not None else Path("config/default.toml")
             )
             config = load_config(config_path)
-            Launcher(
+            # 設定コールバックで後から Launcher を参照する必要があるため、
+            # クロージャで双方向バインディングする（Launcher インスタンス生成前に
+            # コールバックを作る必要がある一方、コールバックは Launcher のメソッドを呼ぶ）。
+            launcher_ref: list[Launcher] = []
+            launcher = Launcher(
                 config=config,
                 config_path=config_path,
                 on_run_pdf_merge=_make_phase_a_callback(config_path),
-            ).run()
+                on_open_settings=_make_settings_callback(
+                    config_path, lambda: launcher_ref[0]
+                ),
+            )
+            launcher_ref.append(launcher)
+            launcher.run()
     except KeyboardInterrupt:
         logger.info("シャットダウン（Ctrl+C）")
         sys.exit(0)

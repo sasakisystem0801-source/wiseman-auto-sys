@@ -173,6 +173,10 @@ class Launcher:
         """各ボタンのラベル（テスト用）。"""
         return (_BTN_RUN_PDF_MERGE, _BTN_OPEN_REVIEW, _BTN_OPEN_SETTINGS)
 
+    def reload_config(self, config: AppConfig) -> None:
+        """設定 GUI で保存された直後に呼ぶ。以降の ``validate_config_ready`` 判定が新値で行われる。"""
+        self._config = config
+
     def invoke_action(self, action: LauncherAction) -> None:
         """指定アクションのハンドラを実行する（ボタン押下と同等）。"""
         match action:
