@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import json
+import multiprocessing as mp
+import os
 import re
+import sys
 import time
+import types
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -28,6 +33,35 @@ from wiseman_hub.pdf.session import (
     transition_session,
     with_session_lock,
 )
+
+# ---------------------------------------------------------------------------
+# multiprocessing target（Issue #51 #2 跨プロセスロック test 用）
+# ---------------------------------------------------------------------------
+#
+# multiprocessing.Process の target はモジュールレベルで picklable であることが必須。
+# spawn context ではサブプロセスが再 import するため、テストクラスのメソッドは不可。
+
+
+def _child_try_acquire_lock(
+    sessions_dir_str: str,
+    session_id: str,
+    result_queue: Any,
+) -> None:
+    """子プロセスで with_session_lock を試み、結果を queue に返す。
+
+    親プロセスがロック保持中に呼ばれ、子は BlockingIOError / OSError を期待する。
+    """
+    from wiseman_hub.pdf.session import with_session_lock as _lock
+
+    try:
+        with _lock(Path(sessions_dir_str), session_id):
+            result_queue.put(("ACQUIRED", None))
+    except BlockingIOError as e:
+        result_queue.put(("BLOCKED_BlockingIOError", e.errno))
+    except OSError as e:
+        result_queue.put(("BLOCKED_OSError", e.errno))
+    except Exception as e:
+        result_queue.put(("UNEXPECTED", f"{type(e).__name__}: {e}"))
 
 # ---------------------------------------------------------------------------
 # session_id
@@ -966,3 +1000,251 @@ class TestWithSessionLock:
         # 解放されていれば再取得が成功
         with with_session_lock(sessions_dir, sid):
             pass
+
+
+# ---------------------------------------------------------------------------
+# Issue #51 #1: Windows msvcrt code path（macOS/Linux では mock で網羅）
+# ---------------------------------------------------------------------------
+#
+# 本番環境は Windows 11 だが CI は macOS/Linux のため、`_acquire_exclusive_lock` /
+# `_release_lock` の `os.name == "nt"` 分岐は通常の unit test で通過しない。
+# `os.name` を monkeypatch し、`msvcrt` モジュールの fake を `sys.modules` に
+# 差し込むことで、呼出順序と引数を検証する。
+
+
+class _FakeMsvcrt:
+    """msvcrt の最小 fake。locking(fd, op, nbytes) の呼出しを記録する。
+
+    本物の msvcrt.locking(fd, LK_NBLCK, nbytes) は既にロック済の場合 OSError を投げる仕様。
+    `raise_on_next_locking` を設定するとその例外を 1 回だけ発生させる。
+    """
+
+    # LK_NBLCK = 2, LK_UNLCK = 0（実 msvcrt と同じ値）
+    LK_NBLCK = 2
+    LK_UNLCK = 0
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[int, int, int]] = []
+        self.raise_on_next_locking: BaseException | None = None
+
+    def locking(self, fd: int, op: int, nbytes: int) -> None:
+        self.calls.append((fd, op, nbytes))
+        if self.raise_on_next_locking is not None:
+            exc = self.raise_on_next_locking
+            self.raise_on_next_locking = None
+            raise exc
+
+
+@pytest.fixture
+def fake_msvcrt_nt(monkeypatch: pytest.MonkeyPatch) -> _FakeMsvcrt:
+    """os.name='nt' + sys.modules に FakeMsvcrt を差し込む fixture。"""
+    fake = _FakeMsvcrt()
+    # `_acquire_exclusive_lock` 内で `import msvcrt` されるため sys.modules 経由で injection
+    fake_module = types.ModuleType("msvcrt")
+    fake_module.LK_NBLCK = fake.LK_NBLCK  # type: ignore[attr-defined]
+    fake_module.LK_UNLCK = fake.LK_UNLCK  # type: ignore[attr-defined]
+    fake_module.locking = fake.locking  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "msvcrt", fake_module)
+    monkeypatch.setattr(os, "name", "nt")
+    return fake
+
+
+class TestLockWindowsMsvcrt:
+    """Issue #51 #1: Windows msvcrt 分岐（`os.name == "nt"`）のテスト。
+
+    macOS/Linux では実 msvcrt が存在しないため、`sys.modules` に fake を差し込み
+    呼出順序 / 引数を検証する。ロック効果の実動作は Windows CI（実 msvcrt）でのみ検証される。
+    """
+
+    def test_acquire_calls_msvcrt_locking_with_lk_nblck(
+        self, tmp_path: Path, fake_msvcrt_nt: _FakeMsvcrt
+    ) -> None:
+        from wiseman_hub.pdf.session import _acquire_exclusive_lock
+
+        lock_file = tmp_path / "x.lock"
+        lock_file.touch()
+        with open(lock_file, "a+b") as fh:
+            _acquire_exclusive_lock(fh)
+
+        assert len(fake_msvcrt_nt.calls) == 1
+        fd, op, nbytes = fake_msvcrt_nt.calls[0]
+        assert op == _FakeMsvcrt.LK_NBLCK
+        assert nbytes == 1
+
+    def test_release_calls_msvcrt_locking_with_lk_unlck(
+        self, tmp_path: Path, fake_msvcrt_nt: _FakeMsvcrt
+    ) -> None:
+        from wiseman_hub.pdf.session import _release_lock
+
+        lock_file = tmp_path / "x.lock"
+        lock_file.touch()
+        with open(lock_file, "a+b") as fh:
+            _release_lock(fh)
+
+        assert len(fake_msvcrt_nt.calls) == 1
+        _fd, op, nbytes = fake_msvcrt_nt.calls[0]
+        assert op == _FakeMsvcrt.LK_UNLCK
+        assert nbytes == 1
+
+    def test_acquire_propagates_oserror_from_msvcrt(
+        self, tmp_path: Path, fake_msvcrt_nt: _FakeMsvcrt
+    ) -> None:
+        """msvcrt.locking が OSError を投げたら `_acquire_exclusive_lock` もそれを伝播。
+
+        本番の LK_NBLCK は既にロック済で OSError/PermissionError を投げる。
+        呼出側（`with_session_lock`）が except で fh.close() + raise するパスを通すため、
+        伝播することが重要。
+        """
+        from wiseman_hub.pdf.session import _acquire_exclusive_lock
+
+        fake_msvcrt_nt.raise_on_next_locking = OSError(33, "Lock violation")
+
+        lock_file = tmp_path / "x.lock"
+        lock_file.touch()
+        with open(lock_file, "a+b") as fh, pytest.raises(OSError, match="Lock violation"):
+            _acquire_exclusive_lock(fh)
+
+    def test_release_swallows_oserror_and_logs_warning(
+        self,
+        tmp_path: Path,
+        fake_msvcrt_nt: _FakeMsvcrt,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """`_release_lock` は OSError を swallow して warning のみ（close 時は OS が自動解放）。"""
+        import logging
+
+        from wiseman_hub.pdf.session import _release_lock
+
+        fake_msvcrt_nt.raise_on_next_locking = OSError(5, "fake unlock failure")
+
+        lock_file = tmp_path / "x.lock"
+        lock_file.touch()
+        with (
+            caplog.at_level(logging.WARNING, logger="wiseman_hub.pdf.session"),
+            open(lock_file, "a+b") as fh,
+        ):
+            # 例外は伝播しない
+            _release_lock(fh)
+
+        assert "failed to release session lock" in caplog.text
+
+    def test_with_session_lock_closes_fh_on_acquire_failure_nt(
+        self, tmp_path: Path, fake_msvcrt_nt: _FakeMsvcrt
+    ) -> None:
+        """nt 分岐でも acquire 失敗時に fh が close される（リーク防止）。"""
+        fake_msvcrt_nt.raise_on_next_locking = OSError(33, "Lock violation")
+
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        sid = generate_session_id()
+
+        with pytest.raises(OSError), with_session_lock(sessions_dir, sid):
+            pass  # 到達しない
+
+        # fh が close されていれば、Windows で lock ファイル削除可能（POSIX では常に可能だが
+        # 確認として lock_path が unlink 可能かだけ検証）
+        lock_path = sessions_dir / f"{sid}.lock"
+        assert lock_path.exists()
+        lock_path.unlink()  # close されていないと WinError になる想定
+
+
+# ---------------------------------------------------------------------------
+# Issue #51 #2: 跨プロセスロック race（exe 二重起動シナリオ）
+# ---------------------------------------------------------------------------
+#
+# 既存の `test_second_acquire_same_process_raises` は同一プロセス内の再取得のみを検証。
+# ADR-010 の主目的は exe 二重起動時の lost update 防止なので、別プロセスからの
+# 取得が BlockingIOError / OSError で拒否されることを multiprocessing で検証する。
+
+
+class TestCrossProcessLock:
+    """Issue #51 #2: 別プロセスからのロック取得が競合時に拒否されること。
+
+    multiprocessing の spawn context を使い、親プロセスが lock 保持中に
+    子プロセスが同じ session_id で `with_session_lock` を試みて失敗することを確認。
+    """
+
+    def test_different_process_blocked_while_parent_holds_lock(
+        self, tmp_path: Path
+    ) -> None:
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        sid = generate_session_id()
+
+        # spawn を使うことで fork 時の fd 継承を回避（子は完全に別 file description）
+        ctx = mp.get_context("spawn")
+        result_queue: Any = ctx.Queue()
+
+        with with_session_lock(sessions_dir, sid):
+            proc = ctx.Process(
+                target=_child_try_acquire_lock,
+                args=(str(sessions_dir), sid, result_queue),
+            )
+            proc.start()
+            proc.join(timeout=30)
+
+            assert not proc.is_alive(), "child did not terminate within 30s"
+            assert proc.exitcode == 0, f"child crashed: exitcode={proc.exitcode}"
+
+            result = result_queue.get(timeout=5)
+            status, detail = result
+
+        # 親が lock 保持中なので子は取得に失敗するはず
+        assert status in {"BLOCKED_BlockingIOError", "BLOCKED_OSError"}, (
+            f"expected BLOCKED, got {status} (detail={detail})"
+        )
+
+    def test_different_process_acquires_after_parent_releases(
+        self, tmp_path: Path
+    ) -> None:
+        """親プロセスが release した後、子プロセスは lock を取得できる。"""
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        sid = generate_session_id()
+
+        # 親プロセスは with 抜けで lock release
+        with with_session_lock(sessions_dir, sid):
+            pass
+
+        ctx = mp.get_context("spawn")
+        result_queue: Any = ctx.Queue()
+
+        proc = ctx.Process(
+            target=_child_try_acquire_lock,
+            args=(str(sessions_dir), sid, result_queue),
+        )
+        proc.start()
+        proc.join(timeout=30)
+
+        assert not proc.is_alive(), "child did not terminate within 30s"
+        assert proc.exitcode == 0, f"child crashed: exitcode={proc.exitcode}"
+
+        status, detail = result_queue.get(timeout=5)
+        assert status == "ACQUIRED", f"expected ACQUIRED, got {status} (detail={detail})"
+
+    def test_different_sessions_concurrent_across_processes(
+        self, tmp_path: Path
+    ) -> None:
+        """異なる session_id のロックは別プロセスからも同時取得可能。"""
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        sid1 = generate_session_id()
+        sid2 = generate_session_id()
+        assert sid1 != sid2
+
+        ctx = mp.get_context("spawn")
+        result_queue: Any = ctx.Queue()
+
+        with with_session_lock(sessions_dir, sid1):
+            proc = ctx.Process(
+                target=_child_try_acquire_lock,
+                args=(str(sessions_dir), sid2, result_queue),
+            )
+            proc.start()
+            proc.join(timeout=30)
+
+        assert not proc.is_alive()
+        assert proc.exitcode == 0
+        status, detail = result_queue.get(timeout=5)
+        # sid2 は別セッションなので子は取得成功
+        assert status == "ACQUIRED", f"expected ACQUIRED, got {status} (detail={detail})"
