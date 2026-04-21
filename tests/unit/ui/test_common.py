@@ -105,3 +105,30 @@ class TestInstallTkExceptionGuard:
             root.report_callback_exception(ValueError, ValueError("x"), None)
 
         assert "RuntimeError" in caplog.text
+
+    @pytest.mark.parametrize(
+        "bad_component",
+        ["", "launcher main", "session picker", "\t", "a\nb"],
+    )
+    def test_rejects_invalid_component_label(self, bad_component: str) -> None:
+        """空文字・空白・制御文字入り component は ValueError（grep 可読性保護）。"""
+        from wiseman_hub.ui.common import install_tk_exception_guard
+
+        root = _FakeRoot()
+        with pytest.raises(ValueError, match="component must be non-empty"):
+            install_tk_exception_guard(
+                root, component=bad_component, messagebox=MagicMock()
+            )
+
+    @pytest.mark.parametrize(
+        "ok_component",
+        ["launcher", "settings", "session_picker", "session_abc-123"],
+    )
+    def test_accepts_snake_case_component(self, ok_component: str) -> None:
+        from wiseman_hub.ui.common import install_tk_exception_guard
+
+        root = _FakeRoot()
+        install_tk_exception_guard(
+            root, component=ok_component, messagebox=MagicMock()
+        )
+        assert callable(root.report_callback_exception)

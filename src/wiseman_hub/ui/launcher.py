@@ -26,8 +26,12 @@ from pathlib import Path
 from tkinter import ttk
 
 from wiseman_hub.config import AppConfig
-from wiseman_hub.ui.common import assert_main_thread, install_tk_exception_guard
-from wiseman_hub.ui.confirm_dialog import MessageBoxLike, default_messagebox
+from wiseman_hub.ui.common import (
+    MessageBoxLike,
+    assert_main_thread,
+    default_messagebox,
+    install_tk_exception_guard,
+)
 
 logger = logging.getLogger(__name__)
 

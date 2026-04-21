@@ -20,8 +20,7 @@ import tkinter as tk
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
-from typing import Protocol
+from tkinter import filedialog, ttk
 
 from wiseman_hub.pdf.matcher import SourceKind
 from wiseman_hub.pdf.session import (
@@ -33,7 +32,7 @@ from wiseman_hub.pdf.session import (
     UserCandidate,
     save_session,
 )
-from wiseman_hub.ui.common import assert_main_thread
+from wiseman_hub.ui.common import MessageBoxLike, assert_main_thread, default_messagebox
 
 logger = logging.getLogger(__name__)
 
@@ -68,34 +67,6 @@ class ConfirmDialogResult:
         if self.aborted:
             return False
         return self.session.all_candidates_resolved
-
-
-class MessageBoxLike(Protocol):
-    """`tkinter.messagebox` の最小インターフェース（DI 用）。"""
-
-    def askyesno(self, title: str, message: str) -> bool: ...
-
-    def showinfo(self, title: str, message: str) -> None: ...
-
-    def showerror(self, title: str, message: str) -> None: ...
-
-
-class _DefaultMessageBox:
-    """`tkinter.messagebox` をそのまま使う実装。"""
-
-    def askyesno(self, title: str, message: str) -> bool:
-        return bool(messagebox.askyesno(title, message))
-
-    def showinfo(self, title: str, message: str) -> None:
-        messagebox.showinfo(title, message)
-
-    def showerror(self, title: str, message: str) -> None:
-        messagebox.showerror(title, message)
-
-
-def default_messagebox() -> MessageBoxLike:
-    """`tkinter.messagebox` を使う既定実装を返す（他 UI モジュールから再利用可能）。"""
-    return _DefaultMessageBox()
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +157,7 @@ class ConfirmDialog:
         self._sessions_dir = sessions_dir
         self._save_session_fn = save_session_fn
         self._askopenfilename_fn = askopenfilename_fn
-        self._messagebox = messagebox_fn or _DefaultMessageBox()
+        self._messagebox = messagebox_fn or default_messagebox()
         # Tk callback 例外で mainloop が異常終了したかを追跡。ConfirmDialogResult に伝搬する
         # ことで、save 失敗後のメモリ全解決状態でも呼出側が READY_TO_MERGE に進むのを防ぐ。
         self._aborted = False
