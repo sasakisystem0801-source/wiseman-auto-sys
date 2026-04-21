@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import os
-from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -124,23 +123,10 @@ class TestLauncherAction:
 # ---------------------------------------------------------------------------
 
 
-@cache
-def _tk_available() -> bool:
-    """Tk が import + root 生成できる環境か判定（プロセス内で 1 回のみ実行）。"""
-    try:
-        import tkinter as _tk
-
-        root = _tk.Tk()
-        root.withdraw()
-        root.destroy()
-        return True
-    except Exception:
-        return False
-
-
-tk_required = pytest.mark.skipif(
-    not _tk_available(), reason="Tk runtime not available (skip UI wiring tests)"
-)
+# Tk 利用可否判定は ``conftest.py`` の ``@pytest.mark.tk_required`` に集約（プロセス内
+# での Tk 生成試行を 1 回に抑え、macOS uv python で累積する Tcl global state による
+# hang を防ぐ）。
+tk_required = pytest.mark.tk_required
 
 
 @tk_required
@@ -197,7 +183,10 @@ class TestLauncherUI:
     def test_run_pdf_merge_with_configured_calls_on_run_pdf_merge(
         self, tmp_path: Path
     ) -> None:
-        """AC-L-2 基盤: 設定完了で「PDF マージ処理」押下 → on_run_pdf_merge 呼ばれる。"""
+        """AC-L-2 基盤: 設定完了で「PDF マージ処理」押下 → on_run_pdf_merge 呼ばれる。
+
+        13B 以降は worker thread で実行されるため ``wait_until_idle`` で待機する。
+        """
         import tkinter as tk
 
         config_path = tmp_path / "config.toml"
@@ -221,6 +210,7 @@ class TestLauncherUI:
                 on_run_pdf_merge=lambda: called.append("run"),
             )
             launcher.invoke_action(LauncherAction.RUN_PDF_MERGE)
+            launcher.wait_until_idle(timeout=5.0)
         finally:
             root.destroy()
 

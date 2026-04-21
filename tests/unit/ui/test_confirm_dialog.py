@@ -615,20 +615,10 @@ class TestStdlibOnly:
 # ===========================================================================
 
 
-def _tk_available() -> bool:
-    """uv python では Tcl ランタイム非同梱で False を返す。Windows/Linux+Tk で True。"""
-    try:
-        r = tk.Tk()
-    except tk.TclError:
-        return False
-    r.destroy()
-    return True
-
-
-_TK_AVAILABLE = _tk_available()
-_skip_if_no_tk = pytest.mark.skipif(
-    not _TK_AVAILABLE, reason="Tk runtime not available (uv python / headless CI)"
-)
+# Tk 利用可否判定は ``conftest.py`` の ``@pytest.mark.tk_required`` に集約（プロセス内
+# での Tk 生成試行を 1 回に抑え、macOS uv python で累積する Tcl global state による
+# hang を防ぐ）。
+_skip_if_no_tk = pytest.mark.tk_required
 
 
 # ---------------------------------------------------------------------------
