@@ -518,3 +518,77 @@ def test_matched_path_override_missing_file_recorded_as_missing(
 
     assert report.missing_sources == [("u1", "B")]
     assert _page_texts(output_path) == ["A:u1", "C:u1", "D"]
+
+
+# ===========================================================================
+# Issue #75: merger._save_atomically のログ PII 非漏洩
+# ===========================================================================
+
+
+class TestSaveAtomicallyLogPiiDefense:
+    """_save_atomically が失敗したとき、output_path / OSError str がログに出ないこと。
+
+    Codex HIGH 指摘: 旧実装は `logger.error("Failed to save merged PDF to %s: %s", output_path, e)`
+    で output_path + str(e) を出していた。出力 dir が PII を含むパス運用（例:
+    `C:\\Users\\担当者\\介護記録\\利用者氏名\\`）では氏名がログに漏れる。
+    """
+
+    def test_save_failure_does_not_log_output_path(
+        self,
+        input_dir: Path,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        import logging
+
+        from wiseman_hub.pdf.merger import _save_atomically
+
+        # 出力先ディレクトリに PII を含める
+        pii_parent = tmp_path / "患者-佐藤次郎"
+        pii_parent.mkdir()
+        target = pii_parent / "merged.pdf"
+
+        # fitz Document を渡すが、save で失敗させるため Document を close してから呼ぶ
+        doc = fitz.open()
+        doc.new_page(width=100, height=100)
+        doc.close()  # → dst.save で例外発生
+
+        with (
+            caplog.at_level(logging.ERROR, logger="wiseman_hub.pdf.merger"),
+            pytest.raises(PdfMergeError),
+        ):
+            _save_atomically(doc, target)
+
+        # ログには型名のみ、path / 氏名は残らない
+        assert "患者-佐藤次郎" not in caplog.text
+        assert str(target) not in caplog.text
+        # Error の事実と例外型名は残って良い
+        assert "Failed to save merged PDF" in caplog.text
+
+    def test_save_failure_exception_message_does_not_contain_path(
+        self,
+        input_dir: Path,
+        tmp_path: Path,
+    ) -> None:
+        """PdfMergeError.__str__ に path / 例外 raw が含まれない。
+
+        Future が未捕捉で stderr に traceback が出た場合（threading.excepthook 等）、
+        exception message 側から PII が漏れないことを保証する（Codex HIGH 指摘）。
+        """
+        from wiseman_hub.pdf.merger import _save_atomically
+
+        pii_parent = tmp_path / "患者-佐藤次郎"
+        pii_parent.mkdir()
+        target = pii_parent / "merged.pdf"
+
+        doc = fitz.open()
+        doc.new_page(width=100, height=100)
+        doc.close()
+
+        with pytest.raises(PdfMergeError) as exc_info:
+            _save_atomically(doc, target)
+
+        msg = str(exc_info.value)
+        assert "患者-佐藤次郎" not in msg
+        assert str(target) not in msg
+        assert "save" in msg.lower()  # 型名 + "save" は残る（既存テスト互換）

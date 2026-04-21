@@ -209,8 +209,11 @@ def _save_atomically(dst: fitz.Document, output_path: Path) -> None:
         dst.save(str(tmp_path))
     except Exception as e:
         tmp_path.unlink(missing_ok=True)
-        logger.error("Failed to save merged PDF to %s: %s", output_path, e)
-        raise PdfMergeError(f"Failed to save merged PDF to {output_path}: {e}") from e
+        # PII 防御: output_path / str(e) は氏名を含むパス運用でログ / stderr 経路から
+        # 漏洩する。message にも path を含めない（Future 未捕捉時の threading.excepthook
+        # 経路や CLI の stderr 表示で PII が出ないことを保証）。Issue #75 / Codex HIGH。
+        logger.error("Failed to save merged PDF: %s", type(e).__name__)
+        raise PdfMergeError(f"Failed to save merged PDF ({type(e).__name__})") from e
     os.replace(tmp_path, output_path)
 
 
