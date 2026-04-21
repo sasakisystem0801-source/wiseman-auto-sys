@@ -23,7 +23,7 @@ from pathlib import Path
 from tkinter import filedialog, ttk
 
 from wiseman_hub.config import AppConfig, save_config
-from wiseman_hub.ui.common import assert_main_thread
+from wiseman_hub.ui.common import assert_main_thread, install_tk_exception_guard
 from wiseman_hub.ui.confirm_dialog import MessageBoxLike, default_messagebox
 
 logger = logging.getLogger(__name__)
@@ -261,9 +261,9 @@ class SettingsDialog:
             self._owns_root = True
             self._is_toplevel = False
             self._root = tk.Tk()
-        # Tk 既定は callback 例外を stderr へ traceback 出力するため PII が漏れる。
-        # Toplevel でも root 経由で共有される property を上書きする。
-        self._root.report_callback_exception = self._on_callback_exception  # type: ignore[union-attr]
+        install_tk_exception_guard(
+            self._root, component="settings", messagebox=self._messagebox
+        )
 
         self._result: SettingsDialogResult = SettingsDialogResult()
         self._vars: dict[str, tk.StringVar] = {}
@@ -467,25 +467,3 @@ class SettingsDialog:
         if picked:
             self._vars[field_name].set(picked)
 
-    # -- Tk callback exception ---------------------------------------------
-
-    def _on_callback_exception(
-        self,
-        exc_type: type[BaseException],
-        exc_value: BaseException,
-        exc_tb: object,
-    ) -> None:
-        # PII 防御: logger には型名のみ。
-        logger.error("settings callback exception: %s", exc_type.__name__)
-        try:
-            self._messagebox.showerror(
-                "内部エラー",
-                "処理中にエラーが発生しました。詳細はログを確認してください。\n\n"
-                f"{exc_type.__name__}",
-            )
-        except Exception as e:  # noqa: BLE001 — 二次 showerror 失敗は握り潰し可
-            # ConfirmDialog と同じ PII 防御パターン: 型名のみ。
-            logger.warning(
-                "showerror failed during settings callback exception: %s",
-                type(e).__name__,
-            )

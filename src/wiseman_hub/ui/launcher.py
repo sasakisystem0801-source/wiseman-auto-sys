@@ -26,7 +26,7 @@ from pathlib import Path
 from tkinter import ttk
 
 from wiseman_hub.config import AppConfig
-from wiseman_hub.ui.common import assert_main_thread
+from wiseman_hub.ui.common import assert_main_thread, install_tk_exception_guard
 from wiseman_hub.ui.confirm_dialog import MessageBoxLike, default_messagebox
 
 logger = logging.getLogger(__name__)
@@ -120,10 +120,9 @@ class Launcher:
 
         self._owns_root = root is None
         self._root = root if root is not None else tk.Tk()
-        # Tk 既定は callback 例外を stderr に traceback 出力して mainloop 継続。
-        # Phase A 統合時に OCR/ファイル I/O 例外が氏名・パスを含みうるため、
-        # ConfirmDialog と同じく型名のみログに残し、UI には sanitized メッセージで通知する。
-        self._root.report_callback_exception = self._on_callback_exception
+        install_tk_exception_guard(
+            self._root, component="launcher", messagebox=self._messagebox
+        )
 
         # Phase A 非同期実行用。max_workers=1 で Phase A の直列実行を保証
         # （Phase A は session lock で他プロセスとは競合しないが、同プロセス内の二重起動を防ぐ）。
@@ -340,20 +339,3 @@ class Launcher:
         else:
             self._messagebox.showinfo(title, message)
 
-    def _on_callback_exception(
-        self,
-        exc_type: type[BaseException],
-        exc_value: BaseException,
-        exc_tb: object,
-    ) -> None:
-        """Tk callback 内の未捕捉例外を fail-fast でハンドルする（PII 防御）。
-
-        logger には型名のみを残す（exc_value は PDF パスや氏名を含みうる）。
-        画面には sanitized なメッセージで通知し、ユーザーに ErrorDialog として示す。
-        """
-        logger.error("launcher callback exception: %s", exc_type.__name__)
-        self._messagebox.showerror(
-            "内部エラー",
-            "処理中にエラーが発生しました。詳細はログを確認してください。\n\n"
-            f"{exc_type.__name__}",
-        )
