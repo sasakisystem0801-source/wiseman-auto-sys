@@ -592,3 +592,33 @@ class TestSaveAtomicallyLogPiiDefense:
         assert "患者-佐藤次郎" not in msg
         assert str(target) not in msg
         assert "save" in msg.lower()  # 型名 + "save" は残る（既存テスト互換）
+
+    def test_save_failure_cause_chain_preserves_original_exception_type(
+        self,
+        input_dir: Path,
+        tmp_path: Path,
+    ) -> None:
+        """`__cause__` には元例外が残る（debugging のため）が、PdfMergeError 本体は sanitized。
+
+        保証範囲の明示: `__cause__` 経由で元例外 message (PII 含みうる) が traceback に
+        出る経路は本 PR のスコープ外（Launcher / CLI が future.result / try-except で
+        捕捉済みのため実運用では塞がっている）。型名チェーンの健全性のみ確認。
+        """
+        from wiseman_hub.pdf.merger import _save_atomically
+
+        pii_parent = tmp_path / "患者-高橋次郎"
+        pii_parent.mkdir()
+        target = pii_parent / "merged.pdf"
+
+        doc = fitz.open()
+        doc.new_page(width=100, height=100)
+        doc.close()
+
+        with pytest.raises(PdfMergeError) as exc_info:
+            _save_atomically(doc, target)
+
+        # __cause__ は元例外を保持（デバッガビリティ維持）
+        assert exc_info.value.__cause__ is not None
+        # PdfMergeError 本体の repr / str 経路では PII が漏れない（message は sanitized）
+        assert "患者-高橋次郎" not in repr(exc_info.value)
+        assert "患者-高橋次郎" not in str(exc_info.value)

@@ -1062,10 +1062,13 @@ class TestPipelineLogPiiDefense:
         sessions_dir = tmp_path / ".sessions"
 
         # OCR がエラーを起こす。message に PII を込める。
+        # OcrClient.extract_name の Protocol と揃える（include_raw_text kwarg を受ける）。
         class _FailingOcr:
             calls = 0
 
-            def extract_name(self, _png: bytes) -> ExtractNameResult:
+            def extract_name(
+                self, _png: bytes, *, include_raw_text: bool = False
+            ) -> ExtractNameResult:
                 raise RuntimeError("/secret/path/患者-山田太郎/A.pdf")
 
         with (
@@ -1084,3 +1087,38 @@ class TestPipelineLogPiiDefense:
         assert "患者-山田太郎" not in caplog.text
         assert "/secret/path" not in caplog.text
         assert "RuntimeError" in caplog.text  # 型名は残る
+
+    def test_unlink_failure_does_not_log_output_path(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """_unlink_with_warning が output_path を logger.warning に出さないこと。
+
+        欠損 B/C 検知 → _unlink_with_warning 失敗（Windows file lock 等）の経路で、
+        output_path が PII を含むディレクトリ名でも warning ログに出現しないこと。
+        Codex HIGH 指摘。
+        """
+        import logging
+
+        from wiseman_hub.pdf.pipeline import _unlink_with_warning
+
+        pii_path = tmp_path / "患者-鈴木花子" / "merged.pdf"
+        pii_path.parent.mkdir()
+        pii_path.write_bytes(b"dummy")
+
+        # unlink 自体を失敗させる
+        def _fail_unlink(*_args: object, **_kwargs: object) -> None:
+            raise OSError("file is locked by another process (山田太郎.pdf)")
+
+        monkeypatch.setattr(Path, "unlink", _fail_unlink)
+
+        with caplog.at_level(logging.WARNING, logger="wiseman_hub.pdf.pipeline"):
+            _unlink_with_warning(pii_path)  # exception は raise しない
+
+        assert "患者-鈴木花子" not in caplog.text
+        assert str(pii_path) not in caplog.text
+        # 型名と「manual cleanup」の警告は残る
+        assert "OSError" in caplog.text
+        assert "manual cleanup" in caplog.text

@@ -406,9 +406,11 @@ def _unlink_with_warning(path: Path) -> None:
     try:
         path.unlink(missing_ok=True)
     except OSError as e:
+        # PII 防御: output_path は output_dir に氏名が含まれる運用で PII を漏らすため
+        # ログには出さない（Issue #75、Codex HIGH 指摘）。運用者には「manual cleanup
+        # required」の警告で、削除対象の場所は session.output_path / config から特定する。
         logger.warning(
-            "failed to remove incomplete output PDF %s: %s (manual cleanup required)",
-            path,
+            "failed to remove incomplete output PDF: %s (manual cleanup required)",
             type(e).__name__,
         )
 
