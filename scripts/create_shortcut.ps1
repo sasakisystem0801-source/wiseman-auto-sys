@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Wiseman PDF ツールのデスクトップショートカットを作成する（タスク 14C / ADR-011）。
 
@@ -29,9 +29,16 @@
     exe パスを明示指定。
 
 .NOTES
-    PowerShell 5.1+（Windows 10/11 標準）で動作確認。
-    実行ポリシー制限時は以下を一時的に適用:
+    対応シェル:
+      - Windows PowerShell 5.1+（Windows 10/11 標準）
+      - PowerShell 7+（Windows のみ、WScript.Shell COM 依存）
+    Linux / macOS の pwsh では `New-Object -ComObject` が機能しないため非対応。
+
+    実行ポリシー制限時は以下を一時的に適用（現在の PS セッションのみ）:
         Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
+
+    ファイルエンコーディング: UTF-8 BOM 付き。PS 5.1 で日本語 ShortcutName が
+    CP932 誤解釈されないよう BOM を残すこと。
 #>
 
 [CmdletBinding()]
@@ -49,7 +56,15 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = $PSScriptRoot
 if (-not $ScriptDir) {
     # dot-sourcing や ISE 経由で $PSScriptRoot が空になるケースの fallback
-    $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+    if ($MyInvocation.MyCommand.Path) {
+        $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+    }
+}
+if (-not $ScriptDir) {
+    Write-Host "エラー: スクリプトの配置ディレクトリを特定できません。" -ForegroundColor Red
+    Write-Host "  `iex` 等でストリーム経由実行された可能性があります。"
+    Write-Host "  ファイルとしてディスクに保存してから `.\create_shortcut.ps1` で実行してください。"
+    exit 1
 }
 
 # 配布 ZIP 展開直後の想定レイアウト:
@@ -58,7 +73,13 @@ if (-not $ScriptDir) {
 #   ├── config/default.toml
 #   ├── assets/icon.ico
 #   └── scripts/create_shortcut.ps1   ← このスクリプト
-$DistRoot = Resolve-Path (Join-Path $ScriptDir "..") | Select-Object -ExpandProperty Path
+$ParentDir = Join-Path $ScriptDir ".."
+$DistRoot = (Resolve-Path -LiteralPath $ParentDir -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Path)
+if (-not $DistRoot) {
+    Write-Host "エラー: 配布ルートディレクトリ ($ParentDir) が解決できません。" -ForegroundColor Red
+    Write-Host "  配布 ZIP の展開が不完全な可能性があります。再展開してください。"
+    exit 1
+}
 
 if (-not $ExePath) {
     $ExePath = Join-Path $DistRoot "wiseman_hub.exe"
@@ -84,33 +105,68 @@ if (-not (Test-Path -LiteralPath $ExePath -PathType Leaf)) {
 $DesktopDir = [Environment]::GetFolderPath("Desktop")
 if (-not $DesktopDir) {
     Write-Host "エラー: Desktop ディレクトリを特定できません。" -ForegroundColor Red
+    Write-Host "  Known Folder 設定が壊れている可能性があります。OneDrive Desktop 同期設定を確認してください。"
     exit 1
 }
 
 $ShortcutPath = Join-Path $DesktopDir "$ShortcutName.lnk"
 
-$WshShell = New-Object -ComObject WScript.Shell
-$Shortcut = $WshShell.CreateShortcut($ShortcutPath)
-$Shortcut.TargetPath = $ExePath
-# WorkingDirectory を exe 配置ディレクトリにすることで、
-# Python 側の config パス解決（__main__._default_config_path の frozen 分岐）と整合。
-$Shortcut.WorkingDirectory = Split-Path -Parent $ExePath
-$Shortcut.Description = "Wiseman PDF 統合ツール（介護記録処理）"
+$WshShell = $null
+$Shortcut = $null
+try {
+    try {
+        $WshShell = New-Object -ComObject WScript.Shell
+    } catch {
+        # Windows Script Host が GPO 等で無効化されている / ConstrainedLanguage モード等
+        Write-Host "エラー: WScript.Shell COM オブジェクトを作成できません。" -ForegroundColor Red
+        Write-Host "  原因候補:"
+        Write-Host "    - Windows Script Host (WSH) が GPO で無効化されている"
+        Write-Host "    - PowerShell ConstrainedLanguage モード（WDAC / AppLocker）"
+        Write-Host "    - $($_.Exception.Message)"
+        Write-Host "  §4「手動でのショートカット作成」を参照してください。"
+        exit 2
+    }
 
-if (Test-Path -LiteralPath $IconPath -PathType Leaf) {
-    # WScript.Shell は "path,index" 形式で icon を受ける（index=0 が先頭）
-    $Shortcut.IconLocation = "$IconPath,0"
-} else {
-    Write-Host "警告: icon.ico が見つかりません。exe 埋め込みアイコンを使用します。" -ForegroundColor Yellow
-    Write-Host "  期待パス: $IconPath"
-    $Shortcut.IconLocation = "$ExePath,0"
+    $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
+    $Shortcut.TargetPath = $ExePath
+    # WorkingDirectory を exe 配置ディレクトリにすることで、
+    # exe と同ディレクトリの config/ を参照する frozen ビルドの挙動と整合。
+    $Shortcut.WorkingDirectory = Split-Path -Parent $ExePath
+    $Shortcut.Description = "Wiseman PDF 統合ツール（介護記録処理）"
+
+    if (Test-Path -LiteralPath $IconPath -PathType Leaf) {
+        # WScript.Shell は "path,index" 形式で icon を受ける（index=0 が先頭）
+        $Shortcut.IconLocation = "$IconPath,0"
+    } else {
+        Write-Host "警告: icon.ico が見つかりません。exe 埋め込みアイコンを使用します。" -ForegroundColor Yellow
+        Write-Host "  期待パス: $IconPath"
+        $Shortcut.IconLocation = "$ExePath,0"
+    }
+
+    try {
+        $Shortcut.Save()
+    } catch [System.UnauthorizedAccessException], [System.Runtime.InteropServices.COMException] {
+        Write-Host ""
+        Write-Host "エラー: ショートカットの保存に失敗しました。" -ForegroundColor Red
+        Write-Host "  保存先: $ShortcutPath"
+        Write-Host "  詳細: $($_.Exception.Message)"
+        Write-Host ""
+        Write-Host "  原因候補:"
+        Write-Host "    - OneDrive Desktop 同期が一時停止中 → OneDrive を再開するか同期無効化"
+        Write-Host "    - アンチウイルスの ASR ルールが .lnk 生成をブロック"
+        Write-Host "    - Desktop への書込 ACL 不足"
+        Write-Host "  §7.1『アクセスが拒否されました』の対処を確認してください。"
+        exit 3
+    }
+} finally {
+    # Save() が例外で抜けても COM を必ず解放する（長時間プロセスでのリーク防止）
+    if ($Shortcut) {
+        [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($Shortcut)
+    }
+    if ($WshShell) {
+        [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($WshShell)
+    }
 }
-
-$Shortcut.Save()
-
-# COM オブジェクト解放（長時間プロセスでないため厳密には不要だが、明示的に）
-[System.Runtime.InteropServices.Marshal]::ReleaseComObject($Shortcut) | Out-Null
-[System.Runtime.InteropServices.Marshal]::ReleaseComObject($WshShell) | Out-Null
 
 Write-Host ""
 Write-Host "=== 完了 ===" -ForegroundColor Green

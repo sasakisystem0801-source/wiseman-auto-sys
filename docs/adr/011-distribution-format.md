@@ -3,6 +3,12 @@
 ## ステータス
 **Proposed (2026-04-21)** — 14A 完了時点。14D で Accepted に昇格予定。
 
+### 変更履歴
+
+- 2026-04-22: 14C 実装に伴い配布レイアウトを更新（`default.toml.sample` 命名に変更、
+  `scripts/create_shortcut.ps1` を配布物に追加）。14C の施設 IT 担当者向け手順書
+  `docs/handoff/14c-deploy.md` と整合。
+
 ## コンテキスト
 
 ADR-002（PyInstaller 選定）で「Python アプリを PyInstaller で exe 化する」方針は確定済。
@@ -31,28 +37,33 @@ ADR-002（PyInstaller 選定）で「Python アプリを PyInstaller で exe 化
 ### 配布レイアウト
 
 ```
-wiseman-hub/                    # 配布 ZIP を展開した結果
-├── wiseman_hub.exe             # PyInstaller onefile
+wiseman-hub/                         # 配布 ZIP を展開した結果
+├── wiseman_hub.exe                  # PyInstaller onefile
 ├── config/
-│   └── default.toml            # 設定ファイル（exe と同階層の相対パス、編集可能）
+│   └── default.toml.sample          # 設定サンプル（施設側で default.toml にコピーして編集）
 ├── assets/
-│   └── icon.ico                # ショートカット用（タスク 14C）
-└── README.txt                  # 起動・設定・よくあるエラー（タスク 11）
+│   └── icon.ico                     # ショートカット用（タスク 14C）
+├── scripts/
+│   └── create_shortcut.ps1          # Desktop ショートカット作成（タスク 14C）
+└── README.txt                       # 起動・設定・よくあるエラー（タスク 11）
 ```
 
 `config/default.toml` は exe 外に配置（設定 GUI の書き戻しを可能にするため）。
+`.sample` 命名で配布し、施設側でコピー → 編集する運用（上書き事故防止、`14c-deploy.md` §2.3）。
 `default` 命名は今後複数プロファイル（施設別等）への拡張余地を残すため。
 
 ### 配布パッケージ
 
-- 形式: ZIP（`wiseman-hub-v0.1.0-win-x64.zip`）
+- 形式: ZIP（`wiseman-hub-vX.Y.Z-win-x64.zip`、`X.Y.Z` はビルドバージョン）
 - 配布物:
   - `wiseman_hub.exe`
-  - `config/default.toml`（サンプル、施設別に編集）
+  - `config/default.toml.sample`（サンプル、施設側で `default.toml` にコピーして編集）
   - `assets/icon.ico`
-  - `README.txt`
+  - `scripts/create_shortcut.ps1`（14C、Desktop ショートカット作成）
+  - `README.txt`（14C 手順書の要点抜粋、タスク 11 で作成予定）
 - USB 配布時は施設側で任意ディレクトリに展開
-- ショートカット作成スクリプト（タスク 14C）で Desktop にアイコン付きショートカットを配置
+- ショートカット作成スクリプトで Desktop にアイコン付きショートカットを配置
+  （詳細手順: `docs/handoff/14c-deploy.md`）
 
 ### ビルド環境
 
@@ -115,9 +126,12 @@ MVP 1 施設運用ではこの補強で十分。2 施設目以降はコードサ
 
 ## 次ステップ（14C / 14D / 10-2）
 
-- **14C**: ショートカット作成スクリプト（PowerShell）、`README.txt` ドラフト
+- **14C**: ✅ ショートカット作成スクリプト (`scripts/create_shortcut.ps1`) +
+  施設 IT 担当者向け手順書 (`docs/handoff/14c-deploy.md`) 実装済（2026-04-22、PR #82）。
+  `README.txt` ドラフトはタスク 11 で作成予定
 - **14D**: 本 ADR を Accepted に昇格、コードサイニング要否の運用判断を追記
-- **10-2**: Windows 実機ビルド + E2E 検証（本田さん実施）、SmartScreen 挙動記録
+- **10-2**: Windows 実機ビルド + E2E 検証（本田さん実施）、SmartScreen 挙動記録、
+  14C の PS スクリプトの実機動作確認
 
 ## 14D Accepted 昇格条件
 
