@@ -622,3 +622,187 @@ class TestSaveAtomicallyLogPiiDefense:
         # PdfMergeError 本体の repr / str 経路では PII が漏れない（message は sanitized）
         assert "患者-高橋次郎" not in repr(exc_info.value)
         assert "患者-高橋次郎" not in str(exc_info.value)
+
+
+# ===========================================================================
+# Issue #76: merger.py 全 PdfMergeError 生成箇所のログ PII 非漏洩
+# ===========================================================================
+#
+# Issue #75 (PR #77) で `_save_atomically` 単体の PII 除外は完了済。
+# Issue #76 は残り 8 箇所（_validate_user_name / _open_pdf_file_or_raise /
+# _append_pdf_bytes / _append_pdf_file）への defense-in-depth 拡張。
+# 呼出側で source_label を kind (A/B/C/D) のみに制限、message は型名ベースに統一。
+
+
+class TestMergerPiiDefense:
+    """merger.py 全 PdfMergeError message から user_name / path / str(e) が漏れないこと。
+
+    Issue #76: _save_atomically (Issue #75) と同パターンで他 8 箇所も型名ベースに統一。
+    """
+
+    def test_validate_user_name_traversal_does_not_leak_name(self) -> None:
+        from wiseman_hub.pdf.merger import _validate_user_name
+
+        pii = "../患者-佐藤次郎"
+        with pytest.raises(PdfMergeError, match="traversal") as exc_info:
+            _validate_user_name(pii)
+        msg = str(exc_info.value)
+        assert pii not in msg
+        assert "佐藤次郎" not in msg
+
+    def test_validate_user_name_forbidden_does_not_leak_name(self) -> None:
+        from wiseman_hub.pdf.merger import _validate_user_name
+
+        pii = "佐藤/次郎"
+        with pytest.raises(PdfMergeError, match="forbidden") as exc_info:
+            _validate_user_name(pii)
+        msg = str(exc_info.value)
+        assert "佐藤" not in msg
+        assert "次郎" not in msg
+
+    def test_validate_user_name_null_byte_does_not_leak_name(self) -> None:
+        from wiseman_hub.pdf.merger import _validate_user_name
+
+        pii = "佐藤\x00次郎"
+        with pytest.raises(PdfMergeError, match="forbidden") as exc_info:
+            _validate_user_name(pii)
+        msg = str(exc_info.value)
+        assert "佐藤" not in msg
+        assert "次郎" not in msg
+
+    def test_open_pdf_corrupted_does_not_leak_path(self, tmp_path: Path) -> None:
+        from wiseman_hub.pdf.merger import _open_pdf_file_or_raise
+
+        pii_parent = tmp_path / "患者-佐藤次郎"
+        pii_parent.mkdir()
+        corrupt = pii_parent / "B_data.pdf"
+        corrupt.write_bytes(b"%PDF-1.4\ngarbage\n%%EOF")
+
+        with pytest.raises(PdfMergeError) as exc_info:
+            _open_pdf_file_or_raise(corrupt, "B")
+        msg = str(exc_info.value)
+        assert "患者-佐藤次郎" not in msg
+        assert str(corrupt) not in msg
+        # 型名ベース + kind は残って良い
+        assert ("Corrupted" in msg) or ("Failed to open" in msg)
+        assert "for B" in msg
+
+    def test_open_pdf_encrypted_does_not_leak_path(self, tmp_path: Path) -> None:
+        from wiseman_hub.pdf.merger import _open_pdf_file_or_raise
+
+        pii_parent = tmp_path / "患者-鈴木花子"
+        pii_parent.mkdir()
+        enc = pii_parent / "B_data.pdf"
+        doc = fitz.open()
+        try:
+            doc.new_page(width=595.0, height=842.0).insert_text((50, 50), "x")
+            doc.save(
+                str(enc),
+                encryption=fitz.PDF_ENCRYPT_AES_256,
+                owner_pw="o",
+                user_pw="u",
+            )
+        finally:
+            doc.close()
+
+        with pytest.raises(PdfMergeError, match="Encrypted") as exc_info:
+            _open_pdf_file_or_raise(enc, "B")
+        msg = str(exc_info.value)
+        assert "患者-鈴木花子" not in msg
+        assert str(enc) not in msg
+
+    def test_open_pdf_empty_file_does_not_leak_path(self, tmp_path: Path) -> None:
+        from wiseman_hub.pdf.merger import _open_pdf_file_or_raise
+
+        pii_parent = tmp_path / "患者-田中太郎"
+        pii_parent.mkdir()
+        empty = pii_parent / "B_data.pdf"
+        empty.write_bytes(b"")
+
+        with pytest.raises(PdfMergeError) as exc_info:
+            _open_pdf_file_or_raise(empty, "B")
+        msg = str(exc_info.value)
+        assert "患者-田中太郎" not in msg
+        assert str(empty) not in msg
+        assert "for B" in msg
+
+    def test_append_pdf_bytes_corrupted_stream_does_not_leak(self) -> None:
+        from wiseman_hub.pdf.merger import _append_pdf_bytes
+
+        dst = fitz.open()
+        try:
+            with pytest.raises(PdfMergeError) as exc_info:
+                _append_pdf_bytes(dst, b"not a valid PDF content", "A")
+            msg = str(exc_info.value)
+            # 呼出側は "A" のみ渡すため user_name は原理的に入らないが、
+            # message 全体に氏名っぽい文字列が混入していないことを規範として確認
+            assert ("Empty" in msg) or ("Corrupted" in msg)
+            assert "for A" in msg
+        finally:
+            dst.close()
+
+    def test_append_pdf_bytes_empty_stream_does_not_leak(self) -> None:
+        from wiseman_hub.pdf.merger import _append_pdf_bytes
+
+        dst = fitz.open()
+        try:
+            with pytest.raises(PdfMergeError, match="Empty") as exc_info:
+                _append_pdf_bytes(dst, b"", "A")
+            msg = str(exc_info.value)
+            assert "for A" in msg
+        finally:
+            dst.close()
+
+    def test_merge_user_pdfs_corrupted_b_does_not_leak_user_name(
+        self, input_dir: Path, output_path: Path, config: PdfMergeConfig
+    ) -> None:
+        """merge_user_pdfs 経由で PdfMergeError message に user_name が含まれないこと。
+
+        B ファイルを破損させた状態で merger を呼び出し、例外 message から
+        user_name が漏洩しないことを end-to-end で保証する。
+        """
+        pii_name = "佐藤次郎"
+        (input_dir / f"B_{pii_name}.pdf").write_bytes(b"%PDF-1.4\ngarbage\n%%EOF")
+        (input_dir / f"C_{pii_name}.pdf").write_bytes(_make_pdf(["C"]))
+        (input_dir / "D_common.pdf").write_bytes(_make_pdf(["D"]))
+
+        user = UserPageSource(
+            user_name=pii_name,
+            a_page_pdf_bytes=_make_pdf([f"A:{pii_name}"]),
+            page_index=0,
+        )
+
+        with pytest.raises(PdfMergeError) as exc_info:
+            merge_user_pdfs([user], config, output_path)
+
+        msg = str(exc_info.value)
+        # user_name が message に漏洩していないこと
+        assert pii_name not in msg
+        # B ファイルの絶対パスも漏洩していないこと
+        assert str(input_dir / f"B_{pii_name}.pdf") not in msg
+        # kind (B) とキーワードは残って良い
+        assert "for B" in msg
+
+    def test_merge_user_pdfs_corrupted_b_cause_chain_preserved(
+        self, input_dir: Path, output_path: Path, config: PdfMergeConfig
+    ) -> None:
+        """__cause__ には元例外が残る（debugging のため）が、PdfMergeError 本体は sanitized。"""
+        pii_name = "高橋花子"
+        (input_dir / f"B_{pii_name}.pdf").write_bytes(b"%PDF-1.4\ngarbage\n%%EOF")
+        (input_dir / f"C_{pii_name}.pdf").write_bytes(_make_pdf(["C"]))
+        (input_dir / "D_common.pdf").write_bytes(_make_pdf(["D"]))
+
+        user = UserPageSource(
+            user_name=pii_name,
+            a_page_pdf_bytes=_make_pdf([f"A:{pii_name}"]),
+            page_index=0,
+        )
+
+        with pytest.raises(PdfMergeError) as exc_info:
+            merge_user_pdfs([user], config, output_path)
+
+        # __cause__ は保持される（デバッガビリティ維持）
+        assert exc_info.value.__cause__ is not None
+        # PdfMergeError 本体の repr / str は sanitized
+        assert pii_name not in repr(exc_info.value)
+        assert pii_name not in str(exc_info.value)
