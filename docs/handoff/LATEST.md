@@ -1,99 +1,84 @@
 # Handoff: "使える Windows デスクトップアプリ" 完成化計画（Session 8 終了時点）
 
 **更新日**: 2026-04-21
-**ブランチ**: feature/task-13b-phase-a-integration (PR #65, CI 進行中)
-**main**: f23aeb5 (PR #61 squash merged: タスク 13A)
+**ブランチ**: feature/task-12b-settings-gui (PR #66, CI 進行中)
+**main**: 707237b (PR #65 squash merged: タスク 13B)
 
 ## セッション 8 の成果
 
 ### マージ済み
-- **PR #61**: タスク 13A（ランチャー GUI 骨格、3 ボタン、コールバック DI）
+- **PR #61**: タスク 13A（ランチャー GUI 骨格、3 ボタン）
+- **PR #65**: タスク 13B（Launcher ↔ Phase A 非同期統合、Issue #62 対応）
 
 ### マージ待ち（次セッション冒頭で確認→マージ）
-- **PR #65**: タスク 13B（Launcher ↔ Phase A 非同期統合、Issue #62 対応）
-  - ThreadPoolExecutor(max_workers=1) + busy flag + worker thread 化
-  - `__main__.py` で Phase A コールバック注入（TOML を毎回再ロード）
-  - 6 Agent + Codex + Evaluator 分離プロトコル通過、CRITICAL 3 件対応済
-  - 325 passed / 33 skipped（Tk wiring は Windows CI で実測）
+- **PR #66**: タスク 12B（設定 GUI、SettingsDialog + Toplevel モーダル化）
+  - 343 passed / 44 skipped ローカル通過
+  - /simplify 3 並列 + Evaluator APPROVE
+  - 6 Agent + Codex 二段レビュー → CRITICAL 3 件 + IMPORTANT 2 件反映済
+  - CI 進行中（test-unit 3.11/3.12 + test-integration）
 
 ## 次セッションの着手手順
 
 ```bash
 cd /Users/yyyhhh/Projects/wiseman_auto_sys
 # 1. catchup で状況把握
-# 2. PR #65 CI 確認
-gh pr checks 65
-gh pr view 65
+# 2. PR #66 CI 確認
+gh pr checks 66
+gh pr view 66
 # 3. CI 通過していればマージ
-gh pr merge 65 --squash --delete-branch
+gh pr merge 66 --squash --delete-branch
 git checkout main
 git reset --hard origin/main
-# 4. タスク 12B 着手（設定 GUI）
-git checkout -b feature/task-12b-settings-gui
+# 4. タスク 13C 着手（ランチャー ↔ 確認 UI / Phase B 統合）
+git checkout -b feature/task-13c-phase-b-integration
 ```
 
 ## 次タスク優先順位
 
-### 優先 1: タスク 12B（設定 GUI）
+### 優先 1: タスク 13C（ランチャー ↔ 確認 UI / Phase B 統合）
 
 **スコープ**:
-- `src/wiseman_hub/ui/settings.py` 新規
-- 必須設定 5 項目 + optional 設定を Tkinter フォームで編集
-  - input_dir / output_dir（フォルダ選択ダイアログ）
-  - source_a_filename / source_b_pattern / source_c_pattern
-  - user_name_bbox / concat_order
-  - ocr_backend.endpoint_url / api_key
-  - wiseman.exe_path
-- Save → `save_config(cfg, path)` 呼出（PR #60 で完成済）
-- `ui/launcher.py` の `on_open_settings` に注入（13A の DI 設計活用）
-- Phase A 実行中（`launcher._busy`）は Save ボタンを無効化、または warning 表示
+- `on_open_review` 実装: NEEDS_REVIEW セッション一覧 → ConfirmDialog → `run_phase_b`
+- 13B と同様 worker thread 化（Phase B も時間がかかるため）
+- SettingsDialog と同じ Toplevel モーダル化パターン（`_make_settings_callback` 参照）
+- Phase B 完了時の出力 PDF 通知
 
 **Acceptance Criteria**:
-- AC-S-1: 設定 GUI 起動で全フィールドが TOML の現在値で初期化される
-- AC-S-2: 各フィールドを編集 → Save → TOML に書き戻される（コメント維持）
-- AC-S-3: 必須項目が空のまま Save → エラー表示、保存しない
-- AC-S-4: フォルダ選択ダイアログで選択したパスが入力欄に反映される
-- AC-S-5: API Key 欄はマスク表示（`show="*"`）
+- AC-L-3: 確認待ちボタン → セッション一覧 → 選択 → ConfirmDialog 起動
+- AC-L-3-Async: Phase B 実行中も mainloop 応答（13B パターン流用）
+- AC-L-3-Done: 完了時に出力 PDF パス通知 + ログには型名のみ（PII 防御）
 
-**TDD の流れ**:
-1. `tests/unit/ui/test_settings.py` Red（pure logic: validate_form、Tk wiring: save callback）
-2. `SettingsDialog` 実装（ConfirmDialog パターン踏襲）
-3. `__main__.py` の `Launcher(on_open_settings=...)` に注入
-
-### 優先 2: タスク 13C（ランチャー ↔ 確認 UI / Phase B 統合）
-
-**スコープ**:
-- `on_open_review` に NEEDS_REVIEW セッション一覧 → ConfirmDialog → run_phase_b
-- Phase B 完了時の出力 PDF 通知
-- 13B と同様に worker thread 化（Phase B も時間がかかる）
-
-### 優先 3: タスク 14A（PyInstaller spec + icon 埋め込み）
+### 優先 2: タスク 14A（PyInstaller spec + icon 埋め込み）
 
 **Issue #59 対応**: `--icon assets/icon.ico` 指定、生成 exe の resource 検証
 
-### 優先 4: タスク 10-2（Windows 実機 E2E、本田さん実施）
+### 優先 3: タスク 10-2（Windows 実機 E2E、本田さん実施）
 
 `docs/handoff/windows-e2e-task10.md` に従って TeamViewer で実施。
 
-### 優先 5: タスク 12C / 14C / 14D / 15 / 11
+### 優先 4: タスク 12C / 14C / 14D / 15 / 11
 
-## 積み残し Issue
+## 積み残し Issue / 技術負債
 
-### Session 8 で対処／新規
-- **#62** ランチャー Phase A worker thread 化 → PR #65 で対応
-- (レビューで識別した将来対応候補)
-  - Protocol 化: `OcrClient` を `contextlib.AbstractContextManager` 準拠にすれば
-    `__main__.py` の `hasattr(ocr_client, "__exit__")` ダックタイピング除去可
-  - テスト: `test_after_failure_after_root_destroy_logs_sanitized` / 
-    `test_executor_shutdown_is_idempotent` 追加
+### Session 8 で新規識別（12B レビューで発覚）
+- **type-design**: `validate_form` 戻り値 `list[str]` を error code enum 化（i18n / テスト結合リスク）
+- **type-design**: `form_to_config` に `ValidatedForm` newtype 導入（illegal-state-unrepresentable）
+- **type-design**: `SettingsDialogResult.config` が AppConfig（frozen でない）で mutation 可能。deepcopy on construction 検討
+- **reuse**: `_on_callback_exception` が ConfirmDialog / Launcher / SettingsDialog で 3 重実装。`ui/common.py` に `install_tk_exception_guard` 抽出（次 PR スコープ）
+- **test**: 重複 `concat_order` "A,A,B" の仕様判断（許可 or 検出）
+- **test**: `reload_config` + `validate_config_ready` の結合遷移テスト（AC-L-4 の実運用フロー検証）
+- **security**: API Key 平文が StringVar / Tcl interpreter / clipboard に残る（`show="*"` だけでは不十分な脅威モデル）
+- **UX**: TOML 構文エラー時に設定ダイアログで修復する UI なし（現状は Launcher の messagebox で型名通知のみ）
+- **robustness**: `ttk.Entry` の改行・制御文字混入を拒否していない（Windows 実機で検証必要）
 
 ### 継続
 - **#58**: `/healthz` Cloud Run GFE intercept（P2、実害なし）
 - **#59**: PyInstaller icon 埋め込み（P2、14A スコープ）
+- **#62**: ~~Phase A worker thread 化~~ → PR #65 で対応済
 - **#63**: Linux CI Tk wiring skip（P2、15 / 別 PR）
 - **#64**: `--config` 存在しないパス警告（P2）
-- **#51** Windows msvcrt / 跨プロセスロック / 0 ページ PDF (P1、単一 PC では発生せず)
-- **#38** atomic_io ユーティリティ抽出（P2、config.py / session.py / merger.py / 新 save_config で重複）
+- **#51**: Windows msvcrt / 跨プロセスロック / 0 ページ PDF (P1、単一 PC では発生せず)
+- **#38**: atomic_io ユーティリティ抽出（P2、config.py / session.py / merger.py / save_config で重複）
 - **#27 #29 #49 #50 #40 #39 #44 #45 #17 #16 #14 #11 #6**: 各種改善
 
 ## impl-plan 進捗（Session 8 終了時点）
@@ -103,11 +88,11 @@ git checkout -b feature/task-12b-settings-gui
 | 10-1 Cloud Run デプロイ + 疎通確認 | ✅ merged | #60 |
 | 10-2 Windows 実機 E2E | ⏳ 本田さん実施待ち | - |
 | 12A TOML 書き戻し機能 | ✅ merged | #60 |
-| 12B 設定 GUI | ⏳ **次セッション最優先** | - |
+| **12B 設定 GUI** | 🔄 **CI 通過待ち、次セッションでマージ** | **#66** |
 | 12C 初回起動ウィザード | ⏳ 12B 後 | - |
 | 13A ランチャー GUI 骨格 | ✅ merged | #61 |
-| **13B ランチャー ↔ Phase A 統合** | 🔄 **CI 通過待ち、次セッションでマージ** | **#65** |
-| 13C ランチャー ↔ 確認 UI 統合 | ⏳ | - |
+| 13B ランチャー ↔ Phase A 統合 | ✅ merged | #65 |
+| **13C ランチャー ↔ 確認 UI 統合** | ⏳ **次セッション最優先** | - |
 | 14A PyInstaller spec | ⏳ GUI 完成後 | - |
 | 14B アイコン生成 | ✅ merged | #60 |
 | 14C ショートカット配布手順 | ⏳ 14A 後 | - |
@@ -117,118 +102,94 @@ git checkout -b feature/task-12b-settings-gui
 
 ## 本セッションで確定した設計判断
 
-### Phase A 非同期実行パターン（13B）
-- `ThreadPoolExecutor(max_workers=1, thread_name_prefix="phase-a")` を Launcher に保持
-- `Launcher.__init__` で生成、`run()` の finally で shutdown（本番経路）
-- `__del__` はベストエフォート cleanup（CPython は interpreter shutdown で呼ばない可能性あり）
-- busy flag + `_current_future` で二重起動防止（AC-L-2-NoDouble）
-- worker thread → main thread 遷移は `root.after(0, callback, arg)` 経由
-  - `add_done_callback` は worker thread で同期実行（CPython 仕様）
-  - after 失敗時（root destroy 後）は `RuntimeError` / `tk.TclError` 両方捕捉
-  - after 失敗時も `future.exception()` を型名でログ（silent failure 防止）
-- `_set_busy(False)` は `future.result()` より先に呼ぶ（例外時もボタン再有効化を保証、regression test `test_buttons_reenabled_even_if_callback_raises` で enforce）
+### 設定 GUI（12B）の Toplevel モーダル化
+- `SettingsDialog(parent=...)` 指定時は `tk.Toplevel(parent) + transient + grab_set + wait_window` でモーダル動作
+- 設定編集中は Launcher の他ボタンが押せない（race 構造的排除、医療 PII 誤配置防止）
+- 親なしで起動（テスト / standalone）時は従来の `tk.Tk() + mainloop()` を使う 2 モード設計
+- Launcher に `get_root() -> tk.Tk` を追加、`_LauncherLike` Protocol に反映
 
-### PII 防御（累積）
-- logger には例外型名のみ（exception message は path/氏名を含みうる）
-- `__main__.py` の最上位 `logger.exception` → `logger.error("...: %s", type(exc).__name__)` に修正
-  （`logger.exception` は traceback に args 経由で PII を流す危険）
-- tmp ファイル cleanup の warning は basename すら出さない
-- `root.report_callback_exception` で PII 防御 sanitize（ConfirmDialog / Launcher 共通）
-- API Key は Secret Manager で rotation、docs には平文記載しない
+### Launcher ↔ SettingsDialog 双方向バインド
+- `_make_settings_callback(config_path, get_launcher)` が `launcher_ref: list[Launcher | None] = [None]` を参照
+- `Launcher(on_open_settings=callback)` → `launcher_ref[0] = launcher` の順で初期化
+- `_get_launcher()` 関数で None チェックを `raise RuntimeError`（`python -O` で assert strip リスク回避）
+- 設定保存成功時は `launcher.reload_config(new_config)` を呼び `validate_config_ready` 判定を新値で行う（再起動不要）
 
-### テスト共有インフラ
-- `tests/unit/ui/conftest.py`: `@pytest.mark.tk_required` マーカー + session-scoped fixture
-- macOS uv python（Tcl/Tk 非同梱）で複数ファイル連続実行時の Tcl global state 蓄積による hang を回避
-- `test_launcher.py` / `test_confirm_dialog.py` / `test_launcher_phase_a_async.py` で共通利用
+### PII 防御（12B で強化）
+- `validate_form`: エラーメッセージに入力値 raw を埋め込まない（URL 欄に API Key 誤入力時の露出防止）
+- `attempt_save` の except は `(OSError, ValueError, TypeError)` のみ捕捉、想定外は `_on_callback_exception` で fail-fast
+- `_on_callback_exception` の二次 showerror 失敗を warning ログで握り潰し（ConfirmDialog と同等）
+- `open_settings` で `load_config` 失敗を型名のみ通知、Launcher は継続
 
-### Quality Gate の実効性（Session 2-8 累積）
-- **/simplify**: 各 PR で IMPORTANT 3-6 件修正（今回: `except BaseException` → `Exception` / executor leak / `wait_until_idle` pump）
-- **Evaluator 分離プロトコル**: 5 ファイル以上で起動、REQUEST_CHANGES 対応で `tk.TclError` 網羅など構造的契約を明確化
-- **/review-pr 6 Agent + Codex**: 今回は CRITICAL 3 件検出（`logger.exception` PII / `suppress(Exception)` / after 失敗時の future silent）
-- **6 Agent レビュー → Codex セカンドオピニオン** の二段構造が PII 漏洩経路を 8 セッション連続検出
+### Quality Gate 実効性（Session 2-8 累積）
+- **/simplify**: 各 PR で IMPORTANT 3-6 件修正
+- **Evaluator 分離プロトコル**: 5 ファイル以上で起動、構造的契約を明確化
+- **/review-pr 6 Agent + Codex**: 12B では CRITICAL 3 件検出（Toplevel モーダル化 / assert strip / except 過剰広域）、PII 漏洩経路 8 セッション連続検出
 
 ## セッション再開手順（コピペ可）
 
 ```bash
 cd /Users/yyyhhh/Projects/wiseman_auto_sys
-# PR #65 確認
-gh pr checks 65
+# PR #66 確認
+gh pr checks 66
 
 # 全て green ならマージ
-gh pr merge 65 --squash --delete-branch
+gh pr merge 66 --squash --delete-branch
 git checkout main
 git reset --hard origin/main
 
-# 12B 着手
-git checkout -b feature/task-12b-settings-gui
+# 13C 着手
+git checkout -b feature/task-13c-phase-b-integration
 
 # TDD: まず Red
-# tests/unit/ui/test_settings.py 新規
+# tests/unit/ui/test_launcher_phase_b_integration.py 新規
 ```
 
-## 12B 設計メモ（詳細）
+## 13C 設計メモ（詳細）
+
+### スコープ
+
+ランチャーの「確認待ちセッション」ボタンから Phase B（最終 PDF 結合）を実行できるようにする。
+
+1. `on_open_review` に実装注入:
+   - `list_sessions(sessions_dir)` で NEEDS_REVIEW / READY_TO_MERGE セッション列挙
+   - セッション選択 UI（リスト表示 + 選択）→ 既存 `scripts/merge_user_pdfs.py::_cmd_review` のロジックを参考
+   - NEEDS_REVIEW なら ConfirmDialog 起動（既存）→ 解決後 run_phase_b
+   - READY_TO_MERGE なら直接 run_phase_b
+2. Phase B は worker thread 化（13B の `_schedule_phase_a_done` パターン流用）
+3. 完了時は出力 PDF パスを showinfo、例外時は型名のみログ
 
 ### ファイル構成案
 
 ```
-src/wiseman_hub/ui/settings.py
-  class SettingsDialog:
-    def __init__(self, config: AppConfig, config_path: Path, *, root=None, save_fn=save_config, ...)
-    def run(self) -> SettingsDialogResult  # cancelled / saved (new AppConfig)
+src/wiseman_hub/ui/session_picker.py  # 新規、セッション一覧 + 選択 Toplevel
+src/wiseman_hub/ui/launcher.py        # _handle_open_review を async 化
+src/wiseman_hub/__main__.py           # _make_review_callback 追加
 ```
 
-### バリデーション（pure logic 層）
+### 既存資産
 
-```python
-def validate_settings_form(form: SettingsForm) -> list[str]:
-    """必須項目チェック。エラーメッセージ一覧を返す（空 = OK）。"""
-    errors = []
-    if not form.input_dir.strip(): errors.append("入力フォルダが未入力")
-    if not form.output_dir.strip(): errors.append("出力フォルダが未入力")
-    if not form.source_a_filename.strip(): errors.append("A.pdf ファイル名が未入力")
-    if not form.ocr_endpoint.strip(): errors.append("OCR エンドポイントが未入力")
-    if not form.ocr_api_key.strip(): errors.append("OCR API キーが未入力")
-    # bbox は 4 要素 int[], concat_order は enum
-    return errors
-```
+- `scripts/merge_user_pdfs.py::_cmd_review`（list → ConfirmDialog → transition）
+- `scripts/merge_user_pdfs.py::_cmd_merge`（READY_TO_MERGE → run_phase_b）
+- `src/wiseman_hub/ui/confirm_dialog.py::ConfirmDialog`（Toplevel 化が必要）
+- `src/wiseman_hub/ui/launcher.py::_schedule_phase_a_done`（Phase B にも同パターン）
 
-### テストパターン
+### 注意点
 
-```python
-def test_validate_missing_input_dir_returns_error(self): ...
-def test_save_writes_toml_and_preserves_comments(self, tmp_path): ...
-def test_api_key_field_is_masked(self): ...  # Tk wiring
-def test_folder_chooser_updates_entry(self, tmp_path): ...  # Tk wiring
-def test_launcher_integration(self, tmp_path): ...  # on_open_settings で SettingsDialog 起動
-```
-
-### Launcher 連携
-
-```python
-# __main__.py
-def _make_settings_callback(config_path: Path, launcher: Launcher) -> Callable[[], None]:
-    def open_settings() -> None:
-        result = SettingsDialog(
-            config=load_config(config_path),
-            config_path=config_path,
-        ).run()
-        if result.saved:
-            launcher.reload_config()  # validate_config_ready を再評価するため
-    return open_settings
-```
-
-`Launcher` に `reload_config()` メソッド追加が必要（13B スコープ外）。
+- ConfirmDialog も Toplevel モーダル化すべき（Launcher を parent に渡す）
+- session lock は既存 `with_session_lock(sessions_dir, session_id)` で確保（二重起動防止）
+- Phase B 実行中の Launcher ボタン disable（13B の `_set_busy` と同じ）
+- **最優先**: ConfirmDialog を Toplevel 化しないと、「確認 UI 中に Launcher ボタンが押せる」という同じ race が残る（12B で Codex に指摘された通り）
 
 ## 参照ファイル（次セッション用）
 
 ### 実装対象
-- `src/wiseman_hub/ui/settings.py`: 新規、12B 実装ファイル
-- `src/wiseman_hub/ui/launcher.py`: `reload_config` 追加（optional）
-- `src/wiseman_hub/__main__.py`: `_make_settings_callback` 追加
+- `src/wiseman_hub/ui/session_picker.py`（新規）
+- `src/wiseman_hub/ui/launcher.py`: `_handle_open_review` 追加
+- `src/wiseman_hub/__main__.py`: `_make_review_callback` 追加
+- `src/wiseman_hub/ui/confirm_dialog.py`: `parent` 引数追加、Toplevel モード対応
 
 ### 既存資産
-- `src/wiseman_hub/config.py`: `save_config`（12A で完成）、`load_config`
-- `src/wiseman_hub/ui/confirm_dialog.py`: Tkinter ダイアログパターン
-- `src/wiseman_hub/ui/launcher.py`: `validate_config_ready` / DI パターン
+- `scripts/merge_user_pdfs.py`: CLI ロジック参考
+- `src/wiseman_hub/pdf/session.py`: `list_sessions` / `load_session` / `with_session_lock`
+- `src/wiseman_hub/pdf/pipeline.py::run_phase_b`
 - `src/wiseman_hub/ui/common.py`: `assert_main_thread`
-- `tests/unit/ui/conftest.py`: `@pytest.mark.tk_required`
