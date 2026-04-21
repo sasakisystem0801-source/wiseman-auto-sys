@@ -30,7 +30,9 @@ sa-key.json
 logs/
 
 # PyInstaller
+# 自動生成される *.spec は除外だが、プロジェクトで管理する wiseman_hub.spec は例外。
 *.spec
+!wiseman_hub.spec
 
 # uv
 .python-version
