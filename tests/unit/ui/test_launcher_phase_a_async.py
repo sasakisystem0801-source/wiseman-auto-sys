@@ -18,34 +18,14 @@ import pytest
 
 os.environ.setdefault("TK_SILENCE_DEPRECATION", "1")
 
+from tests.unit.ui.conftest import FakeMessageBox, make_configured_appconfig  # noqa: E402
 from wiseman_hub.config import AppConfig  # noqa: E402
 from wiseman_hub.ui.launcher import Launcher, LauncherAction  # noqa: E402
 
 tk_required = pytest.mark.tk_required
 
-
-def _configured_appconfig() -> AppConfig:
-    cfg = AppConfig()
-    cfg.pdf_merge.input_dir = "/in"
-    cfg.pdf_merge.output_dir = "/out"
-    cfg.pdf_merge.source_a_filename = "A.pdf"
-    cfg.ocr_backend.endpoint_url = "https://example.com"
-    cfg.ocr_backend.api_key = "key"
-    return cfg
-
-
-class _FakeMessageBox:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, str, str]] = []  # (kind, title, msg)
-
-    def askyesno(self, title: str, message: str) -> bool:
-        return True
-
-    def showinfo(self, title: str, message: str) -> None:
-        self.calls.append(("info", title, message))
-
-    def showerror(self, title: str, message: str) -> None:
-        self.calls.append(("error", title, message))
+_configured_appconfig = make_configured_appconfig
+_FakeMessageBox = FakeMessageBox
 
 
 @tk_required

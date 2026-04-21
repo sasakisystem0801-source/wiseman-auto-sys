@@ -75,6 +75,14 @@ _MSG_PHASE_A_ERROR_FMT = (
     "詳細はログを確認してください。\n\n{type}"
 )
 
+_TITLE_PHASE_B_DONE = "Phase B 完了"
+_MSG_PHASE_B_DONE = "結合 PDF の生成が完了しました。"
+_TITLE_PHASE_B_ERROR = "Phase B 実行エラー"
+_MSG_PHASE_B_ERROR_FMT = (
+    "PDF 結合処理中にエラーが発生しました。\n"
+    "詳細はログを確認してください。\n\n{type}"
+)
+
 
 def validate_config_ready(config: AppConfig) -> bool:
     """必須設定がすべて入力済みかチェック。
@@ -106,11 +114,18 @@ class Launcher:
         *,
         root: tk.Tk | None = None,
         on_run_pdf_merge: Callable[[], None] | None = None,
-        on_open_review: Callable[[], None] | None = None,
+        on_open_review: Callable[[], str | None] | None = None,
+        on_run_phase_b: Callable[[str], None] | None = None,
         on_open_settings: Callable[[], None] | None = None,
         on_config_missing: Callable[[], None] | None = None,
         messagebox_fn: MessageBoxLike | None = None,
     ) -> None:
+        """Args:
+            on_open_review: main thread で呼ぶ確認 UI オープンコールバック。
+                戻り値が session_id 文字列なら Phase B に進む、None ならキャンセル扱い。
+            on_run_phase_b: worker thread で実行する Phase B コールバック。
+                ``on_open_review`` が session_id を返した後に submit される（13C）。
+        """
         assert_main_thread("Launcher")
 
         self._config = config
@@ -119,6 +134,7 @@ class Launcher:
 
         self._on_run_pdf_merge = on_run_pdf_merge
         self._on_open_review = on_open_review
+        self._on_run_phase_b = on_run_phase_b
         self._on_open_settings = on_open_settings
         self._on_config_missing = on_config_missing
 
@@ -128,10 +144,10 @@ class Launcher:
             self._root, component="launcher", messagebox=self._messagebox
         )
 
-        # Phase A 非同期実行用。max_workers=1 で Phase A の直列実行を保証
-        # （Phase A は session lock で他プロセスとは競合しないが、同プロセス内の二重起動を防ぐ）。
+        # Phase A/B 非同期実行用。max_workers=1 で同時実行なしを保証
+        # （session lock で他プロセスとは競合しないが、同プロセス内の二重起動を防ぐ）。
         self._executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="phase-a"
+            max_workers=1, thread_name_prefix="phase-worker"
         )
         self._busy = False
         self._current_future: concurrent.futures.Future[None] | None = None
@@ -191,9 +207,7 @@ class Launcher:
             case LauncherAction.RUN_PDF_MERGE:
                 self._handle_run_pdf_merge()
             case LauncherAction.OPEN_REVIEW:
-                self._invoke_or_show(
-                    self._on_open_review, _TITLE_UNIMPL, _MSG_REVIEW_UNIMPL
-                )
+                self._handle_open_review()
             case LauncherAction.OPEN_SETTINGS:
                 self._invoke_or_show(
                     self._on_open_settings,
@@ -327,6 +341,91 @@ class Launcher:
             )
             return
         self._messagebox.showinfo(_TITLE_PHASE_A_DONE, _MSG_PHASE_A_DONE)
+
+    def _handle_open_review(self) -> None:
+        """「確認待ちセッション」ボタン押下。SessionPicker→ConfirmDialog を main thread で
+        実行し、得た session_id で Phase B を worker thread に submit（13C）。
+
+        ``on_open_review`` は main thread 同期 callback（Tk を触るため）。戻り値が
+        ``str`` なら Phase B へ、``None`` ならキャンセルで busy 解除のみ。
+        """
+        if self._busy:
+            logger.info("open review requested but launcher is busy; ignored")
+            return
+
+        if self._on_open_review is None:
+            # コールバック未注入時のプレースホルダ（未統合状態のみ発生）。
+            self._messagebox.showinfo(_TITLE_UNIMPL, _MSG_REVIEW_UNIMPL)
+            return
+
+        self._set_busy(True)
+        try:
+            session_id = self._on_open_review()
+        except Exception as exc:
+            # callback 本体（load_config / list_sessions / load_session 等）で
+            # 発生する同期例外を捕捉する。SessionPicker / ConfirmDialog 内部の
+            # Tk callback 例外は install_tk_exception_guard が吸収するが、
+            # dialog の外側で raise される例外はここでしか捕まえられない。
+            # PII 防御で型名のみログ、UI には sanitized メッセージで通知。
+            self._set_busy(False)
+            logger.error("open_review callback failed: %s", type(exc).__name__)
+            self._messagebox.showerror(
+                _TITLE_PHASE_B_ERROR,
+                _MSG_PHASE_B_ERROR_FMT.format(type=type(exc).__name__),
+            )
+            return
+
+        if session_id is None:
+            # cancel → Phase B スキップ、ボタン再有効化
+            self._set_busy(False)
+            return
+
+        if self._on_run_phase_b is None:
+            # Phase B コールバック未注入でも session_id は返ってきた時（テスト / 部分統合）。
+            self._set_busy(False)
+            self._messagebox.showinfo(
+                _TITLE_UNIMPL, "Phase B コールバック未注入のためスキップしました。"
+            )
+            return
+
+        callback = self._on_run_phase_b
+        future = self._executor.submit(callback, session_id)
+        self._current_future = future
+        future.add_done_callback(self._schedule_phase_b_done)
+
+    def _schedule_phase_b_done(
+        self, future: concurrent.futures.Future[None]
+    ) -> None:
+        """worker thread → main thread 遷移（Phase A と同パターン）。"""
+        try:
+            self._root.after(0, self._on_phase_b_done, future)
+        except (RuntimeError, tk.TclError) as e:
+            logger.warning(
+                "launcher after() failed after root destroy: %s", type(e).__name__
+            )
+            exc = future.exception()
+            if exc is not None:
+                logger.error(
+                    "phase B callback failed (root destroyed): %s",
+                    type(exc).__name__,
+                )
+
+    def _on_phase_b_done(
+        self, future: concurrent.futures.Future[None]
+    ) -> None:
+        """Phase B 完了処理（main thread）。_set_busy(False) を先に呼ぶ順序は Phase A と共通。"""
+        self._set_busy(False)
+        self._current_future = None
+        try:
+            future.result()
+        except Exception as exc:
+            logger.error("phase B callback failed: %s", type(exc).__name__)
+            self._messagebox.showerror(
+                _TITLE_PHASE_B_ERROR,
+                _MSG_PHASE_B_ERROR_FMT.format(type=type(exc).__name__),
+            )
+            return
+        self._messagebox.showinfo(_TITLE_PHASE_B_DONE, _MSG_PHASE_B_DONE)
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy

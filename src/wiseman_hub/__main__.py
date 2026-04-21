@@ -80,6 +80,156 @@ def _make_settings_callback(
     return open_settings
 
 
+def _make_review_callback(
+    config_path: Path,
+    get_launcher: Callable[[], _LauncherLike],
+) -> Callable[[], str | None]:
+    """Launcher に注入する「確認待ちセッション」コールバックを組み立てる（13C）。
+
+    main thread で以下を実行して session_id を返す（None はキャンセル）:
+      1. ``SessionPicker`` で NEEDS_REVIEW / READY_TO_MERGE セッションを選択
+      2. NEEDS_REVIEW なら ``ConfirmDialog`` を Toplevel モーダルで起動
+      3. 全件解決なら READY_TO_MERGE へ遷移して session_id を返す
+      4. READY_TO_MERGE ならそのまま session_id を返す
+
+    Phase B の実体は Launcher が worker thread で呼ぶ ``on_run_phase_b`` に委譲する。
+    """
+
+    def open_review() -> str | None:
+        from tkinter import messagebox
+
+        from wiseman_hub.config import load_config
+        from wiseman_hub.pdf.session import (
+            InvalidTransitionError,
+            SessionStatus,
+            load_session,
+            save_session,
+            transition_session,
+            with_session_lock,
+        )
+        from wiseman_hub.ui.confirm_dialog import ConfirmDialog
+        from wiseman_hub.ui.session_picker import SessionPicker
+
+        launcher = get_launcher()
+
+        try:
+            config = load_config(config_path)
+        except (OSError, ValueError, TypeError) as exc:
+            logger.error(
+                "load_config failed before review: %s", type(exc).__name__
+            )
+            messagebox.showerror(
+                "設定ファイル読込エラー",
+                "設定ファイルを読み込めませんでした。詳細はログを確認してください。"
+                f"\n\n{type(exc).__name__}",
+            )
+            return None
+
+        sessions_dir = Path(config.pdf_merge.output_dir) / ".sessions"
+        parent = launcher.get_root()
+
+        picker = SessionPicker(sessions_dir=sessions_dir, parent=parent)
+        pick = picker.run()
+        if not pick.selected:
+            return None
+        assert pick.session_id is not None  # Protocol 契約
+        session_id = pick.session_id
+
+        if pick.status == SessionStatus.READY_TO_MERGE:
+            return session_id
+
+        # NEEDS_REVIEW: 確認 UI を起動 → 解決 → READY_TO_MERGE 遷移
+        # 設計判断: ConfirmDialog 実行中はロックを保持し続ける（wait_window が block）。
+        # 単一 PC / 1-3 名/batch の MVP 前提で、UI 操作中に別プロセスが同セッションを
+        # 触る想定はない（ADR-010）。マルチ端末拡張時は「dialog 外でロック取得 → dialog →
+        # 再取得して変更検証」の CAS 型に変更する。
+        try:
+            with with_session_lock(sessions_dir, session_id):
+                session = load_session(session_id, sessions_dir=sessions_dir)
+                if session.status != SessionStatus.NEEDS_REVIEW:
+                    # picker ロード後に他プロセスが遷移させていた場合の整合（単一 PC 運用では稀）
+                    return session_id
+                dialog = ConfirmDialog(session, sessions_dir, parent=parent)
+                result = dialog.run()
+        except (BlockingIOError, OSError) as exc:
+            logger.error(
+                "session %s lock contention: %s", session_id, type(exc).__name__
+            )
+            messagebox.showerror(
+                "セッション操作エラー",
+                "別の処理がセッションを使用中です。しばらく待って再試行してください。"
+                f"\n\n{type(exc).__name__}",
+            )
+            return None
+
+        if result.aborted:
+            # aborted 時はディスク状態が旧状態で一貫。再 open_review で再開可能。
+            return None
+        if not result.resolved_all:
+            # 未解決残り → Phase B に進まない（ユーザーは再度確認 UI を開いて続行）
+            return None
+
+        try:
+            with with_session_lock(sessions_dir, session_id):
+                transition_session(session, SessionStatus.READY_TO_MERGE)
+                save_session(session, sessions_dir=sessions_dir)
+        except (BlockingIOError, OSError) as exc:
+            logger.error(
+                "session %s transition save failed: %s",
+                session_id,
+                type(exc).__name__,
+            )
+            messagebox.showerror(
+                "セッション遷移エラー",
+                "解決は保存済みですが ready_to_merge への遷移に失敗しました。"
+                "再度「確認待ちセッション」を開いて続行してください。"
+                f"\n\n{type(exc).__name__}",
+            )
+            return None
+        except InvalidTransitionError as exc:
+            # 二重遷移（既に READY_TO_MERGE 等）。picker が load 直後に他プロセスが触った可能性。
+            logger.warning(
+                "session %s already transitioned: %s",
+                session_id,
+                type(exc).__name__,
+            )
+            return session_id  # 既に進行可能状態なので Phase B に進める
+
+        return session_id
+
+    return open_review
+
+
+def _make_phase_b_callback(
+    config_path: Path,
+) -> Callable[[str], None]:
+    """Launcher に注入する Phase B コールバックを組み立てる（13C、worker thread 呼出）。
+
+    13B の Phase A と同様に TOML を再ロードしてから ``run_phase_b`` を呼ぶ（設定 GUI で
+    output_dir を変えた直後にも対応）。worker thread で呼ばれるため Tk API には触れない。
+    """
+
+    def run_phase_b_callback(session_id: str) -> None:
+        from wiseman_hub.config import load_config
+        from wiseman_hub.pdf.pipeline import run_phase_b
+        from wiseman_hub.pdf.session import load_session
+
+        config = load_config(config_path)
+        sessions_dir = Path(config.pdf_merge.output_dir) / ".sessions"
+        output_path = (
+            Path(config.pdf_merge.output_dir) / f"{session_id}_merged.pdf"
+        )
+        session = load_session(session_id, sessions_dir=sessions_dir)
+        run_phase_b(
+            session=session,
+            config=config.pdf_merge,
+            sessions_dir=sessions_dir,
+            output_path=output_path,
+        )
+
+    return run_phase_b_callback
+
+
 def _make_phase_a_callback(
     config_path: Path,
 ) -> Callable[[], None]:
@@ -179,6 +329,10 @@ def main() -> None:
                 config=config,
                 config_path=config_path,
                 on_run_pdf_merge=_make_phase_a_callback(config_path),
+                on_open_review=_make_review_callback(
+                    config_path, _get_launcher
+                ),
+                on_run_phase_b=_make_phase_b_callback(config_path),
                 on_open_settings=_make_settings_callback(
                     config_path, _get_launcher
                 ),

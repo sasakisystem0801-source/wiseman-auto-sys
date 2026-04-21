@@ -1028,3 +1028,82 @@ class TestRefreshTreeSelection:
         assert dialog._btn_reject.instate(["disabled"])
         assert dialog._btn_manual.instate(["disabled"])
         assert dialog._btn_skip.instate(["disabled"])
+
+
+# ===========================================================================
+# Toplevel モード（13C）
+# ===========================================================================
+
+
+@_skip_if_no_tk
+class TestConfirmDialogToplevelMode:
+    """parent 指定時は Tk.Tk ではなく Toplevel + grab_set でモーダル化する。
+
+    13C で Launcher から呼び出す際、Launcher の他ボタンが押されて Phase B と
+    Phase A が同時実行される race を構造的に排除するため必須。
+    12B SettingsDialog と同じ dual mode パターン。
+    """
+
+    def test_both_root_and_parent_raises(self, tk_root: tk.Tk) -> None:
+        session = _make_session(candidates=[_needs_confirmation_candidate()])
+        with pytest.raises(ValueError, match="either root or parent"):
+            ConfirmDialog(
+                session,
+                Path("/tmp/.sessions"),
+                root=tk_root,
+                parent=tk_root,
+            )
+
+    def test_parent_mode_creates_toplevel(self, tk_root: tk.Tk) -> None:
+        """parent 指定時: 内部 root は Toplevel、_is_toplevel=True。"""
+        session = _make_session(candidates=[_needs_confirmation_candidate()])
+        dialog = ConfirmDialog(
+            session,
+            Path("/tmp/.sessions"),
+            parent=tk_root,
+            messagebox_fn=_FakeMessageBox(),
+        )
+        try:
+            assert dialog._is_toplevel is True
+            assert isinstance(dialog._root, tk.Toplevel)
+        finally:
+            import contextlib as _cl
+
+            with _cl.suppress(tk.TclError):
+                dialog._root.destroy()
+
+    def test_root_mode_creates_no_toplevel(self, tk_root: tk.Tk) -> None:
+        """従来互換: root 指定時は _is_toplevel=False。"""
+        session = _make_session(candidates=[_needs_confirmation_candidate()])
+        dialog = ConfirmDialog(
+            session,
+            Path("/tmp/.sessions"),
+            root=tk_root,
+            messagebox_fn=_FakeMessageBox(),
+        )
+        assert dialog._is_toplevel is False
+        assert dialog._root is tk_root
+
+    def test_toplevel_close_uses_destroy_not_quit(self, tk_root: tk.Tk) -> None:
+        """Toplevel モードは親 mainloop を止めないため quit() ではなく destroy()。
+
+        `_close_dialog()` ヘルパーがモード分岐する契約を固定。
+        """
+        session = _make_session(candidates=[_needs_confirmation_candidate()])
+        dialog = ConfirmDialog(
+            session,
+            Path("/tmp/.sessions"),
+            parent=tk_root,
+            messagebox_fn=_FakeMessageBox(),
+        )
+        assert dialog._root.winfo_exists()
+        dialog._close_dialog()
+        # destroy 後は winfo_exists が 0 を返す（Toplevel は消えている）
+        # ただし tkinter の実装上、destroy 後の winfo_exists 呼出が TclError になる
+        # ケースもあるため、両方許容する契約とする
+        import contextlib as _cl
+
+        with _cl.suppress(tk.TclError):
+            assert not dialog._root.winfo_exists()
+        # 親 mainloop は生きている（親 root は破棄されない）
+        assert tk_root.winfo_exists()

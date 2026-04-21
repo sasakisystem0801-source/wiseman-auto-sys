@@ -96,7 +96,7 @@ _TITLE_INTERNAL_ERROR = "内部エラー"
 _MSG_INTERNAL_ERROR_FMT = (
     "処理中に回復不能なエラーが発生しました。\n"
     "セッションは保存前の状態で保持されています。再開してやり直してください。\n"
-    "詳細はログを確認してください。\n\n{type}: {msg}"
+    "詳細はログを確認してください。\n\n{type}"
 )
 _TITLE_PARTIAL_MANUAL = "手動選択"
 _MSG_PARTIAL_MANUAL = (
@@ -106,7 +106,7 @@ _MSG_PARTIAL_MANUAL = (
 _TITLE_FILEDIALOG_ERROR = "ファイル選択エラー"
 _MSG_FILEDIALOG_ERROR_FMT = (
     "ファイル選択ダイアログが失敗しました。\n"
-    "手動選択をキャンセル扱いとします。\n\n{type}: {msg}"
+    "手動選択をキャンセル扱いとします。\n\n{type}"
 )
 
 _SOURCE_KIND_B: SourceKind = "B"
@@ -137,10 +137,18 @@ class ConfirmDialog:
         sessions_dir: Path,
         *,
         root: tk.Tk | None = None,
+        parent: tk.Misc | None = None,
         save_session_fn: Callable[..., Path] = save_session,
         askopenfilename_fn: Callable[..., str] = filedialog.askopenfilename,
         messagebox_fn: MessageBoxLike | None = None,
     ) -> None:
+        """Args:
+            root: 既存 Tk root をテストから渡すとき（parent 排他）。
+            parent: Launcher など親ウィンドウが既にある場合に渡す。指定時は
+                ``Toplevel`` + ``grab_set`` + ``wait_window`` で **モーダル** 化し、
+                確認 UI 操作中に Launcher の他ボタンが押されて Phase A/B が並行実行
+                される race を構造的に防ぐ（医療 PII の誤配置対策、12B と同パターン）。
+        """
         assert_main_thread("ConfirmDialog")
         if session.status != SessionStatus.NEEDS_REVIEW:
             raise ValueError(
@@ -162,8 +170,23 @@ class ConfirmDialog:
         # ことで、save 失敗後のメモリ全解決状態でも呼出側が READY_TO_MERGE に進むのを防ぐ。
         self._aborted = False
 
-        self._owns_root = root is None
-        self._root = root if root is not None else tk.Tk()
+        if root is not None and parent is not None:
+            raise ValueError("pass either root or parent, not both")
+        if parent is not None:
+            self._owns_root = True
+            self._is_toplevel = True
+            toplevel = tk.Toplevel(parent)
+            toplevel.transient(parent)  # type: ignore[call-overload]
+            toplevel.grab_set()
+            self._root: tk.Tk | tk.Toplevel = toplevel
+        elif root is not None:
+            self._owns_root = False
+            self._is_toplevel = False
+            self._root = root
+        else:
+            self._owns_root = True
+            self._is_toplevel = False
+            self._root = tk.Tk()
 
         self._build_ui()
 
@@ -176,8 +199,10 @@ class ConfirmDialog:
         root.protocol("WM_DELETE_WINDOW", self._on_close_button)
         # Tkinter 既定は callback 例外を stderr 出力 + mainloop 継続 → fail-fast の骨抜き。
         # save_session 失敗等を「成功したように見せかけない」ため全 callback 例外をここで
-        # 捕捉し、ユーザーに明示通知 + mainloop 停止する（医療介護事故防止）。
-        root.report_callback_exception = self._on_callback_exception
+        # 捕捉し、ユーザーに明示通知 + close する（医療介護事故防止）。
+        # common.install_tk_exception_guard は aborted/session_id 副作用を持たないため、
+        # ConfirmDialog 固有の handler を直接登録する（Protocol に副作用フックを追加するのは過剰）。
+        root.report_callback_exception = self._on_callback_exception  # type: ignore[union-attr]
 
         self._progress_var = tk.StringVar(value=self._progress_text())
         ttk.Label(root, textvariable=self._progress_var, anchor="w", padding=8).pack(
@@ -231,9 +256,14 @@ class ConfirmDialog:
     # -- Public entry -------------------------------------------------------
 
     def run(self) -> ConfirmDialogResult:
-        """mainloop を起動し、UI 終了後に結果を返す。"""
+        """mainloop / wait_window を起動し、UI 終了後に結果を返す。"""
         try:
-            self._root.mainloop()
+            if self._is_toplevel:
+                # Toplevel モードは親 mainloop が既に走っているので wait_window で
+                # このダイアログが閉じるまで block（grab_set で他操作抑止済み）。
+                self._root.wait_window()
+            else:
+                self._root.mainloop()
         finally:
             if self._owns_root:
                 try:
@@ -244,6 +274,19 @@ class ConfirmDialog:
                     logger.debug("session %s destroy failed (benign): %s",
                                  self._session.session_id, type(e).__name__)
         return ConfirmDialogResult(session=self._session, aborted=self._aborted)
+
+    def _close_dialog(self) -> None:
+        """モードに応じて dialog を閉じる。
+
+        - Toplevel モード: ``destroy()`` で window を閉じる（親 mainloop は継続）
+        - Standalone モード: ``quit()`` で mainloop を止める（``run()`` の finally で destroy）
+        """
+        if self._is_toplevel:
+            with contextlib.suppress(tk.TclError):
+                self._root.destroy()
+        else:
+            with contextlib.suppress(tk.TclError):
+                self._root.quit()
 
     # -- Treeview management ------------------------------------------------
 
@@ -396,7 +439,7 @@ class ConfirmDialog:
             )
             self._messagebox.showerror(
                 _TITLE_FILEDIALOG_ERROR,
-                _MSG_FILEDIALOG_ERROR_FMT.format(type=type(e).__name__, msg=str(e)),
+                _MSG_FILEDIALOG_ERROR_FMT.format(type=type(e).__name__),
             )
             return None
         return path if path else None
@@ -458,7 +501,7 @@ class ConfirmDialog:
         if not self._session.all_candidates_resolved:
             return
         self._messagebox.showinfo(_TITLE_ALL_RESOLVED, _MSG_ALL_RESOLVED)
-        self._root.quit()
+        self._close_dialog()
 
     # -- Tk callback exception handling -------------------------------------
 
@@ -482,10 +525,11 @@ class ConfirmDialog:
             exc_type.__name__,
         )
         self._aborted = True
-        # 画面表示は PII 露出可（本人・担当者のみが見る、ローカルウィンドウ）
-        detail = _MSG_INTERNAL_ERROR_FMT.format(
-            type=exc_type.__name__, msg=str(exc_value) or "(no detail)"
-        )
+        # PII 防御: 画面表示も型名のみ（`str(exc_value)` は output_dir 配下のセッション
+        # ファイルパスを含みうる。output_dir が `C:\Users\担当者\介護記録\出力\` のように
+        # 担当者・患者氏名をパス名に持つ運用では messagebox にそのまま PII が表示される）。
+        # 12B / 13C 以降の方針で UI も型名のみに統一。
+        detail = _MSG_INTERNAL_ERROR_FMT.format(type=exc_type.__name__)
         try:
             self._messagebox.showerror(_TITLE_INTERNAL_ERROR, detail)
         except Exception as e:  # noqa: BLE001 — showerror 二次失敗は握り潰し可
@@ -495,21 +539,20 @@ class ConfirmDialog:
                 self._session.session_id,
                 type(e).__name__,
             )
-        # mainloop 停止。destroy は run() の finally で実施。
-        with contextlib.suppress(tk.TclError):
-            self._root.quit()
+        # close: Toplevel なら destroy、standalone なら quit（run の finally で destroy）
+        self._close_dialog()
 
     # -- Close handling -----------------------------------------------------
 
     def _on_close_button(self) -> None:
         # resolved_all の判定は run() 内で session.all_candidates_resolved から
-        # 都度計算するため、ここでは quit() のみ（フラグ保持不要）。
+        # 都度計算するため、ここではフラグ保持不要。
         if self._session.all_candidates_resolved:
-            self._root.quit()
+            self._close_dialog()
             return
 
         if self._messagebox.askyesno(_TITLE_CLOSE_UNRESOLVED, _MSG_CLOSE_UNRESOLVED):
-            self._root.quit()
+            self._close_dialog()
         # いいえ → dialog 継続
 
     # -- Helpers ------------------------------------------------------------
