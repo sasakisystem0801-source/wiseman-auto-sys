@@ -298,10 +298,11 @@ def run_phase_a(
             sessions_dir=sessions_dir,
         )
 
+    # PII 防御: source_a_path は利用者氏名を含むファイル名運用があるためログに出さない。
+    # 追跡は session_id + config_snapshot（JSON 側で保持）で十分（Issue #75）。
     logger.info(
-        "run_phase_a: session=%s source=%s resume=%s",
+        "run_phase_a: session=%s resume=%s",
         session.session_id,
-        source_a_path,
         is_resume,
     )
 
@@ -347,22 +348,26 @@ def run_phase_a(
 
                 # 1 ページ処理完了ごとに永続化（中断耐性）
                 save_session(session, sessions_dir=sessions_dir)
-        except (Exception, KeyboardInterrupt):
+        except (Exception, KeyboardInterrupt) as exc:
             # Exception 派生（OcrServerError 等）と KeyboardInterrupt を INTERRUPTED 扱い。
             # SystemExit / GeneratorExit は BaseException 直下のため捕捉せず通過させる
             # （プロセス終了を阻害しない）。
-            logger.exception(
-                "run_phase_a interrupted at page after processed=%d (session=%s)",
-                len(session.candidates),
+            # PII 防御: logger.exception は traceback 経由で PDF パス / 氏名を含みうる。
+            # 型名のみ + session_id + 処理済み件数で追跡可能（Issue #75）。
+            logger.error(
+                "run_phase_a interrupted: session=%s processed=%d exc=%s",
                 session.session_id,
+                len(session.candidates),
+                type(exc).__name__,
             )
             try:
                 transition_session(session, SessionStatus.INTERRUPTED_PHASE_A)
                 save_session(session, sessions_dir=sessions_dir)
-            except Exception:
-                logger.exception(
-                    "failed to save INTERRUPTED state for session %s",
+            except Exception as save_exc:
+                logger.error(
+                    "failed to save INTERRUPTED state: session=%s exc=%s",
                     session.session_id,
+                    type(save_exc).__name__,
                 )
             raise
 
@@ -401,9 +406,11 @@ def _unlink_with_warning(path: Path) -> None:
     try:
         path.unlink(missing_ok=True)
     except OSError as e:
+        # PII 防御: output_path は output_dir に氏名が含まれる運用で PII を漏らすため
+        # ログには出さない（Issue #75、Codex HIGH 指摘）。運用者には「manual cleanup
+        # required」の警告で、削除対象の場所は session.output_path / config から特定する。
         logger.warning(
-            "failed to remove incomplete output PDF %s: %s (manual cleanup required)",
-            path,
+            "failed to remove incomplete output PDF: %s (manual cleanup required)",
             type(e).__name__,
         )
 
@@ -471,11 +478,12 @@ def run_phase_b(
             f"{sorted(s.value for s in _PHASE_B_START_STATUSES)}"
         )
 
+    # PII 防御: output_path は output_dir が利用者氏名を含むパス運用で PII を漏らす
+    # （例: C:\Users\担当者\介護記録\出力\）。session_id で追跡（Issue #75）。
     logger.info(
-        "run_phase_b: session=%s start_status=%s output=%s",
+        "run_phase_b: session=%s start_status=%s",
         session.session_id,
         session.status.value,
-        output_path,
     )
 
     with with_session_lock(sessions_dir, session.session_id):
@@ -497,29 +505,35 @@ def run_phase_b(
                     "Prepare missing files or mark users as rejected/skipped via --review, "
                     "then rerun --merge."
                 )
-        except (Exception, KeyboardInterrupt):
+        except (Exception, KeyboardInterrupt) as exc:
             # merger 失敗 (PdfMergeError / FileNotFoundError) や中断は INTERRUPTED_PHASE_B で保存。
             # SystemExit / GeneratorExit は BaseException 直下なので捕捉せず通過（run_phase_a と同方針）。
-            logger.exception(
-                "run_phase_b interrupted (session=%s)", session.session_id
+            # PII 防御: logger.exception は traceback 経由で output_path / 氏名を含みうる。
+            # 型名のみ + session_id で追跡（Issue #75）。
+            logger.error(
+                "run_phase_b interrupted: session=%s exc=%s",
+                session.session_id,
+                type(exc).__name__,
             )
             try:
                 transition_session(session, SessionStatus.INTERRUPTED_PHASE_B)
                 save_session(session, sessions_dir=sessions_dir)
-            except Exception:
-                logger.exception(
-                    "failed to save INTERRUPTED_PHASE_B for session %s",
+            except Exception as save_exc:
+                logger.error(
+                    "failed to save INTERRUPTED_PHASE_B: session=%s exc=%s",
                     session.session_id,
+                    type(save_exc).__name__,
                 )
             raise
 
         session.output_path = str(output_path)
         transition_session(session, SessionStatus.COMPLETED)
         save_session(session, sessions_dir=sessions_dir)
+        # PII 防御: output_path は出力先パスが PII を含む運用想定のためログに出さない。
+        # 成功時の output PDF パスは呼出側で session.output_path 経由で参照する（Issue #75）。
         logger.info(
-            "run_phase_b done: session=%s output=%s users=%d",
+            "run_phase_b done: session=%s users=%d",
             session.session_id,
-            output_path,
             len(users),
         )
         return session

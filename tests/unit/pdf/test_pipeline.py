@@ -907,3 +907,218 @@ class TestRunPhaseBInterrupted:
         )
         assert result.status == SessionStatus.COMPLETED
         assert output.exists()
+
+
+# ===========================================================================
+# Issue #75: pipeline ログ PII 非漏洩回帰テスト
+# ===========================================================================
+
+
+class TestPipelineLogPiiDefense:
+    """pipeline.py のログから利用者氏名・書類パスが漏洩しないことを回帰固定する。
+
+    Codex HIGH 指摘（PR #74 レビュー）の背景:
+    - `run_phase_a` / `run_phase_b` の info ログに source_a_path / output_path
+    - `logger.exception` で traceback 経由に PDF パス / 氏名
+    - 出力ディレクトリが `C:\\Users\\担当者\\介護記録\\出力\\利用者氏名\\` のように
+      PII を含むパス運用では直接漏洩する。
+
+    方針: セッション ID + 型名 + 件数のみログに残し、パス・例外 str は出さない。
+    """
+
+    def test_run_phase_a_does_not_log_source_a_path(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """source_a_path にユーザー名を含めても info ログに出現しないこと。"""
+        import logging
+
+        pii_dir = tmp_path / "患者-山田太郎"
+        pii_dir.mkdir()
+        a_pdf = _make_pdf_file(pii_dir, "A.pdf", num_pages=1)
+        sessions_dir = tmp_path / ".sessions"
+
+        (pii_dir / "B_ユーザ0.pdf").write_bytes(b"dummy")
+        (pii_dir / "C_ユーザ0.pdf").write_bytes(b"dummy")
+
+        ocr = FakeOcrClient([_ocr_high("ユーザ0")])
+        matcher = FakeMatcher(
+            {
+                "ユーザ0": _match_auto(
+                    pii_dir / "B_ユーザ0.pdf", pii_dir / "C_ユーザ0.pdf"
+                )
+            }
+        )
+
+        config = PdfMergeConfig(
+            input_dir=str(pii_dir),
+            output_dir=str(tmp_path / "out"),
+            source_a_filename="A.pdf",
+            source_d_filename="",
+            source_b_pattern="B_{name}.pdf",
+            source_c_pattern="C_{name}.pdf",
+            concat_order=["A", "B", "C"],
+            user_name_bbox=_bbox(),
+        )
+
+        with caplog.at_level(logging.INFO, logger="wiseman_hub.pdf.pipeline"):
+            run_phase_a(
+                source_a_path=a_pdf,
+                config=config,
+                ocr_client=ocr,
+                matcher=matcher,
+                sessions_dir=sessions_dir,
+            )
+
+        # 実行ログ本体にパス・氏名が含まれないこと
+        assert "患者-山田太郎" not in caplog.text
+        assert str(a_pdf) not in caplog.text
+
+    def test_run_phase_b_does_not_log_output_path(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """output_path に PII を含むディレクトリ名を使っても info ログに出現しない。"""
+        import logging
+
+        sessions_dir = tmp_path / ".sessions"
+        (tmp_path / "B_u0.pdf").write_bytes(_single_page_pdf_bytes("B:u0"))
+        (tmp_path / "C_u0.pdf").write_bytes(_single_page_pdf_bytes("C:u0"))
+
+        session = _make_phase_b_session(
+            tmp_path=tmp_path,
+            sessions_dir=sessions_dir,
+            status=SessionStatus.READY_TO_MERGE,
+            candidates=[_cand(page_index=0, name="u0", status=PairStatus.AUTO_MATCHED)],
+        )
+
+        pii_output = tmp_path / "利用者-鈴木花子" / "merged.pdf"
+        pii_output.parent.mkdir()
+
+        with caplog.at_level(logging.INFO, logger="wiseman_hub.pdf.pipeline"):
+            run_phase_b(
+                session=session,
+                config=_config(tmp_path),
+                sessions_dir=sessions_dir,
+                output_path=pii_output,
+            )
+
+        assert "利用者-鈴木花子" not in caplog.text
+        assert str(pii_output) not in caplog.text
+
+    def test_run_phase_b_failure_does_not_log_exception_detail(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Phase B 失敗時に logger.error は型名のみ、exception (traceback) は出さない。"""
+        import logging
+
+        sessions_dir = tmp_path / ".sessions"
+        # B/C ファイルなし → PdfMergeError with missing sources
+        session = _make_phase_b_session(
+            tmp_path=tmp_path,
+            sessions_dir=sessions_dir,
+            status=SessionStatus.READY_TO_MERGE,
+            candidates=[
+                _cand(
+                    page_index=0,
+                    name="患者-鈴木花子",  # PII を user_name に含める
+                    status=PairStatus.AUTO_MATCHED,
+                )
+            ],
+        )
+
+        output = tmp_path / "merged.pdf"
+
+        from wiseman_hub.pdf.merger import PdfMergeError
+
+        with (
+            caplog.at_level(logging.ERROR, logger="wiseman_hub.pdf.pipeline"),
+            pytest.raises(PdfMergeError),
+        ):
+            run_phase_b(
+                session=session,
+                config=_config(tmp_path),
+                sessions_dir=sessions_dir,
+                output_path=output,
+            )
+
+        # ログには型名と session_id のみ、氏名・パスは漏れない
+        assert "患者-鈴木花子" not in caplog.text
+        assert str(output) not in caplog.text
+
+    def test_run_phase_a_failure_does_not_use_logger_exception(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Phase A 失敗時、logger.exception の traceback に PII が乗らない。"""
+        import logging
+
+        a_pdf = _make_pdf_file(tmp_path, "A.pdf", num_pages=2)
+        sessions_dir = tmp_path / ".sessions"
+
+        # OCR がエラーを起こす。message に PII を込める。
+        # OcrClient.extract_name の Protocol と揃える（include_raw_text kwarg を受ける）。
+        class _FailingOcr:
+            calls = 0
+
+            def extract_name(
+                self, _png: bytes, *, include_raw_text: bool = False
+            ) -> ExtractNameResult:
+                raise RuntimeError("/secret/path/患者-山田太郎/A.pdf")
+
+        with (
+            caplog.at_level(logging.ERROR, logger="wiseman_hub.pdf.pipeline"),
+            pytest.raises(RuntimeError),
+        ):
+            run_phase_a(
+                source_a_path=a_pdf,
+                config=_config(tmp_path),
+                ocr_client=_FailingOcr(),
+                matcher=FakeMatcher({}),
+                sessions_dir=sessions_dir,
+            )
+
+        # PII (氏名・パス) が logger.error 経由でも混入しないこと（型名のみ残る）
+        assert "患者-山田太郎" not in caplog.text
+        assert "/secret/path" not in caplog.text
+        assert "RuntimeError" in caplog.text  # 型名は残る
+
+    def test_unlink_failure_does_not_log_output_path(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """_unlink_with_warning が output_path を logger.warning に出さないこと。
+
+        欠損 B/C 検知 → _unlink_with_warning 失敗（Windows file lock 等）の経路で、
+        output_path が PII を含むディレクトリ名でも warning ログに出現しないこと。
+        Codex HIGH 指摘。
+        """
+        import logging
+
+        from wiseman_hub.pdf.pipeline import _unlink_with_warning
+
+        pii_path = tmp_path / "患者-鈴木花子" / "merged.pdf"
+        pii_path.parent.mkdir()
+        pii_path.write_bytes(b"dummy")
+
+        # unlink 自体を失敗させる
+        def _fail_unlink(*_args: object, **_kwargs: object) -> None:
+            raise OSError("file is locked by another process (山田太郎.pdf)")
+
+        monkeypatch.setattr(Path, "unlink", _fail_unlink)
+
+        with caplog.at_level(logging.WARNING, logger="wiseman_hub.pdf.pipeline"):
+            _unlink_with_warning(pii_path)  # exception は raise しない
+
+        assert "患者-鈴木花子" not in caplog.text
+        assert str(pii_path) not in caplog.text
+        # 型名と「manual cleanup」の警告は残る
+        assert "OSError" in caplog.text
+        assert "manual cleanup" in caplog.text

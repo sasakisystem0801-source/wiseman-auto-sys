@@ -209,8 +209,23 @@ def _save_atomically(dst: fitz.Document, output_path: Path) -> None:
         dst.save(str(tmp_path))
     except Exception as e:
         tmp_path.unlink(missing_ok=True)
-        logger.error("Failed to save merged PDF to %s: %s", output_path, e)
-        raise PdfMergeError(f"Failed to save merged PDF to {output_path}: {e}") from e
+        # PII 防御: output_path / str(e) は氏名を含むパス運用でログ / stderr 経路から
+        # 漏洩する。PdfMergeError.__str__ には path を含めない。
+        #
+        # 保証範囲:
+        #   - logger 経路: 完全に型名のみ（Issue #75）
+        #   - PdfMergeError.__str__: 型名 + "save" キーワードのみ
+        #   - GUI Launcher 経路: `future.result()` で捕捉 → `logger.error(type)` のみ
+        #     （src/wiseman_hub/ui/launcher.py::_on_phase_b_done）
+        #   - CLI 経路: `_cmd_merge` で型名のみ表示（test_merge_user_pdfs_cli.py 既存）
+        # 残リスク（本 PR スコープ外）:
+        #   - `raise ... from e` のため `__cause__` chain に元例外 (OSError 等) の
+        #     message が残り、Future 未捕捉 → threading.excepthook 経路で stderr に
+        #     traceback が出る場合、__cause__ の str(e) から path が漏れうる。
+        #     現状 GUI/CLI 両経路で `future.result()` / try-except で捕捉済みのため
+        #     実運用経路では発生しないが、将来 async / subprocess 化する際は要再評価。
+        logger.error("Failed to save merged PDF: %s", type(e).__name__)
+        raise PdfMergeError(f"Failed to save merged PDF ({type(e).__name__})") from e
     os.replace(tmp_path, output_path)
 
 
