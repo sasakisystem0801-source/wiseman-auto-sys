@@ -177,6 +177,11 @@ class Launcher:
         """設定 GUI で保存された直後に呼ぶ。以降の ``validate_config_ready`` 判定が新値で行われる。"""
         self._config = config
 
+    def get_root(self) -> tk.Tk:
+        """子ダイアログ（SettingsDialog など）が ``tk.Toplevel(parent)`` で
+        モーダル化するための親 widget を返す。"""
+        return self._root
+
     def invoke_action(self, action: LauncherAction) -> None:
         """指定アクションのハンドラを実行する（ボタン押下と同等）。"""
         match action:

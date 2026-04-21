@@ -136,6 +136,11 @@ def test_settings_callback_reloads_launcher_on_save(
         def reload_config(self, config: AppConfig) -> None:
             reload_calls.append(config)
 
+        def get_root(self) -> None:
+            # テスト用: SettingsDialog を monkeypatch で FakeDialog に差し替えて
+            # いるため、戻り値が実際に使われることはない。
+            return None
+
     launcher = FakeLauncher()
 
     from wiseman_hub.__main__ import _make_settings_callback
@@ -175,6 +180,11 @@ def test_settings_callback_does_not_reload_on_cancel(
     class FakeLauncher:
         def reload_config(self, config: AppConfig) -> None:
             reload_calls.append(config)
+
+        def get_root(self) -> None:
+            # テスト用: SettingsDialog を monkeypatch で FakeDialog に差し替えて
+            # いるため、戻り値が実際に使われることはない。
+            return None
 
     launcher = FakeLauncher()
 

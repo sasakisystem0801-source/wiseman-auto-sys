@@ -15,7 +15,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    import tkinter as tk
+
     from wiseman_hub.config import AppConfig
+
+logger = logging.getLogger(__name__)
 
 
 class _LauncherLike(Protocol):
@@ -26,6 +30,8 @@ class _LauncherLike(Protocol):
     """
 
     def reload_config(self, config: AppConfig) -> None: ...
+
+    def get_root(self) -> tk.Misc: ...
 
 
 def _make_settings_callback(
@@ -39,14 +45,37 @@ def _make_settings_callback(
     """
 
     def open_settings() -> None:
+        from tkinter import messagebox
+
         from wiseman_hub.config import load_config
         from wiseman_hub.ui.settings import SettingsDialog
 
-        config = load_config(config_path)
-        dialog = SettingsDialog(config=config, config_path=config_path)
+        launcher = get_launcher()
+        try:
+            config = load_config(config_path)
+        except (OSError, ValueError, TypeError) as exc:
+            # TOML 構文エラー / ファイル I/O 失敗時は dialog を開かず Launcher 継続。
+            # PII 防御で型名のみログに残す。
+            logger.error(
+                "load_config failed before settings dialog: %s", type(exc).__name__
+            )
+            messagebox.showerror(
+                "設定ファイル読込エラー",
+                "設定ファイルを読み込めませんでした。詳細はログを確認してください。"
+                f"\n\n{type(exc).__name__}",
+            )
+            return
+
+        dialog = SettingsDialog(
+            config=config,
+            config_path=config_path,
+            # Launcher の root を親にすることで Toplevel + grab_set でモーダル化される。
+            # 設定編集中に Launcher の PDF マージ処理ボタンが押せない（race 防止）。
+            parent=launcher.get_root(),
+        )
         result = dialog.run()
         if result.config is not None:
-            get_launcher().reload_config(result.config)
+            launcher.reload_config(result.config)
 
     return open_settings
 
@@ -101,7 +130,6 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-    logger = logging.getLogger(__name__)
 
     parser = argparse.ArgumentParser(
         prog="wiseman-hub",
@@ -141,8 +169,10 @@ def main() -> None:
             launcher_ref: list[Launcher | None] = [None]
 
             def _get_launcher() -> Launcher:
+                # python -O で assert が strip されるケースに備え明示 raise。
                 instance = launcher_ref[0]
-                assert instance is not None, "launcher accessed before initialization"
+                if instance is None:
+                    raise RuntimeError("launcher accessed before initialization")
                 return instance
 
             launcher = Launcher(

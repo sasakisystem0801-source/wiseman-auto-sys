@@ -220,11 +220,19 @@ class SettingsDialog:
         config_path: Path,
         *,
         root: tk.Tk | None = None,
+        parent: tk.Misc | None = None,
         save_fn: SaveFn = save_config,
         askdirectory_fn: AskDirectoryFn = filedialog.askdirectory,
         askopenfilename_fn: AskOpenFileFn = filedialog.askopenfilename,
         messagebox_fn: MessageBoxLike | None = None,
     ) -> None:
+        """Args:
+            root: 既存 Tk root をテストから渡すとき（parent 排他）。
+            parent: Launcher など親ウィンドウが既にある場合に渡す。指定時は
+                `Toplevel` + `grab_set` + `wait_window` で**モーダル**化し、
+                設定編集中に Launcher の他ボタンが押されて旧 config で Phase A が
+                走る race を構造的に防ぐ（医療 PII の誤配置対策）。
+        """
         assert_main_thread("SettingsDialog")
 
         self._config = config
@@ -234,9 +242,28 @@ class SettingsDialog:
         self._askopenfilename_fn = askopenfilename_fn
         self._messagebox = messagebox_fn or default_messagebox()
 
-        self._owns_root = root is None
-        self._root = root if root is not None else tk.Tk()
-        self._root.report_callback_exception = self._on_callback_exception
+        if root is not None and parent is not None:
+            raise ValueError("pass either root or parent, not both")
+        if parent is not None:
+            self._owns_root = True
+            self._is_toplevel = True
+            toplevel = tk.Toplevel(parent)
+            # transient は Wm / Tcl_Obj を期待するが、Tk は Wm 派生のため実際には安全。
+            # typeshed の overload 差で mypy が誤検知するため型無視する。
+            toplevel.transient(parent)  # type: ignore[call-overload]
+            toplevel.grab_set()
+            self._root: tk.Tk | tk.Toplevel = toplevel
+        elif root is not None:
+            self._owns_root = False
+            self._is_toplevel = False
+            self._root = root
+        else:
+            self._owns_root = True
+            self._is_toplevel = False
+            self._root = tk.Tk()
+        # Tk 既定は callback 例外を stderr へ traceback 出力するため PII が漏れる。
+        # Toplevel でも root 経由で共有される property を上書きする。
+        self._root.report_callback_exception = self._on_callback_exception  # type: ignore[union-attr]
 
         self._result: SettingsDialogResult = SettingsDialogResult()
         self._vars: dict[str, tk.StringVar] = {}
@@ -361,7 +388,13 @@ class SettingsDialog:
 
     def run(self) -> SettingsDialogResult:
         try:
-            self._root.mainloop()
+            if self._is_toplevel:
+                # Toplevel モードは親 mainloop が既に走っているので wait_window で
+                # このダイアログが閉じるまで block（他ボタンは grab_set で抑止済み）。
+                self._root.wait_window()
+            else:
+                # Standalone モード（テスト / parent なし起動）では自前 mainloop。
+                self._root.mainloop()
         finally:
             if self._owns_root:
                 with contextlib.suppress(tk.TclError):
@@ -388,7 +421,9 @@ class SettingsDialog:
             # save_config は create_if_missing=False が既定だが、設定 GUI から
             # 保存する以上「設定ファイルを作ってよい」状況なので明示的に True。
             self._save_fn(new_config, self._config_path, create_if_missing=True)
-        except Exception as exc:
+        except (OSError, ValueError, TypeError) as exc:
+            # 想定される失敗型のみ捕捉（ファイル I/O / 数値 parse / TOML 型違反）。
+            # 想定外は _on_callback_exception に落として fail-fast。
             # PII 防御: 例外 message はパスを含みうるため型名のみログに残す。
             logger.error("save_config failed: %s", type(exc).__name__)
             self._messagebox.showerror(
@@ -398,15 +433,25 @@ class SettingsDialog:
             return SettingsDialogResult()
 
         self._result = SettingsDialogResult(config=new_config)
-        with contextlib.suppress(tk.TclError):
-            self._root.quit()
+        self._close_dialog()
         return self._result
 
     def cancel(self) -> SettingsDialogResult:
         self._result = SettingsDialogResult()
-        with contextlib.suppress(tk.TclError):
-            self._root.quit()
+        self._close_dialog()
         return self._result
+
+    def _close_dialog(self) -> None:
+        """Toplevel / standalone 両モードで dialog を閉じる共通処理。
+
+        - Toplevel: ``destroy()`` で wait_window が return → 親の mainloop 継続
+        - Standalone: ``quit()`` で自前 mainloop を終了
+        """
+        with contextlib.suppress(tk.TclError):
+            if self._is_toplevel:
+                self._root.destroy()
+            else:
+                self._root.quit()
 
     def pick_folder(self, field_name: str) -> None:
         if field_name not in self._vars:
@@ -432,8 +477,15 @@ class SettingsDialog:
     ) -> None:
         # PII 防御: logger には型名のみ。
         logger.error("settings callback exception: %s", exc_type.__name__)
-        self._messagebox.showerror(
-            "内部エラー",
-            "処理中にエラーが発生しました。詳細はログを確認してください。\n\n"
-            f"{exc_type.__name__}",
-        )
+        try:
+            self._messagebox.showerror(
+                "内部エラー",
+                "処理中にエラーが発生しました。詳細はログを確認してください。\n\n"
+                f"{exc_type.__name__}",
+            )
+        except Exception as e:  # noqa: BLE001 — 二次 showerror 失敗は握り潰し可
+            # ConfirmDialog と同じ PII 防御パターン: 型名のみ。
+            logger.warning(
+                "showerror failed during settings callback exception: %s",
+                type(e).__name__,
+            )

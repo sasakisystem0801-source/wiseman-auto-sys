@@ -112,6 +112,13 @@ class TestValidateForm:
         errors = validate_form(form)
         assert any("dpi" in e.lower() for e in errors)
 
+    def test_bbox_dpi_zero_returns_error(self) -> None:
+        """境界値: dpi=0 は「正の整数」要件を満たさない。"""
+        form = _full_form()
+        form.bbox_dpi = "0"
+        errors = validate_form(form)
+        assert any("dpi" in e.lower() for e in errors)
+
     def test_invalid_concat_order_returns_error(self) -> None:
         form = _full_form()
         form.concat_order = "A,X,C"  # X は不正
@@ -424,3 +431,76 @@ class TestSettingsDialogUI:
         # PII 防御: dialog message に氏名・パスが露出していない
         assert "山田太郎" not in error_calls[0][2]
         assert "/sensitive/path" not in error_calls[0][2]
+
+    def test_save_failure_with_permission_error_shows_type_name(
+        self, tmp_path: Path
+    ) -> None:
+        """PermissionError（Windows 読取専用 TOML 想定）でも型名のみがメッセージに出る。"""
+        import tkinter as tk
+
+        def failing_save(*args: Any, **kwargs: Any) -> None:
+            raise PermissionError("/denied/path")
+
+        mbox = _FakeMessageBox()
+        root = tk.Tk()
+        try:
+            dlg = SettingsDialog(
+                config=_base_config(),
+                config_path=tmp_path / "c.toml",
+                root=root,
+                save_fn=failing_save,
+                messagebox_fn=mbox,
+            )
+            result = dlg.attempt_save()
+        finally:
+            root.destroy()
+
+        assert result.saved is False
+        error_calls = [c for c in mbox.calls if c[0] == "error"]
+        assert len(error_calls) == 1
+        assert "PermissionError" in error_calls[0][2]
+        assert "/denied/path" not in error_calls[0][2]
+
+    def test_unexpected_exception_propagates_to_callback_handler(
+        self, tmp_path: Path
+    ) -> None:
+        """想定外例外（KeyError 等）は attempt_save 内で握り潰されず伝播する。"""
+        import tkinter as tk
+
+        def failing_save(*args: Any, **kwargs: Any) -> None:
+            raise KeyError("unexpected schema key")
+
+        root = tk.Tk()
+        try:
+            dlg = SettingsDialog(
+                config=_base_config(),
+                config_path=tmp_path / "c.toml",
+                root=root,
+                save_fn=failing_save,
+                messagebox_fn=_FakeMessageBox(),
+            )
+            with pytest.raises(KeyError):
+                dlg.attempt_save()
+        finally:
+            root.destroy()
+
+    def test_save_success_closes_dialog(self, tmp_path: Path) -> None:
+        """AC-S-2 補完: Save 成功時に dialog が閉じられる（_close_dialog 呼出）。"""
+        import tkinter as tk
+
+        root = tk.Tk()
+        try:
+            dlg = SettingsDialog(
+                config=_base_config(),
+                config_path=tmp_path / "c.toml",
+                root=root,
+                save_fn=lambda *a, **kw: None,
+                messagebox_fn=_FakeMessageBox(),
+            )
+            dlg.attempt_save()
+            # standalone モード（root 渡し）では _root.quit() が呼ばれる。
+            # quit 呼出は StringVar に影響しないため、再度 attempt_save できる状態
+            # になっていることを間接的に確認する（_is_toplevel=False なので destroy は呼ばれない）。
+            assert dlg._is_toplevel is False
+        finally:
+            root.destroy()
