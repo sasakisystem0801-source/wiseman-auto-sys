@@ -212,17 +212,21 @@ class Launcher:
         executor = getattr(self, "_executor", None)
         if executor is None:
             return
-        with contextlib.suppress(Exception):
+        try:
             executor.shutdown(wait=False, cancel_futures=True)
+        except Exception as e:  # noqa: BLE001 — GC / double-shutdown パスでも落とさない
+            # PII 防御で型名のみ。二重 shutdown で ``RuntimeError`` が出ても続行可能。
+            logger.warning("executor shutdown failed: %s", type(e).__name__)
 
     def wait_until_idle(self, timeout: float) -> None:
         """実行中の Phase A が完了し、完了処理が main thread で pump されるまで待機する（テスト用）。
 
         順序保証（CPython の concurrent.futures 実装に基づく）::
 
-            1. worker thread: callback 完了 → future.set_result()
-            2. worker thread: add_done_callback に登録した ``_schedule_phase_a_done``
-               を同期呼出 → ``root.after(0, _on_phase_a_done, future)`` で Tk queue に enqueue
+            1. worker thread: callback 完了 → ``future.set_result()``
+            2. worker thread: ``set_result`` 直後に同一 worker thread で ``_invoke_callbacks``
+               が走り、``add_done_callback`` で登録した ``_schedule_phase_a_done`` を呼ぶ
+               → ``root.after(0, _on_phase_a_done, future)`` で Tk queue に enqueue
             3. main thread: ``future.result(timeout)`` から return
             4. main thread: ``while self._busy: root.update()`` で enqueue された
                ``_on_phase_a_done`` を pump → ``_set_busy(False)``
@@ -278,10 +282,17 @@ class Launcher:
             self._root.after(0, self._on_phase_a_done, future)
         except (RuntimeError, tk.TclError) as e:
             # root が既に destroy 済みなら after は RuntimeError / TclError。
-            # PII 防御で型名のみログに残す。
+            # 通知先の UI は消失しているが、future の結果/例外をロスせず型名だけでも
+            # ログに残して silent failure を防ぐ（PII 防御で exception message は除外）。
             logger.warning(
                 "launcher after() failed after root destroy: %s", type(e).__name__
             )
+            exc = future.exception()
+            if exc is not None:
+                logger.error(
+                    "phase A callback failed (root destroyed): %s",
+                    type(exc).__name__,
+                )
 
     def _on_phase_a_done(
         self, future: concurrent.futures.Future[None]

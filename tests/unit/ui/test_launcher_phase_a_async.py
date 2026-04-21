@@ -254,6 +254,45 @@ class TestCompletionNotifications:
 
 
 @tk_required
+class TestButtonReEnabledOnException:
+    """例外発生時もボタン再有効化を保証する（_set_busy(False) 順序不変性）。"""
+
+    def test_buttons_reenabled_even_if_callback_raises(
+        self, tmp_path: Path
+    ) -> None:
+        import tkinter as tk
+
+        config_path = tmp_path / "config.toml"
+        config_path.write_text("", encoding="utf-8")
+
+        def failing() -> None:
+            raise RuntimeError("boom")
+
+        root = tk.Tk()
+        try:
+            launcher = Launcher(
+                config=_configured_appconfig(),
+                config_path=config_path,
+                root=root,
+                on_run_pdf_merge=failing,
+                messagebox_fn=_FakeMessageBox(),
+            )
+            launcher.invoke_action(LauncherAction.RUN_PDF_MERGE)
+            launcher.wait_until_idle(timeout=5.0)
+            final_states = (
+                "disabled" in launcher._btn_run.state(),
+                "disabled" in launcher._btn_review.state(),
+                "disabled" in launcher._btn_settings.state(),
+            )
+        finally:
+            root.destroy()
+
+        assert final_states == (False, False, False), (
+            "buttons must be re-enabled even when the Phase A callback raises"
+        )
+
+
+@tk_required
 class TestConfigMissingBypassesExecutor:
     """設定未完了時は executor を起動しない（既存 AC-L-4 誘導フローを壊さない）。"""
 

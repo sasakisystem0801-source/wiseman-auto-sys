@@ -104,8 +104,11 @@ def main() -> None:
     except KeyboardInterrupt:
         logger.info("シャットダウン（Ctrl+C）")
         sys.exit(0)
-    except Exception:
-        logger.exception("予期しないエラーで終了")
+    except Exception as exc:
+        # PII 防御: ``logger.exception`` は traceback 経由で PDF パス / 氏名を含む
+        # 可能性のある例外 message を出力する。本番は医療介護データを扱うため、
+        # ログには型名のみを残し、例外詳細は画面/検証環境に限定する。
+        logger.error("予期しないエラーで終了: %s", type(exc).__name__)
         sys.exit(1)
 
 
