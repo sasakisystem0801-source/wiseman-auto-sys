@@ -27,14 +27,6 @@
 
 **MEDIUM 計 8 件**: PS 5.1 BOM 付与、ADR-011 ↔ 14c-deploy 整合、v0.1.0 → vX.Y.Z placeholder、Resolve-Path 非存在時の明示 check、検証用ドラフト注記、`Bypass -Scope Process` 表現、out-of-band SHA256 共有、Win11 22H2+ SmartScreen 文言注記
 
-## 次セッションの着手手順
-
-```bash
-cd /Users/yyyhhh/Projects/wiseman_auto_sys
-git checkout main
-git pull --ff-only
-```
-
 ## 次タスク優先順位
 
 ### 優先 1: タスク 10-2（Windows 実機 E2E、本田さん実施）
@@ -135,22 +127,24 @@ git pull --ff-only
 
 ### タスク 14C
 
-**配布レイアウトの更新（ADR-011 変更履歴に記載）**
-- `config/default.toml` → `config/default.toml.sample` に命名変更（上書き事故防止、施設側でコピーして `default.toml` 作成）
-- `scripts/create_shortcut.ps1` を配布物に追加
-- バージョン表記を `v0.1.0` → `vX.Y.Z` placeholder に変更
+**ADR-011 への反映（変更履歴に記載）**
+- 配布レイアウト: `config/default.toml` → `config/default.toml.sample` 命名変更（上書き事故防止、施設側でコピーして `default.toml` 作成）
+- 配布物: `scripts/create_shortcut.ps1` を追加
+- バージョン表記: `v0.1.0` → `vX.Y.Z` placeholder に変更
 
-**MVP 配置先の既定化（Codex HIGH 指摘反映）**
+**`14c-deploy.md` への反映（運用手順書、ADR とは別ドキュメント）**
+
+*MVP 配置先の既定化（Codex HIGH 指摘反映）*:
 - 標準ユーザー権限で書込可能な `%USERPROFILE%\wiseman-hub\` を既定（= `C:\Users\<user>\wiseman-hub\`）
 - `C:\wiseman-hub\` は「管理者権限必要」と明記（標準ユーザーは C:\ 直下に新規作成不可）
 - `%LOCALAPPDATA%\wiseman-hub\` をエクスプローラ非表示運用の代替に
 
-**allowlist 登録ルールの明確化（Codex HIGH 指摘反映）**
+*allowlist 登録ルールの明確化（Codex HIGH 指摘反映）*:
 - 未署名 exe の間は Hash / FilePath ルールのみ実効性あり
 - FilePublisher / Publisher ルールは 14D コードサイニング採用後の選択肢として分離
 - SHA256 共有は **out-of-band**（電話 / 既存チャット / 別メール）で ZIP とは別経路必須
 
-**エラーハンドリングの構造化（Claude HIGH 指摘反映）**
+**`scripts/create_shortcut.ps1` の構造化（Claude HIGH 指摘反映）**
 - PS スクリプト exit code: 1 = 設定不備、2 = WSH 無効 / ConstrainedLanguage、3 = 書込失敗
 - `try/finally` で COM リソース解放を保証（Save 失敗時のリーク防止）
 - OneDrive / ASR / ACL の個別診断メッセージを追加
@@ -162,7 +156,7 @@ git pull --ff-only
   - Session 9: 13C で Codex HIGH 2 件（TOCTOU + logger.exception PII）検出
   - Session 10: 14A で Codex HIGH 2 件（config CWD バグ + SmartScreen 過小評価）検出
   - Session 11: 14C で Codex HIGH 2 件（USERPROFILE 既定 + FilePublisher 不正確）検出
-  - **7 セッション連続で Codex が Claude 見落としの HIGH を検出 → 継続運用が合理的**
+  - **直近 3 セッション（9-11）連続で Codex が Claude 見落としの HIGH を検出 → 継続運用が合理的**
 
 ## セッション再開手順（コピペ可）
 
