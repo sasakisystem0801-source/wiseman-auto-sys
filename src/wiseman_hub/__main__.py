@@ -12,6 +12,72 @@ import logging
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    import tkinter as tk
+
+    from wiseman_hub.config import AppConfig
+
+logger = logging.getLogger(__name__)
+
+
+class _LauncherLike(Protocol):
+    """``_make_settings_callback`` が必要とする Launcher の最小インターフェース。
+
+    import 循環と Tk 依存を避けるため Protocol で表現し、Launcher 実体を直接
+    参照しない（テストで FakeLauncher を差し替えやすくする副次効果もある）。
+    """
+
+    def reload_config(self, config: AppConfig) -> None: ...
+
+    def get_root(self) -> tk.Misc: ...
+
+
+def _make_settings_callback(
+    config_path: Path,
+    get_launcher: Callable[[], _LauncherLike],
+) -> Callable[[], None]:
+    """Launcher に注入する「設定」コールバックを組み立てる。
+
+    設定保存成功時は ``Launcher.reload_config`` を呼び、以降の
+    ``validate_config_ready`` 判定が新値で行われるようにする（再起動不要）。
+    """
+
+    def open_settings() -> None:
+        from tkinter import messagebox
+
+        from wiseman_hub.config import load_config
+        from wiseman_hub.ui.settings import SettingsDialog
+
+        launcher = get_launcher()
+        try:
+            config = load_config(config_path)
+        except (OSError, ValueError, TypeError) as exc:
+            # TOML 構文エラー / ファイル I/O 失敗時は dialog を開かず Launcher 継続。
+            # PII 防御で型名のみログに残す。
+            logger.error(
+                "load_config failed before settings dialog: %s", type(exc).__name__
+            )
+            messagebox.showerror(
+                "設定ファイル読込エラー",
+                "設定ファイルを読み込めませんでした。詳細はログを確認してください。"
+                f"\n\n{type(exc).__name__}",
+            )
+            return
+
+        dialog = SettingsDialog(
+            config=config,
+            config_path=config_path,
+            # Launcher の root を親にすることで Toplevel + grab_set でモーダル化される。
+            # 設定編集中に Launcher の PDF マージ処理ボタンが押せない（race 防止）。
+            parent=launcher.get_root(),
+        )
+        result = dialog.run()
+        if result.config is not None:
+            launcher.reload_config(result.config)
+
+    return open_settings
 
 
 def _make_phase_a_callback(
@@ -64,7 +130,6 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-    logger = logging.getLogger(__name__)
 
     parser = argparse.ArgumentParser(
         prog="wiseman-hub",
@@ -96,11 +161,30 @@ def main() -> None:
                 args.config if args.config is not None else Path("config/default.toml")
             )
             config = load_config(config_path)
-            Launcher(
+            # 設定コールバックで後から Launcher を参照する必要があるため、
+            # クロージャで双方向バインディングする（Launcher インスタンス生成前に
+            # コールバックを作る必要がある一方、コールバックは Launcher のメソッドを呼ぶ）。
+            # ``list[Launcher | None] = [None]`` で初期化し、参照時 assert で
+            # 未初期化（将来スレッド化した場合の race）を fail-fast に検出する。
+            launcher_ref: list[Launcher | None] = [None]
+
+            def _get_launcher() -> Launcher:
+                # python -O で assert が strip されるケースに備え明示 raise。
+                instance = launcher_ref[0]
+                if instance is None:
+                    raise RuntimeError("launcher accessed before initialization")
+                return instance
+
+            launcher = Launcher(
                 config=config,
                 config_path=config_path,
                 on_run_pdf_merge=_make_phase_a_callback(config_path),
-            ).run()
+                on_open_settings=_make_settings_callback(
+                    config_path, _get_launcher
+                ),
+            )
+            launcher_ref[0] = launcher
+            launcher.run()
     except KeyboardInterrupt:
         logger.info("シャットダウン（Ctrl+C）")
         sys.exit(0)

@@ -104,6 +104,98 @@ def test_unexpected_exception_exits_one(monkeypatch: Any) -> None:
     assert exc_info.value.code == 1
 
 
+def test_settings_callback_reloads_launcher_on_save(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """設定ダイアログで保存した直後、Launcher.reload_config に新 config が渡される。"""
+    config_file = tmp_path / "config.toml"
+    config_file.write_text("", encoding="utf-8")
+
+    from wiseman_hub.config import AppConfig
+
+    saved_config = AppConfig()
+    saved_config.pdf_merge.input_dir = "/reloaded"
+
+    class FakeDialog:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def run(self) -> Any:
+            from wiseman_hub.ui.settings import SettingsDialogResult
+
+            return SettingsDialogResult(config=saved_config)
+
+    monkeypatch.setattr("wiseman_hub.ui.settings.SettingsDialog", FakeDialog)
+    monkeypatch.setattr(
+        "wiseman_hub.config.load_config", lambda _p: AppConfig()
+    )
+
+    reload_calls: list[AppConfig] = []
+
+    class FakeLauncher:
+        def reload_config(self, config: AppConfig) -> None:
+            reload_calls.append(config)
+
+        def get_root(self) -> None:
+            # テスト用: SettingsDialog を monkeypatch で FakeDialog に差し替えて
+            # いるため、戻り値が実際に使われることはない。
+            return None
+
+    launcher = FakeLauncher()
+
+    from wiseman_hub.__main__ import _make_settings_callback
+
+    callback = _make_settings_callback(config_file, lambda: launcher)
+    callback()
+
+    assert len(reload_calls) == 1
+    assert reload_calls[0].pdf_merge.input_dir == "/reloaded"
+
+
+def test_settings_callback_does_not_reload_on_cancel(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """キャンセル（saved=False）時は reload_config が呼ばれない。"""
+    config_file = tmp_path / "config.toml"
+    config_file.write_text("", encoding="utf-8")
+
+    from wiseman_hub.config import AppConfig
+
+    class FakeDialog:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def run(self) -> Any:
+            from wiseman_hub.ui.settings import SettingsDialogResult
+
+            return SettingsDialogResult()
+
+    monkeypatch.setattr("wiseman_hub.ui.settings.SettingsDialog", FakeDialog)
+    monkeypatch.setattr(
+        "wiseman_hub.config.load_config", lambda _p: AppConfig()
+    )
+
+    reload_calls: list[AppConfig] = []
+
+    class FakeLauncher:
+        def reload_config(self, config: AppConfig) -> None:
+            reload_calls.append(config)
+
+        def get_root(self) -> None:
+            # テスト用: SettingsDialog を monkeypatch で FakeDialog に差し替えて
+            # いるため、戻り値が実際に使われることはない。
+            return None
+
+    launcher = FakeLauncher()
+
+    from wiseman_hub.__main__ import _make_settings_callback
+
+    callback = _make_settings_callback(config_file, lambda: launcher)
+    callback()
+
+    assert reload_calls == []
+
+
 def test_phase_a_callback_reloads_config_and_runs_phase_a(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
