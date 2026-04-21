@@ -85,11 +85,12 @@ git pull --ff-only
 ### P1
 - **#51**: Windows msvcrt / 跨プロセスロック / 0 ページ PDF（単一 PC では発生せず）
 
-### P2（Session 9 で新規）
-- **#71**: guard の exc_type=None / BaseException 契約テスト
-- **#72**: `review_flow.resolve_review_session` 共通化
-- **#73**: `ReviewCallbackResult` dataclass
-- **#76**: 他 PdfMergeError 生成箇所の PII 除外
+### P2（Session 8-9 で新規、継続）
+- **#68**（Session 8）: `validate_form` 戻り値を error code enum 化 + `ValidatedForm` newtype
+- **#71**（Session 9）: guard の exc_type=None / BaseException 契約テスト
+- **#72**（Session 9）: `review_flow.resolve_review_session` 共通化
+- **#73**（Session 9）: `ReviewCallbackResult` dataclass
+- **#76**（Session 9）: 他 PdfMergeError 生成箇所の PII 除外
 
 ### P2（継続）
 - **#58**: `/healthz` Cloud Run GFE intercept（実害なし）
@@ -172,16 +173,17 @@ git checkout -b feature/task-14a-pyinstaller-spec
 
 PyInstaller で `wiseman_hub.exe` を生成し、ダブルクリック起動できる Windows デスクトップアプリに仕立てる。
 
-1. `wiseman_hub.spec` 新規作成:
+1. **PyInstaller を dev 依存に追加**（`pyproject.toml` `[dependency-groups]` or `[tool.uv.dev-dependencies]` に `pyinstaller>=6.0` を追加して `uv sync`）
+2. `wiseman_hub.spec` 新規作成:
    - Entry: `src/wiseman_hub/__main__.py`
    - Name: `wiseman_hub`
    - Icon: `assets/icon.ico`
    - Console: False（--windowed）
    - Hidden imports: tkinter / tomlkit / httpx / fitz / pymupdf
    - Data files: 必要なら （現状 TOML は exe 隣配置で十分）
-2. ビルドコマンド: `pyinstaller wiseman_hub.spec`
-3. Windows CI に「exe ビルド成功」の smoke test 追加（optional）
-4. ADR-011 執筆（14D）に繋げる
+3. ビルドコマンド: `uv run pyinstaller wiseman_hub.spec`
+4. Windows CI に「exe ビルド成功」の smoke test 追加（optional）
+5. ADR-011 執筆（14D）に繋げる
 
 ### ファイル構成案
 
