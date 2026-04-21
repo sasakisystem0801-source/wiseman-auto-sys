@@ -1,185 +1,221 @@
-# Handoff: "使える Windows デスクトップアプリ" 完成化計画（Session 8 終了時点）
+# Handoff: "使える Windows デスクトップアプリ" 完成化計画（Session 9 終了時点）
 
 **更新日**: 2026-04-21
 **ブランチ**: main（clean、全 PR マージ済）
-**main**: a85eef5 (PR #66 squash merged: タスク 12B)
+**main**: 29cb3fa (PR #77 squash merged: Issue #75)
 
-## セッション 8 の成果
+## セッション 9 の成果
 
 ### マージ済み
-- **PR #61**: タスク 13A（ランチャー GUI 骨格、3 ボタン）
-- **PR #65**: タスク 13B（Launcher ↔ Phase A 非同期統合、Issue #62 対応 → close）
-- **PR #66**: タスク 12B（設定 GUI、SettingsDialog + Toplevel モーダル化）
-  - 343 passed / 44 skipped
-  - /simplify 3 並列 + Evaluator APPROVE
-  - 6 Agent + Codex 二段レビュー → CRITICAL 3 件 + IMPORTANT 2 件反映済
-  - CI: test-unit 3.11/3.12 + test-integration 全 pass
+- **PR #70**: Issue #67（`install_tk_exception_guard` 共通化、P0）
+- **PR #74**: タスク 13C（ランチャー ↔ 確認 UI / Phase B 統合）
+  - 9 files, +1358/-61、ConfirmDialog Toplevel 化 + SessionPicker 新規 + Launcher Phase B worker thread
+  - /simplify 3 並列 + Evaluator 分離 + 6 Agent + Codex 二段レビュー
+  - Evaluator REQUEST_CHANGES 1 件（画面文言 PII）+ LOW 3 件、Codex HIGH 2 件（TOCTOU + grab_release）+ MEDIUM 2 件反映済
+- **PR #77**: Issue #75（pipeline / merger ログ PII 漏洩、Codex HIGH）
+  - 4 files, +374/-26、logger.exception 除去・output_path 非混入・__cause__ 保証範囲明示
+  - 386 passed / 62 skipped、3 Agent + Codex レビュー HIGH 全解消
+
+### 新規作成 Issue（Session 9）
+- **#71**（P2）: `install_tk_exception_guard` の exc_type=None / BaseException テスト補強
+- **#72**（P2）: `review_flow.py` で CLI `_cmd_review` と GUI `_make_review_callback` を共通化
+- **#73**（P2）: `on_open_review` 戻り値を `ReviewCallbackResult` dataclass へ昇格
+- **#75**（P1、PR #77 で close）: pipeline/merger ログ PII 漏洩
+- **#76**（P2）: 他 `PdfMergeError` 生成箇所 8 箇所の path/user_name 除外（defense-in-depth）
 
 ## 次セッションの着手手順
 
 ```bash
 cd /Users/yyyhhh/Projects/wiseman_auto_sys
 # 1. catchup で状況把握
-# 2. 13C 着手（ランチャー ↔ 確認 UI / Phase B 統合）
+# 2. 優先タスク選択（14A or 10-2）
 git checkout main
 git pull --ff-only
-git checkout -b feature/task-13c-phase-b-integration
 ```
 
 ## 次タスク優先順位
 
-### 優先 1: タスク 13C（ランチャー ↔ 確認 UI / Phase B 統合）
+### 優先 1: タスク 14A（PyInstaller spec + icon 埋め込み）
+
+**Issue #59 対応**: GUI 完成後のパッケージング。
 
 **スコープ**:
-- `on_open_review` 実装: NEEDS_REVIEW セッション一覧 → ConfirmDialog → `run_phase_b`
-- 13B と同様 worker thread 化（Phase B も時間がかかるため）
-- SettingsDialog と同じ Toplevel モーダル化パターン（`_make_settings_callback` 参照）
-- Phase B 完了時の出力 PDF 通知
+- `wiseman_hub.spec` 作成（entry point: `src/wiseman_hub/__main__.py`）
+- `--icon assets/icon.ico` で exe に resource 埋め込み（14B で生成済み）
+- Tkinter / tomlkit / httpx / fitz の hidden imports 設定
+- `pyinstaller --onefile --windowed wiseman_hub.spec` でビルド検証
+- 生成 exe の起動確認（Windows 実機、10-2 と同時に）
 
 **Acceptance Criteria**:
-- AC-L-3: 確認待ちボタン → セッション一覧 → 選択 → ConfirmDialog 起動
-- AC-L-3-Async: Phase B 実行中も mainloop 応答（13B パターン流用）
-- AC-L-3-Done: 完了時に出力 PDF パス通知 + ログには型名のみ（PII 防御）
+- AC-DIST-1: `dist/wiseman_hub.exe` がダブルクリックで Launcher GUI を起動
+- AC-DIST-2: exe の taskbar / alt-tab アイコンが `assets/icon.ico` に差し替わる
+- AC-DIST-3: config/default.toml が exe と同ディレクトリにあれば読み込める
+- AC-DIST-4: Windows Defender / SmartScreen の挙動記録（署名なし配布の運用考慮）
 
-### 優先 2: タスク 14A（PyInstaller spec + icon 埋め込み）
+**参照**: ADR-002 PyInstaller 選定、Issue #59
 
-**Issue #59 対応**: `--icon assets/icon.ico` 指定、生成 exe の resource 検証
+### 優先 2: タスク 10-2（Windows 実機 E2E、本田さん実施）
 
-### 優先 3: タスク 10-2（Windows 実機 E2E、本田さん実施）
+**スコープ**:
+- TeamViewer 経由で Windows 11 PC にアクセス
+- `docs/handoff/windows-e2e-task10.md` 手順に従い実施
+- 13A/13B/13C 完成済みの Launcher GUI で以下を確認:
+  - PDF マージ処理ボタン → Phase A 実行 → セッション生成
+  - 確認待ちセッションボタン → SessionPicker → ConfirmDialog → Phase B → 出力 PDF 生成
+  - 設定ボタン → SettingsDialog → TOML 書き戻し → 即反映
+- AC2 (Cloud Run OCR 疎通), AC-UI-6~10 (Tkinter 実描画), AC-L-2/3/4 (Launcher 統合) 実測
 
-`docs/handoff/windows-e2e-task10.md` に従って TeamViewer で実施。
+**14A と同時実施可**: exe 化した後の実機確認も含めて 1 回のセッションで済ます方が効率的。
 
-### 優先 4: タスク 12C / 14C / 14D / 15 / 11
+### 優先 3: Issue #76（P2、PdfMergeError 全般の PII 除外）
+
+他 8 箇所の `PdfMergeError` message から path/user_name 除外（Issue #75 follow-up、defense-in-depth）。
+30 分程度の小作業、PR #77 と同パターンで。
+
+### 優先 4: タスク 14C / 14D / 15 / 11 / 12C
+
+- 14C: ショートカット配布手順（14A 後）
+- 14D: ADR-011 配布形式決定（14A 完了後）
+- 15: GitHub Actions + WIF デプロイ CI
+- 11: README + sample TOML（最後）
+- 12C: 初回起動ウィザード（優先度低、12B でカバー済）
 
 ## 積み残し Issue / 技術負債
 
-### Session 8 で新規 Issue 化
-- **#67**: `_on_callback_exception` を `install_tk_exception_guard` に共通化（P2、13C 着手前に対応で SessionPicker でも再利用可能）
-- **#68**: `validate_form` 戻り値を error code enum 化 + `ValidatedForm` newtype（P2、i18n + illegal-state-unrepresentable）
+### P1
+- **#51**: Windows msvcrt / 跨プロセスロック / 0 ページ PDF（単一 PC では発生せず）
 
-### Session 8 で識別（Issue 未化、記録のみ）
-- **type-design**: `SettingsDialogResult.config` が AppConfig（frozen でない）で mutation 可能。deepcopy on construction 検討
-- **test**: 重複 `concat_order` "A,A,B" の仕様判断（許可 or 検出）
-- **test**: `reload_config` + `validate_config_ready` の結合遷移テスト（AC-L-4 の実運用フロー検証）
-- **security**: API Key 平文が StringVar / Tcl interpreter / clipboard に残る（`show="*"` だけでは不十分な脅威モデル）
-- **UX**: TOML 構文エラー時に設定ダイアログで修復する UI なし（現状は Launcher の messagebox で型名通知のみ）
-- **robustness**: `ttk.Entry` の改行・制御文字混入を拒否していない（Windows 実機で検証必要）
+### P2（Session 9 で新規）
+- **#71**: guard の exc_type=None / BaseException 契約テスト
+- **#72**: `review_flow.resolve_review_session` 共通化
+- **#73**: `ReviewCallbackResult` dataclass
+- **#76**: 他 PdfMergeError 生成箇所の PII 除外
 
-### 継続
-- **#58**: `/healthz` Cloud Run GFE intercept（P2、実害なし）
-- **#59**: PyInstaller icon 埋め込み（P2、14A スコープ）
-- **#62**: ~~Phase A worker thread 化~~ → PR #65 で対応済
-- **#63**: Linux CI Tk wiring skip（P2、15 / 別 PR）
-- **#64**: `--config` 存在しないパス警告（P2）
-- **#51**: Windows msvcrt / 跨プロセスロック / 0 ページ PDF (P1、単一 PC では発生せず)
-- **#38**: atomic_io ユーティリティ抽出（P2、config.py / session.py / merger.py / save_config で重複）
+### P2（継続）
+- **#58**: `/healthz` Cloud Run GFE intercept（実害なし）
+- **#59**: PyInstaller icon 埋め込み（14A スコープ）
+- **#63**: Linux CI Tk wiring skip（別 PR）
+- **#64**: `--config` 存在しないパス警告
+- **#38**: `atomic_io` ユーティリティ抽出
 - **#27 #29 #49 #50 #40 #39 #44 #45 #17 #16 #14 #11 #6**: 各種改善
 
-## impl-plan 進捗（Session 8 終了時点）
+## impl-plan 進捗（Session 9 終了時点）
 
 | タスク | 状態 | PR |
 |--------|------|-----|
 | 10-1 Cloud Run デプロイ + 疎通確認 | ✅ merged | #60 |
-| 10-2 Windows 実機 E2E | ⏳ 本田さん実施待ち | - |
+| **10-2 Windows 実機 E2E** | ⏳ **本田さん実施待ち（14A と同時実施推奨）** | - |
 | 12A TOML 書き戻し機能 | ✅ merged | #60 |
 | 12B 設定 GUI | ✅ merged | #66 |
-| 12C 初回起動ウィザード | ⏳ 優先度低（12B で必須設定編集カバー） | - |
+| 12C 初回起動ウィザード | ⏳ 優先度低 | - |
 | 13A ランチャー GUI 骨格 | ✅ merged | #61 |
 | 13B ランチャー ↔ Phase A 統合 | ✅ merged | #65 |
-| **13C ランチャー ↔ 確認 UI 統合** | ⏳ **次セッション最優先** | - |
-| 14A PyInstaller spec | ⏳ GUI 完成後 | - |
+| 13C ランチャー ↔ 確認 UI / Phase B 統合 | ✅ merged | #74 |
+| **14A PyInstaller spec** | ⏳ **次セッション最優先** | - |
 | 14B アイコン生成 | ✅ merged | #60 |
 | 14C ショートカット配布手順 | ⏳ 14A 後 | - |
 | 14D ADR-011 執筆 | ⏳ 14A 完了時 | - |
 | 15 GitHub Actions + WIF | ⏳ GUI 安定後 | - |
 | 11 README + sample TOML | ⏳ 最後 | - |
 
-## 本セッションで確定した設計判断
+## Session 9 で確定した設計判断
 
-### 設定 GUI（12B）の Toplevel モーダル化
-- `SettingsDialog(parent=...)` 指定時は `tk.Toplevel(parent) + transient + grab_set + wait_window` でモーダル動作
-- 設定編集中は Launcher の他ボタンが押せない（race 構造的排除、医療 PII 誤配置防止）
-- 親なしで起動（テスト / standalone）時は従来の `tk.Tk() + mainloop()` を使う 2 モード設計
-- Launcher に `get_root() -> tk.Tk` を追加、`_LauncherLike` Protocol に反映
+### タスク 13C
 
-### Launcher ↔ SettingsDialog 双方向バインド
-- `_make_settings_callback(config_path, get_launcher)` が `launcher_ref: list[Launcher | None] = [None]` を参照
-- `Launcher(on_open_settings=callback)` → `launcher_ref[0] = launcher` の順で初期化
-- `_get_launcher()` 関数で None チェックを `raise RuntimeError`（`python -O` で assert strip リスク回避）
-- 設定保存成功時は `launcher.reload_config(new_config)` を呼び `validate_config_ready` 判定を新値で行う（再起動不要）
+**Toplevel モーダル統一パターン（ConfirmDialog / SessionPicker / SettingsDialog 共通）**
+- `tk.Toplevel(parent) + transient + grab_set + wait_window()` で race 構造排除
+- `_close_dialog()` ヘルパーで Toplevel=destroy / standalone=quit を分岐
+- **grab_release** を明示的に呼んでから destroy（Windows grab 残留防止、Codex MEDIUM 指摘反映）
 
-### PII 防御（12B で強化）
-- `validate_form`: エラーメッセージに入力値 raw を埋め込まない（URL 欄に API Key 誤入力時の露出防止）
-- `attempt_save` の except は `(OSError, ValueError, TypeError)` のみ捕捉、想定外は `_on_callback_exception` で fail-fast
-- `_on_callback_exception` の二次 showerror 失敗を warning ログで握り潰し（ConfirmDialog と同等）
-- `open_settings` で `load_config` 失敗を型名のみ通知、Launcher は継続
+**Launcher Phase A/B 統合パターン**
+- `ThreadPoolExecutor(max_workers=1, thread_name_prefix="phase-worker")` で Phase A/B 直列化
+- `on_open_review: Callable[[], str | None]`（main thread 同期）+ `on_run_phase_b: Callable[[str], None]`（worker thread）の 2 callback 設計
+- `_handle_open_review` 内で `except Exception` は「コールバック本体の同期例外防御」として妥当（`install_tk_exception_guard` は Tk callback 例外のみ捕捉）
 
-### Quality Gate 実効性（Session 2-8 累積）
-- **/simplify**: 各 PR で IMPORTANT 3-6 件修正
-- **Evaluator 分離プロトコル**: 5 ファイル以上で起動、構造的契約を明確化
-- **/review-pr 6 Agent + Codex**: 12B では CRITICAL 3 件検出（Toplevel モーダル化 / assert strip / except 過剰広域）、PII 漏洩経路 8 セッション連続検出
+**TOCTOU 防御（Codex HIGH 指摘反映）**
+- `_make_review_callback` の 2 回目ロック内で `load_session` 再実行
+- 許可: (a) NEEDS_REVIEW && all_candidates_resolved、(b) 既に READY_TO_MERGE（冪等）
+- それ以外は競合として停止（CLI `_cmd_review` 方針と統一）
+
+### Issue #75
+
+**PII 防御方針の完全化（pipeline / merger 層）**
+- `logger.exception` 全廃、`logger.error("...: %s", type(exc).__name__)` に統一
+- `source_a_path` / `output_path` ログ非混入（session_id + 型名 + 件数で追跡）
+- `_save_atomically` 失敗時 `PdfMergeError.__str__` からも path 除外
+  - 保証範囲: logger / GUI Launcher / CLI 経路は完全塞ぎ
+  - 残リスク: `__cause__` chain 経由 threading.excepthook（実運用経路では発生せず、async/subprocess 化時に再評価）
+
+### Quality Gate の実効性（Session 2-9 累積）
+- **/simplify** 3 並列: 各 PR で IMPORTANT 3-6 件修正
+- **Evaluator 分離**: 5+ files 発動、構造的契約の妥当性を別コンテキスト評価
+- **6 Agent + Codex 二段レビュー**: Claude agents が見落とす HIGH を Codex が検出する非対称性を継続確認
+  - 13C: Codex HIGH 2 件（TOCTOU + logger.exception PII）検出 → 14A 以降も継続運用
 
 ## セッション再開手順（コピペ可）
 
 ```bash
 cd /Users/yyyhhh/Projects/wiseman_auto_sys
-# main 同期確認（全 PR マージ済）
 git checkout main
 git pull --ff-only
 
-# 13C 着手
-git checkout -b feature/task-13c-phase-b-integration
+# 14A 着手（PyInstaller spec）
+git checkout -b feature/task-14a-pyinstaller-spec
 
-# TDD: まず Red
-# tests/unit/ui/test_launcher_phase_b_integration.py 新規
+# または 10-2 と同時進行の場合
+# → 14A で exe ビルド → Windows 実機 E2E で 14A + 10-2 を同時検証
 ```
 
-## 13C 設計メモ（詳細）
+## 14A 設計メモ（詳細）
 
 ### スコープ
 
-ランチャーの「確認待ちセッション」ボタンから Phase B（最終 PDF 結合）を実行できるようにする。
+PyInstaller で `wiseman_hub.exe` を生成し、ダブルクリック起動できる Windows デスクトップアプリに仕立てる。
 
-1. `on_open_review` に実装注入:
-   - `list_sessions(sessions_dir)` で NEEDS_REVIEW / READY_TO_MERGE セッション列挙
-   - セッション選択 UI（リスト表示 + 選択）→ 既存 `scripts/merge_user_pdfs.py::_cmd_review` のロジックを参考
-   - NEEDS_REVIEW なら ConfirmDialog 起動（既存）→ 解決後 run_phase_b
-   - READY_TO_MERGE なら直接 run_phase_b
-2. Phase B は worker thread 化（13B の `_schedule_phase_a_done` パターン流用）
-3. 完了時は出力 PDF パスを showinfo、例外時は型名のみログ
+1. `wiseman_hub.spec` 新規作成:
+   - Entry: `src/wiseman_hub/__main__.py`
+   - Name: `wiseman_hub`
+   - Icon: `assets/icon.ico`
+   - Console: False（--windowed）
+   - Hidden imports: tkinter / tomlkit / httpx / fitz / pymupdf
+   - Data files: 必要なら （現状 TOML は exe 隣配置で十分）
+2. ビルドコマンド: `pyinstaller wiseman_hub.spec`
+3. Windows CI に「exe ビルド成功」の smoke test 追加（optional）
+4. ADR-011 執筆（14D）に繋げる
 
 ### ファイル構成案
 
 ```
-src/wiseman_hub/ui/session_picker.py  # 新規、セッション一覧 + 選択 Toplevel
-src/wiseman_hub/ui/launcher.py        # _handle_open_review を async 化
-src/wiseman_hub/__main__.py           # _make_review_callback 追加
+wiseman_hub.spec          # 新規、PyInstaller spec ファイル
+docs/adr/ADR-011-distribution.md  # 14D で執筆
+docs/handoff/14a-build.md # ビルド手順書（14C 配布手順と統合しても良い）
 ```
 
 ### 既存資産
 
-- `scripts/merge_user_pdfs.py::_cmd_review`（list → ConfirmDialog → transition）
-- `scripts/merge_user_pdfs.py::_cmd_merge`（READY_TO_MERGE → run_phase_b）
-- `src/wiseman_hub/ui/confirm_dialog.py::ConfirmDialog`（Toplevel 化が必要）
-- `src/wiseman_hub/ui/launcher.py::_schedule_phase_a_done`（Phase B にも同パターン）
+- `assets/icon.ico`（14B で生成済、18KB、6 サイズマルチ ICO）
+- `scripts/generate_icon.py`（再生成用）
+- ADR-002: PyInstaller 選定
+- `pyproject.toml`: 依存関係（PyInstaller 本体は開発依存として追加）
 
 ### 注意点
 
-- ConfirmDialog も Toplevel モーダル化すべき（Launcher を parent に渡す）
-- session lock は既存 `with_session_lock(sessions_dir, session_id)` で確保（二重起動防止）
-- Phase B 実行中の Launcher ボタン disable（13B の `_set_busy` と同じ）
-- **最優先**: ConfirmDialog を Toplevel 化しないと、「確認 UI 中に Launcher ボタンが押せる」という同じ race が残る（12B で Codex に指摘された通り）
+- PyInstaller 6.x を uv 経由でインストール（開発依存）
+- `--onefile` vs `--onedir` の選択: 起動速度は `--onedir` が速いが配布は `--onefile` が単純
+  → MVP は `--onefile` で進める（`--windowed` と組み合わせ）
+- Cloud Run API Key は TOML 設定で運用、exe に埋め込まない（12A で確定済）
+- Windows Defender SmartScreen 対策は別 Issue（署名購入の是非は運用判断、14D で記録）
 
 ## 参照ファイル（次セッション用）
 
-### 実装対象
-- `src/wiseman_hub/ui/session_picker.py`（新規）
-- `src/wiseman_hub/ui/launcher.py`: `_handle_open_review` 追加
-- `src/wiseman_hub/__main__.py`: `_make_review_callback` 追加
-- `src/wiseman_hub/ui/confirm_dialog.py`: `parent` 引数追加、Toplevel モード対応
+### 14A 実装対象
+- `wiseman_hub.spec`（新規）
+- `pyproject.toml`（PyInstaller 開発依存追加）
+- `docs/adr/ADR-011-distribution.md`（14D で執筆、14A では stub のみ）
 
 ### 既存資産
-- `scripts/merge_user_pdfs.py`: CLI ロジック参考
-- `src/wiseman_hub/pdf/session.py`: `list_sessions` / `load_session` / `with_session_lock`
-- `src/wiseman_hub/pdf/pipeline.py::run_phase_b`
-- `src/wiseman_hub/ui/common.py`: `assert_main_thread`
+- `src/wiseman_hub/__main__.py`: main() エントリポイント
+- `src/wiseman_hub/ui/launcher.py`: Launcher（3 ボタン + Phase A/B 非同期）
+- `src/wiseman_hub/ui/confirm_dialog.py` / `session_picker.py` / `settings.py`: dialog 群
+- `assets/icon.ico`: 14B で生成済
+- `docs/adr/ADR-002-pyinstaller.md`: 選定理由
