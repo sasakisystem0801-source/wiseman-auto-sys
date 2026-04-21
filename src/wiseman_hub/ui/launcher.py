@@ -203,8 +203,9 @@ class Launcher:
 
     def __del__(self) -> None:
         # ``run()`` を呼ばずに Launcher インスタンスが破棄されるパス（テストで
-        # __init__ 後に root.destroy() で抜ける等）でも worker thread がプロセス
-        # 終了を阻害しないよう、GC 時にも shutdown を保証する。
+        # __init__ 後に root.destroy() で抜ける等）向けのベストエフォート cleanup。
+        # CPython の __del__ はインタプリタ終了時や循環参照検出時に呼ばれない
+        # ことがあるため、本番経路では ``run()`` の finally で shutdown を行うこと。
         self._shutdown_executor()
 
     def _shutdown_executor(self) -> None:
@@ -217,9 +218,17 @@ class Launcher:
     def wait_until_idle(self, timeout: float) -> None:
         """実行中の Phase A が完了し、完了処理が main thread で pump されるまで待機する（テスト用）。
 
-        ``_on_phase_a_done`` は ``root.after(0, ...)`` で main thread に再スケジュール
-        されるため、本 helper 内で ``root.update()`` を呼んで pump する。呼び出し元は
-        追加の event loop 操作なしに busy=False まで確認できる。
+        順序保証（CPython の concurrent.futures 実装に基づく）::
+
+            1. worker thread: callback 完了 → future.set_result()
+            2. worker thread: add_done_callback に登録した ``_schedule_phase_a_done``
+               を同期呼出 → ``root.after(0, _on_phase_a_done, future)`` で Tk queue に enqueue
+            3. main thread: ``future.result(timeout)`` から return
+            4. main thread: ``while self._busy: root.update()`` で enqueue された
+               ``_on_phase_a_done`` を pump → ``_set_busy(False)``
+
+        ``_busy`` フラグが ``_on_phase_a_done`` 内で False に落ちるまで pump を継続する
+        ため、enqueue と pump の race は ``deadline`` まで吸収される。
         """
         future = self._current_future
         if future is None:
@@ -267,8 +276,9 @@ class Launcher:
         """worker thread → main thread 遷移（Tk は main thread 以外から触れない）。"""
         try:
             self._root.after(0, self._on_phase_a_done, future)
-        except RuntimeError as e:
-            # root が既に destroy 済みなら after は RuntimeError。PII 防御で型名のみ。
+        except (RuntimeError, tk.TclError) as e:
+            # root が既に destroy 済みなら after は RuntimeError / TclError。
+            # PII 防御で型名のみログに残す。
             logger.warning(
                 "launcher after() failed after root destroy: %s", type(e).__name__
             )
@@ -276,7 +286,11 @@ class Launcher:
     def _on_phase_a_done(
         self, future: concurrent.futures.Future[None]
     ) -> None:
-        """Phase A 完了後処理（main thread で実行）。成功/失敗を通知しボタンを再有効化。"""
+        """Phase A 完了後処理（main thread で実行）。成功/失敗を通知しボタンを再有効化。
+
+        ``_set_busy(False)`` は ``future.result()`` より先に呼ぶ。例外が raise される
+        ケースでも必ずボタンを再有効化するための意図的な順序（変更禁止）。
+        """
         self._set_busy(False)
         self._current_future = None
         try:
