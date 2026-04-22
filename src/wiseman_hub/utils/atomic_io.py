@@ -29,6 +29,13 @@ logger = logging.getLogger(__name__)
 _TMP_PREFIX = "."
 _TMP_SUFFIX = ".tmp"
 
+#: atomic_io が作成する tempfile のデフォルト命名パターンにマッチする glob pattern。
+#: 呼び出し元が独自の sweep 機構を実装する場合、この定数を使うことで atomic_io の
+#: デフォルト ``prefix`` / ``suffix`` が変わった際にも自動追従できる。
+#: 独自 prefix を ``write_bytes_atomically(prefix=...)`` 等で指定した場合は、
+#: この pattern ではマッチしないため呼び出し元が自前でパターンを構築すること。
+DEFAULT_TMP_GLOB = f"{_TMP_PREFIX}*{_TMP_SUFFIX}"
+
 
 def _cleanup_tmp(tmp_path: Path) -> None:
     """tmp ファイルを best-effort で削除する。

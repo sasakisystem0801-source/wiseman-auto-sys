@@ -18,17 +18,19 @@ import os
 import re
 import secrets
 import shutil
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from glob import glob
 from pathlib import Path
 from typing import IO, Any
 
 from wiseman_hub.pdf.matcher import MatchResult, MatchStatus, SourceKind
 from wiseman_hub.pdf.ocr_client import Confidence
-from wiseman_hub.utils.atomic_io import write_bytes_atomically
+from wiseman_hub.utils.atomic_io import DEFAULT_TMP_GLOB, write_bytes_atomically
 
 logger = logging.getLogger(__name__)
 
@@ -439,6 +441,47 @@ def _ensure_sessions_dir(sessions_dir: Path) -> None:
     ensure_private_dir(sessions_dir)
 
 
+# Issue #105: プロセスクラッシュで残留した atomic_io の ``.*.tmp`` を掃除する閾値。
+# atomic_io の書込は通常数百 ms 以内で完了するため、60 秒は並行書込中の tmp を
+# 誤削除しないための安全マージン。
+_STALE_TMP_THRESHOLD_SECONDS = 60.0
+
+
+def _sweep_stale_session_tmp(
+    sessions_dir: Path, *, threshold_seconds: float | None = None
+) -> None:
+    """``sessions_dir`` 直下の stale tmp を best-effort で削除する。
+
+    ``atomic_io.DEFAULT_TMP_GLOB`` にマッチする tempfile のうち、mtime が閾値
+    以上経過したもののみ削除する。並行書込中の tmp を誤削除しないための mtime
+    ガードにより、他プロセス/スレッドの書込と race しない。
+
+    ``sessions_dir`` が存在しない場合は ``glob`` が空リストを返すため no-op。
+
+    Args:
+        sessions_dir: sweep 対象のセッションディレクトリ
+        threshold_seconds: stale と見なす経過時間の閾値。``None`` の場合は
+            ``_STALE_TMP_THRESHOLD_SECONDS`` (60 秒) を使う。テストでの注入用途。
+
+    PII 防御: 失敗時は件数のみ warning ログ、path / 例外 message は出さない。
+    """
+    threshold_sec = (
+        threshold_seconds if threshold_seconds is not None else _STALE_TMP_THRESHOLD_SECONDS
+    )
+    threshold = time.time() - threshold_sec
+    pattern = str(sessions_dir / DEFAULT_TMP_GLOB)
+    failed = 0
+    for p in glob(pattern):
+        try:
+            if os.path.getmtime(p) > threshold:
+                continue
+            os.unlink(p)
+        except OSError:
+            failed += 1
+    if failed:
+        logger.warning("Failed to remove %d stale session tmp file(s)", failed)
+
+
 def save_session(session: Session, *, sessions_dir: Path) -> Path:
     """セッションを JSON としてアトミックに保存する。
 
@@ -446,6 +489,9 @@ def save_session(session: Session, *, sessions_dir: Path) -> Path:
     """
     _ensure_sessions_dir(sessions_dir)
     validate_session_id(session.session_id)
+    # Issue #105: プロセスクラッシュで残留した PII 含む tmp を都度掃除する。
+    # 頻繁な glob だが sessions_dir のファイル数は通常小さく、mtime で並行保護。
+    _sweep_stale_session_tmp(sessions_dir)
 
     session.updated_at = datetime.now(UTC).isoformat()
 

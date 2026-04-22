@@ -1316,3 +1316,177 @@ class TestCrossProcessLock:
         status, detail = result_queue.get(timeout=5)
         # sid2 は別セッションなので子は取得成功
         assert status == "ACQUIRED", f"expected ACQUIRED, got {status} (detail={detail})"
+
+
+# ===========================================================================
+# Issue #105: stale tmp sweep 機構
+# ===========================================================================
+#
+# PR #104 で session.py は atomic_io.write_bytes_atomically に委譲。
+# プロセスクラッシュ時に .*.tmp（atomic_io のデフォルト prefix="."）が残留し、
+# PII（user_name_ocr 等）が平文で残るリスクを解消するため、save_session 実行時に
+# sessions_dir 内の stale tmp を sweep する。
+
+
+class TestStaleTmpSweep:
+    """Issue #105: sessions_dir 内 stale .*.tmp を save_session 時に掃除する。"""
+
+    def test_sweep_deletes_stale_tmp(self, tmp_path: Path) -> None:
+        """mtime が閾値を超えた .*.tmp が削除される。"""
+        from wiseman_hub.pdf.session import _sweep_stale_session_tmp
+
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        stale = sessions_dir / ".abc123.tmp"
+        stale.write_bytes(b"PII=leaked")
+
+        # mtime を十分過去に設定（閾値 60s を余裕で超える 10 分前）
+        past = time.time() - 600
+        os.utime(stale, (past, past))
+
+        _sweep_stale_session_tmp(sessions_dir)
+
+        assert not stale.exists()
+
+    def test_sweep_preserves_recent_tmp(self, tmp_path: Path) -> None:
+        """mtime が閾値未満の tmp は並行書込中の可能性があるため保護する。"""
+        from wiseman_hub.pdf.session import _sweep_stale_session_tmp
+
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        recent = sessions_dir / ".active123.tmp"
+        recent.write_bytes(b"writing in progress")
+        # mtime はデフォルトで現在時刻 → 閾値内
+
+        _sweep_stale_session_tmp(sessions_dir)
+
+        assert recent.exists()
+        assert recent.read_bytes() == b"writing in progress"
+
+    def test_sweep_missing_dir_is_noop(self, tmp_path: Path) -> None:
+        """sessions_dir が存在しない場合は例外を出さず no-op。"""
+        from wiseman_hub.pdf.session import _sweep_stale_session_tmp
+
+        missing = tmp_path / "does-not-exist"
+        # 例外が出ないこと
+        _sweep_stale_session_tmp(missing)
+        assert not missing.exists()
+
+    def test_sweep_preserves_non_tmp_files(self, tmp_path: Path) -> None:
+        """.json / .lock / 通常ファイルは削除対象外。"""
+        from wiseman_hub.pdf.session import _sweep_stale_session_tmp
+
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+
+        session_file = sessions_dir / "session_id.json"
+        session_file.write_text("{}", encoding="utf-8")
+        lock_file = sessions_dir / "session_id.lock"
+        lock_file.write_text("", encoding="utf-8")
+        plain_file = sessions_dir / "readme.txt"
+        plain_file.write_text("info", encoding="utf-8")
+        # stale tmp（削除対象）
+        stale = sessions_dir / ".stale.tmp"
+        stale.write_bytes(b"")
+        past = time.time() - 600
+        os.utime(stale, (past, past))
+
+        _sweep_stale_session_tmp(sessions_dir)
+
+        assert session_file.exists()
+        assert lock_file.exists()
+        assert plain_file.exists()
+        assert not stale.exists()
+
+    def test_sweep_sanitized_log_on_unlink_failure(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """unlink 失敗時は件数のみ warning、path/例外 message/PII を出さない。"""
+        import logging
+
+        from wiseman_hub.pdf import session as session_mod
+
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        pii_name = "patient-taro-yamada"
+        stale = sessions_dir / f".{pii_name}.tmp"
+        stale.write_bytes(b"")
+        past = time.time() - 600
+        os.utime(stale, (past, past))
+
+        def failing_unlink(path: str) -> None:
+            raise OSError(f"simulated-unlink-error-{pii_name}")
+
+        monkeypatch.setattr(session_mod.os, "unlink", failing_unlink)
+
+        with caplog.at_level(logging.WARNING, logger="wiseman_hub.pdf.session"):
+            session_mod._sweep_stale_session_tmp(sessions_dir)
+
+        log_text = caplog.text
+        assert pii_name not in log_text
+        assert "simulated-unlink-error" not in log_text
+        assert str(stale) not in log_text
+        # 件数のみ含まれる
+        assert "1" in log_text
+
+    def test_save_session_sweeps_stale_tmp(self, tmp_path: Path) -> None:
+        """save_session 実行時に過去クラッシュで残った stale tmp が削除される。"""
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+
+        # 過去クラッシュの痕跡を偽装
+        stale = sessions_dir / ".abc123.tmp"
+        stale.write_bytes(b"PII=leaked")
+        past = time.time() - 600
+        os.utime(stale, (past, past))
+
+        s = _make_session(tmp_path)
+        save_session(s, sessions_dir=sessions_dir)
+
+        assert not stale.exists()
+        # save_session 自体は成功
+        assert (sessions_dir / f"{s.session_id}.json").exists()
+
+    def test_sweep_preserves_concurrent_write_tmp(self, tmp_path: Path) -> None:
+        """並行 save_session が書込中の tmp（新しい mtime）を誤削除しない。
+
+        atomic_io の書込は数百 ms 以内で完了するが、閾値 60s の保護により
+        他プロセス/スレッドの書込中 tmp が誤削除されない。
+        """
+        from wiseman_hub.pdf.session import _sweep_stale_session_tmp
+
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        # 他プロセスが書込中を想定した tmp
+        active = sessions_dir / ".other_session.tmp"
+        active.write_bytes(b"in progress")
+        # mtime は「今」 → 閾値 60s の保護で削除されない
+
+        _sweep_stale_session_tmp(sessions_dir)
+
+        assert active.exists()
+
+    def test_sweep_boundary_case_with_injected_threshold(self, tmp_path: Path) -> None:
+        """threshold 境界: 直前は保護、直後は削除。``threshold_seconds`` 注入で検証。"""
+        from wiseman_hub.pdf.session import _sweep_stale_session_tmp
+
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+
+        now = time.time()
+        # 5 秒閾値でテスト（テスト注入用途）
+        recent = sessions_dir / ".just_inside.tmp"
+        recent.write_bytes(b"")
+        os.utime(recent, (now - 4.0, now - 4.0))  # 4 秒前 → 保護
+
+        stale = sessions_dir / ".just_outside.tmp"
+        stale.write_bytes(b"")
+        os.utime(stale, (now - 6.0, now - 6.0))  # 6 秒前 → 削除
+
+        _sweep_stale_session_tmp(sessions_dir, threshold_seconds=5.0)
+
+        assert recent.exists()
+        assert not stale.exists()
