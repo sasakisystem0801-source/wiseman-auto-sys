@@ -524,6 +524,108 @@ class TestInterruption:
                 session=completed,
             )
 
+    def test_ocr_server_error_saves_interrupted_state(self, tmp_path: Path) -> None:
+        """Issue #51 #3: KeyboardInterrupt 以外の Exception 経路でも INTERRUPTED 保存。
+
+        run_phase_a の except 節は (Exception, KeyboardInterrupt) を補足するため、
+        OcrServerError のような通常 Exception 派生も INTERRUPTED_PHASE_A として記録され、
+        例外がそのまま再送出されることを契約として検証する。
+        """
+        from wiseman_hub.pdf.ocr_client import OcrServerError
+
+        a_pdf = _make_pdf_file(tmp_path, "A.pdf", num_pages=3)
+        sessions_dir = tmp_path / ".sessions"
+
+        ocr = FakeOcrClient(
+            [
+                _ocr_high("u0"),
+                OcrServerError("simulated 503"),
+                _ocr_high("u2"),
+            ]
+        )
+        matcher = FakeMatcher(
+            {"u0": _match_auto(), "u2": _match_auto()}
+        )
+
+        with pytest.raises(OcrServerError, match="simulated 503"):
+            run_phase_a(
+                source_a_path=a_pdf,
+                config=_config(tmp_path),
+                ocr_client=ocr,
+                matcher=matcher,
+                sessions_dir=sessions_dir,
+            )
+
+        sids = list_sessions(sessions_dir=sessions_dir)
+        assert len(sids) == 1
+        session = load_session(sids[0], sessions_dir=sessions_dir)
+        assert session.status == SessionStatus.INTERRUPTED_PHASE_A
+        # 1 ページ目のみ処理完了。2 ページ目で OCR 失敗したため 1 件だけ記録
+        assert len(session.candidates) == 1
+        assert session.candidates[0].page_index == 0
+
+    def test_save_failure_during_interrupt_does_not_mask_original_exception(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Issue #51 #5: INTERRUPTED 状態保存時の disk-full でも元例外が伝播する。
+
+        run_phase_a の except 節は INTERRUPTED 保存失敗を logger.error でログし、
+        元の例外（KeyboardInterrupt / OcrServerError 等）を raise で再送出する契約。
+        元例外が save 例外で masked されないことを検証する。
+        """
+        import os
+
+        from wiseman_hub.pdf import session as session_mod
+
+        a_pdf = _make_pdf_file(tmp_path, "A.pdf", num_pages=2)
+        sessions_dir = tmp_path / ".sessions"
+
+        ocr = FakeOcrClient([_ocr_high("u0"), KeyboardInterrupt()])
+        matcher = FakeMatcher({"u0": _match_auto()})
+
+        real_replace = os.replace
+        interrupt_phase_started = {"flag": False}
+
+        def failing_replace_during_interrupt(src: str, dst: str) -> None:
+            # 正常処理中の save_session は成功させ、except 節での
+            # INTERRUPTED 保存時のみ失敗させる。
+            # transition_session(INTERRUPTED_PHASE_A) が呼ばれた後に
+            # 立つ flag を save_session 内部の os.replace フックで検出する構造
+            # ではなく、ここでは KeyboardInterrupt 後の最初の replace を失敗と
+            # みなす（pipeline.py の except 節は transition → save の順なので、
+            # KI 発生後に呼ばれる replace は INTERRUPTED 保存のもの）。
+            if interrupt_phase_started["flag"]:
+                raise OSError("simulated disk full during INTERRUPTED save")
+            real_replace(src, dst)
+
+        original_extract = ocr.extract_name
+
+        def extract_and_flag(image_png: bytes, **kwargs) -> object:
+            try:
+                return original_extract(image_png, **kwargs)
+            except KeyboardInterrupt:
+                interrupt_phase_started["flag"] = True
+                raise
+
+        ocr.extract_name = extract_and_flag  # type: ignore[method-assign]
+
+        monkeypatch.setattr(
+            session_mod.os, "replace", failing_replace_during_interrupt
+        )
+
+        # 元の KeyboardInterrupt が INTERRUPTED 保存失敗で masked されずに伝播する
+        with pytest.raises(KeyboardInterrupt):
+            run_phase_a(
+                source_a_path=a_pdf,
+                config=_config(tmp_path),
+                ocr_client=ocr,
+                matcher=matcher,
+                sessions_dir=sessions_dir,
+            )
+
+        # 契約: 元例外（KeyboardInterrupt）が save 失敗で masked されず伝播すること。
+        # on-disk 状態は検証しない（save 失敗時の残留状態は実装詳細のため）。
+
 
 # ---------------------------------------------------------------------------
 # 追加: session のロック取得失敗は例外伝播（run_phase_a は内部でロック取得）

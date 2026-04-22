@@ -586,6 +586,74 @@ class TestGcOldSessions:
         assert removed == []
         assert (sessions_dir / "bad-date.json").exists()
 
+    def test_gc_coexists_with_interrupted_sessions(self, tmp_path: Path) -> None:
+        """Issue #51 #6: GC は with_session_lock を取得しないが、INTERRUPTED は skip するため安全。
+
+        設計契約: gc_old_sessions は COMPLETED のみ削除。INTERRUPTED_PHASE_A 等の
+        未完了セッションは何日経過していても削除されない（resume 機会を保全）。
+        同時 resume 中に GC が走っても INTERRUPTED セッションには触れないため、
+        ロック取得は不要という現行設計を契約として固定する。
+        """
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+
+        # 古い COMPLETED（GC 対象）
+        old_completed = {
+            "schema_version": 1,
+            "session_id": "old-completed",
+            "status": "completed",
+            "created_at": "2020-01-01T00:00:00+00:00",
+            "updated_at": "2020-01-01T00:00:00+00:00",
+            "config_snapshot": {},
+            "source_a_path": str(tmp_path / "A.pdf"),
+            "candidates": [],
+            "a_page_pdf_bytes_dir": str(tmp_path / ".pages-completed"),
+            "output_path": None,
+        }
+        (sessions_dir / "old-completed.json").write_text(json.dumps(old_completed))
+
+        # 同じくらい古い INTERRUPTED（resume 中想定、GC 対象外）
+        old_interrupted = {
+            "schema_version": 1,
+            "session_id": "old-interrupted",
+            "status": "interrupted_phase_a",
+            "created_at": "2020-01-01T00:00:00+00:00",
+            "updated_at": "2020-01-01T00:00:00+00:00",
+            "config_snapshot": {},
+            "source_a_path": str(tmp_path / "A.pdf"),
+            "candidates": [],
+            "a_page_pdf_bytes_dir": str(tmp_path / ".pages-interrupted"),
+            "output_path": None,
+        }
+        (sessions_dir / "old-interrupted.json").write_text(
+            json.dumps(old_interrupted)
+        )
+
+        # 同じくらい古い NEEDS_REVIEW（GC 対象外）
+        old_needs_review = {
+            "schema_version": 1,
+            "session_id": "old-needs-review",
+            "status": "needs_review",
+            "created_at": "2020-01-01T00:00:00+00:00",
+            "updated_at": "2020-01-01T00:00:00+00:00",
+            "config_snapshot": {},
+            "source_a_path": str(tmp_path / "A.pdf"),
+            "candidates": [],
+            "a_page_pdf_bytes_dir": str(tmp_path / ".pages-needs-review"),
+            "output_path": None,
+        }
+        (sessions_dir / "old-needs-review.json").write_text(
+            json.dumps(old_needs_review)
+        )
+
+        removed = gc_old_sessions(sessions_dir=sessions_dir, older_than_days=30)
+
+        # COMPLETED だけ削除される。他は resume 機会のために保全
+        assert removed == ["old-completed"]
+        assert not (sessions_dir / "old-completed.json").exists()
+        assert (sessions_dir / "old-interrupted.json").exists()
+        assert (sessions_dir / "old-needs-review.json").exists()
+
 
 class TestSessionStatusTransitions:
     """状態遷移の制約（ADR-010 準拠）。Session 自体は値オブジェクト、遷移判定は外側。
