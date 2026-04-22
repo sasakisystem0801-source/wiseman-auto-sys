@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 from typing import Any
 
@@ -23,11 +24,51 @@ import pytest
 os.environ.setdefault("TK_SILENCE_DEPRECATION", "1")
 
 from wiseman_hub.config import AppConfig  # noqa: E402
-from wiseman_hub.ui.launcher import Launcher, LauncherAction, validate_config_ready  # noqa: E402
+from wiseman_hub.ui.launcher import (  # noqa: E402
+    Launcher,
+    LauncherAction,
+    ReviewCallbackResult,
+    validate_config_ready,
+)
 
 # ---------------------------------------------------------------------------
 # Pure logic tests (Tk 非依存)
 # ---------------------------------------------------------------------------
+
+
+class TestReviewCallbackResult:
+    """``ReviewCallbackResult`` dataclass の不変条件。
+
+    cancel / 通常完了 / 第三状態（Phase B 明示スキップ）の 3 状態を
+    should_phase_b プロパティ 1 つで判定可能にする。
+    """
+
+    def test_default_is_cancel_equivalent(self) -> None:
+        """既定値（``ReviewCallbackResult()``）は cancel 相当 = should_phase_b False。"""
+        result = ReviewCallbackResult()
+        assert result.session_id is None
+        assert result.should_run_phase_b is True  # 既定 True だが session_id None なので結果 False
+        assert result.should_phase_b is False
+
+    def test_session_id_with_default_phase_b_runs(self) -> None:
+        """session_id 指定 + 既定値 should_run_phase_b=True → 通常 Phase B 起動。"""
+        result = ReviewCallbackResult(session_id="20260101T120000Z-abcd1234")
+        assert result.should_phase_b is True
+
+    def test_session_id_with_phase_b_skipped_does_not_run(self) -> None:
+        """session_id があっても should_run_phase_b=False なら Phase B スキップ（第三状態）。"""
+        result = ReviewCallbackResult(
+            session_id="20260101T120000Z-abcd1234",
+            should_run_phase_b=False,
+        )
+        assert result.session_id == "20260101T120000Z-abcd1234"
+        assert result.should_phase_b is False
+
+    def test_frozen_prevents_mutation(self) -> None:
+        """``frozen=True`` のため属性変更は禁止。"""
+        result = ReviewCallbackResult(session_id="s1")
+        with pytest.raises(FrozenInstanceError):
+            result.session_id = "s2"  # type: ignore[misc]
 
 
 class TestValidateConfigReady:
@@ -225,13 +266,17 @@ class TestLauncherUI:
 
         called: list[str] = []
 
+        def open_review() -> ReviewCallbackResult:
+            called.append("review")
+            return ReviewCallbackResult()
+
         root = tk.Tk()
         try:
             launcher = Launcher(
                 config=AppConfig(),
                 config_path=config_path,
                 root=root,
-                on_open_review=lambda: called.append("review"),
+                on_open_review=open_review,
             )
             launcher.invoke_action(LauncherAction.OPEN_REVIEW)
         finally:

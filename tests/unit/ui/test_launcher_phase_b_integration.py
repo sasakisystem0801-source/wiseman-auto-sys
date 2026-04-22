@@ -4,7 +4,7 @@ AC-L-3: 「確認待ちセッション」ボタン → `on_open_review` (main th
         session_id が返れば `on_run_phase_b` を worker thread で実行。
 AC-L-3-Async: Phase B 実行中も mainloop 応答（Phase A と同じ worker thread パターン）。
 AC-L-3-Done: 完了時に出力 PDF パス通知、失敗時は型名のみ通知（PII 防御）。
-AC-L-3-NoSel: `on_open_review` が None 返却（cancel）時は Phase B スキップ + busy 解除。
+AC-L-3-NoSel: `on_open_review` が should_phase_b=False 返却（cancel 等）時は Phase B スキップ + busy 解除。
 """
 
 from __future__ import annotations
@@ -19,7 +19,11 @@ import pytest
 os.environ.setdefault("TK_SILENCE_DEPRECATION", "1")
 
 from tests.unit.ui.conftest import FakeMessageBox, make_configured_appconfig  # noqa: E402
-from wiseman_hub.ui.launcher import Launcher, LauncherAction  # noqa: E402
+from wiseman_hub.ui.launcher import (  # noqa: E402
+    Launcher,
+    LauncherAction,
+    ReviewCallbackResult,
+)
 
 tk_required = pytest.mark.tk_required
 
@@ -40,9 +44,9 @@ class TestOpenReviewMainThread:
         main_tid = threading.get_ident()
         captured_tid: list[int] = []
 
-        def open_review() -> str | None:
+        def open_review() -> ReviewCallbackResult:
             captured_tid.append(threading.get_ident())
-            return None  # cancel
+            return ReviewCallbackResult()  # cancel
 
         root = tk.Tk()
         try:
@@ -74,8 +78,8 @@ class TestPhaseBWorkerThread:
         main_tid = threading.get_ident()
         phase_b_tids: list[int] = []
 
-        def open_review() -> str | None:
-            return "20260101T120000Z-abcd1234"
+        def open_review() -> ReviewCallbackResult:
+            return ReviewCallbackResult(session_id="20260101T120000Z-abcd1234")
 
         def run_phase_b(session_id: str) -> None:
             phase_b_tids.append(threading.get_ident())
@@ -113,8 +117,8 @@ class TestCancelSkipsPhaseB:
 
         phase_b_called = False
 
-        def open_review() -> str | None:
-            return None
+        def open_review() -> ReviewCallbackResult:
+            return ReviewCallbackResult()
 
         def run_phase_b(_sid: str) -> None:
             nonlocal phase_b_called
@@ -148,8 +152,8 @@ class TestPhaseBCompletionNotification:
         config_path = tmp_path / "config.toml"
         config_path.write_text("", encoding="utf-8")
 
-        def open_review() -> str | None:
-            return "20260101T120000Z-abcd1234"
+        def open_review() -> ReviewCallbackResult:
+            return ReviewCallbackResult(session_id="20260101T120000Z-abcd1234")
 
         def run_phase_b(_sid: str) -> None:
             pass  # success
@@ -183,8 +187,8 @@ class TestPhaseBCompletionNotification:
         config_path = tmp_path / "config.toml"
         config_path.write_text("", encoding="utf-8")
 
-        def open_review() -> str | None:
-            return "20260101T120000Z-abcd1234"
+        def open_review() -> ReviewCallbackResult:
+            return ReviewCallbackResult(session_id="20260101T120000Z-abcd1234")
 
         def run_phase_b(_sid: str) -> None:
             raise RuntimeError("/Users/secret/patient-山田太郎.pdf")
@@ -231,10 +235,10 @@ class TestRepeatedClickIgnoredPhaseB:
         proceed = threading.Event()
         open_review_calls = 0
 
-        def open_review() -> str | None:
+        def open_review() -> ReviewCallbackResult:
             nonlocal open_review_calls
             open_review_calls += 1
-            return "20260101T120000Z-abcd1234"
+            return ReviewCallbackResult(session_id="20260101T120000Z-abcd1234")
 
         def run_phase_b(_sid: str) -> None:
             start.set()
