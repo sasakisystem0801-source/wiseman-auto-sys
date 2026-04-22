@@ -19,6 +19,7 @@ import re
 import secrets
 import shutil
 import time
+from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
@@ -442,44 +443,55 @@ def _ensure_sessions_dir(sessions_dir: Path) -> None:
 
 
 # Issue #105: プロセスクラッシュで残留した atomic_io の ``.*.tmp`` を掃除する閾値。
-# atomic_io の書込は通常数百 ms 以内で完了するため、60 秒は並行書込中の tmp を
-# 誤削除しないための安全マージン。
+# 採用根拠: session JSON 書込は現状 <50 KB で数百 ms 以内に完了するため、60 秒は
+# 2 桁以上の安全マージン。将来 payload が秒オーダーまで膨らむ場合は再評価する。
 _STALE_TMP_THRESHOLD_SECONDS = 60.0
 
 
 def _sweep_stale_session_tmp(
-    sessions_dir: Path, *, threshold_seconds: float | None = None
+    sessions_dir: Path,
+    *,
+    threshold_seconds: float = _STALE_TMP_THRESHOLD_SECONDS,
 ) -> None:
     """``sessions_dir`` 直下の stale tmp を best-effort で削除する。
 
     ``atomic_io.DEFAULT_TMP_GLOB`` にマッチする tempfile のうち、mtime が閾値
-    以上経過したもののみ削除する。並行書込中の tmp を誤削除しないための mtime
-    ガードにより、他プロセス/スレッドの書込と race しない。
+    以上経過したもののみ削除する。実用上の atomic_io 書込時間（通常数百 ms）に
+    対して閾値 60 秒は十分な安全マージンであり、並行書込中の tmp を誤削除する
+    race は実用上発生しない。
 
     ``sessions_dir`` が存在しない場合は ``glob`` が空リストを返すため no-op。
 
+    例外契約: 本関数は例外を伝播しない（best-effort）。sweep 失敗は ``save_session``
+    の可否に影響しない。``FileNotFoundError``（race で他プロセスが先に消した場合）
+    は silent に skip する。他の ``OSError`` は型名別に集計し warning ログに出力する
+    （path / 例外 message / PII は出さない）。
+
     Args:
         sessions_dir: sweep 対象のセッションディレクトリ
-        threshold_seconds: stale と見なす経過時間の閾値。``None`` の場合は
-            ``_STALE_TMP_THRESHOLD_SECONDS`` (60 秒) を使う。テストでの注入用途。
-
-    PII 防御: 失敗時は件数のみ warning ログ、path / 例外 message は出さない。
+        threshold_seconds: stale と見なす経過時間の閾値。既定は 60 秒。テスト注入用。
     """
-    threshold_sec = (
-        threshold_seconds if threshold_seconds is not None else _STALE_TMP_THRESHOLD_SECONDS
-    )
-    threshold = time.time() - threshold_sec
+    threshold = time.time() - threshold_seconds
     pattern = str(sessions_dir / DEFAULT_TMP_GLOB)
-    failed = 0
+    failures: Counter[str] = Counter()
     for p in glob(pattern):
         try:
-            if os.path.getmtime(p) > threshold:
-                continue
+            mtime = os.path.getmtime(p)
+        except FileNotFoundError:
+            continue  # race で他プロセスが先に消した → 成功扱い
+        except OSError as e:
+            failures[type(e).__name__] += 1
+            continue
+        if mtime > threshold:
+            continue
+        try:
             os.unlink(p)
-        except OSError:
-            failed += 1
-    if failed:
-        logger.warning("Failed to remove %d stale session tmp file(s)", failed)
+        except FileNotFoundError:
+            continue  # race で他プロセスが先に消した → 成功扱い
+        except OSError as e:
+            failures[type(e).__name__] += 1
+    if failures:
+        logger.warning("session tmp sweep failures: %s", dict(failures))
 
 
 def save_session(session: Session, *, sessions_dir: Path) -> Path:

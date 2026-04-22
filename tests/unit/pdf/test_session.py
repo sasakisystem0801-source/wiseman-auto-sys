@@ -1356,7 +1356,6 @@ class TestStaleTmpSweep:
         sessions_dir.mkdir()
         recent = sessions_dir / ".active123.tmp"
         recent.write_bytes(b"writing in progress")
-        # mtime はデフォルトで現在時刻 → 閾値内
 
         _sweep_stale_session_tmp(sessions_dir)
 
@@ -1404,7 +1403,7 @@ class TestStaleTmpSweep:
         monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """unlink 失敗時は件数のみ warning、path/例外 message/PII を出さない。"""
+        """unlink 失敗時は型名別集計のみ warning、path/例外 message/PII を出さない。"""
         import logging
 
         from wiseman_hub.pdf import session as session_mod
@@ -1418,7 +1417,7 @@ class TestStaleTmpSweep:
         os.utime(stale, (past, past))
 
         def failing_unlink(path: str) -> None:
-            raise OSError(f"simulated-unlink-error-{pii_name}")
+            raise PermissionError(f"simulated-unlink-error-{pii_name}")
 
         monkeypatch.setattr(session_mod.os, "unlink", failing_unlink)
 
@@ -1429,8 +1428,99 @@ class TestStaleTmpSweep:
         assert pii_name not in log_text
         assert "simulated-unlink-error" not in log_text
         assert str(stale) not in log_text
-        # 件数のみ含まれる
-        assert "1" in log_text
+        # 型名は出る（運用上の原因診断のため、PII 含まず）
+        assert "PermissionError" in log_text
+
+    def test_sweep_getmtime_race_is_silent_continue(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """glob 取得後 getmtime 実行前に他プロセスが消した場合は silent に skip。"""
+        import logging
+
+        from wiseman_hub.pdf import session as session_mod
+
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        stale = sessions_dir / ".racing.tmp"
+        stale.write_bytes(b"")
+
+        def failing_getmtime(path: str) -> float:
+            raise FileNotFoundError(path)
+
+        monkeypatch.setattr(session_mod.os.path, "getmtime", failing_getmtime)
+
+        with caplog.at_level(logging.WARNING, logger="wiseman_hub.pdf.session"):
+            session_mod._sweep_stale_session_tmp(sessions_dir)
+
+        # race は成功扱い → warning なし
+        assert caplog.text == ""
+
+    def test_sweep_unlink_race_is_silent_continue(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """getmtime 通過後 unlink 実行前に他プロセスが消した場合は silent に skip。"""
+        import logging
+
+        from wiseman_hub.pdf import session as session_mod
+
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        stale = sessions_dir / ".racing.tmp"
+        stale.write_bytes(b"")
+        past = time.time() - 600
+        os.utime(stale, (past, past))
+
+        def failing_unlink(path: str) -> None:
+            raise FileNotFoundError(path)
+
+        monkeypatch.setattr(session_mod.os, "unlink", failing_unlink)
+
+        with caplog.at_level(logging.WARNING, logger="wiseman_hub.pdf.session"):
+            session_mod._sweep_stale_session_tmp(sessions_dir)
+
+        assert caplog.text == ""
+
+    def test_sweep_logs_exception_types_separately(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """getmtime と unlink で異なる例外が出ても型別に集計される（運用診断用）。"""
+        import logging
+
+        from wiseman_hub.pdf import session as session_mod
+
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        past = time.time() - 600
+
+        # 2 つの stale tmp を作成
+        stale_a = sessions_dir / ".one.tmp"
+        stale_a.write_bytes(b"")
+        os.utime(stale_a, (past, past))
+        stale_b = sessions_dir / ".two.tmp"
+        stale_b.write_bytes(b"")
+        os.utime(stale_b, (past, past))
+
+        # unlink を 2 件とも PermissionError で失敗させる
+        def failing_unlink(path: str) -> None:
+            raise PermissionError("simulated")
+
+        monkeypatch.setattr(session_mod.os, "unlink", failing_unlink)
+
+        with caplog.at_level(logging.WARNING, logger="wiseman_hub.pdf.session"):
+            session_mod._sweep_stale_session_tmp(sessions_dir)
+
+        # 型名と件数が集計形式で出る
+        assert "PermissionError" in caplog.text
+        assert "2" in caplog.text
 
     def test_save_session_sweeps_stale_tmp(self, tmp_path: Path) -> None:
         """save_session 実行時に過去クラッシュで残った stale tmp が削除される。"""
@@ -1460,10 +1550,9 @@ class TestStaleTmpSweep:
 
         sessions_dir = tmp_path / ".sessions"
         sessions_dir.mkdir()
-        # 他プロセスが書込中を想定した tmp
+        # 他プロセスが書込中を想定した tmp（mtime は現在 → 閾値 60s の保護で削除されない）
         active = sessions_dir / ".other_session.tmp"
         active.write_bytes(b"in progress")
-        # mtime は「今」 → 閾値 60s の保護で削除されない
 
         _sweep_stale_session_tmp(sessions_dir)
 
