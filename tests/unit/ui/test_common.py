@@ -140,6 +140,11 @@ class TestInstallTkExceptionGuard:
         仕様外の呼び出しで exc_type=None になる可能性を踏まえ、現行挙動を契約として
         固定する。AttributeError は Tk の main loop に伝播して Tk 側でログされ、
         アプリ全体を停止させない（defense-in-depth）。
+
+        Note: 現行挙動は `exc_type.__name__` の副作用的な崩壊。理想的には
+        `getattr(exc_type, "__name__", "Unknown")` で defensive にする余地があるが、
+        Tk 仕様外の入力に対する改善は本テストの scope 外（要 follow-up）。
+        本テストは defensive 化された際に更新が必要となる契約テストとして機能する。
         """
         from wiseman_hub.ui.common import install_tk_exception_guard
 
