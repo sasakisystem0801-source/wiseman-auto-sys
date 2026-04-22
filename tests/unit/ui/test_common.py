@@ -132,3 +132,65 @@ class TestInstallTkExceptionGuard:
             root, component=ok_component, messagebox=MagicMock()
         )
         assert callable(root.report_callback_exception)
+
+    def test_handler_raises_attribute_error_on_exc_type_none(self) -> None:
+        """Issue #71 #1: exc_type=None は現行実装で AttributeError を raise する。
+
+        Tk の `report_callback_exception` は通常 (exc_class, exc_value, tb) を渡すが、
+        仕様外の呼び出しで exc_type=None になる可能性を踏まえ、現行挙動を契約として
+        固定する。AttributeError は Tk の main loop に伝播して Tk 側でログされ、
+        アプリ全体を停止させない（defense-in-depth）。
+
+        Note: 現行挙動は `exc_type.__name__` の副作用的な崩壊。理想的には
+        `getattr(exc_type, "__name__", "Unknown")` で defensive にする余地があるが、
+        Tk 仕様外の入力に対する改善は本テストの scope 外（要 follow-up）。
+        本テストは defensive 化された際に更新が必要となる契約テストとして機能する。
+        """
+        from wiseman_hub.ui.common import install_tk_exception_guard
+
+        root = _FakeRoot()
+        messagebox = MagicMock()
+        install_tk_exception_guard(
+            root, component="launcher", messagebox=messagebox
+        )
+
+        with pytest.raises(AttributeError):
+            root.report_callback_exception(None, ValueError("x"), None)
+
+        # showerror は AttributeError 発生前に呼ばれていない（型名解決で先に落ちる）
+        messagebox.showerror.assert_not_called()
+
+    def test_handler_does_not_swallow_system_exit(self) -> None:
+        """Issue #71 #2: showerror が BaseException 派生を投げた場合は伝播させる。
+
+        実装の二次失敗ハンドラは `except Exception` で KeyboardInterrupt / SystemExit
+        を意図的に通す設計（プロセス終了を阻害しない）。regression 検知のため契約固定。
+        """
+        from wiseman_hub.ui.common import install_tk_exception_guard
+
+        root = _FakeRoot()
+        messagebox = MagicMock()
+        messagebox.showerror.side_effect = SystemExit(1)
+        install_tk_exception_guard(
+            root, component="launcher", messagebox=messagebox
+        )
+
+        with pytest.raises(SystemExit):
+            root.report_callback_exception(ValueError, ValueError("x"), None)
+
+    def test_handler_does_not_swallow_keyboard_interrupt(self) -> None:
+        """Issue #71 #2: showerror が KeyboardInterrupt を投げた場合も伝播。
+
+        SystemExit と同じく、プロセス中断シグナルは握り潰さない契約。
+        """
+        from wiseman_hub.ui.common import install_tk_exception_guard
+
+        root = _FakeRoot()
+        messagebox = MagicMock()
+        messagebox.showerror.side_effect = KeyboardInterrupt()
+        install_tk_exception_guard(
+            root, component="launcher", messagebox=messagebox
+        )
+
+        with pytest.raises(KeyboardInterrupt):
+            root.report_callback_exception(ValueError, ValueError("x"), None)
