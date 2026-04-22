@@ -113,13 +113,11 @@ def _make_review_callback(
       2. NEEDS_REVIEW なら ``ConfirmDialog`` を Toplevel モーダルで起動
       3. 全件解決なら READY_TO_MERGE へ遷移して session_id を返す
       4. READY_TO_MERGE ならそのまま session_id を返す
-      5. cancel / 未解決 / エラーは ``_CANCEL_RESULT``（should_phase_b False）
+      5. cancel / 未解決 / エラーは ``CANCEL_RESULT``（should_phase_b False）
 
     Phase B の実体は Launcher が worker thread で呼ぶ ``on_run_phase_b`` に委譲する。
     """
-    from wiseman_hub.ui.launcher import ReviewCallbackResult
-
-    _CANCEL_RESULT = ReviewCallbackResult()
+    from wiseman_hub.ui.launcher import CANCEL_RESULT, ReviewCallbackResult
 
     def open_review() -> ReviewCallbackResult:
         from tkinter import messagebox
@@ -149,7 +147,7 @@ def _make_review_callback(
                 "設定ファイルを読み込めませんでした。詳細はログを確認してください。"
                 f"\n\n{type(exc).__name__}",
             )
-            return _CANCEL_RESULT
+            return CANCEL_RESULT
 
         sessions_dir = Path(config.pdf_merge.output_dir) / ".sessions"
         parent = launcher.get_root()
@@ -157,7 +155,7 @@ def _make_review_callback(
         picker = SessionPicker(sessions_dir=sessions_dir, parent=parent)
         pick = picker.run()
         if not pick.selected:
-            return _CANCEL_RESULT
+            return CANCEL_RESULT
         assert pick.session_id is not None  # Protocol 契約
         session_id = pick.session_id
 
@@ -186,14 +184,14 @@ def _make_review_callback(
                 "別の処理がセッションを使用中です。しばらく待って再試行してください。"
                 f"\n\n{type(exc).__name__}",
             )
-            return _CANCEL_RESULT
+            return CANCEL_RESULT
 
         if result.aborted:
             # aborted 時はディスク状態が旧状態で一貫。再 open_review で再開可能。
-            return _CANCEL_RESULT
+            return CANCEL_RESULT
         if not result.resolved_all:
             # 未解決残り → Phase B に進まない（ユーザーは再度確認 UI を開いて続行）
-            return _CANCEL_RESULT
+            return CANCEL_RESULT
 
         # HIGH (Codex 指摘): ConfirmDialog 実行後に lock 解放 → 再取得する間、
         # 他プロセスがセッションを discard / COMPLETED 遷移 / JSON 削除する可能性がある。
@@ -222,7 +220,7 @@ def _make_review_callback(
                         "別のプロセスがセッションを変更したため遷移を中止しました。"
                         "「確認待ちセッション」から再度開いてください。",
                     )
-                    return _CANCEL_RESULT
+                    return CANCEL_RESULT
                 transition_session(fresh, SessionStatus.READY_TO_MERGE)
                 save_session(fresh, sessions_dir=sessions_dir)
         except (BlockingIOError, OSError) as exc:
@@ -237,7 +235,7 @@ def _make_review_callback(
                 "再度「確認待ちセッション」を開いて続行してください。"
                 f"\n\n{type(exc).__name__}",
             )
-            return _CANCEL_RESULT
+            return CANCEL_RESULT
         except InvalidTransitionError as exc:
             # fresh.status チェックで弾くはずだが、状態機械の race で到達する可能性に備えた
             # 最終安全網。既に READY_TO_MERGE なら冪等で session_id 返却、それ以外は停止
@@ -252,7 +250,7 @@ def _make_review_callback(
                 "セッションの状態が予期しないものです。ログを確認してください。"
                 f"\n\n{type(exc).__name__}",
             )
-            return _CANCEL_RESULT
+            return CANCEL_RESULT
 
         return ReviewCallbackResult(session_id=session_id)
 

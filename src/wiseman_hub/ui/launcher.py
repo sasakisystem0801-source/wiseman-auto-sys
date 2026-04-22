@@ -61,6 +61,10 @@ class ReviewCallbackResult:
         return self.session_id is not None and self.should_run_phase_b
 
 
+# cancel/error 共通 sentinel。frozen dataclass のため共有安全（識別子比較も意味的に妥当）。
+CANCEL_RESULT = ReviewCallbackResult()
+
+
 _BTN_RUN_PDF_MERGE = "PDF マージ処理を実行"
 _BTN_OPEN_REVIEW = "確認待ちセッション"
 _BTN_OPEN_SETTINGS = "設定"
@@ -400,7 +404,19 @@ class Launcher:
             return
 
         session_id = result.session_id
-        assert session_id is not None  # should_phase_b True 時の不変条件
+        if session_id is None:
+            # should_phase_b True 時は session_id が必ず非 None（プロパティ定義より）。
+            # ここに到達したら ReviewCallbackResult のプロパティ実装が破綻しており、
+            # python -O で assert が剥離されても安全に停止させる必要がある。
+            self._set_busy(False)
+            logger.error(
+                "ReviewCallbackResult invariant broken: should_phase_b=True but session_id is None"
+            )
+            self._messagebox.showerror(
+                _TITLE_PHASE_B_ERROR,
+                "内部状態エラーが発生しました。詳細はログを確認してください。",
+            )
+            return
 
         if self._on_run_phase_b is None:
             # Phase B コールバック未注入でも session_id は返ってきた時（テスト / 部分統合）。
