@@ -174,9 +174,10 @@ def test_zero_page_pdf_raises_corrupted_error(
 ) -> None:
     """Issue #51 #4: 0 ページ PDF は PdfCorruptedError("PDF has no pages")。
 
-    fitz は 0 ページ PDF を save できない実装のため、現実の 0 ページ PDF 発生源は
-    外部ツールが吐いた変則 PDF か削除ページ後の再保存等に限られる。ここでは
-    page_count=0 を返す Document を monkeypatch で注入して contract を固定する。
+    fitz は page_count=0 状態の Document を save/tobytes しようとすると
+    ValueError("cannot save with zero pages") を送出する。そのため
+    現実のテスト fixture として 0 ページ PDF ファイルを作れない。
+    ここでは page_count を 0 に差し替えた Document を注入して contract を固定する。
     """
     import wiseman_hub.pdf.splitter as splitter_mod
 
