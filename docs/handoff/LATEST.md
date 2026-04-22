@@ -1,8 +1,47 @@
-# Handoff: "使える Windows デスクトップアプリ" 完成化計画（Session 14 終了時点）
+# Handoff: "使える Windows デスクトップアプリ" 完成化計画（Session 15 終了時点）
 
 **更新日**: 2026-04-22
 **ブランチ**: main（clean、全 PR マージ済）
-**main**: 105a5fc (PR #94 squash merged: 10-2 トラブル切り分けフロー + Cloud Run /health 本番反映)
+**main**: 3977267 (PR #96 squash merged: Issue #73 - ReviewCallbackResult dataclass)
+
+## セッション 15 の成果
+
+### マージ済み（本セッション、1 PR）
+- **PR #96**: Issue #73 - on_open_review 戻り値を ReviewCallbackResult dataclass に昇格
+  - 4 files, +138/-46 lines（src 2 + tests 2）
+  - `Launcher.on_open_review` callback の戻り値を `str | None` → `ReviewCallbackResult` (frozen dataclass) へ昇格
+  - 第三状態（確認完了したが Phase B スキップ / ドライラン等）に備えた API 拡張可能化
+  - `_make_review_callback` の cancel/error 8 path を `CANCEL_RESULT` module-level sentinel に統一
+  - 不変条件破綻時の明示 guard（python -O で assert 剥離されても安全停止）
+  - 3 commits（初版 + レビュー対応 + codex セカンドオピニオン対応）
+  - **Issue #73 CLOSED**
+
+### 本セッションの Quality Gate 適用フロー
+1. `/impl-plan` で 4 ファイル変更計画 + AC-1〜AC-7 定義
+2. `/simplify` 3 並列 → CANCEL_RESULT sentinel 化 + 歴史的タグ除去
+3. `/safe-refactor` → 8 error path 全件確認 + frozen 副作用検証
+4. `/review-pr` 6 エージェント並列 → Critical 0 / Important 4 件
+5. `/codex review` セカンドオピニオン → MEDIUM 2 / LOW 2 件追加検出
+6. レビュー指摘の triage 適用:
+   - 本 PR で対応: assert → guard / sentinel module-level / 第三状態テスト追加 / sentinel コメント整理
+   - 別 Issue: #97 起票（テストギャップ rating 8）
+   - PR コメント TODO: factory methods 推奨（severity rating ≥ 7 未満のため Issue 化見送り）
+
+### Issue Net 変化（本セッション）
+- **Close**: 2 件（#73 = 本実装 / #98 = triage 基準未達で取り下げ）
+- **起票**: 1 件（#97 = pr-test-analyzer rating 8 テストギャップ）
+- **Net: -1** ✅ KPI 改善
+
+### 総変更量（Session 15）
+- 4 files changed, +138 / -46 lines
+- テスト件数: 421 passed → **425 passed**（+4: TestReviewCallbackResult 4 ケース）
+- skip: 62 → 63（第三状態 Tk required test 追加、Linux CI では skip）
+- 全ローカル検証 PASS（pytest 425/425 / ruff / mypy 28 files）
+
+### Session 15 の学び
+- **Issue triage 厳格運用の効果**: type-design REVISE は per-axis rating（Encapsulation 5/10 等）であり severity rating ≠ 7 のため Issue #98 を一度起票後に再評価で close、PR コメント TODO に変換
+- **codex セカンドオピニオンの価値（4 セッション連続）**: Session 9-11 連続で HIGH 検出に続き、本 Session も MEDIUM 指摘 2 件採用（第三状態テスト + sentinel コメント整理）
+- **module-level sentinel は Tk import deferring 設計と要トレードオフ**: closure scope 内 import を維持し、`launcher.py` 側のみ module-level 化することで両立
 
 ## セッション 14 の成果
 
@@ -211,6 +250,9 @@
 
 ## 積み残し Issue / 技術負債
 
+### Session 15 で CLOSED
+- ~~**#73**~~（on_open_review dataclass 昇格、PR #96）
+
 ### Session 13 で CLOSED
 - ~~**#51**~~（P1 #1-#6 全完了、PR #86/#88）
 - ~~**#58**~~（/healthz rename、PR #89）
@@ -218,10 +260,12 @@
 - ~~**#50**~~（list-sessions 集計行、PR #91）
 - ~~**#64**~~（--config 警告、PR #92）
 
+### P2（Session 15 で新規）
+- **#97**: `_make_review_callback` の 8 cancel path 直接ユニットテスト追加（pr-test-analyzer rating 8、Issue #72 と統合着手推奨）
+
 ### P2（Session 8-12 で新規、継続）
 - **#68**（Session 8）: `validate_form` 戻り値を error code enum 化 + `ValidatedForm` newtype
 - **#72**（Session 9）: `review_flow.resolve_review_session` 共通化（refactor 中規模）
-- **#73**（Session 9）: `on_open_review` 戻り値の dataclass 昇格（Issue タイトルは `SessionPickResult`、Issue 本文案の class 名は `ReviewCallbackResult`。「次回 Launcher API 拡張時」と明示 postpone）
 - **#80**（Session 10）: Windows 実機 smoke で Phase B / OCR import 検証
 
 ### P2（継続）
@@ -301,14 +345,15 @@ git pull --ff-only
 
 # 優先2: 14D ADR-011 Accepted 昇格（10-2 結果反映）
 
-# 優先3: P2 refactor 系 Issue（Session 14 以降の候補、TODO 粒度）
+# 優先3: P2 refactor 系 Issue（Session 15 以降の候補、TODO 粒度）
 #   #68 validate_form 戻り値 enum 化 + ValidatedForm newtype
 #   #72 review_flow.resolve_review_session 共通化
+#   #97 _make_review_callback の 8 cancel path テスト追加（#72 と統合推奨）
 #   #44 Session/UserCandidate immutable 化
 #   #45 SourceKind StrEnum 統一
 #   #49 resume 時の candidates 検証
 # 優先4: CI / 運用 (#63 Linux Tk skip)
-# postponed: #73（次回 Launcher API 拡張時）/ #80（Windows 実機必要）
+# postponed: #80（Windows 実機必要）
 ```
 
 ## Session 12 での設計判断
