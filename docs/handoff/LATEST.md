@@ -177,7 +177,7 @@
 ### P2（Session 8-12 で新規、継続）
 - **#68**（Session 8）: `validate_form` 戻り値を error code enum 化 + `ValidatedForm` newtype
 - **#72**（Session 9）: `review_flow.resolve_review_session` 共通化（refactor 中規模）
-- **#73**（Session 9）: `ReviewCallbackResult` dataclass（Issue 本文で「次回 Launcher API 拡張時」と明示 postpone）
+- **#73**（Session 9）: `on_open_review` 戻り値の dataclass 昇格（Issue タイトルは `SessionPickResult`、Issue 本文案の class 名は `ReviewCallbackResult`。「次回 Launcher API 拡張時」と明示 postpone）
 - **#80**（Session 10）: Windows 実機 smoke で Phase B / OCR import 検証
 
 ### P2（継続）
