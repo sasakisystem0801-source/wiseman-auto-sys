@@ -64,13 +64,15 @@ def test_health(client: TestClient) -> None:
     assert resp.json() == {"status": "ok"}
 
 
-def test_healthz_returns_404_after_rename(client: TestClient) -> None:
-    """Issue #58: /healthz は Cloud Run GFE 404 と衝突するため削除済み。
+def test_healthz_route_is_not_registered() -> None:
+    """Issue #58: /healthz は Cloud Run GFE 404 と衝突するため登録禁止。
 
-    旧パスでアクセスすると FastAPI が 404 を返すこと（運用文書の切替漏れ防止）。
+    catch-all ハンドラ追加等で 404 が隠蔽される脆さを避け、
+    ルート表から /healthz が除外されていることを直接検証する。
     """
-    resp = client.get("/healthz")
-    assert resp.status_code == 404
+    registered_paths = {getattr(r, "path", None) for r in main.app.routes}
+    assert "/healthz" not in registered_paths
+    assert "/health" in registered_paths
 
 
 def test_extract_name_requires_api_key(client: TestClient) -> None:
