@@ -164,13 +164,20 @@ def _cmd_list_sessions(sessions_dir: Path) -> int:
     if not sids:
         print("(no sessions)")
         return EXIT_OK
+    healthy = 0
+    corrupted = 0
     for sid in sids:
         try:
             s = load_session(sid, sessions_dir=sessions_dir)
             print(f"{sid}\t{s.status.value}\tcandidates={len(s.candidates)}")
+            healthy += 1
         except Exception as e:
             # 破損セッションもスキップせず表示（手動対処を促す）
             print(f"{sid}\t<corrupted: {type(e).__name__}>")
+            corrupted += 1
+    # Issue #50: 運用者が「何件壊れているか」を一目で把握できるよう末尾に集計行を追加
+    total = healthy + corrupted
+    print(f"{total} sessions total: {healthy} healthy, {corrupted} corrupted")
     return EXIT_OK
 
 
