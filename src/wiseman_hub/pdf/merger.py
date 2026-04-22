@@ -223,7 +223,7 @@ def _save_atomically(dst: fitz.Document, output_path: Path) -> None:
         - GUI Launcher 経路: ``future.result()`` で捕捉 → ``logger.error(type)`` のみ
           （src/wiseman_hub/ui/launcher.py::_on_phase_b_done）
         - CLI 経路: ``_cmd_merge`` で型名のみ表示（test_merge_user_pdfs_cli.py 既存）
-        残リスク（本 PR スコープ外）:
+        Known limitation:
         - ``raise ... from e`` のため ``__cause__`` chain に元例外 (OSError 等) の
           message が残り、Future 未捕捉 → threading.excepthook 経路で stderr に
           traceback が出る場合、__cause__ の str(e) から path が漏れうる。

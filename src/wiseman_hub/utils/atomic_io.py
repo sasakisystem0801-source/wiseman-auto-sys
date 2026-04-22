@@ -66,6 +66,8 @@ def write_bytes_atomically(
 
     Raises:
         OSError: tempfile 作成・書込・fsync・replace 失敗時（元例外をそのまま伝播）
+        BaseException: KeyboardInterrupt 等が発生した場合も tmp cleanup 後に伝播する
+            （module docstring の「挙動契約」参照）
     """
     fd, tmp_name = tempfile.mkstemp(
         prefix=prefix, suffix=_TMP_SUFFIX, dir=str(target.parent)
@@ -102,6 +104,11 @@ def save_atomically(
 
     親ディレクトリは事前に存在している必要がある（呼び出し元で作成）。
 
+    writer の契約（precondition）:
+        - writer は渡された tmp Path に対してのみ書き込むこと
+        - writer は tmp Path を削除・rename してはならない（後続の fsync / replace が失敗する）
+        - writer は成功/失敗を例外で伝えること（戻り値は読まない）
+
     Args:
         target: 最終的に配置する path
         writer: tmp Path を受け取り、そこに書き込む callback
@@ -110,6 +117,8 @@ def save_atomically(
 
     Raises:
         Exception: writer / fsync / replace 失敗時（元例外をそのまま伝播）
+        BaseException: KeyboardInterrupt 等が発生した場合も tmp cleanup 後に伝播する
+            （module docstring の「挙動契約」参照）
     """
     fd, tmp_name = tempfile.mkstemp(
         prefix=prefix, suffix=_TMP_SUFFIX, dir=str(target.parent)
