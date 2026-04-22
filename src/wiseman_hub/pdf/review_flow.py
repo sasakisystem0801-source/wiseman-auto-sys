@@ -140,7 +140,10 @@ def resolve_review_session(
         return ReviewOutcome("aborted", session_id)
     if not result.resolved_all:
         # 未解決候補残り。adapter は「再度確認 UI を開いて続行」を誘導する。
-        return ReviewOutcome("unresolved", session_id)
+        # 候補数を detail に含めて CLI 側の既存メッセージ（"N candidate(s) unresolved"）
+        # を復元する。GUI adapter は本情報を使わないが両方で共有して問題ない。
+        remaining = sum(1 for c in result.session.candidates if not c.is_resolved)
+        return ReviewOutcome("unresolved", session_id, detail=str(remaining))
 
     # 2 回目のロック: race safe に READY_TO_MERGE へ遷移する。
     # 1 回目のロック解放後、別プロセスが session を discard / COMPLETED 遷移

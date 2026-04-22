@@ -125,7 +125,12 @@ def _make_review_callback(
 
         from wiseman_hub.config import load_config
         from wiseman_hub.pdf.review_flow import resolve_review_session
-        from wiseman_hub.pdf.session import SessionStatus
+        from wiseman_hub.pdf.session import (
+            Session,
+            SessionCorruptedError,
+            SessionNotFoundError,
+            SessionStatus,
+        )
         from wiseman_hub.ui.confirm_dialog import ConfirmDialog
         from wiseman_hub.ui.session_picker import SessionPicker
 
@@ -158,10 +163,7 @@ def _make_review_callback(
             return ReviewCallbackResult(session_id=session_id)
 
         # NEEDS_REVIEW: ConfirmDialog + 2 段階ロックによる race safe な遷移を
-        # resolve_review_session に委譲する（CLI 側と共通、Issue #72）。
-        # parent は closure で捕捉して ConfirmDialog に渡す（Toplevel modal 化）。
-        from wiseman_hub.pdf.session import Session
-
+        # resolve_review_session に委譲する。parent は closure で捕捉（Toplevel modal 化）。
         def dialog_factory(
             session: Session, _sessions_dir: Path
         ) -> ConfirmDialog:
@@ -171,11 +173,6 @@ def _make_review_callback(
         # resolve 内の load_session が SessionNotFoundError/Corrupted を raise する
         # 可能性がある（review_flow の「呼出側契約」）。messagebox 通知 + CANCEL に
         # マッピングしてアプリ全体終了を防ぐ。
-        from wiseman_hub.pdf.session import (
-            SessionCorruptedError,
-            SessionNotFoundError,
-        )
-
         try:
             outcome = resolve_review_session(
                 session_id,
@@ -224,6 +221,7 @@ def _review_outcome_to_callback_result(
 
     # aborted / unresolved: ConfirmDialog 側で既にユーザーに通知済み、または
     # 未解決残りはユーザーが自覚している状態。追加の messagebox は不要。
+    # NOTE: mypy は `reason in (...)` の Literal narrowing を行わないため `or` chain で記述。
     if reason == "aborted" or reason == "unresolved":
         return CANCEL_RESULT
 

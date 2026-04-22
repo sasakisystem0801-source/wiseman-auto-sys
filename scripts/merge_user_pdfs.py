@@ -390,8 +390,10 @@ def _review_outcome_to_exit_code(
         return EXIT_ERROR
 
     if reason == "unresolved":
+        # detail には未解決候補数が入る（review_flow 側で計算、既存メッセージ復元）
+        count = outcome.detail or "some"
         print(
-            f"session {session_id}: candidate(s) still unresolved; "
+            f"session {session_id}: {count} candidate(s) still unresolved; "
             "rerun --review when ready.",
             file=sys.stderr,
         )

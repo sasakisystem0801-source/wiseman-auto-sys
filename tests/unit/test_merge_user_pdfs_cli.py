@@ -680,7 +680,9 @@ class TestReviewCommand:
         final = load_session(sid, sessions_dir=_sessions_dir(tmp_path))
         assert final.status == SessionStatus.READY_TO_MERGE
 
-    def test_review_unresolved_remainder_exits_needs_review(self, tmp_path: Path) -> None:
+    def test_review_unresolved_remainder_exits_needs_review(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """UI 終了時に未解決が残っていれば EXIT_NEEDS_REVIEW。"""
         from wiseman_hub.pdf.session import PairStatus, UserCandidate, load_session
 
@@ -714,6 +716,9 @@ class TestReviewCommand:
         assert exit_code == script.EXIT_NEEDS_REVIEW
         final = load_session(sid, sessions_dir=_sessions_dir(tmp_path))
         assert final.status == SessionStatus.NEEDS_REVIEW
+        # code-reviewer 指摘: 未解決候補数が stderr に含まれる既存メッセージ契約を検証
+        captured = capsys.readouterr()
+        assert "1 candidate(s) still unresolved" in captured.err
 
     def _make_session_for_race_test(self, tmp_path: Path) -> str:
         """race catch テストで共用するセッション fixture。"""

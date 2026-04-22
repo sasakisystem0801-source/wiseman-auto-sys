@@ -121,17 +121,25 @@ class _FakeDialog:
         )
 
 
-def _make_factory(**dialog_kwargs: Any):  # type: ignore[no-untyped-def]
-    """``_FakeDialog`` を返す dialog_factory を生成する。"""
-    calls: list[_FakeDialog] = []
+class _RecordingFactory:
+    """``_FakeDialog`` を生成する callable。作成した dialog 一覧を ``calls`` に保持。
 
-    def factory(session: Session, sessions_dir: Path) -> _FakeDialog:
-        d = _FakeDialog(session, sessions_dir, **dialog_kwargs)
-        calls.append(d)
+    evaluator / code-simplifier 指摘: 関数に属性を後付け (``factory.calls = ...``) する
+    hack を避け、型付き class として明示する（``# type: ignore[attr-defined]`` 削除）。
+    """
+
+    def __init__(self, **dialog_kwargs: Any) -> None:
+        self.calls: list[_FakeDialog] = []
+        self._kwargs = dialog_kwargs
+
+    def __call__(self, session: Session, sessions_dir: Path) -> _FakeDialog:
+        d = _FakeDialog(session, sessions_dir, **self._kwargs)
+        self.calls.append(d)
         return d
 
-    factory.calls = calls  # type: ignore[attr-defined]
-    return factory
+
+def _make_factory(**dialog_kwargs: Any) -> _RecordingFactory:
+    return _RecordingFactory(**dialog_kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -160,8 +168,8 @@ class TestResolvedSuccess:
         assert reloaded.status == SessionStatus.READY_TO_MERGE
 
         # dialog は 1 回だけ呼ばれている
-        assert len(factory.calls) == 1  # type: ignore[attr-defined]
-        assert factory.calls[0].call_count == 1  # type: ignore[attr-defined]
+        assert len(factory.calls) == 1
+        assert factory.calls[0].call_count == 1
 
     def test_resolved_acquires_lock_exactly_twice(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -216,7 +224,7 @@ class TestReadyToMergeEarlyReturn:
         assert outcome.reason == "ready_to_merge"
         assert outcome.session_id == session.session_id
         # dialog は 1 度も呼ばれない（READY_TO_MERGE で早期 return）
-        assert factory.calls == []  # type: ignore[attr-defined]
+        assert factory.calls == []
 
     def test_ready_to_merge_second_lock_idempotent(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -293,6 +301,9 @@ class TestUnresolved:
         )
 
         assert outcome.reason == "unresolved"
+        # code-reviewer 指摘: unresolved の detail に未解決候補数が入ることを検証
+        # （CLI 側の既存メッセージ "N candidate(s) still unresolved" を復元する契約）
+        assert outcome.detail == "1"  # _make_needs_review_session は 1 候補
         reloaded = load_session(session.session_id, sessions_dir=sessions_dir)
         assert reloaded.status == SessionStatus.NEEDS_REVIEW
 
@@ -313,7 +324,7 @@ class TestInvalidStatus:
 
         assert outcome.reason == "invalid_status"
         assert outcome.detail == SessionStatus.RUNNING_PHASE_A.value
-        assert factory.calls == []  # type: ignore[attr-defined]
+        assert factory.calls == []
 
     def test_completed_invalid(self, tmp_path: Path) -> None:
         sessions_dir = tmp_path / ".sessions"
@@ -361,7 +372,7 @@ class TestLockError:
 
         assert outcome.reason == "lock_error"
         assert outcome.detail == "BlockingIOError"
-        assert factory.calls == []  # type: ignore[attr-defined]
+        assert factory.calls == []
         assert call_count["n"] == 1
 
     def test_os_error_first_lock(
@@ -517,7 +528,7 @@ class TestSessionLoadErrorPropagation:
                 "nonexistent-id", sessions_dir, dialog_factory=factory
             )
         # dialog は起動しない（load_session 失敗で exception が伝播）
-        assert factory.calls == []  # type: ignore[attr-defined]
+        assert factory.calls == []
 
     def test_session_corrupted_propagates(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -539,7 +550,7 @@ class TestSessionLoadErrorPropagation:
             resolve_review_session(
                 session.session_id, sessions_dir, dialog_factory=factory
             )
-        assert factory.calls == []  # type: ignore[attr-defined]
+        assert factory.calls == []
 
 
 class TestInvalidTransitionFallback:
