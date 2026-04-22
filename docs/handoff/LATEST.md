@@ -1,8 +1,56 @@
-# Handoff: "使える Windows デスクトップアプリ" 完成化計画（Session 12 終了時点）
+# Handoff: "使える Windows デスクトップアプリ" 完成化計画（Session 13 終了時点）
 
 **更新日**: 2026-04-22
 **ブランチ**: main（clean、全 PR マージ済）
-**main**: bdca87c (PR #86 squash merged: Issue #51 #1/#2 テスト)
+**main**: 98e337e (PR #92 squash merged: Issue #64 --config 警告)
+
+## セッション 13 の成果
+
+### マージ済み（本セッション、5 PR 連続）
+- **PR #88**: Issue #51 #3-#6 - 残タスク 4 件のテストカバレッジ追加
+  - 3 files, +209 lines（tests/unit/pdf/ 配下のみ、本体コード変更なし）
+  - #3: `test_ocr_server_error_saves_interrupted_state`（非 KI Exception 経路で INTERRUPTED 保存）
+  - #4: `test_zero_page_pdf_raises_corrupted_error`（fitz 0-page は save できないため monkeypatch で page_count=0 注入）
+  - #5: `test_save_failure_during_interrupt_does_not_mask_original_exception`（INTERRUPTED 保存失敗で元例外が masked されない契約）
+  - #6: `test_gc_coexists_with_interrupted_sessions`（gc_old_sessions が COMPLETED のみ削除、INTERRUPTED/NEEDS_REVIEW はロック不要で保全）
+  - /review-pr 3 エージェント並列: Critical 0 / Important 3 → 全対応（#4 docstring wording / #5 threshold magic number を KI flag 検出方式に変更 / #5 末尾コメント整理）
+  - **Issue #51 CLOSED**（#1-#6 全完了）
+
+- **PR #89**: Issue #58 - /healthz を /health にリネーム（Cloud Run GFE 404 回避）
+  - 4 files, +22/-7（`backend/ocr_proxy/app/main.py` + tests + README + deploy.md）
+  - Cloud Run GFE が `/healthz` を intercept して 404 HTML を返す問題の修正
+  - /review-pr 2 エージェント: Critical 0 / Important 1 → 対応（regression test を `app.routes` ベースに強化し FastAPI 404 挙動依存を解消）
+  - **Issue #58 CLOSED**
+
+- **PR #90**: Issue #71 - install_tk_exception_guard 契約テスト追加
+  - 1 file, +62（tests/unit/ui/test_common.py のみ）
+  - exc_type=None で AttributeError 伝播（Tk main loop に委ねる defense-in-depth）を契約固定
+  - SystemExit / KeyboardInterrupt は握り潰さず伝播（プロセス終了を阻害しない設計）を契約固定
+  - /review-pr 2 エージェント: Critical 0 / Important 1 → 対応（docstring に「現行は副作用的、理想は defensive ガード」follow-up 注記追加）
+  - **Issue #71 CLOSED**
+
+- **PR #91**: Issue #50 - --list-sessions 集計行（healthy/corrupted 件数表示）
+  - 2 files, +88（scripts/merge_user_pdfs.py + tests）
+  - 出力末尾に「N sessions total: X healthy, Y corrupted」を追加、運用者が一目で破損件数を把握可能
+  - /review-pr 2 エージェント: Critical 0 / Important 2 → 全対応（全 corrupted 境界値テスト追加、末尾位置を splitlines()[-1] で固定、例外型名 `<corrupted: SessionCorruptedError>` まで完全一致）
+  - **Issue #50 CLOSED**
+
+- **PR #92**: Issue #64 - --config 存在しないパス警告ログ
+  - 2 files, +112（src/wiseman_hub/__main__.py + tests）
+  - `args.config` 明示指定 + `.exists() == False` で logger.warning 事前通知（load_config 挙動は非破壊）
+  - /review-pr 2 エージェント: Critical 0 / Important 1 → 対応（--rpa 経路での警告配置契約テスト追加）
+  - **Issue #64 CLOSED**
+
+### 総変更量（Session 13）
+- 12 files changed, +493 lines（-7 lines only from #89 healthz rename）
+- **5 Issue CLOSED**: #51, #58, #71, #50, #64
+- 全 CI SUCCESS、全レビュー Critical 0
+- 前セッション 408 passed → **現在 421 passed**（+13 テスト）
+
+### Issue triage pattern 継続運用（memory 教訓）
+- review agent rating 5-6 は Issue 化せず PR 中で対応（feedback_issue_triage.md）
+- rating 7 は判断: PR #88 #5 threshold（対応）/ PR #90 exc_type=None（docstring 注記のみ）/ PR #91 末尾固定（対応）/ PR #92 --rpa 配置（対応）
+- 5 PR 連続で Critical 0、Important 指摘は全て修正反映
 
 ## セッション 12 の成果
 
@@ -119,23 +167,28 @@
 
 ## 積み残し Issue / 技術負債
 
-### P1
-- **#51**: Windows msvcrt / 跨プロセスロック / 0 ページ PDF（**Session 12 で #1/#2 部分解消、PR #86**、残項目 #3-#6 は open 維持）
+### Session 13 で CLOSED
+- ~~**#51**~~（P1 #1-#6 全完了、PR #86/#88）
+- ~~**#58**~~（/healthz rename、PR #89）
+- ~~**#71**~~（Tk guard 契約テスト、PR #90）
+- ~~**#50**~~（list-sessions 集計行、PR #91）
+- ~~**#64**~~（--config 警告、PR #92）
 
 ### P2（Session 8-12 で新規、継続）
 - **#68**（Session 8）: `validate_form` 戻り値を error code enum 化 + `ValidatedForm` newtype
-- **#71**（Session 9）: guard の exc_type=None / BaseException 契約テスト
-- **#72**（Session 9）: `review_flow.resolve_review_session` 共通化
-- **#73**（Session 9）: `ReviewCallbackResult` dataclass
-- ~~**#76**（Session 9）: 他 PdfMergeError 生成箇所の PII 除外~~ → **Session 12 で PR #84 解消、closed**
+- **#72**（Session 9）: `review_flow.resolve_review_session` 共通化（refactor 中規模）
+- **#73**（Session 9）: `on_open_review` 戻り値の dataclass 昇格（Issue タイトルは `SessionPickResult`、Issue 本文案の class 名は `ReviewCallbackResult`。「次回 Launcher API 拡張時」と明示 postpone）
 - **#80**（Session 10）: Windows 実機 smoke で Phase B / OCR import 検証
 
 ### P2（継続）
-- **#58**: `/healthz` Cloud Run GFE intercept（実害なし）
-- **#63**: Linux CI Tk wiring skip（別 PR）
-- **#64**: `--config` 存在しないパス警告
+- **#63**: Linux CI Tk wiring skip（CI 環境調整）
 - **#38**: `atomic_io` ユーティリティ抽出
-- **#27 #29 #49 #50 #40 #39 #44 #45 #17 #16 #14 #11 #6**: 各種改善
+- **#49**: resume 時の candidates 範囲外/重複 page_index 検証
+- **#45**: SourceKind を Literal から StrEnum に統一
+- **#44**: Session/UserCandidate を immutable 化（updated_at mutation 排除）
+- **#40**: B と C で異なる名前が距離0マッチした場合の扱い
+- **#39**: フリガナベースのマッチング
+- **#27 #29 #17 #16 #14 #11 #6**: 各種改善
 
 ## impl-plan 進捗（Session 12 終了時点）
 
@@ -198,17 +251,20 @@ cd /Users/yyyhhh/Projects/wiseman_auto_sys
 git checkout main
 git pull --ff-only
 
-# 10-2 Windows 実機 E2E（本田さん実施、TeamViewer）
+# 優先1: 10-2 Windows 実機 E2E（本田さん実施、TeamViewer）
 # → docs/handoff/14a-build.md + 14c-deploy.md + windows-e2e-task10.md に従う
 # → README.md 運用者セクション + config/default.toml.sample で配布物最小セット揃い済
 
-# または 14D ADR-011 Accepted 昇格（10-2 結果反映）
-# または Issue #51 残項目（#3-#6、各 1-2 時間）:
-#   #3 非 KeyboardInterrupt Exception 経路（OcrServerError / TimeoutError）
-#   #4 0/1 ページ境界（splitter boundary）
-#   #5 disk-full save_session（既存 test_save_failure_cleans_tmp_file 同パターン）
-#   #6 gc_old_sessions 並行 resume（設計判断が必要）
-# または その他 P2（#63/#64/#68/#71/#72/#73/#80）
+# 優先2: 14D ADR-011 Accepted 昇格（10-2 結果反映）
+
+# 優先3: P2 refactor 系 Issue（Session 14 以降の候補、TODO 粒度）
+#   #68 validate_form 戻り値 enum 化 + ValidatedForm newtype
+#   #72 review_flow.resolve_review_session 共通化
+#   #44 Session/UserCandidate immutable 化
+#   #45 SourceKind StrEnum 統一
+#   #49 resume 時の candidates 検証
+# 優先4: CI / 運用 (#63 Linux Tk skip)
+# postponed: #73（次回 Launcher API 拡張時）/ #80（Windows 実機必要）
 ```
 
 ## Session 12 での設計判断
