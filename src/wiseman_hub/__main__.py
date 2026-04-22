@@ -352,6 +352,16 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # Issue #64: --config で明示指定されたパスが存在しない場合、
+    # load_config は空の AppConfig を返すため全設定未入力扱いになる。
+    # ユーザー困惑を避けるため警告ログで事前通知する。
+    if args.config is not None and not args.config.exists():
+        logger.warning(
+            "--config path does not exist: %s (using empty config, "
+            "all settings will appear unconfigured)",
+            args.config,
+        )
+
     try:
         if args.rpa:
             from wiseman_hub.app import WisemanHub

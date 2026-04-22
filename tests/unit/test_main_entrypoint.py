@@ -89,6 +89,78 @@ def test_keyboard_interrupt_exits_zero(monkeypatch: Any) -> None:
     assert exc_info.value.code == 0
 
 
+def test_nonexistent_config_path_emits_warning(
+    tmp_path: Path,
+    monkeypatch: Any,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Issue #64: --config で存在しないパスを指定すると警告ログが出る。
+
+    ランチャーは起動するが load_config は空の AppConfig を返すため、
+    ユーザーは「なぜ設定が消えた」と困惑する。事前に警告ログで通知する。
+    """
+    import logging
+
+    launcher_class = MagicMock()
+    monkeypatch.setattr("wiseman_hub.ui.launcher.Launcher", launcher_class)
+
+    nonexistent = tmp_path / "does_not_exist.toml"
+    monkeypatch.setattr(sys, "argv", ["wiseman-hub", "--config", str(nonexistent)])
+
+    from wiseman_hub.__main__ import main
+
+    with caplog.at_level(logging.WARNING, logger="wiseman_hub.__main__"):
+        main()
+
+    assert "--config path does not exist" in caplog.text
+    assert str(nonexistent) in caplog.text
+
+
+def test_existing_config_path_emits_no_warning(
+    tmp_path: Path,
+    monkeypatch: Any,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Issue #64: 正常に存在する --config パスでは警告ログを出さない。"""
+    import logging
+
+    config_file = tmp_path / "valid.toml"
+    config_file.write_text("", encoding="utf-8")
+
+    launcher_class = MagicMock()
+    monkeypatch.setattr("wiseman_hub.ui.launcher.Launcher", launcher_class)
+    monkeypatch.setattr(sys, "argv", ["wiseman-hub", "--config", str(config_file)])
+
+    from wiseman_hub.__main__ import main
+
+    with caplog.at_level(logging.WARNING, logger="wiseman_hub.__main__"):
+        main()
+
+    assert "--config path does not exist" not in caplog.text
+
+
+def test_default_config_path_absence_emits_no_warning(
+    monkeypatch: Any,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Issue #64: --config を指定しない場合は警告を出さない。
+
+    既定パス（config/default.toml）が存在しなくても警告対象は明示指定のみ。
+    """
+    import logging
+
+    launcher_class = MagicMock()
+    monkeypatch.setattr("wiseman_hub.ui.launcher.Launcher", launcher_class)
+    monkeypatch.setattr(sys, "argv", ["wiseman-hub"])
+
+    from wiseman_hub.__main__ import main
+
+    with caplog.at_level(logging.WARNING, logger="wiseman_hub.__main__"):
+        main()
+
+    assert "--config path does not exist" not in caplog.text
+
+
 def test_unexpected_exception_exits_one(monkeypatch: Any) -> None:
     """予期しない例外で exit code 1 終了する。"""
     launcher_class = MagicMock()
