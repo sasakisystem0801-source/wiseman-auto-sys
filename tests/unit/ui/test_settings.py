@@ -26,8 +26,11 @@ from wiseman_hub.config import AppConfig  # noqa: E402
 from wiseman_hub.ui.settings import (  # noqa: E402
     SettingsDialog,
     SettingsForm,
+    ValidationCode,
+    ValidationError,
     form_from_config,
     form_to_config,
+    format_validation_errors,
     validate_form,
 )
 
@@ -58,8 +61,12 @@ def _full_form() -> SettingsForm:
     )
 
 
+def _codes(errors: list[ValidationError]) -> set[ValidationCode]:
+    return {e.code for e in errors}
+
+
 class TestValidateForm:
-    """AC-S-3: 必須未入力チェック。"""
+    """AC-S-3: 必須未入力チェック。error code ベースで assert（文字列依存を排除）。"""
 
     def test_fully_filled_form_returns_no_errors(self) -> None:
         assert validate_form(_full_form()) == []
@@ -67,69 +74,132 @@ class TestValidateForm:
     def test_missing_input_dir_returns_error(self) -> None:
         form = _full_form()
         form.input_dir = ""
-        errors = validate_form(form)
-        assert any("入力" in e for e in errors)
+        assert ValidationCode.INPUT_DIR_MISSING in _codes(validate_form(form))
 
     def test_missing_output_dir_returns_error(self) -> None:
         form = _full_form()
         form.output_dir = ""
-        errors = validate_form(form)
-        assert any("出力" in e for e in errors)
+        assert ValidationCode.OUTPUT_DIR_MISSING in _codes(validate_form(form))
 
     def test_missing_source_a_filename_returns_error(self) -> None:
         form = _full_form()
         form.source_a_filename = ""
-        errors = validate_form(form)
-        assert any("A" in e for e in errors)
+        assert ValidationCode.SOURCE_A_FILENAME_MISSING in _codes(validate_form(form))
 
     def test_missing_ocr_endpoint_returns_error(self) -> None:
         form = _full_form()
         form.ocr_endpoint_url = ""
-        errors = validate_form(form)
-        assert any("エンドポイント" in e for e in errors)
+        assert ValidationCode.OCR_ENDPOINT_MISSING in _codes(validate_form(form))
 
     def test_missing_ocr_api_key_returns_error(self) -> None:
         form = _full_form()
         form.ocr_api_key = ""
-        errors = validate_form(form)
-        assert any("キー" in e for e in errors)
+        assert ValidationCode.OCR_API_KEY_MISSING in _codes(validate_form(form))
 
     def test_whitespace_only_input_dir_returns_error(self) -> None:
         form = _full_form()
         form.input_dir = "   "
-        errors = validate_form(form)
-        assert any("入力" in e for e in errors)
+        assert ValidationCode.INPUT_DIR_MISSING in _codes(validate_form(form))
 
     def test_invalid_bbox_number_returns_error(self) -> None:
         form = _full_form()
         form.bbox_x0 = "not-a-number"
         errors = validate_form(form)
-        assert any("bbox" in e.lower() or "座標" in e for e in errors)
+        assert ValidationCode.BBOX_NOT_NUMBER in _codes(errors)
 
-    def test_invalid_bbox_dpi_returns_error(self) -> None:
+    def test_bbox_not_number_context_carries_field(self) -> None:
+        """AC-3: BBOX_NOT_NUMBER の field_name に壊れた field 名が入る（PII 防御のため値は入れない）。"""
+        form = _full_form()
+        form.bbox_y1 = "abc"
+        errors = [e for e in validate_form(form) if e.code == ValidationCode.BBOX_NOT_NUMBER]
+        assert len(errors) == 1
+        assert errors[0].field_name == "bbox_y1"
+        # PII 防御: context に raw value を入れない
+        assert "abc" not in str(errors[0].context.values())
+
+    def test_invalid_bbox_dpi_negative_returns_positive_int_error(self) -> None:
+        """dpi=-1 は整数 parse は成功するが「正の整数」要件違反。"""
         form = _full_form()
         form.bbox_dpi = "-1"
-        errors = validate_form(form)
-        assert any("dpi" in e.lower() for e in errors)
+        assert ValidationCode.BBOX_DPI_NOT_POSITIVE_INT in _codes(validate_form(form))
 
-    def test_bbox_dpi_zero_returns_error(self) -> None:
+    def test_bbox_dpi_zero_returns_positive_int_error(self) -> None:
         """境界値: dpi=0 は「正の整数」要件を満たさない。"""
         form = _full_form()
         form.bbox_dpi = "0"
-        errors = validate_form(form)
-        assert any("dpi" in e.lower() for e in errors)
+        assert ValidationCode.BBOX_DPI_NOT_POSITIVE_INT in _codes(validate_form(form))
+
+    def test_invalid_bbox_dpi_non_integer_returns_integer_error(self) -> None:
+        """dpi='abc' は整数 parse 失敗 → BBOX_DPI_NOT_INTEGER（POSITIVE_INT とは別 code）。"""
+        form = _full_form()
+        form.bbox_dpi = "abc"
+        assert ValidationCode.BBOX_DPI_NOT_INTEGER in _codes(validate_form(form))
 
     def test_invalid_concat_order_returns_error(self) -> None:
         form = _full_form()
         form.concat_order = "A,X,C"  # X は不正
-        errors = validate_form(form)
-        assert any("concat_order" in e or "結合順" in e for e in errors)
+        errors = [
+            e for e in validate_form(form) if e.code == ValidationCode.CONCAT_ORDER_INVALID_TOKEN
+        ]
+        assert len(errors) == 1
+        assert errors[0].context["invalid_tokens"] == ["X"]
 
     def test_empty_concat_order_returns_error(self) -> None:
         form = _full_form()
         form.concat_order = ""
-        errors = validate_form(form)
-        assert any("concat_order" in e or "結合順" in e for e in errors)
+        assert ValidationCode.CONCAT_ORDER_EMPTY in _codes(validate_form(form))
+
+
+class TestFormatValidationErrors:
+    """AC-5: enum → 既存日本語メッセージ変換が破られていないこと。UI 文言は不変。"""
+
+    def test_all_codes_have_message(self) -> None:
+        """全 ValidationCode に対応メッセージがある（AC-2 網羅性の反証）。"""
+        for code in ValidationCode:
+            msg = format_validation_errors([ValidationError(code=code, field_name="dummy")])
+            assert msg, f"code={code} に対応メッセージがない"
+
+    def test_input_dir_missing_message_matches_legacy(self) -> None:
+        msg = format_validation_errors(
+            [ValidationError(code=ValidationCode.INPUT_DIR_MISSING, field_name="input_dir")]
+        )
+        assert "入力フォルダを指定してください。" in msg
+
+    def test_output_dir_missing_message_matches_legacy(self) -> None:
+        msg = format_validation_errors(
+            [ValidationError(code=ValidationCode.OUTPUT_DIR_MISSING, field_name="output_dir")]
+        )
+        assert "出力フォルダを指定してください。" in msg
+
+    def test_bbox_not_number_includes_field_label(self) -> None:
+        """AC-3: BBOX_NOT_NUMBER 表示は field 名（bbox x0 等）を含むが raw 値は含まない。"""
+        msg = format_validation_errors(
+            [ValidationError(code=ValidationCode.BBOX_NOT_NUMBER, field_name="bbox_x0")]
+        )
+        assert "bbox x0" in msg
+        assert "数値で入力してください。" in msg
+
+    def test_concat_order_invalid_token_includes_tokens(self) -> None:
+        msg = format_validation_errors(
+            [
+                ValidationError(
+                    code=ValidationCode.CONCAT_ORDER_INVALID_TOKEN,
+                    field_name="concat_order",
+                    context={"invalid_tokens": ["X", "Y"]},
+                )
+            ]
+        )
+        assert "不正な識別子" in msg
+        assert "X" in msg and "Y" in msg
+
+    def test_multiple_errors_joined_with_bullet(self) -> None:
+        msg = format_validation_errors(
+            [
+                ValidationError(code=ValidationCode.INPUT_DIR_MISSING, field_name="input_dir"),
+                ValidationError(code=ValidationCode.OUTPUT_DIR_MISSING, field_name="output_dir"),
+            ]
+        )
+        assert msg.count("・") == 2
 
 
 class TestFormFromConfig:

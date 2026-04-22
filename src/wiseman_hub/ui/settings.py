@@ -17,10 +17,11 @@ import copy
 import enum
 import logging
 import tkinter as tk
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field
 from pathlib import Path
 from tkinter import filedialog, ttk
+from typing import Any
 
 from wiseman_hub.config import AppConfig, save_config
 from wiseman_hub.ui.common import (
@@ -63,6 +64,38 @@ class SettingsForm:
     ocr_endpoint_url: str = ""
     ocr_api_key: str = ""
     wiseman_exe_path: str = ""
+
+
+class ValidationCode(enum.StrEnum):
+    """``validate_form`` が返すエラー種別（Issue #68）。
+
+    文字列メッセージ依存を解消し、i18n / テスト結合を enum 経由に集約する。
+    表示文字列は ``format_validation_errors`` が UI 層で変換する。
+    """
+
+    INPUT_DIR_MISSING = "input_dir_missing"
+    OUTPUT_DIR_MISSING = "output_dir_missing"
+    SOURCE_A_FILENAME_MISSING = "source_a_filename_missing"
+    OCR_ENDPOINT_MISSING = "ocr_endpoint_missing"
+    OCR_API_KEY_MISSING = "ocr_api_key_missing"
+    BBOX_NOT_NUMBER = "bbox_not_number"
+    BBOX_DPI_NOT_POSITIVE_INT = "bbox_dpi_not_positive_int"
+    BBOX_DPI_NOT_INTEGER = "bbox_dpi_not_integer"
+    CONCAT_ORDER_EMPTY = "concat_order_empty"
+    CONCAT_ORDER_INVALID_TOKEN = "concat_order_invalid_token"
+
+
+@dataclass(frozen=True)
+class ValidationError:
+    """``validate_form`` が返す個別エラー。
+
+    PII 防御: ``context`` に raw 入力値は入れない。field 名 / 不正 token 等の
+    「構造的に安全な情報」のみ保持し、表示文字列は UI 層で構築する。
+    """
+
+    code: ValidationCode
+    field_name: str
+    context: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -135,55 +168,122 @@ def form_to_config(form: SettingsForm, base: AppConfig) -> AppConfig:
     return new_config
 
 
-def validate_form(form: SettingsForm) -> list[str]:
-    """フォーム値を検証し、エラーメッセージの list を返す（空 = OK）。"""
-    errors: list[str] = []
+_BBOX_FIELD_LABELS: dict[str, str] = {
+    "bbox_x0": "bbox x0",
+    "bbox_y0": "bbox y0",
+    "bbox_x1": "bbox x1",
+    "bbox_y1": "bbox y1",
+}
+
+
+def validate_form(form: SettingsForm) -> list[ValidationError]:
+    """フォーム値を検証し、``ValidationError`` のリストを返す（空 = OK）。
+
+    PII 防御: ``context`` に raw 入力値を入れない（API Key を URL 欄に貼付け
+    などのコピペ誤入力で PII が表示層に露出しないよう構造的に分離する）。
+    """
+    errors: list[ValidationError] = []
 
     if not form.input_dir.strip():
-        errors.append("入力フォルダを指定してください。")
+        errors.append(
+            ValidationError(code=ValidationCode.INPUT_DIR_MISSING, field_name="input_dir")
+        )
     if not form.output_dir.strip():
-        errors.append("出力フォルダを指定してください。")
+        errors.append(
+            ValidationError(code=ValidationCode.OUTPUT_DIR_MISSING, field_name="output_dir")
+        )
     if not form.source_a_filename.strip():
-        errors.append("A.pdf ファイル名を入力してください。")
+        errors.append(
+            ValidationError(
+                code=ValidationCode.SOURCE_A_FILENAME_MISSING, field_name="source_a_filename"
+            )
+        )
     if not form.ocr_endpoint_url.strip():
-        errors.append("OCR エンドポイント URL を入力してください。")
+        errors.append(
+            ValidationError(
+                code=ValidationCode.OCR_ENDPOINT_MISSING, field_name="ocr_endpoint_url"
+            )
+        )
     if not form.ocr_api_key.strip():
-        errors.append("OCR API キーを入力してください。")
+        errors.append(
+            ValidationError(code=ValidationCode.OCR_API_KEY_MISSING, field_name="ocr_api_key")
+        )
 
-    # エラーメッセージに入力値 (raw) を埋め込まない。フィールド間のコピペ誤入力
-    # （例: API Key を URL 欄に貼付けて数値エラーになる）で PII が表示に露出する
-    # のを防ぐ（PII 防御）。
-    for label, raw in (
-        ("bbox x0", form.bbox_x0),
-        ("bbox y0", form.bbox_y0),
-        ("bbox x1", form.bbox_x1),
-        ("bbox y1", form.bbox_y1),
-    ):
+    for bbox_field in ("bbox_x0", "bbox_y0", "bbox_x1", "bbox_y1"):
         try:
-            float(raw)
+            float(getattr(form, bbox_field))
         except ValueError:
-            errors.append(f"{label} は数値で入力してください。")
+            errors.append(
+                ValidationError(code=ValidationCode.BBOX_NOT_NUMBER, field_name=bbox_field)
+            )
 
     try:
         dpi = int(form.bbox_dpi)
         if dpi <= 0:
-            errors.append("bbox dpi は正の整数で入力してください。")
+            errors.append(
+                ValidationError(
+                    code=ValidationCode.BBOX_DPI_NOT_POSITIVE_INT, field_name="bbox_dpi"
+                )
+            )
     except ValueError:
-        errors.append("bbox dpi は整数で入力してください。")
+        errors.append(
+            ValidationError(code=ValidationCode.BBOX_DPI_NOT_INTEGER, field_name="bbox_dpi")
+        )
 
     order_tokens = [s.strip() for s in form.concat_order.split(",") if s.strip()]
     if not order_tokens:
-        errors.append("結合順 concat_order を A,B,C のようなカンマ区切りで入力してください。")
+        errors.append(
+            ValidationError(code=ValidationCode.CONCAT_ORDER_EMPTY, field_name="concat_order")
+        )
     else:
         invalid = [t for t in order_tokens if t not in _VALID_SOURCES]
         if invalid:
             errors.append(
-                "結合順 concat_order に不正な識別子があります: "
-                + ",".join(invalid)
-                + f"（使用可能: {','.join(_VALID_SOURCES)}）"
+                ValidationError(
+                    code=ValidationCode.CONCAT_ORDER_INVALID_TOKEN,
+                    field_name="concat_order",
+                    context={"invalid_tokens": invalid},
+                )
             )
 
     return errors
+
+
+def _message_for(err: ValidationError) -> str:
+    """ValidationError 単体の UI 表示文字列を構築。"""
+    code = err.code
+    if code == ValidationCode.INPUT_DIR_MISSING:
+        return "入力フォルダを指定してください。"
+    if code == ValidationCode.OUTPUT_DIR_MISSING:
+        return "出力フォルダを指定してください。"
+    if code == ValidationCode.SOURCE_A_FILENAME_MISSING:
+        return "A.pdf ファイル名を入力してください。"
+    if code == ValidationCode.OCR_ENDPOINT_MISSING:
+        return "OCR エンドポイント URL を入力してください。"
+    if code == ValidationCode.OCR_API_KEY_MISSING:
+        return "OCR API キーを入力してください。"
+    if code == ValidationCode.BBOX_NOT_NUMBER:
+        label = _BBOX_FIELD_LABELS.get(err.field_name, err.field_name)
+        return f"{label} は数値で入力してください。"
+    if code == ValidationCode.BBOX_DPI_NOT_POSITIVE_INT:
+        return "bbox dpi は正の整数で入力してください。"
+    if code == ValidationCode.BBOX_DPI_NOT_INTEGER:
+        return "bbox dpi は整数で入力してください。"
+    if code == ValidationCode.CONCAT_ORDER_EMPTY:
+        return "結合順 concat_order を A,B,C のようなカンマ区切りで入力してください。"
+    if code == ValidationCode.CONCAT_ORDER_INVALID_TOKEN:
+        tokens = err.context.get("invalid_tokens", [])
+        return (
+            "結合順 concat_order に不正な識別子があります: "
+            + ",".join(tokens)
+            + f"（使用可能: {','.join(_VALID_SOURCES)}）"
+        )
+    raise AssertionError(f"unknown validation code: {code!r}")  # pragma: no cover
+
+
+def format_validation_errors(errors: Iterable[ValidationError]) -> str:
+    """ValidationError 列を messagebox body 用の bullet list 文字列に整形。"""
+    return "\n".join(f"・{_message_for(e)}" for e in errors)
 
 
 # ---------------------------------------------------------------------------
@@ -416,7 +516,7 @@ class SettingsDialog:
         if errors:
             self._messagebox.showerror(
                 _TITLE_VALIDATION_ERROR,
-                _MSG_VALIDATION_HEADER + "\n".join(f"・{e}" for e in errors),
+                _MSG_VALIDATION_HEADER + format_validation_errors(errors),
             )
             return SettingsDialogResult()
 
