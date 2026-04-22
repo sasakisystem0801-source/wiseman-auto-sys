@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     import tkinter as tk
 
     from wiseman_hub.config import AppConfig
+    from wiseman_hub.pdf.review_flow import ReviewOutcome
     from wiseman_hub.ui.launcher import ReviewCallbackResult
 
 logger = logging.getLogger(__name__)
@@ -110,12 +111,12 @@ def _make_review_callback(
 
     main thread で以下を実行して ``ReviewCallbackResult`` を返す:
       1. ``SessionPicker`` で NEEDS_REVIEW / READY_TO_MERGE セッションを選択
-      2. NEEDS_REVIEW なら ``ConfirmDialog`` を Toplevel モーダルで起動
-      3. 全件解決なら READY_TO_MERGE へ遷移して session_id を返す
-      4. READY_TO_MERGE ならそのまま session_id を返す
-      5. cancel / 未解決 / エラーは ``CANCEL_RESULT``（should_phase_b False）
+      2. NEEDS_REVIEW なら ``resolve_review_session`` に dialog + transition を委譲
+      3. READY_TO_MERGE ならそのまま session_id を返す
+      4. cancel / 未解決 / エラーは ``CANCEL_RESULT``（should_phase_b False）
 
     Phase B の実体は Launcher が worker thread で呼ぶ ``on_run_phase_b`` に委譲する。
+    flow 本体は Issue #72 で CLI と共通化（``pdf/review_flow.py``）。
     """
     from wiseman_hub.ui.launcher import CANCEL_RESULT, ReviewCallbackResult
 
@@ -123,14 +124,8 @@ def _make_review_callback(
         from tkinter import messagebox
 
         from wiseman_hub.config import load_config
-        from wiseman_hub.pdf.session import (
-            InvalidTransitionError,
-            SessionStatus,
-            load_session,
-            save_session,
-            transition_session,
-            with_session_lock,
-        )
+        from wiseman_hub.pdf.review_flow import resolve_review_session
+        from wiseman_hub.pdf.session import SessionStatus
         from wiseman_hub.ui.confirm_dialog import ConfirmDialog
         from wiseman_hub.ui.session_picker import SessionPicker
 
@@ -162,99 +157,110 @@ def _make_review_callback(
         if pick.status == SessionStatus.READY_TO_MERGE:
             return ReviewCallbackResult(session_id=session_id)
 
-        # NEEDS_REVIEW: 確認 UI を起動 → 解決 → READY_TO_MERGE 遷移
-        # 設計判断: ConfirmDialog 実行中はロックを保持し続ける（wait_window が block）。
-        # 単一 PC / 1-3 名/batch の MVP 前提で、UI 操作中に別プロセスが同セッションを
-        # 触る想定はない（ADR-010）。マルチ端末拡張時は「dialog 外でロック取得 → dialog →
-        # 再取得して変更検証」の CAS 型に変更する。
-        try:
-            with with_session_lock(sessions_dir, session_id):
-                session = load_session(session_id, sessions_dir=sessions_dir)
-                if session.status != SessionStatus.NEEDS_REVIEW:
-                    # picker ロード後に他プロセスが遷移させていた場合の整合（単一 PC 運用では稀）
-                    return ReviewCallbackResult(session_id=session_id)
-                dialog = ConfirmDialog(session, sessions_dir, parent=parent)
-                result = dialog.run()
-        except (BlockingIOError, OSError) as exc:
-            logger.error(
-                "session %s lock contention: %s", session_id, type(exc).__name__
-            )
-            messagebox.showerror(
-                "セッション操作エラー",
-                "別の処理がセッションを使用中です。しばらく待って再試行してください。"
-                f"\n\n{type(exc).__name__}",
-            )
-            return CANCEL_RESULT
+        # NEEDS_REVIEW: ConfirmDialog + 2 段階ロックによる race safe な遷移を
+        # resolve_review_session に委譲する（CLI 側と共通、Issue #72）。
+        # parent は closure で捕捉して ConfirmDialog に渡す（Toplevel modal 化）。
+        from wiseman_hub.pdf.session import Session
 
-        if result.aborted:
-            # aborted 時はディスク状態が旧状態で一貫。再 open_review で再開可能。
-            return CANCEL_RESULT
-        if not result.resolved_all:
-            # 未解決残り → Phase B に進まない（ユーザーは再度確認 UI を開いて続行）
-            return CANCEL_RESULT
+        def dialog_factory(
+            session: Session, _sessions_dir: Path
+        ) -> ConfirmDialog:
+            return ConfirmDialog(session, _sessions_dir, parent=parent)
 
-        # HIGH (Codex 指摘): ConfirmDialog 実行後に lock 解放 → 再取得する間、
-        # 他プロセスがセッションを discard / COMPLETED 遷移 / JSON 削除する可能性がある。
-        # メモリ上の stale session で save_session すると古い内容で復活保存され不整合に
-        # なるため、2 回目のロック内で必ず再ロードし、許可する状態のみ遷移する。
-        # 許可: (a) NEEDS_REVIEW かつ all_candidates_resolved → READY_TO_MERGE へ遷移
-        #       (b) 既に READY_TO_MERGE → 冪等で session_id 返却（InvalidTransition に揃える）
-        # それ以外は競合として停止（CLI 側 _cmd_review と方針統一、Issue #72 準備）。
+        # picker 選択後〜1st lock 取得前の race（他プロセスが --discard した等）で
+        # resolve 内の load_session が SessionNotFoundError/Corrupted を raise する
+        # 可能性がある（review_flow の「呼出側契約」）。messagebox 通知 + CANCEL に
+        # マッピングしてアプリ全体終了を防ぐ。
+        from wiseman_hub.pdf.session import (
+            SessionCorruptedError,
+            SessionNotFoundError,
+        )
+
         try:
-            with with_session_lock(sessions_dir, session_id):
-                fresh = load_session(session_id, sessions_dir=sessions_dir)
-                if fresh.status == SessionStatus.READY_TO_MERGE:
-                    return ReviewCallbackResult(session_id=session_id)
-                if (
-                    fresh.status != SessionStatus.NEEDS_REVIEW
-                    or not fresh.all_candidates_resolved
-                ):
-                    logger.warning(
-                        "session %s concurrent modification detected (status=%s): "
-                        "abort transition",
-                        session_id,
-                        fresh.status.value,
-                    )
-                    messagebox.showerror(
-                        "セッション競合",
-                        "別のプロセスがセッションを変更したため遷移を中止しました。"
-                        "「確認待ちセッション」から再度開いてください。",
-                    )
-                    return CANCEL_RESULT
-                transition_session(fresh, SessionStatus.READY_TO_MERGE)
-                save_session(fresh, sessions_dir=sessions_dir)
-        except (BlockingIOError, OSError) as exc:
+            outcome = resolve_review_session(
+                session_id,
+                sessions_dir,
+                dialog_factory=dialog_factory,
+            )
+        except (SessionNotFoundError, SessionCorruptedError) as exc:
             logger.error(
-                "session %s transition save failed: %s",
+                "session %s load failed before review: %s",
                 session_id,
                 type(exc).__name__,
             )
             messagebox.showerror(
-                "セッション遷移エラー",
-                "解決は保存済みですが ready_to_merge への遷移に失敗しました。"
-                "再度「確認待ちセッション」を開いて続行してください。"
+                "セッション読込エラー",
+                "選択したセッションが読み込めませんでした。"
+                "他のプロセスが削除した可能性があります。"
                 f"\n\n{type(exc).__name__}",
             )
             return CANCEL_RESULT
-        except InvalidTransitionError as exc:
-            # fresh.status チェックで弾くはずだが、状態機械の race で到達する可能性に備えた
-            # 最終安全網。既に READY_TO_MERGE なら冪等で session_id 返却、それ以外は停止
-            # （CLI _cmd_review 方針と揃える、Codex MEDIUM 指摘）。
-            logger.warning(
-                "session %s invalid transition: %s",
-                session_id,
-                type(exc).__name__,
-            )
-            messagebox.showerror(
-                "セッション状態エラー",
-                "セッションの状態が予期しないものです。ログを確認してください。"
-                f"\n\n{type(exc).__name__}",
-            )
-            return CANCEL_RESULT
-
-        return ReviewCallbackResult(session_id=session_id)
+        return _review_outcome_to_callback_result(outcome)
 
     return open_review
+
+
+def _review_outcome_to_callback_result(
+    outcome: ReviewOutcome,
+) -> ReviewCallbackResult:
+    """``ReviewOutcome`` を ``ReviewCallbackResult`` + messagebox 通知へマッピング。
+
+    adapter 境界を分離することで、各 reason を直接ユニットテストできる
+    （Issue #97、pr-test-analyzer rating 8 対応）。
+
+    ``assert_never`` により ``ReviewReason`` Literal に新値が追加されて本関数で
+    未処理になった場合、mypy が compile-time エラーで検出する。
+    """
+    from tkinter import messagebox
+    from typing import assert_never
+
+    from wiseman_hub.ui.launcher import CANCEL_RESULT, ReviewCallbackResult
+
+    reason = outcome.reason
+    detail = outcome.detail or ""
+
+    if reason == "ready_to_merge" or reason == "resolved":
+        return ReviewCallbackResult(session_id=outcome.session_id)
+
+    # aborted / unresolved: ConfirmDialog 側で既にユーザーに通知済み、または
+    # 未解決残りはユーザーが自覚している状態。追加の messagebox は不要。
+    if reason == "aborted" or reason == "unresolved":
+        return CANCEL_RESULT
+
+    if reason == "lock_error":
+        messagebox.showerror(
+            "セッション操作エラー",
+            "別の処理がセッションを使用中です。しばらく待って再試行してください。"
+            f"\n\n{detail}",
+        )
+        return CANCEL_RESULT
+
+    if reason == "concurrent_modification":
+        messagebox.showerror(
+            "セッション競合",
+            "別のプロセスがセッションを変更したため遷移を中止しました。"
+            "「確認待ちセッション」から再度開いてください。",
+        )
+        return CANCEL_RESULT
+
+    if reason == "transition_lock_error":
+        messagebox.showerror(
+            "セッション遷移エラー",
+            "解決は保存済みですが ready_to_merge への遷移に失敗しました。"
+            "再度「確認待ちセッション」を開いて続行してください。"
+            f"\n\n{detail}",
+        )
+        return CANCEL_RESULT
+
+    if reason == "invalid_transition" or reason == "invalid_status":
+        messagebox.showerror(
+            "セッション状態エラー",
+            "セッションの状態が予期しないものです。ログを確認してください。"
+            f"\n\n{detail}",
+        )
+        return CANCEL_RESULT
+
+    assert_never(reason)
 
 
 def _make_phase_b_callback(
