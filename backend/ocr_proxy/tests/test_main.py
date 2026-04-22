@@ -58,10 +58,19 @@ def _png_base64() -> str:
     return base64.b64encode(bytes.fromhex(png_hex)).decode("ascii")
 
 
-def test_healthz(client: TestClient) -> None:
-    resp = client.get("/healthz")
+def test_health(client: TestClient) -> None:
+    resp = client.get("/health")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
+
+
+def test_healthz_returns_404_after_rename(client: TestClient) -> None:
+    """Issue #58: /healthz は Cloud Run GFE 404 と衝突するため削除済み。
+
+    旧パスでアクセスすると FastAPI が 404 を返すこと（運用文書の切替漏れ防止）。
+    """
+    resp = client.get("/healthz")
+    assert resp.status_code == 404
 
 
 def test_extract_name_requires_api_key(client: TestClient) -> None:
@@ -165,7 +174,7 @@ def test_lifespan_preserves_injected_client() -> None:
     fake = _FakeClient()
     main.set_client(fake)
     with TestClient(main.app) as ctx_client:
-        resp = ctx_client.get("/healthz")
+        resp = ctx_client.get("/health")
         assert resp.status_code == 200
     assert main._client_instance is fake
 

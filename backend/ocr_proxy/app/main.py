@@ -120,8 +120,9 @@ def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRespons
     )
 
 
-@app.get("/healthz")
-def healthz() -> dict[str, str]:
+# Issue #58: /healthz は Cloud Run GFE に intercept され 404 を返すため /health を使用
+@app.get("/health")
+def health() -> dict[str, str]:
     return {"status": "ok"}
 
 

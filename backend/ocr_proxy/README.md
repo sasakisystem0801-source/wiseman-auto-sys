@@ -39,9 +39,11 @@ X-API-Key: <client-key>
 - `429 Too Many Requests`: レート制限超過（既定 60/minute/API key）
 - `503 Service Unavailable`: Vertex AI 呼び出し失敗（クライアントはリトライ）
 
-### `GET /healthz`
+### `GET /health`
 
 Cloud Run のヘルスチェック用。`{"status": "ok"}` を返す。
+
+> `/healthz` は Cloud Run GFE に intercept され 404 を返すため、`/health` を使用する（Issue #58）。
 
 ## ローカル開発
 
