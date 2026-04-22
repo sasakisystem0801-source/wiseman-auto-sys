@@ -118,7 +118,8 @@ Cloud Monitoring で日次コストアラートを設定し、二次防衛とす
 URL=$(gcloud run services describe wiseman-ocr-proxy --region asia-northeast1 --format='value(status.url)')
 
 # ヘルスチェック（--allow-unauthenticated のため認証ヘッダ不要）
-curl -s "${URL}/healthz"
+# Issue #58: /healthz は Cloud Run GFE に intercept され 404 を返すため /health を使用
+curl -s "${URL}/health"
 # => {"status":"ok"}
 
 # API Key 未指定で 401 を返すこと（IAM 認証ではなくアプリ層の認証）

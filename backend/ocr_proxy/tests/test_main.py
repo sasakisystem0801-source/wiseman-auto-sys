@@ -58,10 +58,21 @@ def _png_base64() -> str:
     return base64.b64encode(bytes.fromhex(png_hex)).decode("ascii")
 
 
-def test_healthz(client: TestClient) -> None:
-    resp = client.get("/healthz")
+def test_health(client: TestClient) -> None:
+    resp = client.get("/health")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
+
+
+def test_healthz_route_is_not_registered() -> None:
+    """Issue #58: /healthz は Cloud Run GFE 404 と衝突するため登録禁止。
+
+    catch-all ハンドラ追加等で 404 が隠蔽される脆さを避け、
+    ルート表から /healthz が除外されていることを直接検証する。
+    """
+    registered_paths = {getattr(r, "path", None) for r in main.app.routes}
+    assert "/healthz" not in registered_paths
+    assert "/health" in registered_paths
 
 
 def test_extract_name_requires_api_key(client: TestClient) -> None:
@@ -165,7 +176,7 @@ def test_lifespan_preserves_injected_client() -> None:
     fake = _FakeClient()
     main.set_client(fake)
     with TestClient(main.app) as ctx_client:
-        resp = ctx_client.get("/healthz")
+        resp = ctx_client.get("/health")
         assert resp.status_code == 200
     assert main._client_instance is fake
 
