@@ -161,6 +161,36 @@ def test_default_config_path_absence_emits_no_warning(
     assert "--config path does not exist" not in caplog.text
 
 
+def test_nonexistent_config_path_emits_warning_on_rpa_path(
+    tmp_path: Path,
+    monkeypatch: Any,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Issue #64: --rpa 経路でも --config 警告が発火する契約を固定。
+
+    警告ロジックは parse_args 直後（--rpa 分岐の前）に配置されているため、
+    UI / RPA 両経路で発火する。将来誰かが警告を `else` ブロック内へ
+    移動した場合に regression を検知する。
+    """
+    import logging
+
+    hub_class = MagicMock()
+    monkeypatch.setattr("wiseman_hub.app.WisemanHub", hub_class)
+
+    nonexistent = tmp_path / "does_not_exist.toml"
+    monkeypatch.setattr(
+        sys, "argv", ["wiseman-hub", "--rpa", "--config", str(nonexistent)]
+    )
+
+    from wiseman_hub.__main__ import main
+
+    with caplog.at_level(logging.WARNING, logger="wiseman_hub.__main__"):
+        main()
+
+    assert "--config path does not exist" in caplog.text
+    assert str(nonexistent) in caplog.text
+
+
 def test_unexpected_exception_exits_one(monkeypatch: Any) -> None:
     """予期しない例外で exit code 1 終了する。"""
     launcher_class = MagicMock()
