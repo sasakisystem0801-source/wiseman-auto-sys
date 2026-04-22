@@ -524,6 +524,93 @@ class TestInterruption:
                 session=completed,
             )
 
+    def test_ocr_server_error_saves_interrupted_state(self, tmp_path: Path) -> None:
+        """Issue #51 #3: KeyboardInterrupt 以外の Exception 経路でも INTERRUPTED 保存。
+
+        run_phase_a の except 節は (Exception, KeyboardInterrupt) を補足するため、
+        OcrServerError のような通常 Exception 派生も INTERRUPTED_PHASE_A として記録され、
+        例外がそのまま再送出されることを契約として検証する。
+        """
+        from wiseman_hub.pdf.ocr_client import OcrServerError
+
+        a_pdf = _make_pdf_file(tmp_path, "A.pdf", num_pages=3)
+        sessions_dir = tmp_path / ".sessions"
+
+        ocr = FakeOcrClient(
+            [
+                _ocr_high("u0"),
+                OcrServerError("simulated 503"),
+                _ocr_high("u2"),
+            ]
+        )
+        matcher = FakeMatcher(
+            {"u0": _match_auto(), "u2": _match_auto()}
+        )
+
+        with pytest.raises(OcrServerError, match="simulated 503"):
+            run_phase_a(
+                source_a_path=a_pdf,
+                config=_config(tmp_path),
+                ocr_client=ocr,
+                matcher=matcher,
+                sessions_dir=sessions_dir,
+            )
+
+        sids = list_sessions(sessions_dir=sessions_dir)
+        assert len(sids) == 1
+        session = load_session(sids[0], sessions_dir=sessions_dir)
+        assert session.status == SessionStatus.INTERRUPTED_PHASE_A
+        # 1 ページ目のみ処理完了。2 ページ目で OCR 失敗したため 1 件だけ記録
+        assert len(session.candidates) == 1
+        assert session.candidates[0].page_index == 0
+
+    def test_save_failure_during_interrupt_does_not_mask_original_exception(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Issue #51 #5: INTERRUPTED 状態保存時の disk-full でも元例外が伝播する。
+
+        run_phase_a の except 節は INTERRUPTED 保存失敗を logger.error でログし、
+        元の例外（KeyboardInterrupt / OcrServerError 等）を raise で再送出する契約。
+        元例外が save 例外で masked されないことを検証する。
+        """
+        import os
+
+        from wiseman_hub.pdf import session as session_mod
+
+        a_pdf = _make_pdf_file(tmp_path, "A.pdf", num_pages=2)
+        sessions_dir = tmp_path / ".sessions"
+
+        ocr = FakeOcrClient([_ocr_high("u0"), KeyboardInterrupt()])
+        matcher = FakeMatcher({"u0": _match_auto()})
+
+        real_replace = os.replace
+        replace_call_count = {"n": 0}
+
+        def failing_replace_after_first(src: str, dst: str) -> None:
+            # INTERRUPTED 保存時（2 回目以降の os.replace）で失敗させる
+            replace_call_count["n"] += 1
+            if replace_call_count["n"] >= 3:
+                raise OSError("simulated disk full during INTERRUPTED save")
+            real_replace(src, dst)
+
+        monkeypatch.setattr(
+            session_mod.os, "replace", failing_replace_after_first
+        )
+
+        # 元の KeyboardInterrupt が INTERRUPTED 保存失敗で masked されずに伝播する
+        with pytest.raises(KeyboardInterrupt):
+            run_phase_a(
+                source_a_path=a_pdf,
+                config=_config(tmp_path),
+                ocr_client=ocr,
+                matcher=matcher,
+                sessions_dir=sessions_dir,
+            )
+
+        # save 失敗したため session はディスク上で INTERRUPTED に更新されていない
+        # （前回成功保存時点の状態で残留）か、全く保存できていない状態
+        # → いずれも「元例外が伝播した」契約は満たす
+
 
 # ---------------------------------------------------------------------------
 # 追加: session のロック取得失敗は例外伝播（run_phase_a は内部でロック取得）

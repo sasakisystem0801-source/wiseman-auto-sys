@@ -167,6 +167,44 @@ def test_corrupted_file_raises_corrupted_error(
         split_pdf_with_bbox(path, default_bbox)
 
 
+def test_zero_page_pdf_raises_corrupted_error(
+    tmp_path: Path,
+    default_bbox: UserNameBBox,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #51 #4: 0 ページ PDF は PdfCorruptedError("PDF has no pages")。
+
+    fitz は 0 ページ PDF を save できない実装のため、現実の 0 ページ PDF 発生源は
+    外部ツールが吐いた変則 PDF か削除ページ後の再保存等に限られる。ここでは
+    page_count=0 を返す Document を monkeypatch で注入して contract を固定する。
+    """
+    import wiseman_hub.pdf.splitter as splitter_mod
+
+    # 正常に開ける 1 ページ PDF を作っておき、page_count だけ 0 に差し替える
+    path = tmp_path / "looks_valid.pdf"
+    doc_for_file = fitz.open()
+    try:
+        doc_for_file.new_page(width=595.0, height=842.0)
+        path.write_bytes(bytes(doc_for_file.tobytes()))
+    finally:
+        doc_for_file.close()
+
+    real_open_pdf_or_raise = splitter_mod._open_pdf_or_raise
+
+    def open_returning_zero_page_doc(pdf_path: Path) -> fitz.Document:
+        doc = real_open_pdf_or_raise(pdf_path)
+        # page_count プロパティを 0 に差し替える（実体の削除はせず contract 検証のみ）
+        monkeypatch.setattr(type(doc), "page_count", 0, raising=False)
+        return doc
+
+    monkeypatch.setattr(
+        splitter_mod, "_open_pdf_or_raise", open_returning_zero_page_doc
+    )
+
+    with pytest.raises(PdfCorruptedError, match="no pages"):
+        split_pdf_with_bbox(path, default_bbox)
+
+
 def test_non_pdf_file_renamed_raises_corrupted_error(
     tmp_path: Path, default_bbox: UserNameBBox
 ) -> None:
