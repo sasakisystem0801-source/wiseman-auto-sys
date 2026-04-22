@@ -1,8 +1,56 @@
-# Handoff: "使える Windows デスクトップアプリ" 完成化計画（Session 15 終了時点）
+# Handoff: "使える Windows デスクトップアプリ" 完成化計画（Session 16 終了時点）
 
 **更新日**: 2026-04-22
 **ブランチ**: main（clean、全 PR マージ済）
-**main**: 3977267 (PR #96 squash merged: Issue #73 - ReviewCallbackResult dataclass)
+**main**: 9b7b232 (PR #100 squash merged: Issue #72 + #97 - review_flow 共通化 + 8 cancel path 直接テスト)
+
+## セッション 16 の成果
+
+### マージ済み（本セッション、1 PR）
+- **PR #100**: Issue #72 + #97 統合 - review_flow に共通ロジック抽出 + 8 cancel path 直接テスト
+  - 6 files, +1410/-129 lines（src 3 + tests 3）
+  - CLI (`_cmd_review`) と GUI (`_make_review_callback.open_review`) で二重実装されていた
+    確認 UI 起動 + NEEDS_REVIEW → READY_TO_MERGE 遷移フローを `pdf/review_flow.resolve_review_session` に集約
+  - `ReviewOutcome` (frozen dataclass) + `ReviewReason` Literal (9 値) で分岐を型付き値オブジェクト化
+  - `_review_outcome_to_callback_result` (GUI) / `_review_outcome_to_exit_code` (CLI) adapter を分離し、
+    各 reason を直接ユニットテスト化（pr-test-analyzer rating 8 指摘対応）
+  - CLI 側を single-lock → double-lock + fresh reload に強化（race safety 向上、correctness win）
+  - `assert_never` で Literal 網羅性を mypy で compile-time 検証
+  - race 対応: picker 選択後〜1st lock 取得前の `SessionNotFoundError` / `SessionCorruptedError` を
+    両 adapter で catch → messagebox / stderr 通知 + CANCEL / EXIT_ERROR マッピング
+  - 2 commits（初版 + /review-pr 指摘対応）
+  - **Issue #72 CLOSED / Issue #97 CLOSED**
+
+### 本セッションの Quality Gate 適用フロー（最多数の gate 通過）
+1. `/impl-plan` で 5 ファイル変更計画 + AC-1〜AC-8 定義
+2. `/simplify` 3 並列 → `assert_never` 追加 + `outcome: object` 削除
+3. `/safe-refactor` → `dialog_factory` 型注釈追加（`type: ignore` 削除）
+4. **evaluator 分離プロトコル (2 round)**:
+   - 1st: REQUEST_CHANGES (HIGH 2 + MEDIUM 2) → 全対応（docstring 拡張 / race catch 追加 / test assertion 補強）
+   - 2nd: APPROVE (LOW 2 件は merge blocker 外)
+5. `/review-pr` 6 エージェント並列 → Important 1 (CLI unresolved count regression) + Suggestions 複数適用
+6. `/codex review` セカンドオピニオン → HIGH 0 / MEDIUM 2（実質 skip）
+7. レビュー指摘の triage 適用:
+   - 本 PR で対応: CLI unresolved 残数復元（`ReviewOutcome.detail` 経由）/ `_make_factory` → `_RecordingFactory` class 化 / import 統合 / `SessionCorruptedError` テスト追加 / lock 呼出回数直接検証
+   - Skip: discriminated union (rating 6 / 別 PR) / CLI per-reason parametrize / comment cleanup
+
+### Issue Net 変化（本セッション）
+- **Close**: 2 件（#72 = review_flow 共通化 / #97 = adapter 直接テスト追加）
+- **起票**: 0 件（codex MEDIUM 指摘は triage 基準未達で skip、review agent suggestion は全て PR 内対応または skip）
+- **Net: -2** ✅ KPI 改善
+
+### 総変更量（Session 16）
+- 6 files changed, +1410 / -129 lines
+- テスト件数: 425 passed → **466 passed**（+41: review_flow 19 + adapter 19 + CLI race 3 = 41 新規）
+- skip: 63 維持
+- 全ローカル検証 PASS（pytest 466/466 / ruff / mypy 29 files）
+- CI: 全 SUCCESS（test-unit 3.11 / 3.12 / test-integration、Windows Integration Tests in_progress）
+
+### Session 16 の学び
+- **evaluator 2 round の価値**: 1st round で HIGH 指摘（dialog.run() 中のロック保持期間が未文書化、race SessionNotFoundError 未処理）を検出し、docstring 拡張 + race catch 追加で対応。2nd round で APPROVE、適切な粒度で完了。
+- **codex HIGH 0 の意義（5 セッション連続）**: Claude 6 エージェント + evaluator で HIGH レベル問題は網羅できており、codex は MEDIUM 2 件に留まった。品質ゲート多層化が機能している証左。
+- **mypy `reason in (...)` Literal narrowing 非対応**: `or` chain（`reason == "a" or reason == "b"`）で記述する必要。`match/case` ならば narrow できるが assert_never との相性で if chain を維持。
+- **既存 pre-existing 設計の踏襲判断**: CLI/GUI の message 露出非対称（CLI = exception message、GUI = type name only）は既存パターンであり、refactor で統一する判断はスコープ外と明示的に却下（`feedback_evaluate_as_system.md` 原則）。
 
 ## セッション 15 の成果
 
@@ -250,6 +298,10 @@
 
 ## 積み残し Issue / 技術負債
 
+### Session 16 で CLOSED
+- ~~**#72**~~（review_flow.py 共通化、PR #100）
+- ~~**#97**~~（_make_review_callback cancel path 直接テスト、PR #100 で同時解消）
+
 ### Session 15 で CLOSED
 - ~~**#73**~~（on_open_review dataclass 昇格、PR #96）
 
@@ -260,12 +312,8 @@
 - ~~**#50**~~（list-sessions 集計行、PR #91）
 - ~~**#64**~~（--config 警告、PR #92）
 
-### P2（Session 15 で新規）
-- **#97**: `_make_review_callback` の 8 cancel path 直接ユニットテスト追加（pr-test-analyzer rating 8、Issue #72 と統合着手推奨）
-
 ### P2（Session 8-12 で新規、継続）
 - **#68**（Session 8）: `validate_form` 戻り値を error code enum 化 + `ValidatedForm` newtype
-- **#72**（Session 9）: `review_flow.resolve_review_session` 共通化（refactor 中規模）
 - **#80**（Session 10）: Windows 実機 smoke で Phase B / OCR import 検証
 
 ### P2（継続）
@@ -345,15 +393,16 @@ git pull --ff-only
 
 # 優先2: 14D ADR-011 Accepted 昇格（10-2 結果反映）
 
-# 優先3: P2 refactor 系 Issue（Session 15 以降の候補、TODO 粒度）
+# 優先3: P2 refactor 系 Issue（Session 17 以降の候補、TODO 粒度）
 #   #68 validate_form 戻り値 enum 化 + ValidatedForm newtype
-#   #72 review_flow.resolve_review_session 共通化
-#   #97 _make_review_callback の 8 cancel path テスト追加（#72 と統合推奨）
 #   #44 Session/UserCandidate immutable 化
 #   #45 SourceKind StrEnum 統一
 #   #49 resume 時の candidates 検証
+#   #38 atomic_io ユーティリティ抽出（merger + session の tempfile+os.replace 重複）
+#   #27 config dataclass 型設計強化（Literal + __post_init__ 検証）
 # 優先4: CI / 運用 (#63 Linux Tk skip)
-# postponed: #80（Windows 実機必要）
+# 優先5: OCRプロキシ改善 (#29 非root/例外絞込/429テスト)
+# postponed: #80（Windows 実機必要）, #17（smoke_real.py pytest 統合）
 ```
 
 ## Session 12 での設計判断
