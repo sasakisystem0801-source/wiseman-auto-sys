@@ -424,7 +424,12 @@ output_dir = ""
     def test_save_cleanup_warning_does_not_leak_path_or_pii(
         self, tmp_path: Path, monkeypatch: Any, caplog: Any
     ) -> None:
-        """os.replace 失敗時の cleanup warning にパスや PII が含まれない。"""
+        """os.replace 失敗時の cleanup warning にパスや PII が含まれない。
+
+        save_config は内部で ``wiseman_hub.utils.atomic_io.write_bytes_atomically`` を
+        呼ぶため、atomic_io 経由でも同じ PII 防御契約が維持されていることを確認する
+        （atomic_io 本体のテストとは別に、config 統合経路を検証）。
+        """
         import logging
 
         import pytest
@@ -438,15 +443,13 @@ output_dir = ""
         def _fail_replace(src: str, dst: str) -> None:
             raise PermissionError("simulated Windows file lock")
 
-        def _fail_unlink(_: str) -> None:
+        def _fail_unlink(self: Path, missing_ok: bool = False) -> None:
             raise PermissionError("simulated unlink failure")
 
-        monkeypatch.setattr("wiseman_hub.config.os.replace", _fail_replace)
-        monkeypatch.setattr("wiseman_hub.config.os.unlink", _fail_unlink)
+        monkeypatch.setattr("wiseman_hub.utils.atomic_io.os.replace", _fail_replace)
+        monkeypatch.setattr(Path, "unlink", _fail_unlink)
 
-        with caplog.at_level(logging.WARNING, logger="wiseman_hub.config"), pytest.raises(
-            PermissionError
-        ):
+        with caplog.at_level(logging.WARNING), pytest.raises(PermissionError):
             save_config(cfg, target)
 
         logged = " ".join(r.getMessage() for r in caplog.records)

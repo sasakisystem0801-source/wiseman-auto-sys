@@ -8,7 +8,6 @@ except ModuleNotFoundError:
     import tomli as tomllib  # type: ignore[no-redef]
 import logging
 import os
-import tempfile
 from dataclasses import asdict, dataclass, field
 from glob import glob
 from pathlib import Path
@@ -17,6 +16,8 @@ from typing import Any
 import tomlkit
 from tomlkit import TOMLDocument
 from tomlkit.items import InlineTable, Table
+
+from wiseman_hub.utils.atomic_io import write_bytes_atomically
 
 logger = logging.getLogger(__name__)
 
@@ -281,20 +282,7 @@ def save_config(cfg: AppConfig, path: Path, *, create_if_missing: bool = False) 
     _update_pdf_merge(doc, cfg.pdf_merge)
     _update_reports(doc, cfg.reports)
 
-    fd, tmp_path = tempfile.mkstemp(
-        prefix=path.name + ".", suffix=".tmp", dir=str(path.parent)
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(tomlkit.dumps(doc))
-        os.replace(tmp_path, path)
-    except Exception:
-        # Windows では他プロセスがハンドル保持時に unlink が PermissionError になりうる。
-        # PII/API key を含みうるため、ログには tmp path を出さない（basename のみ・失敗種別のみ）。
-        try:
-            os.unlink(tmp_path)
-        except FileNotFoundError:
-            pass
-        except OSError as cleanup_err:
-            logger.warning("Failed to unlink tmp config file: %s", type(cleanup_err).__name__)
-        raise
+    # tomlkit.dumps が例外を投げる場合は payload 生成前に伝播し、target は保持される。
+    # tmp cleanup と PII を出さないログは atomic_io 側の責務（module docstring 参照）。
+    payload = tomlkit.dumps(doc).encode("utf-8")
+    write_bytes_atomically(path, payload, prefix=path.name + ".")

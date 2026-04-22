@@ -18,7 +18,6 @@ import os
 import re
 import secrets
 import shutil
-import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
@@ -29,6 +28,7 @@ from typing import IO, Any
 
 from wiseman_hub.pdf.matcher import MatchResult, MatchStatus, SourceKind
 from wiseman_hub.pdf.ocr_client import Confidence
+from wiseman_hub.utils.atomic_io import write_bytes_atomically
 
 logger = logging.getLogger(__name__)
 
@@ -453,24 +453,11 @@ def save_session(session: Session, *, sessions_dir: Path) -> Path:
     payload = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
 
     target = _session_path(session.session_id, sessions_dir)
-    fd, tmp_name = tempfile.mkstemp(
-        dir=sessions_dir, prefix=f".{session.session_id}.", suffix=".tmp"
-    )
-    tmp_path = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(payload)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, target)
-    except (OSError, ValueError):
-        # BaseException 派生（KeyboardInterrupt / MemoryError / SystemExit）は伝播させ、
-        # 本モジュールが扱う IO/値エラーのみ tmp クリーンアップして再送出する。
-        try:
-            tmp_path.unlink(missing_ok=True)
-        except OSError as e:
-            logger.warning("failed to clean up tmp session file %s: %s", tmp_path, e)
-        raise
+    # tmp cleanup は atomic_io 側の finally で BaseException 含む全例外時に実施される。
+    # write_bytes_atomically は fsync 標準なのでセッション保存の耐障害性要件を満たす。
+    # prefix は atomic_io のデフォルト "." を採用（session ディレクトリに sweep 機構は
+    # 存在しないため、旧実装の ``.{session_id}.`` prefix を維持する必要はない）。
+    write_bytes_atomically(target, payload)
     return target
 
 
