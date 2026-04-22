@@ -29,7 +29,11 @@
   - CI 全 SUCCESS
 
 ### 総変更量（Session 12）
-- 6 files changed, +721 lines（テスト +300 / docs +420 / code +1）
+- 6 files changed, +721 / -27 lines
+  - テスト: +~448（merger.py テスト追加 +~166 + Windows/multiprocessing テスト +282）
+  - 設定テンプレート: +133（`config/default.toml.sample` 新規）
+  - docs: +~85（README 運用者セクション + 14c-deploy.md §7.2）
+  - code: +~55（`merger.py` の PII 防御リファクタ、実装コード変更は本質的にこれのみ）
 - 全 CI SUCCESS、全レビュー blocking issue 0
 - 前セッション 400 passed → **現在 408 passed**（+8 テスト）
 
@@ -211,7 +215,7 @@ git pull --ff-only
 
 ### Issue #76 の PII 除外拡張
 - PR #77 で `_save_atomically` のみ型名ベースに統一済だったが、残り 8 箇所の `PdfMergeError` 生成箇所（`_validate_user_name` / `_open_pdf_file_or_raise` / `_append_pdf_bytes` / `_append_pdf_file`）にも適用
-- `source_label` を呼出側で kind (A/B/C/D) のみに制限し、関数シグネチャ非破壊で user_name 埋込を原理的に排除
+- `source_label` を呼出側で kind (A/B/C/D) のみに制限し、関数シグネチャ非破壊で user_name 埋込を呼出規約レベルで排除（型システム強制ではなく、テストが規約違反を検出する設計）
 - `from e` は全箇所で維持 → `__cause__` 経由で元例外情報にアクセス可能
 
 ### タスク 11（docs 整備）
