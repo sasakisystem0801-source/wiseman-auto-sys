@@ -61,7 +61,8 @@ class ReviewCallbackResult:
         return self.session_id is not None and self.should_run_phase_b
 
 
-# cancel/error 共通 sentinel。frozen dataclass のため共有安全（識別子比較も意味的に妥当）。
+# cancel/error 共通 sentinel。frozen dataclass のため共有安全。
+# 呼び出し側は値比較（``==``）を使い ``is CANCEL_RESULT`` には依存しないこと。
 CANCEL_RESULT = ReviewCallbackResult()
 
 

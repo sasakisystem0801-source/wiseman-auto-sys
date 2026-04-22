@@ -105,9 +105,9 @@ class TestPhaseBWorkerThread:
 
 @tk_required
 class TestCancelSkipsPhaseB:
-    """AC-L-3-NoSel: picker cancel (None) 時は Phase B 呼ばれない + busy 解除。"""
+    """AC-L-3-NoSel: should_phase_b=False 返却時は Phase B 呼ばれない + busy 解除。"""
 
-    def test_none_returned_skips_phase_b_and_clears_busy(
+    def test_cancel_skips_phase_b_and_clears_busy(
         self, tmp_path: Path
     ) -> None:
         import tkinter as tk
@@ -136,6 +136,47 @@ class TestCancelSkipsPhaseB:
             )
             launcher.invoke_action(LauncherAction.OPEN_REVIEW)
             # cancel パスは同期完結（executor に submit しない）
+            assert phase_b_called is False
+            assert launcher._busy is False
+        finally:
+            root.destroy()
+
+    def test_third_state_skip_phase_b_with_session_id(
+        self, tmp_path: Path
+    ) -> None:
+        """第三状態: session_id あり + should_run_phase_b=False → Phase B 起動せず busy 解除。
+
+        Issue #73 で追加した第三状態（確認完了したが Phase B スキップ / ドライラン等）が
+        Launcher 側で正しく Phase B 起動を抑制することを保証する。
+        """
+        import tkinter as tk
+
+        config_path = tmp_path / "config.toml"
+        config_path.write_text("", encoding="utf-8")
+
+        phase_b_called = False
+
+        def open_review() -> ReviewCallbackResult:
+            return ReviewCallbackResult(
+                session_id="20260101T120000Z-abcd1234",
+                should_run_phase_b=False,
+            )
+
+        def run_phase_b(_sid: str) -> None:
+            nonlocal phase_b_called
+            phase_b_called = True
+
+        root = tk.Tk()
+        try:
+            launcher = Launcher(
+                config=_configured_appconfig(),
+                config_path=config_path,
+                root=root,
+                on_open_review=open_review,
+                on_run_phase_b=run_phase_b,
+                messagebox_fn=_FakeMessageBox(),
+            )
+            launcher.invoke_action(LauncherAction.OPEN_REVIEW)
             assert phase_b_called is False
             assert launcher._busy is False
         finally:
