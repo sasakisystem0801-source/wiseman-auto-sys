@@ -169,6 +169,63 @@ class TestListSessionsCommand:
         out = capsys.readouterr().out
         for sid in list_sessions(sessions_dir=sdir):
             assert sid in out
+        # Issue #50: 集計行の表示
+        assert "2 sessions total: 2 healthy, 0 corrupted" in out
+
+    def test_list_shows_summary_with_corrupted_sessions(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Issue #50: 破損セッション混在時、集計行で healthy/corrupted 内訳を明示。
+
+        運用者が「何件壊れているか」「PII 残留リスクがある session_id はどれか」を
+        1 目で把握できる。
+        """
+        import json
+
+        script = _load_script_module()
+        cfg = _make_config(tmp_path)
+        sdir = _sessions_dir(tmp_path)
+        sdir.mkdir(parents=True, exist_ok=True)
+
+        # healthy session 1 件
+        healthy = Session(
+            session_id=generate_session_id(),
+            status=SessionStatus.COMPLETED,
+            created_at=datetime.now(UTC).isoformat(),
+            updated_at=datetime.now(UTC).isoformat(),
+            config_snapshot={},
+            source_a_path="",
+            candidates=[],
+            a_page_pdf_bytes_dir=str(sdir / "pages"),
+            output_path=None,
+        )
+        save_session(healthy, sessions_dir=sdir)
+
+        # corrupted session 2 件（JSON 直書きで不正な payload を仕込む）
+        corrupted_sid_1 = "20260101T000000Z-dead0001"
+        corrupted_sid_2 = "20260101T000000Z-dead0002"
+        (sdir / f"{corrupted_sid_1}.json").write_text("not a valid json {{{")
+        (sdir / f"{corrupted_sid_2}.json").write_text(
+            json.dumps({"schema_version": 9999})  # wrong schema
+        )
+
+        exit_code = script.main(
+            ["--list-sessions"],
+            config_loader=lambda _: cfg,
+            ocr_factory=lambda _: FakeOcr([]),
+            matcher_factory=lambda _: FakeMatcher({}),
+        )
+        assert exit_code == 0
+        out = capsys.readouterr().out
+
+        # 各 session_id が表示される
+        assert healthy.session_id in out
+        assert corrupted_sid_1 in out
+        assert corrupted_sid_2 in out
+        # corrupted マーカ
+        assert "<corrupted:" in out
+        # 集計行
+        assert "3 sessions total: 1 healthy, 2 corrupted" in out
 
 
 # ---------------------------------------------------------------------------
