@@ -171,6 +171,48 @@ uv run python scripts\merge_user_pdfs.py --resume <session_id>
 uv run python scripts\merge_user_pdfs.py --discard <session_id>
 ```
 
+## トラブル切り分けフロー
+
+症状から原因候補を特定するためのマトリクス。まず該当行の「確認コマンド」を実行し、ログ採取は次節に記載。
+
+### Phase A（テスト 1）でつまずいた場合
+
+| 症状 | 原因候補 | 確認コマンド / 対応 |
+|------|---------|---------------------|
+| `OCRAuthError` / HTTP 401 | API Key 未設定 / 誤コピー | `default.toml` の `[ocr_backend] api_key` を再確認。Secret Manager から再取得: `gcloud secrets versions access latest --secret=wiseman-ocr-api-keys --project=wiseman-hub-prod` |
+| `OCRAuthError` / HTTP 403 | API Key 失効（rotation） | 同上 + `backend/ocr_proxy/deploy.md` のキーローテーション節確認 |
+| HTTP 503 のみ（例外トレース） | 1x1 PNG / 極小画像 / OCR 不能 | `user_name_bbox` の座標が狭すぎないか確認（x1-x0, y1-y0 ≥ 50pt 目安） |
+| `FileNotFoundError: A.pdf` | `input_dir` にファイル未配置 | `dir <input_dir>` で実在確認。パス区切りは `\\`（TOML 内は 2 重バックスラッシュ） |
+| セッション作成されるが氏名空 | `user_name_bbox` ずれ / PDF がスキャン画像で OCR 不能 | `python -c "import fitz; d=fitz.open(r'A.pdf'); print(d[0].get_pixmap(clip=(x0,y0,x1,y1), dpi=200).save('debug.png'))"` で bbox 画像を目視確認 |
+| 全利用者が NEEDS_REVIEW 状態 | 氏名マッチ閾値未達（B/C ファイル名と一致しない） | B/C ファイル名のフリガナ/漢字表記揺れ確認。確認 UI（テスト 2）で手動選択できれば機能的には OK |
+
+### Phase B 確認 UI（テスト 2）の描画問題
+
+| 症状 | 原因候補 | 対応 |
+|------|---------|------|
+| ダイアログが表示されない / 一瞬出て消える | Python 未 frozen 実行で Tk ランタイム未解決（Windows の場合稀） | `python -c "import tkinter; tkinter.Tk().mainloop()"` で Tk 単体起動確認 |
+| 文字化け（□ や ? 表示） | フォント解決失敗 | Windows 10/11 標準フォント（Meiryo UI）の存在確認、他 PC でも再現するか確認 |
+| 高解像度でボタン/文字が極小 | DPI awareness 未有効（Windows 10+） | `windows-e2e-task10.md` 完了後に Issue 化、MVP では運用上 OK（ディスプレイ解像度を 100% に一時変更で回避可） |
+| 「手動選択」でファイル選択ダイアログが出ない | `tkinter.filedialog` 未バンドル（exe 化後のみ） | spec の `hiddenimports` に `tkinter.filedialog` 含む（14A 確認済）。uv 経由実行では発生しない |
+
+### Phase B 結合（テスト 3-4）の問題
+
+| 症状 | 原因候補 | 対応 |
+|------|---------|------|
+| 出力 PDF が生成されない | 出力ディレクトリへの書込権限なし | `output_dir` を `%USERPROFILE%` 配下に変更（C:\ 直下は標準ユーザー書込不可） |
+| `PdfMergeError: ...` が出るが氏名/パスが stderr に出ない | **正常**（PR #84 / Issue #76 で PII 防御済） | `client.log` 内の `__cause__` 経由で元例外を確認 |
+| 出力順序が concat_order と異なる | `[pdf_merge] concat_order` 設定ミス | TOML のリスト順と利用者数 × セクション数が一致しているか確認 |
+
+### exe 起動失敗（タスク 14C 以降で発生する場合）
+
+→ `docs/handoff/14a-build.md` §トラブルシューティング参照（Tk ランタイム / hidden imports / config 配置）。10-2 範囲では exe ビルド後起動までをスコープ対象とする。
+
+### SmartScreen 警告（初回起動）
+
+想定内。「詳細情報 → 実行」で通過。2 回目以降は警告なし。詳細は `docs/handoff/14c-deploy.md` §5.1。
+
+---
+
 ## 問題発生時のログ取得
 
 ### クライアント側
@@ -210,6 +252,6 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
 
 ## 既知の制約（本セッションで発見済み）
 
-- **Cloud Run `/healthz` は 404**: GFE 予約パス衝突、Issue #58。アプリは健全なので無視可
+- **Cloud Run ヘルスチェックは `/health`**: `/healthz` は GFE 予約パス衝突で 404 を返していたため、PR #89（Issue #58）で `/health` にリネーム済
 - **1x1 透明 PNG は 503**: Vertex AI が INVALID_ARGUMENT を返す（正常動作、極小画像は OCR 不能）
 - **SmartScreen 警告**（.exe 化後）: 署名なしのため初回起動時「詳細情報 → 実行」手順が必要
