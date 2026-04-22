@@ -25,14 +25,13 @@
 from __future__ import annotations
 
 import logging
-import os
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 import fitz
 
 from wiseman_hub.config import PdfMergeConfig
+from wiseman_hub.utils.atomic_io import save_atomically
 
 logger = logging.getLogger(__name__)
 
@@ -212,38 +211,31 @@ def _resolve_bc_path(
 
 
 def _save_atomically(dst: fitz.Document, output_path: Path) -> None:
-    """一時ファイルに保存してから os.replace で差し替える。
+    """``fitz.Document`` をアトミックに ``output_path`` に保存する。
 
-    save 失敗時に既存 output_path を壊さない。
+    内部的には ``wiseman_hub.utils.atomic_io.save_atomically`` を使い、
+    tempfile 作成 → ``dst.save`` → fsync → ``os.replace`` を実施する。
+    save / replace どちらの失敗でも既存 ``output_path`` は壊さない。
+
+    PII 防御:
+        - logger 経路: 完全に型名のみ（Issue #75）
+        - PdfMergeError.__str__: 型名 + "save" キーワードのみ
+        - GUI Launcher 経路: ``future.result()`` で捕捉 → ``logger.error(type)`` のみ
+          （src/wiseman_hub/ui/launcher.py::_on_phase_b_done）
+        - CLI 経路: ``_cmd_merge`` で型名のみ表示（test_merge_user_pdfs_cli.py 既存）
+        残リスク（本 PR スコープ外）:
+        - ``raise ... from e`` のため ``__cause__`` chain に元例外 (OSError 等) の
+          message が残り、Future 未捕捉 → threading.excepthook 経路で stderr に
+          traceback が出る場合、__cause__ の str(e) から path が漏れうる。
+          現状 GUI/CLI 両経路で ``future.result()`` / try-except で捕捉済みのため
+          実運用経路では発生しないが、将来 async / subprocess 化する際は要再評価。
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_fd, tmp_name = tempfile.mkstemp(
-        suffix=".pdf", prefix=".merge-", dir=str(output_path.parent)
-    )
-    os.close(tmp_fd)
-    tmp_path = Path(tmp_name)
     try:
-        dst.save(str(tmp_path))
+        save_atomically(output_path, lambda tmp: dst.save(str(tmp)))
     except Exception as e:
-        tmp_path.unlink(missing_ok=True)
-        # PII 防御: output_path / str(e) は氏名を含むパス運用でログ / stderr 経路から
-        # 漏洩する。PdfMergeError.__str__ には path を含めない。
-        #
-        # 保証範囲:
-        #   - logger 経路: 完全に型名のみ（Issue #75）
-        #   - PdfMergeError.__str__: 型名 + "save" キーワードのみ
-        #   - GUI Launcher 経路: `future.result()` で捕捉 → `logger.error(type)` のみ
-        #     （src/wiseman_hub/ui/launcher.py::_on_phase_b_done）
-        #   - CLI 経路: `_cmd_merge` で型名のみ表示（test_merge_user_pdfs_cli.py 既存）
-        # 残リスク（本 PR スコープ外）:
-        #   - `raise ... from e` のため `__cause__` chain に元例外 (OSError 等) の
-        #     message が残り、Future 未捕捉 → threading.excepthook 経路で stderr に
-        #     traceback が出る場合、__cause__ の str(e) から path が漏れうる。
-        #     現状 GUI/CLI 両経路で `future.result()` / try-except で捕捉済みのため
-        #     実運用経路では発生しないが、将来 async / subprocess 化する際は要再評価。
         logger.error("Failed to save merged PDF: %s", type(e).__name__)
         raise PdfMergeError(f"Failed to save merged PDF ({type(e).__name__})") from e
-    os.replace(tmp_path, output_path)
 
 
 def merge_user_pdfs(
