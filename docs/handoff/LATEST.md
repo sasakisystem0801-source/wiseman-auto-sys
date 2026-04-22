@@ -1,8 +1,46 @@
-# Handoff: "使える Windows デスクトップアプリ" 完成化計画（Session 16 終了時点）
+# Handoff: "使える Windows デスクトップアプリ" 完成化計画（Session 17 終了時点）
 
 **更新日**: 2026-04-22
 **ブランチ**: main（clean、全 PR マージ済）
-**main**: 9b7b232 (PR #100 squash merged: Issue #72 + #97 - review_flow 共通化 + 8 cancel path 直接テスト)
+**main**: a04fea0 (PR #102 squash merged: Issue #68 - validate_form 戻り値を ValidationError enum 化)
+
+## セッション 17 の成果
+
+### マージ済み（本セッション、1 PR）
+- **PR #102**: Issue #68 - `validate_form` 戻り値を `list[str]` → `list[ValidationError]` 化
+  - 2 files, +246/-52 lines（`src/wiseman_hub/ui/settings.py` + tests）
+  - `ValidationCode` (StrEnum 10 種) + `ValidationError` (frozen dataclass) 導入
+  - `format_validation_errors` が UI 層で enum → 日本語メッセージ変換、messagebox 表示は既存文言と完全一致
+  - `_message_for` を `match/case` + `typing.assert_never` 化（type-design-analyzer rating 7 指摘反映）→ mypy で網羅性を静的検証、`# pragma: no cover` 削除
+  - `test_multiple_missing_fields_accumulate_errors` 追加（pr-test-analyzer rating 7 指摘反映）→ early return / break 混入 regression 防御
+  - PII 防御: `context` に raw 入力値を入れない契約を維持（API Key を URL 欄貼付け等の誤入力で PII 露出しない構造的分離）
+  - `ValidationError.field_name` 命名: Issue 本文は `field: str` だが `dataclasses.field` と衝突して mypy "str not callable" → `field_name` に改名（simplify rating 7 confidence 95% 指摘反映）
+  - 2 commits（初版 + /review-pr 指摘対応）
+  - **Issue #68 CLOSED**
+
+### 本セッションの Quality Gate 適用フロー
+1. `/impl-plan` で 2 ファイル変更計画 + AC-1〜AC-7 定義（3 ステップ以上ルール）
+2. TDD: RED（テスト error code assert 化）→ GREEN（enum 追加 + validate_form 改修）→ Refactor
+3. `/simplify` 3 並列 → `field` → `field_name` 改名 + `dc_field` alias 解消
+4. `/review-pr` 4 エージェント並列（code-reviewer rating 9/10 / type-design / silent-failure / test-analyzer）→ rating 7+ の 2 指摘採用
+5. Issue triage 適用: rating 5-6 の指摘は PR コメント / TODO / 却下（CLAUDE.md triage 基準準拠）
+
+### Issue Net 変化（本セッション）
+- **Close**: 1 件（#68 = validate_form enum 化）
+- **起票**: 0 件
+- **Net: -1** ✅ KPI 改善（MEMORY.md `feedback_issue_triage.md` 基準達成）
+
+### 総変更量（Session 17）
+- 2 files changed, +246 / -52 lines
+- テスト件数: 466 passed → **475 passed**（+9: TestValidateForm +4 / TestFormatValidationErrors +6 - 差分は既存テスト置換吸収）
+- skip: 63 維持
+- 全ローカル検証 PASS（pytest 475 / ruff / mypy 29 files）
+- CI: 全 SUCCESS（test-unit 3.11 54s / 3.12 59s / test-integration 2m31s）
+
+### Session 17 の学び
+- **`/simplify` の rating 7 確実採用の効果**: `field` → `field_name` 改名は Issue 本文と異なる命名だが、mypy 衝突という実害のため採用。単なる「Issue 本文の忠実実装」より構造的正しさを優先する判断が機能した（`feedback_evaluate_as_system.md` 原則）
+- **match/case + assert_never の mypy 静的網羅性**: 10 値 enum + UI 表示分岐で `if` チェーンと比較し、型安全性が大幅向上。新 code 追加時に runtime `AssertionError`（pragma: no cover で未検証）ではなく compile time で検出可能
+- **review agent rating 閾値の厳格運用**: 4 エージェント並列で rating 7+ confidence 80+ は 2 件のみ。rating 5-6 を却下することで PR 肥大化を防ぎ、net -1 を維持
 
 ## セッション 16 の成果
 
@@ -298,6 +336,9 @@
 
 ## 積み残し Issue / 技術負債
 
+### Session 17 で CLOSED
+- ~~**#68**~~（validate_form 戻り値 ValidationError enum 化、PR #102）
+
 ### Session 16 で CLOSED
 - ~~**#72**~~（review_flow.py 共通化、PR #100）
 - ~~**#97**~~（_make_review_callback cancel path 直接テスト、PR #100 で同時解消）
@@ -313,7 +354,6 @@
 - ~~**#64**~~（--config 警告、PR #92）
 
 ### P2（Session 8-12 で新規、継続）
-- **#68**（Session 8）: `validate_form` 戻り値を error code enum 化 + `ValidatedForm` newtype
 - **#80**（Session 10）: Windows 実機 smoke で Phase B / OCR import 検証
 
 ### P2（継続）
@@ -347,29 +387,9 @@
 
 ## Session 11 で確定した設計判断
 
-### タスク 14C
-
-**ADR-011 への反映（変更履歴に記載）**
-- 配布レイアウト: `config/default.toml` → `config/default.toml.sample` 命名変更（上書き事故防止、施設側でコピーして `default.toml` 作成）
-- 配布物: `scripts/create_shortcut.ps1` を追加
-- バージョン表記: `v0.1.0` → `vX.Y.Z` placeholder に変更
-
-**`14c-deploy.md` への反映（運用手順書、ADR とは別ドキュメント）**
-
-*MVP 配置先の既定化（Codex HIGH 指摘反映）*:
-- 標準ユーザー権限で書込可能な `%USERPROFILE%\wiseman-hub\` を既定（= `C:\Users\<user>\wiseman-hub\`）
-- `C:\wiseman-hub\` は「管理者権限必要」と明記（標準ユーザーは C:\ 直下に新規作成不可）
-- `%LOCALAPPDATA%\wiseman-hub\` をエクスプローラ非表示運用の代替に
-
-*allowlist 登録ルールの明確化（Codex HIGH 指摘反映）*:
-- 未署名 exe の間は Hash / FilePath ルールのみ実効性あり
-- FilePublisher / Publisher ルールは 14D コードサイニング採用後の選択肢として分離
-- SHA256 共有は **out-of-band**（電話 / 既存チャット / 別メール）で ZIP とは別経路必須
-
-**`scripts/create_shortcut.ps1` の構造化（Claude HIGH 指摘反映）**
-- PS スクリプト exit code: 1 = 設定不備、2 = WSH 無効 / ConstrainedLanguage、3 = 書込失敗
-- `try/finally` で COM リソース解放を保証（Save 失敗時のリーク防止）
-- OneDrive / ASR / ACL の個別診断メッセージを追加
+タスク 14C の詳細（ADR-011 配布レイアウト / `14c-deploy.md` MVP 配置先 / allowlist ルール /
+`create_shortcut.ps1` exit code 構造化）は既にドキュメントに反映済（PR #82 merged）。
+詳細は `docs/adr/011-distribution-format.md` と `docs/handoff/14c-deploy.md` を参照。
 
 ### Quality Gate の実効性（Session 2-11 累積）
 - **/simplify** 3 並列: 各 PR で IMPORTANT 3-6 件修正
@@ -393,8 +413,7 @@ git pull --ff-only
 
 # 優先2: 14D ADR-011 Accepted 昇格（10-2 結果反映）
 
-# 優先3: P2 refactor 系 Issue（Session 17 以降の候補、TODO 粒度）
-#   #68 validate_form 戻り値 enum 化 + ValidatedForm newtype
+# 優先3: P2 refactor 系 Issue（Session 18 以降の候補、TODO 粒度）
 #   #44 Session/UserCandidate immutable 化
 #   #45 SourceKind StrEnum 統一
 #   #49 resume 時の candidates 検証
