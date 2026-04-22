@@ -22,6 +22,7 @@ import logging
 import time
 import tkinter as tk
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from tkinter import ttk
 
@@ -42,6 +43,27 @@ class LauncherAction(enum.Enum):
     RUN_PDF_MERGE = "run_pdf_merge"
     OPEN_REVIEW = "open_review"
     OPEN_SETTINGS = "open_settings"
+
+
+@dataclass(frozen=True)
+class ReviewCallbackResult:
+    """``on_open_review`` callback の戻り値。
+
+    cancel / 通常完了 / 「確認完了したが Phase B スキップ」（ドライラン等）の 3 状態を
+    表現する。既定値は cancel 相当（``should_phase_b == False``）。
+    """
+
+    session_id: str | None = None
+    should_run_phase_b: bool = True
+
+    @property
+    def should_phase_b(self) -> bool:
+        return self.session_id is not None and self.should_run_phase_b
+
+
+# cancel/error 共通 sentinel。frozen dataclass のため共有安全。
+# 呼び出し側は値比較（``==``）を使い ``is CANCEL_RESULT`` には依存しないこと。
+CANCEL_RESULT = ReviewCallbackResult()
 
 
 _BTN_RUN_PDF_MERGE = "PDF マージ処理を実行"
@@ -114,7 +136,7 @@ class Launcher:
         *,
         root: tk.Tk | None = None,
         on_run_pdf_merge: Callable[[], None] | None = None,
-        on_open_review: Callable[[], str | None] | None = None,
+        on_open_review: Callable[[], ReviewCallbackResult] | None = None,
         on_run_phase_b: Callable[[str], None] | None = None,
         on_open_settings: Callable[[], None] | None = None,
         on_config_missing: Callable[[], None] | None = None,
@@ -122,9 +144,10 @@ class Launcher:
     ) -> None:
         """Args:
             on_open_review: main thread で呼ぶ確認 UI オープンコールバック。
-                戻り値が session_id 文字列なら Phase B に進む、None ならキャンセル扱い。
+                戻り値の ``should_phase_b`` が True なら Phase B に進む、False ならスキップ
+                （cancel / 未解決 / Phase B 明示スキップ等を統一表現）。
             on_run_phase_b: worker thread で実行する Phase B コールバック。
-                ``on_open_review`` が session_id を返した後に submit される（13C）。
+                ``on_open_review`` が ``should_phase_b == True`` の結果を返した後に submit される。
         """
         assert_main_thread("Launcher")
 
@@ -344,10 +367,11 @@ class Launcher:
 
     def _handle_open_review(self) -> None:
         """「確認待ちセッション」ボタン押下。SessionPicker→ConfirmDialog を main thread で
-        実行し、得た session_id で Phase B を worker thread に submit（13C）。
+        実行し、得た session_id で Phase B を worker thread に submit。
 
-        ``on_open_review`` は main thread 同期 callback（Tk を触るため）。戻り値が
-        ``str`` なら Phase B へ、``None`` ならキャンセルで busy 解除のみ。
+        ``on_open_review`` は main thread 同期 callback（Tk を触るため）。戻り値の
+        ``ReviewCallbackResult.should_phase_b`` が True なら Phase B へ、False なら busy
+        解除のみ（cancel / 未解決 / Phase B 明示スキップを統一表現）。
         """
         if self._busy:
             logger.info("open review requested but launcher is busy; ignored")
@@ -360,7 +384,7 @@ class Launcher:
 
         self._set_busy(True)
         try:
-            session_id = self._on_open_review()
+            result = self._on_open_review()
         except Exception as exc:
             # callback 本体（load_config / list_sessions / load_session 等）で
             # 発生する同期例外を捕捉する。SessionPicker / ConfirmDialog 内部の
@@ -375,9 +399,24 @@ class Launcher:
             )
             return
 
-        if session_id is None:
-            # cancel → Phase B スキップ、ボタン再有効化
+        if not result.should_phase_b:
+            # cancel / 未解決 / 第三状態（Phase B スキップ） → ボタン再有効化のみ
             self._set_busy(False)
+            return
+
+        session_id = result.session_id
+        if session_id is None:
+            # should_phase_b True 時は session_id が必ず非 None（プロパティ定義より）。
+            # ここに到達したら ReviewCallbackResult のプロパティ実装が破綻しており、
+            # python -O で assert が剥離されても安全に停止させる必要がある。
+            self._set_busy(False)
+            logger.error(
+                "ReviewCallbackResult invariant broken: should_phase_b=True but session_id is None"
+            )
+            self._messagebox.showerror(
+                _TITLE_PHASE_B_ERROR,
+                "内部状態エラーが発生しました。詳細はログを確認してください。",
+            )
             return
 
         if self._on_run_phase_b is None:
