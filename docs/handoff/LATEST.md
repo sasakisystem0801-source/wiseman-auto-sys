@@ -1,10 +1,39 @@
-# Handoff: "使える Windows デスクトップアプリ" 完成化計画（Session 11 終了時点）
+# Handoff: "使える Windows デスクトップアプリ" 完成化計画（Session 12 終了時点）
 
 **更新日**: 2026-04-22
 **ブランチ**: main（clean、全 PR マージ済）
-**main**: f4e34b1 (PR #82 squash merged: タスク 14C)
+**main**: bdca87c (PR #86 squash merged: Issue #51 #1/#2 テスト)
 
-## セッション 11 の成果
+## セッション 12 の成果
+
+### マージ済み（本セッション、3 PR 連続）
+- **PR #84**: Issue #76 - merger 全 PdfMergeError message PII 除外
+  - 2 files, +221/-18（`src/wiseman_hub/pdf/merger.py` + `tests/unit/pdf/test_merger.py`）
+  - 8 箇所の `PdfMergeError` 生成箇所を型名ベースに統一、`source_label` 呼出側で kind (A/B/C/D) のみに制限
+  - 4 エージェント並列レビュー（code-reviewer / pr-test-analyzer / silent-failure-hunter / comment-analyzer）: Critical 0 / Important 8 件は defense-in-depth 強化系として PR #84 コメントに TODO 記録
+  - 新規 PII 非漏洩回帰テスト +10 件（TestMergerPiiDefense）
+  - CI 全 SUCCESS
+
+- **PR #85**: タスク 11 - README 運用者セクション + default.toml.sample + §7.2 ログ取得手順
+  - 3 files, +218/-9（`README.md` + `config/default.toml.sample` 新規 + `docs/handoff/14c-deploy.md`）
+  - 2 エージェント並列レビュー（code-reviewer / comment-analyzer）: Critical 2 / Important 3 / Suggestion 3 → **8/8 修正済**
+  - 主な修正: README「リネーム」→「コピー保存」整合、§2.3 フィールド名実装整合（source_dir 削除）、README リンクに GitHub anchor slug 付与、[gcp] project_id 直書き警告追加
+  - CI 全 SUCCESS
+
+- **PR #86**: Issue #51 #1/#2 - Windows msvcrt mock + 跨プロセスロックテスト
+  - 1 file, +282（`tests/unit/pdf/test_session.py`、テストのみ）
+  - TestLockWindowsMsvcrt (5 件): `sys.modules` 経由の fake msvcrt 注入で Windows 分岐を macOS/Linux でも検証
+  - TestCrossProcessLock (3 件): multiprocessing.spawn で親子プロセス間の lock 競合検証
+  - 2 エージェント並列レビュー（pr-test-analyzer / code-reviewer）: Critical 0 / Important 0 (blocking) → Merge as-is 推奨
+  - Issue #51 は残項目 #3-#6 のため **open 維持**（feedback_issue_postpone_pattern.md 準拠）
+  - CI 全 SUCCESS
+
+### 総変更量（Session 12）
+- 6 files changed, +721 lines（テスト +300 / docs +420 / code +1）
+- 全 CI SUCCESS、全レビュー blocking issue 0
+- 前セッション 400 passed → **現在 408 passed**（+8 テスト）
+
+## 前セッション（11）の成果
 
 ### マージ済み
 - **PR #82**: タスク 14C（ショートカット配布手順、ADR-011 具体化）
@@ -87,14 +116,14 @@
 ## 積み残し Issue / 技術負債
 
 ### P1
-- **#51**: Windows msvcrt / 跨プロセスロック / 0 ページ PDF（単一 PC では発生せず）
+- **#51**: Windows msvcrt / 跨プロセスロック / 0 ページ PDF（**Session 12 で #1/#2 部分解消、PR #86**、残項目 #3-#6 は open 維持）
 
-### P2（Session 8-11 で新規、継続）
+### P2（Session 8-12 で新規、継続）
 - **#68**（Session 8）: `validate_form` 戻り値を error code enum 化 + `ValidatedForm` newtype
 - **#71**（Session 9）: guard の exc_type=None / BaseException 契約テスト
 - **#72**（Session 9）: `review_flow.resolve_review_session` 共通化
 - **#73**（Session 9）: `ReviewCallbackResult` dataclass
-- **#76**（Session 9）: 他 PdfMergeError 生成箇所の PII 除外
+- ~~**#76**（Session 9）: 他 PdfMergeError 生成箇所の PII 除外~~ → **Session 12 で PR #84 解消、closed**
 - **#80**（Session 10）: Windows 実機 smoke で Phase B / OCR import 検証
 
 ### P2（継続）
@@ -104,12 +133,13 @@
 - **#38**: `atomic_io` ユーティリティ抽出
 - **#27 #29 #49 #50 #40 #39 #44 #45 #17 #16 #14 #11 #6**: 各種改善
 
-## impl-plan 進捗（Session 11 終了時点）
+## impl-plan 進捗（Session 12 終了時点）
 
 | タスク | 状態 | PR |
 |--------|------|-----|
 | 10-1 Cloud Run デプロイ + 疎通確認 | ✅ merged | #60 |
-| **10-2 Windows 実機 E2E** | ⏳ **本田さん実施待ち（14A / 14C 完了、exe + 配布リハ可能）** | - |
+| **10-2 Windows 実機 E2E** | ⏳ **本田さん実施待ち（14A / 14C / 11 完了、exe + 配布リハ + README 揃い済）** | - |
+| **11 README + sample TOML** | ✅ merged | **#85** |
 | 12A TOML 書き戻し機能 | ✅ merged | #60 |
 | 12B 設定 GUI | ✅ merged | #66 |
 | 12C 初回起動ウィザード | ⏳ 優先度低 | - |
@@ -121,7 +151,6 @@
 | **14C ショートカット配布手順** | ✅ merged | #82 |
 | **14D ADR-011 Accepted 昇格** | ⏳ **10-2 結果反映後** | - |
 | 15 GitHub Actions + WIF | ⏳ GUI 安定後 | - |
-| 11 README + sample TOML | ⏳ 14D 後が理想 | - |
 
 ## Session 11 で確定した設計判断
 
@@ -167,11 +196,37 @@ git pull --ff-only
 
 # 10-2 Windows 実機 E2E（本田さん実施、TeamViewer）
 # → docs/handoff/14a-build.md + 14c-deploy.md + windows-e2e-task10.md に従う
+# → README.md 運用者セクション + config/default.toml.sample で配布物最小セット揃い済
 
 # または 14D ADR-011 Accepted 昇格（10-2 結果反映）
-# または 11 README + sample TOML（14D 後が理想）
-# または #76 PdfMergeError PII 除去（30 分小作業）
+# または Issue #51 残項目（#3-#6、各 1-2 時間）:
+#   #3 非 KeyboardInterrupt Exception 経路（OcrServerError / TimeoutError）
+#   #4 0/1 ページ境界（splitter boundary）
+#   #5 disk-full save_session（既存 test_save_failure_cleans_tmp_file 同パターン）
+#   #6 gc_old_sessions 並行 resume（設計判断が必要）
+# または その他 P2（#63/#64/#68/#71/#72/#73/#80）
 ```
+
+## Session 12 での設計判断
+
+### Issue #76 の PII 除外拡張
+- PR #77 で `_save_atomically` のみ型名ベースに統一済だったが、残り 8 箇所の `PdfMergeError` 生成箇所（`_validate_user_name` / `_open_pdf_file_or_raise` / `_append_pdf_bytes` / `_append_pdf_file`）にも適用
+- `source_label` を呼出側で kind (A/B/C/D) のみに制限し、関数シグネチャ非破壊で user_name 埋込を原理的に排除
+- `from e` は全箇所で維持 → `__cause__` 経由で元例外情報にアクセス可能
+
+### タスク 11（docs 整備）
+- `config/default.toml.sample` を新規作成、`config/default.toml`（dev 用）は残存
+- README は先頭に運用者セクションを挿入、既存 dev 内容は維持（分離ファイル回避で GitHub プレビュー改善）
+- `14c-deploy.md §7.2` に `startup.log` 取得コマンド（PowerShell `*>` / cmd `2>&1`）を具体化
+
+### Issue #51 の scope 絞込
+- P1 #1 (Windows msvcrt) + #2 (跨プロセスロック) のみに絞り、#3-#6 は follow-up
+- Windows msvcrt は `sys.modules` 経由の fake 注入で macOS/Linux でも検証
+- 跨プロセスロックは `multiprocessing.spawn` で fork の fd 継承を回避、Windows exe 二重起動と等価な挙動を再現
+
+### Issue triage pattern の再適用（memory 教訓）
+- review agent の rating 5-7 指摘は Issue 化せず PR コメント TODO で可視化（3 PR 連続で適用）
+- Issue #51 は残項目 #3-#6 のため **open 維持**、再開条件を PR #86 本文で機械的に判定可能な形で記述
 
 ## 14D 着手メモ（10-2 結果反映）
 
