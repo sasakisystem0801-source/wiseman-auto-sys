@@ -1,8 +1,52 @@
-# Handoff: "使える Windows デスクトップアプリ" 完成化計画（Session 13 終了時点）
+# Handoff: "使える Windows デスクトップアプリ" 完成化計画（Session 14 終了時点）
 
 **更新日**: 2026-04-22
 **ブランチ**: main（clean、全 PR マージ済）
-**main**: 98e337e (PR #92 squash merged: Issue #64 --config 警告)
+**main**: 105a5fc (PR #94 squash merged: 10-2 トラブル切り分けフロー + Cloud Run /health 本番反映)
+
+## セッション 14 の成果
+
+### マージ済み（本セッション、1 PR）
+- **PR #94**: 10-2 トラブル切り分けフロー追加 + Cloud Run /health 本番反映
+  - 1 file, +43/-1 lines（`docs/handoff/windows-e2e-task10.md` のみ）
+  - 症状×原因×対応マトリクス 5 節追加（Phase A / Phase B UI / Phase B 結合 / exe 起動 / SmartScreen）
+  - `/healthz` 既知制約記述を「PR #89 で解消済」に更新
+  - 軽量 docs 変更のため `/review-pr`（6 エージェント並列）は過剰としてセルフレビューで対応
+  - CI 全 SUCCESS（test-unit 3.11 1m4s / 3.12 59s / test-integration 2m22s）
+
+### 本セッションで発見・解消した本番ブロッカー
+- **症状**: Cloud Run `/health` が HTTP 404 を返していた
+- **原因**: PR #89（Issue #58、/healthz → /health リネーム）は main に merged 済だったが、**Cloud Run 本番リビジョンは旧コードのまま**（openapi.json の paths に `/healthz` が残存、`/health` は存在しない状態）
+- **検出経路**: 10-2 実機テスト前の事前準備として macOS から `curl /health` で疎通確認 → HTTP 404 で異常検出
+- **対応**: Cloud Run 再デプロイ実施
+  - 新リビジョン: `wiseman-ocr-proxy-00003-98m`
+  - 反映日時: 2026-04-22 13:31 JST
+  - Cloud Build 52 秒 + Cloud Run deploy 約 40 秒
+- **検証**:
+  - 既存 URL `/health` → HTTP 200 `{"status":"ok"}` ✅
+  - 既存 URL `/healthz` → HTTP 404 ✅（ルート削除済、期待通り）
+  - openapi.json paths: `['/health', '/v1/ocr/extract-name']` ✅
+- **影響範囲**: 10-2 実機テスト前に修正済のため、本田さんの Windows 実機テスト時には `/v1/ocr/extract-name` 経由で正常動作する見込み
+
+### 事前検証（10-2 実機テスト前に全 PASS）
+- **macOS smoke build**: `uv run pyinstaller --clean wiseman_hub.spec` → 67MB binary 生成、hidden imports 致命警告なし（user32/msvcrt 欠落は macOS なので想定内、jinja2/pycparser 未使用で実害なし）
+- **frozen path 回帰テスト**: `tests/unit/test_main_entrypoint.py` に 3 件既存（Codex HIGH #14A 対応分）
+- **lint / typecheck / test**: ruff all checks passed / mypy no issues (28 files) / pytest 421 passed, 62 skipped
+- **Cloud Run 疎通**: 再デプロイ後 `/health` → 200 確認
+
+### 総変更量（Session 14）
+- 1 file changed, +43 / -1 lines（docs のみ、本体コード変更なし）
+- テスト件数: 421 passed 維持（Session 13 と同数）
+- **本番 Cloud Run リビジョン更新**: 00002-* → 00003-98m（PR #89 本番反映）
+
+### Session 14 の学び（次セッションに引継ぐ運用ギャップ）
+- **PR merged ≠ 本番反映**: Cloud Run は手動 `gcloud run deploy` 運用のため、PR マージ後にデプロイ実行者が手動トリガーしないと本番は旧コードのまま残る
+  - 本セッション発見前、**Session 11-13 の間に少なくとも 1 リビジョン分の本番反映遅延**が発生していた（PR #89 merged が 2026-04-22 早朝、本番反映が同日 13:31）
+- **対策候補**:
+  1. タスク 15（GitHub Actions Windows runner + WIF）の範囲で、`main` への push 時に `backend/ocr_proxy/**` 変更があれば自動 Cloud Build + Cloud Run deploy を追加
+  2. `backend/ocr_proxy/deploy.md` 冒頭に「**main merge 後は速やかに再デプロイ必須**」チェックリストを追記
+  3. 10-2 実施前の受入基準に `curl /health` 疎通確認を含める（本セッションで実施済の経験を形式化）
+- **短期対応**: 1 は工数重め（タスク 15 待ち）、2 は軽量で即対応可能 → **次セッション冒頭で deploy.md 補強 PR 化を推奨**
 
 ## セッション 13 の成果
 
@@ -190,11 +234,11 @@
 - **#39**: フリガナベースのマッチング
 - **#27 #29 #17 #16 #14 #11 #6**: 各種改善
 
-## impl-plan 進捗（Session 12 終了時点）
+## impl-plan 進捗（Session 14 終了時点）
 
 | タスク | 状態 | PR |
 |--------|------|-----|
-| 10-1 Cloud Run デプロイ + 疎通確認 | ✅ merged | #60 |
+| 10-1 Cloud Run デプロイ + 疎通確認 | ✅ merged（本番反映は Session 14 で PR #89 分を追加デプロイ） | #60, #89 |
 | **10-2 Windows 実機 E2E** | ⏳ **本田さん実施待ち（14A / 14C / 11 完了、exe + 配布リハ + README 揃い済）** | - |
 | **11 README + sample TOML** | ✅ merged | **#85** |
 | 12A TOML 書き戻し機能 | ✅ merged | #60 |
