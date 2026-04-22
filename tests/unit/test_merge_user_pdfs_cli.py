@@ -680,7 +680,9 @@ class TestReviewCommand:
         final = load_session(sid, sessions_dir=_sessions_dir(tmp_path))
         assert final.status == SessionStatus.READY_TO_MERGE
 
-    def test_review_unresolved_remainder_exits_needs_review(self, tmp_path: Path) -> None:
+    def test_review_unresolved_remainder_exits_needs_review(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """UI 終了時に未解決が残っていれば EXIT_NEEDS_REVIEW。"""
         from wiseman_hub.pdf.session import PairStatus, UserCandidate, load_session
 
@@ -714,6 +716,103 @@ class TestReviewCommand:
         assert exit_code == script.EXIT_NEEDS_REVIEW
         final = load_session(sid, sessions_dir=_sessions_dir(tmp_path))
         assert final.status == SessionStatus.NEEDS_REVIEW
+        # code-reviewer 指摘: 未解決候補数が stderr に含まれる既存メッセージ契約を検証
+        captured = capsys.readouterr()
+        assert "1 candidate(s) still unresolved" in captured.err
+
+    def _make_session_for_race_test(self, tmp_path: Path) -> str:
+        """race catch テストで共用するセッション fixture。"""
+        from wiseman_hub.pdf.session import PairStatus, UserCandidate
+
+        return _make_session_with_candidates(
+            tmp_path=tmp_path,
+            status=SessionStatus.NEEDS_REVIEW,
+            candidates=[
+                UserCandidate(
+                    page_index=0,
+                    user_name_ocr="u0",
+                    confidence="medium",
+                    status=PairStatus.NEEDS_CONFIRMATION,
+                    matched_b_path=None,
+                    matched_c_path=None,
+                    similar_candidates=[],
+                )
+            ],
+        )
+
+    def _run_review_with_resolve_raising(
+        self,
+        tmp_path: Path,
+        sid: str,
+        exc: Exception,
+    ) -> tuple[int, Any]:
+        """resolve_review_session が ``exc`` を raise する状況で --review を実行する。
+
+        patch 対象は ``wiseman_hub.pdf.review_flow.resolve_review_session``（文字列パス）。
+        `_cmd_review` が関数内で lazy import するため、モジュール属性側を差し替える
+        必要がある。patch 有効性を保証するため ``mock_resolve.assert_called_once()``
+        を呼出側テストで行う。
+        """
+        from unittest import mock as _mock
+
+        script = _load_script_module()
+        cfg = _make_config(tmp_path)
+
+        mock_resolve = _mock.MagicMock(side_effect=exc)
+        dialog_factory = lambda s, d: FakeDialog(s, d, resolver=None)  # noqa: E731
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "wiseman_hub.pdf.review_flow.resolve_review_session",
+                mock_resolve,
+            )
+            exit_code = script.main(
+                ["--review", sid],
+                config_loader=lambda _: cfg,
+                ocr_factory=lambda _: FakeOcr([]),
+                matcher_factory=lambda _: FakeMatcher({}),
+                dialog_factory=dialog_factory,
+            )
+        return exit_code, mock_resolve
+
+    def test_review_race_session_not_found_exits_error(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """evaluator 指摘: pre-load 成功後〜1st lock 取得前に他プロセスが
+        --discard した race で SessionNotFoundError が resolve 内で raise される。
+
+        _cmd_review は catch して EXIT_ERROR + 既存メッセージ形式に揃える
+        （型名だけ露出してアプリ全体終了する状態を回避する）。"""
+        from wiseman_hub.pdf.session import SessionNotFoundError
+
+        sid = self._make_session_for_race_test(tmp_path)
+        exit_code, mock_resolve = self._run_review_with_resolve_raising(
+            tmp_path, sid, SessionNotFoundError(f"session {sid} not found")
+        )
+
+        script = _load_script_module()
+        assert exit_code == script.EXIT_ERROR
+        mock_resolve.assert_called_once()  # patch 有効性を保証
+        captured = capsys.readouterr()
+        assert "error:" in captured.err
+        assert sid in captured.err
+
+    def test_review_race_session_corrupted_exits_error(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """SessionCorruptedError も同じ catch 経路で EXIT_ERROR を返すことを検証
+        （evaluator 指摘: 2 例外のうち片方しかテストしていなかった）。"""
+        from wiseman_hub.pdf.session import SessionCorruptedError
+
+        sid = self._make_session_for_race_test(tmp_path)
+        exit_code, mock_resolve = self._run_review_with_resolve_raising(
+            tmp_path, sid, SessionCorruptedError("simulated JSON corruption")
+        )
+
+        script = _load_script_module()
+        assert exit_code == script.EXIT_ERROR
+        mock_resolve.assert_called_once()
+        captured = capsys.readouterr()
+        assert "error:" in captured.err
 
 
 class TestMergeCommand:

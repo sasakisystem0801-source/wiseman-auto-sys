@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     # 型のみ参照: confirm_dialog は tkinter を import するため実行時はロードしない
     # （macOS uv python は Tcl/Tk 非同梱）。実行時の import は _default_dialog_factory
     # 内部で行い、`--review` 実行時にのみロードする。
+    from wiseman_hub.pdf.review_flow import ReviewOutcome
     from wiseman_hub.ui.confirm_dialog import ConfirmDialogResult
 
 from wiseman_hub.config import (
@@ -70,8 +71,6 @@ from wiseman_hub.pdf.session import (
     list_sessions,
     load_session,
     remove_session_artifacts,
-    save_session,
-    transition_session,
     validate_session_id,
     with_session_lock,
 )
@@ -307,7 +306,17 @@ def _cmd_review(
     session_id: str,
     dialog_factory: _DialogFactory,
 ) -> int:
-    """確認 UI を起動し、全件解決時に NEEDS_REVIEW → READY_TO_MERGE へ遷移させる。"""
+    """確認 UI を起動し、全件解決時に NEEDS_REVIEW → READY_TO_MERGE へ遷移させる。
+
+    flow 本体は ``pdf/review_flow.resolve_review_session`` に共通化（Issue #72）。
+    本関数は以下を担当する:
+      - session_id の事前 validate
+      - 事前 load（NotFound / Corrupted / invalid_status の即時エラーメッセージ）
+      - READY_TO_MERGE の早期アナウンス（UI 起動スキップ）
+      - ``ReviewOutcome`` の reason → exit code / メッセージへのマッピング
+    """
+    from wiseman_hub.pdf.review_flow import resolve_review_session
+
     try:
         validate_session_id(session_id)
     except ValueError as e:
@@ -321,6 +330,8 @@ def _cmd_review(
         return EXIT_ERROR
 
     # 既に READY_TO_MERGE なら確認済みとみなし UI 起動をスキップ（再度の解決作業は不要）。
+    # resolve_review_session 内でも READY_TO_MERGE は検知可能だが、
+    # 既存 CLI の明示的メッセージ（"run --merge to produce the final PDF"）を保つ。
     if session.status == SessionStatus.READY_TO_MERGE:
         print(
             f"session {session_id}: already READY_TO_MERGE "
@@ -336,21 +347,41 @@ def _cmd_review(
         )
         return EXIT_ERROR
 
+    # picker 選択後〜1st lock 取得前に他プロセスが --discard した race では
+    # resolve 内の load_session が SessionNotFoundError/Corrupted を raise する
+    # （review_flow docstring の「呼出側契約」）。エラーメッセージは事前 load 時と
+    # 同フォーマットで揃える。
     try:
-        with with_session_lock(sessions_dir, session_id):
-            dialog = dialog_factory(session, sessions_dir)
-            result = dialog.run()
-    except (BlockingIOError, OSError) as e:
-        print(
-            f"error: session {session_id} is locked by another process: {e}",
-            file=sys.stderr,
+        outcome = resolve_review_session(
+            session_id,
+            sessions_dir,
+            dialog_factory=dialog_factory,
         )
+    except (SessionNotFoundError, SessionCorruptedError) as e:
+        print(f"error: {e}", file=sys.stderr)
         return EXIT_ERROR
+    return _review_outcome_to_exit_code(outcome, session_id=session_id)
 
-    # 呼出側契約: aborted=True の場合、メモリ上の session は信頼できない（save 失敗済み）。
-    # 遷移は試みず EXIT_ERROR で return する。次に `--review` を実行したとき、load_session
-    # がディスクから旧状態を再ロードし、未解決候補として再提示する。
-    if result.aborted:
+
+def _review_outcome_to_exit_code(
+    outcome: ReviewOutcome, *, session_id: str
+) -> int:
+    """``ReviewOutcome`` を CLI の exit code + stderr メッセージへマッピング。
+
+    旧 ``_cmd_review`` のメッセージ文言・exit code を保持する
+    （下位互換性: スクリプト監視・自動テストが exit code 契約に依存している）。
+    ``assert_never`` により ``ReviewReason`` Literal に新値が追加されて本関数で
+    未処理になった場合、mypy が compile-time エラーで検出する。
+    """
+    from typing import assert_never
+
+    reason = outcome.reason
+
+    if reason == "ready_to_merge" or reason == "resolved":
+        print(f"session {session_id}: status=ready_to_merge (run --merge to finalize)")
+        return EXIT_OK
+
+    if reason == "aborted":
         print(
             f"error: review UI aborted for session {session_id}. "
             "state preserved; rerun --review to resume.",
@@ -358,31 +389,28 @@ def _cmd_review(
         )
         return EXIT_ERROR
 
-    # aborted=False の場合、dialog の save は成功している。最新の session は
-    # メモリ上のものとディスクが一致しているため、ここでは再ロードせず遷移する。
-    if not session.all_candidates_resolved:
+    if reason == "unresolved":
+        # detail には未解決候補数が入る（review_flow 側で計算、既存メッセージ復元）
+        count = outcome.detail or "some"
         print(
-            f"session {session_id}: {sum(1 for c in session.candidates if not c.is_resolved)} "
-            "candidate(s) still unresolved; rerun --review when ready.",
+            f"session {session_id}: {count} candidate(s) still unresolved; "
+            "rerun --review when ready.",
             file=sys.stderr,
         )
         return EXIT_NEEDS_REVIEW
 
-    # ロック再取得して READY_TO_MERGE へ遷移 + 保存。
-    # 既知リスク: UI 実行中のロック解放とこの再取得の間に別プロセスが同 session を触る
-    # 時間窓がある（例: 別端末からの --discard）。対象規模 1〜3 名の単一 PC 運用では
-    # 発生しない前提で受容。マルチ端末運用に拡張する際は session 再ロード + 状態再検証を
-    # ここに追加する。
-    try:
-        with with_session_lock(sessions_dir, session_id):
-            transition_session(session, SessionStatus.READY_TO_MERGE)
-            save_session(session, sessions_dir=sessions_dir)
-    except (BlockingIOError, OSError) as e:
-        # ここまでで dialog 側 save は既に成功済み（全候補が解決済みで永続化済）。
-        # 遷移だけが失敗したので、再 --review で冪等に READY_TO_MERGE へ進める。
+    if reason == "lock_error":
         print(
-            f"error: resolutions saved but transition to ready_to_merge failed "
-            f"(lock contention): {e}",
+            f"error: session {session_id} is locked by another process: "
+            f"{outcome.detail}",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+
+    if reason == "transition_lock_error":
+        print(
+            "error: resolutions saved but transition to ready_to_merge failed "
+            f"(lock contention): {outcome.detail}",
             file=sys.stderr,
         )
         print(
@@ -391,13 +419,32 @@ def _cmd_review(
             file=sys.stderr,
         )
         return EXIT_ERROR
-    except InvalidTransitionError as e:
-        # dialog が既に遷移させていた等（二重遷移は invariant 違反）
-        print(f"error: {e}", file=sys.stderr)
+
+    if reason == "concurrent_modification":
+        print(
+            f"error: session {session_id} was modified by another process "
+            f"(status={outcome.detail}); transition aborted.",
+            file=sys.stderr,
+        )
         return EXIT_ERROR
 
-    print(f"session {session_id}: status=ready_to_merge (run --merge to finalize)")
-    return EXIT_OK
+    if reason == "invalid_transition":
+        print(
+            f"error: invalid session transition for {session_id}: {outcome.detail}",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+
+    if reason == "invalid_status":
+        # resolve 内で detect された想定外状態（1st lock 再ロード時の race）
+        print(
+            f"error: session {session_id} has unexpected status ({outcome.detail}); "
+            "cannot proceed.",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+
+    assert_never(reason)
 
 
 def _cmd_merge(
