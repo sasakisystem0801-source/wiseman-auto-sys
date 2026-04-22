@@ -21,7 +21,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from tkinter import filedialog, ttk
-from typing import Any
+from typing import Any, assert_never
 
 from wiseman_hub.config import AppConfig, save_config
 from wiseman_hub.ui.common import (
@@ -250,35 +250,41 @@ def validate_form(form: SettingsForm) -> list[ValidationError]:
 
 
 def _message_for(err: ValidationError) -> str:
-    """ValidationError 単体の UI 表示文字列を構築。"""
-    code = err.code
-    if code == ValidationCode.INPUT_DIR_MISSING:
-        return "入力フォルダを指定してください。"
-    if code == ValidationCode.OUTPUT_DIR_MISSING:
-        return "出力フォルダを指定してください。"
-    if code == ValidationCode.SOURCE_A_FILENAME_MISSING:
-        return "A.pdf ファイル名を入力してください。"
-    if code == ValidationCode.OCR_ENDPOINT_MISSING:
-        return "OCR エンドポイント URL を入力してください。"
-    if code == ValidationCode.OCR_API_KEY_MISSING:
-        return "OCR API キーを入力してください。"
-    if code == ValidationCode.BBOX_NOT_NUMBER:
-        label = _BBOX_FIELD_LABELS.get(err.field_name, err.field_name)
-        return f"{label} は数値で入力してください。"
-    if code == ValidationCode.BBOX_DPI_NOT_POSITIVE_INT:
-        return "bbox dpi は正の整数で入力してください。"
-    if code == ValidationCode.BBOX_DPI_NOT_INTEGER:
-        return "bbox dpi は整数で入力してください。"
-    if code == ValidationCode.CONCAT_ORDER_EMPTY:
-        return "結合順 concat_order を A,B,C のようなカンマ区切りで入力してください。"
-    if code == ValidationCode.CONCAT_ORDER_INVALID_TOKEN:
-        tokens = err.context.get("invalid_tokens", [])
-        return (
-            "結合順 concat_order に不正な識別子があります: "
-            + ",".join(tokens)
-            + f"（使用可能: {','.join(_VALID_SOURCES)}）"
-        )
-    raise AssertionError(f"unknown validation code: {code!r}")  # pragma: no cover
+    """ValidationError 単体の UI 表示文字列を構築。
+
+    ``match`` + ``assert_never`` で mypy が網羅性を静的検証する。新しい
+    ``ValidationCode`` を追加した際に対応メッセージを書き忘れると型エラー
+    として検出されるため、実行時 ``AssertionError`` 防御より早い段階で気付ける。
+    """
+    match err.code:
+        case ValidationCode.INPUT_DIR_MISSING:
+            return "入力フォルダを指定してください。"
+        case ValidationCode.OUTPUT_DIR_MISSING:
+            return "出力フォルダを指定してください。"
+        case ValidationCode.SOURCE_A_FILENAME_MISSING:
+            return "A.pdf ファイル名を入力してください。"
+        case ValidationCode.OCR_ENDPOINT_MISSING:
+            return "OCR エンドポイント URL を入力してください。"
+        case ValidationCode.OCR_API_KEY_MISSING:
+            return "OCR API キーを入力してください。"
+        case ValidationCode.BBOX_NOT_NUMBER:
+            label = _BBOX_FIELD_LABELS.get(err.field_name, err.field_name)
+            return f"{label} は数値で入力してください。"
+        case ValidationCode.BBOX_DPI_NOT_POSITIVE_INT:
+            return "bbox dpi は正の整数で入力してください。"
+        case ValidationCode.BBOX_DPI_NOT_INTEGER:
+            return "bbox dpi は整数で入力してください。"
+        case ValidationCode.CONCAT_ORDER_EMPTY:
+            return "結合順 concat_order を A,B,C のようなカンマ区切りで入力してください。"
+        case ValidationCode.CONCAT_ORDER_INVALID_TOKEN:
+            tokens = err.context.get("invalid_tokens", [])
+            return (
+                "結合順 concat_order に不正な識別子があります: "
+                + ",".join(tokens)
+                + f"（使用可能: {','.join(_VALID_SOURCES)}）"
+            )
+        case _:
+            assert_never(err.code)
 
 
 def format_validation_errors(errors: Iterable[ValidationError]) -> str:

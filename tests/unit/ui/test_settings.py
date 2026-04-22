@@ -149,6 +149,24 @@ class TestValidateForm:
         form.concat_order = ""
         assert ValidationCode.CONCAT_ORDER_EMPTY in _codes(validate_form(form))
 
+    def test_multiple_missing_fields_accumulate_errors(self) -> None:
+        """全 check が順次実行され errors が積み重なる（early return / break 混入 regression 防御）。
+
+        Issue #68 PR review (pr-test-analyzer rating 7) の指摘対応。
+        """
+        form = _full_form()
+        form.input_dir = ""
+        form.output_dir = ""
+        form.source_a_filename = ""
+        form.ocr_endpoint_url = ""
+        form.ocr_api_key = ""
+        codes = _codes(validate_form(form))
+        assert ValidationCode.INPUT_DIR_MISSING in codes
+        assert ValidationCode.OUTPUT_DIR_MISSING in codes
+        assert ValidationCode.SOURCE_A_FILENAME_MISSING in codes
+        assert ValidationCode.OCR_ENDPOINT_MISSING in codes
+        assert ValidationCode.OCR_API_KEY_MISSING in codes
+
 
 class TestFormatValidationErrors:
     """AC-5: enum → 既存日本語メッセージ変換が破られていないこと。UI 文言は不変。"""
