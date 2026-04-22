@@ -222,10 +222,34 @@ class TestListSessionsCommand:
         assert healthy.session_id in out
         assert corrupted_sid_1 in out
         assert corrupted_sid_2 in out
-        # corrupted マーカ
-        assert "<corrupted:" in out
-        # 集計行
-        assert "3 sessions total: 1 healthy, 2 corrupted" in out
+        # corrupted マーカ（例外型名含む形式）
+        assert "<corrupted: SessionCorruptedError>" in out
+        # 集計行が末尾に出力される（将来の print 追加で順序が崩れても検知）
+        last_line = out.rstrip().splitlines()[-1]
+        assert last_line == "3 sessions total: 1 healthy, 2 corrupted"
+
+    def test_list_shows_summary_when_all_corrupted(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Issue #50: healthy=0 境界値。全 corrupted でも集計行が 0 healthy で出る。"""
+        script = _load_script_module()
+        cfg = _make_config(tmp_path)
+        sdir = _sessions_dir(tmp_path)
+        sdir.mkdir(parents=True, exist_ok=True)
+
+        (sdir / "20260101T000000Z-dead0001.json").write_text("not a valid json {{{")
+        (sdir / "20260101T000000Z-dead0002.json").write_text("also broken")
+
+        exit_code = script.main(
+            ["--list-sessions"],
+            config_loader=lambda _: cfg,
+            ocr_factory=lambda _: FakeOcr([]),
+            matcher_factory=lambda _: FakeMatcher({}),
+        )
+        assert exit_code == 0
+        out = capsys.readouterr().out
+        last_line = out.rstrip().splitlines()[-1]
+        assert last_line == "2 sessions total: 0 healthy, 2 corrupted"
 
 
 # ---------------------------------------------------------------------------
