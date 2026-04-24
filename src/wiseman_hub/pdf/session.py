@@ -615,6 +615,22 @@ def _from_dict(data: dict[str, Any], session_id: str) -> Session:
             f"{type(total_pages_a).__name__}"
         )
 
+    # Issue #49: page_index invariant 検証（uniqueness + range）。
+    # 同姓重複時に confirm_dialog の page_index マッチで別利用者へ B/C を誤添付する
+    # リスクを load 時点で遮断する。
+    seen: set[int] = set()
+    for c in candidates:
+        if c.page_index in seen:
+            raise SessionCorruptedError(
+                f"duplicate page_index={c.page_index} in {session_id} candidates"
+            )
+        seen.add(c.page_index)
+        if isinstance(total_pages_a, int) and c.page_index >= total_pages_a:
+            raise SessionCorruptedError(
+                f"candidate in {session_id} has page_index={c.page_index} "
+                f">= total_pages_a={total_pages_a}"
+            )
+
     return Session(
         session_id=data["session_id"],
         status=status,
@@ -639,6 +655,20 @@ def _candidate_from_dict(data: dict[str, Any], session_id: str) -> UserCandidate
     if missing:
         raise SessionCorruptedError(
             f"candidate in {session_id} missing required fields: {missing}"
+        )
+
+    # Issue #49: page_index invariant 検証（type / non-negative）。
+    # 一意性と total_pages_a 範囲は session 全体の検証として _from_dict で行う。
+    # bool は int サブクラスだが page_index 値としては不正なので除外する。
+    page_index = data["page_index"]
+    if isinstance(page_index, bool) or not isinstance(page_index, int):
+        raise SessionCorruptedError(
+            f"candidate in {session_id} has non-int page_index: "
+            f"{type(page_index).__name__}={page_index!r}"
+        )
+    if page_index < 0:
+        raise SessionCorruptedError(
+            f"candidate in {session_id} has negative page_index: {page_index}"
         )
 
     try:
