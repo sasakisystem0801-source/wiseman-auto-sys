@@ -1,8 +1,98 @@
-# Handoff: facility_merger 回帰テスト強化 + exe 配布準備 + 1-C runbook 完備（Session 20 終了時点）
+# Handoff: Session immutable 化 + 1-C runbook Phase 3-B 追加 + under-triage 発見（Session 21 終了時点）
 
-**更新日**: 2026-04-24
-**ブランチ**: main（clean、PR #110 + #111 + #112 + #113 マージ済）
-**main**: cfb7128 (PR #113 squash merged: docs(runbook): 1-C exe 再配布専用ランブック新設)
+**更新日**: 2026-04-25
+**ブランチ**: main（clean、PR #115 + #116 マージ済）
+**main**: 28c1440 (PR #116 squash merged: refactor(session): Issue #44 Session/UserCandidate 完全 immutable 化)
+
+## セッション 21 の成果（2 PR、合計 +736 / -144 行）
+
+### マージ済み
+- **PR #115**: docs(runbook): 1-C に Phase 3-B（既存機能 regression smoke）追加（Issue #80 手動部分カバー）
+  - 1 file, +49 / -1 行（fix-up 2 commits）
+  - 1-C Windows 実機セッションで `facility_merger` 以外の既存機能（Phase A マージ / Phase B 確認）起動を確認する任意 section 追加
+  - Issue #80 の「手動 smoke 部分」をカバー（Issue #80 本体の CI 自動化はタスク 15 で別途）
+  - 1-C 完走判定に影響しない fail-safe 設計（3-B 失敗は別件 regression として記録）
+  - `/review-pr` 2 エージェント並列（comment-analyzer / code-reviewer）→ approve 推奨、nice-to-have 1 件反映
+
+- **PR #116**: refactor(session): Issue #44 Session/UserCandidate 完全 immutable 化
+  - 9 files, +687 / -143 行（2 commits: 初版 + Codex HIGH fix-up）
+  - `Session` / `UserCandidate` を `@dataclass(frozen=True)` 化、7 箇所の mutation を `dataclasses.replace` に置換
+  - `save_session(session) -> Session` / `transition_session(session, ns) -> Session` 戻り値契約変更
+  - `session_path()` public 化（旧 `_session_path` 削除）
+  - AC-IM-1〜9 テスト群追加（9 テスト）+ Partial Update CRITICAL 契約の全フィールド列挙検証
+  - **Codex HIGH-1 (resume TOCTOU)**: `run_phase_a` が lock 取得後に `load_session` 戻り値を捨てて stale session を使い続けていたバグを構造的修正。同一 session_id への二重 resume で別利用者 PDF 混入のリスクを排除。regression test 追加
+  - 品質ゲート全通過（詳細: Quality Gate 履歴セクション参照）
+
+### Issue Net 変化（本セッション）
+- **Close**: 2 件（#44 `Session immutable 化` / #118 `page_index 検証` — #49 と重複のため統合 close）
+- **起票**: 2 件（#117 `tuple 化 follow-up` type-design HIGH / #118 `page_index 検証` Codex HIGH → #49 に統合）
+- **Priority 昇格**: 1 件（#49 `page_index 検証` P2 LOW → **P1 bug**、Codex HIGH rating 9+ 評価を反映）
+- **Net: 0 件**（close 2 / 起票 2、#118 が重複起票だったため）
+
+進捗評価: Net 0 は Issue 削減 KPI 的にはゼロだが、本セッションの本質は以下:
+1. **ユーザー明示指示 (Track 2) による PR #116 完了** — CLAUDE.md GitHub Issues #5 該当、Issue 駆動ではなく scope 作業
+2. **Codex セカンドオピニオンによる致命バグ発見** — HIGH-1 (TOCTOU) 即修正、HIGH-2 (page_index) 統合先 #49 に反映
+3. **under-triage の発見** — 既存 Issue #49 が LOW 評価だったが、Codex HIGH 評価で P1 bug に昇格。triage quality 向上 1 件
+4. **follow-up 型 Issue #117 起票** — type-design-analyzer HIGH 指摘（tuple 化）の rating 7+ triage 基準 #4 該当、Issue 化妥当
+
+### Quality Gate 履歴（PR #116）
+
+| ゲート | 結果 |
+|-------|------|
+| `/impl-plan` + AC-IM-1〜9 定義 | ✅ 事前策定、PR description に全 AC 評価反映 |
+| TDD (T1 RED → T2-T5 GREEN) | ✅ AC-IM テスト先行、実装後 550+ passed |
+| T6 pytest / ruff / mypy | ✅ pytest 551 passed, skip 68 維持、lint / type clean |
+| T7 `/simplify` 3 並列 | ✅ Important 3 件反映（`_session_path` alias 削除 / inline import / `_promote_needs_confirmation` helper 抽出） |
+| T8 `/safe-refactor` | ✅ MEDIUM 1 件反映（docstring 追補） |
+| T9 Evaluator 分離プロトコル (5+ ファイル) | ✅ REQUEST_CHANGES 1 件 (`review_flow.py:174` save_session 戻り値統一) + 推奨 3 件反映 |
+| T10 `/review-pr` 5 並列 | ✅ Important 複数反映（AC-IM-2/3/6 強化、コメント整理、follow-up Issue 起票） |
+| T10 `/codex review` セカンドオピニオン | ✅ **HIGH-1 (TOCTOU) 構造的修正**、HIGH-2 (page_index) → #49 統合 |
+| T11 PR → CI 全 pass → マージ | ✅ test-unit 3.11/3.12 + test-integration Windows 全 pass、squash merge |
+
+### 次スプリント方針（優先順）
+
+**1. 🔥 優先 1-C (Windows 実機、最優先)**
+- 前提: PR #115 で Phase 3-B runbook 追加済、PR #111 で spec hiddenimports 追加済
+- 作業: `docs/handoff/1c-exe-redistribution-runbook.md` 実施 (20-30 分)
+- 同時実施: Phase 3-B の Issue #80 手動 smoke（Launcher 1/2 ボタンの ImportError 確認）
+- 完了後: ADR-011 Status `Proposed` → `Accepted` 昇格、タスク 14D 完了
+
+**2. 🔥 Issue #49 (P1 bug) page_index 一意性検証**
+- Codex HIGH rating 9+ 評価済、medical PII 誤配置防御線
+- scope: `_candidate_from_dict` / `_from_dict` で `page_index` が `int >= 0`、重複なし、可能なら `total_pages_a` 未満
+- 実装規模: ~50 行 + テスト、単独 PR 化可能
+
+**3. 🟡 優先 1-B (1-C 実運用 1 回後)**
+- 対象: `facility_merger._match_by_partial` をファイル名ベース → 内容ベース優先に拡張
+- API 追加: `text_name_extractor.extract_name_from_pdf_first_page(path) -> ExtractedName | None`
+- Codex 方針: 実運用 1 回の observed failure を fixture 化して投資対効果最大化
+
+**4. 🟢 Issue #117 (type-design follow-up)**
+- `Session.candidates: list` → `tuple[UserCandidate, ...]`
+- `UserCandidate.similar_candidates: list` → `tuple[CandidateState, ...]`
+- `Session.config_snapshot: dict[str, Any]` → `Mapping[str, Any]` or `MappingProxyType`
+- 現状 docstring で警告、型レベル deep immutability は未保証
+
+**5. 🟢 その他 P2 refactor 系**
+- #45 (SourceKind StrEnum 統一), #27 (config dataclass 型設計), #44 は close 済
+
+**6. 🟢 優先 1-D / 1-E（フリーズ実害化後）**
+- Codex 方針「観測頻度を見てから」で即着手せず
+
+### Session 21 の学び
+
+- **Codex セカンドオピニオンの投資対効果**: 6 エージェント (5 /review-pr + Codex) のうち Codex のみが HIGH-1 (resume TOCTOU) を検出。medical PII 文脈では Codex レベルの批判的レビューが不可欠。既存 /review-pr では検出不可能だったバグ
+- **既存 Issue との重複防止**: #118 起票直後に #49 との重複を発見。新 Issue 起票前に `gh issue list` で既存検索を徹底すべき (本セッションでは事後整理で対応、次回は事前検索必須)
+- **under-triage の再評価**: #49 が LOW (2026-04-20) だったが、Codex HIGH 評価により P1 bug 昇格。古い triage は鮮度を失うため、関連 PR レビュー時に既存 Issue の priority 再評価を検討すべき
+- **frozen + replace パターンの徹底**: 7 mutation 箇所の網羅的書き換えに加え、呼出側で `session = save_session(...)` / `session = transition_session(...)` の戻り値受取を全箇所で統一。1 箇所でも戻り値を捨てると stale 参照が伝播する（review_flow.py:174 Evaluator 指摘の通り、Codex TOCTOU と同じ stale 問題の別形態）
+- **Partial Update CRITICAL の威力**: CLAUDE.md「DBにPartial Update する関数を追加/変更 → テストに更新対象外フィールドの値が変化しないこと」規範により、AC-IM-2/3 の「更新対象外フィールド全列挙の for-loop 検証」が導出された。この構造が save_session/transition_session の silent mutation regression を確実に捕捉する
+
+### 総変更量（Session 21）
+- 2 PRs, 10 files changed, +736 / -144 行
+- テスト件数: 538 passed → **551 passed**（+13: AC-IM テスト 9 + Codex HIGH regression 1 + `_build_candidate` / `save_session` IO 失敗 / `transition_session` invalid の mutation 検証 3）
+- skip: 68（変化なし）
+- 全ローカル検証 PASS（pytest 551 / ruff / mypy 33 source files）
+- CI: 全 SUCCESS（test-unit 3.11/3.12 + test-integration Windows、両 PR）
 
 ## セッション 20 の成果（4 PR、合計 +492 / -25 行）
 
