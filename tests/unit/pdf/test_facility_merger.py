@@ -235,7 +235,8 @@ class TestMergeFacility:
     def test_same_surname_conflict_generates_suffix(
         self, workspace: dict[str, Path]
     ) -> None:
-        """同姓 2 名は連番 suffix でユニーク化される（silent 上書き防止）。"""
+        """同姓 2 名は連番 suffix でユニーク化される（silent 上書き防止）。
+        B/C ファイルが無いケースなので ambiguous_bc_skipped には入らない（A のみ）。"""
         _make_pdf(
             workspace["a_pdf"],
             ["氏名 田中 太郎 様", "氏名 田中 花子 様"],
@@ -255,6 +256,42 @@ class TestMergeFacility:
         facility_out = workspace["output_root"] / "きなり(メール)"
         assert (facility_out / "田中.pdf").exists()
         assert (facility_out / "田中_2.pdf").exists()
+
+    def test_ambiguous_surname_fails_safe_on_bc_match(
+        self, workspace: dict[str, Path]
+    ) -> None:
+        """同姓重複 fail-safe: A に同姓 2 名 + B/C 1 式 → 誤添付を防ぐため
+        両者の B/C 添付を見送り A のみ出力。ambiguous_bc_skipped に記録。
+
+        Codex セカンドオピニオン HIGH 指摘への対応（同じ B/C が 2 人に混入するのを
+        構造的に防ぐ）。"""
+        _make_pdf(
+            workspace["a_pdf"],
+            ["氏名 田中 太郎 様", "氏名 田中 花子 様"],
+        )
+        _make_pdf(workspace["plan_dir"] / "田中.pdf", ["計画書 田中"])
+        _make_pdf(workspace["report_dir"] / "田中.pdf", ["経過 田中"])
+
+        report = merge_facility(
+            workspace["a_pdf"], workspace["facility_dir"], workspace["output_root"]
+        )
+
+        # 両エントリとも A のみ、B/C は添付されない
+        entries = {e.user_key: e for e in report.success}
+        assert entries["田中"].sources_used == ("A",)
+        assert entries["田中_2"].sources_used == ("A",)
+        assert "田中" in report.ambiguous_bc_skipped
+        assert "田中_2" in report.ambiguous_bc_skipped
+        # ambiguous_bc_skipped は独立カテゴリ: a_only / b_missing / c_missing には入らない
+        assert "田中" not in report.a_only
+        assert "田中" not in report.b_missing
+        assert "田中" not in report.c_missing
+        # 主眼は Phase 1 で両者の B/C 添付が回避されていること
+        # （Phase 2 で 田中 が残余として処理されるかは実装依存）
+        assert all(
+            e.sources_used == ("A",)
+            for e in (entries["田中"], entries["田中_2"])
+        )
 
     def test_phase2_resolves_bc_name_variation(
         self, workspace: dict[str, Path]

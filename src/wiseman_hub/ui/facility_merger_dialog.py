@@ -185,10 +185,20 @@ class FacilityMergerDialog:
         try:
             report = self._merge_fn(Path(a), Path(facility), Path(output))
         except FileNotFoundError as e:
-            # PII 防御: FileNotFoundError.filename を含む可能性あり、型名のみ表示
-            logger.error("merge_facility FileNotFoundError: %s", type(e).__name__)
-            self._append_result(f"ERROR: ファイル/フォルダが見つかりません ({e})\n")
-            self._messagebox.showerror(_MSG_TITLE_ERROR, str(e))
+            # PII 防御: FileNotFoundError.filename は UNC / 絶対パスを含みうるため
+            # 画面には型名 + 汎用メッセージのみ、詳細は logger.exception で取得。
+            logger.exception(
+                "merge_facility FileNotFoundError: %s", type(e).__name__
+            )
+            self._append_result(
+                "ERROR: ファイル/フォルダが見つかりません（詳細はログ参照）\n"
+            )
+            self._messagebox.showerror(
+                _MSG_TITLE_ERROR,
+                "指定したファイル / フォルダが見つかりませんでした。\n"
+                "A.pdf のパス、事業所フォルダ、出力ルートを再確認してください。\n"
+                f"\n{type(e).__name__}",
+            )
             self._btn_run.state(["!disabled"])  # type: ignore[no-untyped-call]
             return
         except Exception as e:
@@ -233,6 +243,11 @@ class FacilityMergerDialog:
         if report.name_conflicts:
             lines.append(
                 f"同姓コンフリクト（連番付与）: {', '.join(report.name_conflicts)}"
+            )
+        if report.ambiguous_bc_skipped:
+            lines.append(
+                "同姓重複 fail-safe（B/C 添付見送り、A のみ出力）: "
+                f"{', '.join(report.ambiguous_bc_skipped)}"
             )
 
         self._set_result_text("\n".join(lines) + "\n")

@@ -79,6 +79,11 @@ def _print_report(report: FacilityMergeReport) -> None:
         print(
             f"同姓コンフリクト（連番付与）: {', '.join(report.name_conflicts)}"
         )
+    if report.ambiguous_bc_skipped:
+        print(
+            f"同姓重複 fail-safe（B/C 添付見送り、A のみ出力）: "
+            f"{', '.join(report.ambiguous_bc_skipped)}"
+        )
 
 
 def main(argv: list[str] | None = None) -> int:

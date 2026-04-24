@@ -70,6 +70,7 @@ class FacilityMergeReport:
     b_missing: tuple[str, ...] = ()  # A + C はあるが B なし
     c_missing: tuple[str, ...] = ()  # A + B はあるが C なし
     name_conflicts: tuple[str, ...] = ()  # 同姓で出力キーが衝突したため連番付与した user_key
+    ambiguous_bc_skipped: tuple[str, ...] = ()  # 同姓重複 fail-safe で B/C 添付を見送った user_key
 
 
 def _collect_pdfs_by_stem(directory: Path) -> dict[str, Path]:
@@ -152,6 +153,7 @@ def merge_facility(
     matched_bc_stems: set[str] = set()
     used_user_keys: set[str] = set()  # 出力ファイル名衝突検知用
     name_conflicts: list[str] = []
+    ambiguous_bc_skipped: list[str] = []  # 同姓重複で B/C 添付を見送った user_key
 
     def _unique_key(base: str) -> tuple[str, bool]:
         """base が使用済なら連番を付与してユニーク化する。
@@ -171,9 +173,30 @@ def merge_facility(
         output_dir,
     )
 
-    # Phase 1: A.pdf の各ページを処理
+    # Phase 0: 姓の重複を事前検出（fail-safe 用）
+    # 同姓 2 名以上が A に存在する場合、ファイル名（姓）だけでは誰の B/C かを
+    # 区別できないため、該当姓については B/C 添付を一律スキップする。
+    # 「誤って他人の計画書/経過報告書を添付する」より「添付不足」のほうが害が小さい。
+    from collections import Counter
+
     a_doc = _open_pdf_or_raise(source_a_pdf)
     try:
+        surname_counts: Counter[str] = Counter()
+        for page_index in range(a_doc.page_count):
+            e = extract_name_from_page(a_doc[page_index])
+            if e is not None:
+                surname_counts[e.last_name] += 1
+        ambiguous_surnames: set[str] = {
+            s for s, c in surname_counts.items() if c >= 2
+        }
+        if ambiguous_surnames:
+            logger.warning(
+                "Ambiguous surnames detected (B/C attachment skipped for fail-safe): "
+                "count=%d",
+                len(ambiguous_surnames),
+            )
+
+        # Phase 1: A.pdf の各ページを処理
         for page_index in range(a_doc.page_count):
             page = a_doc[page_index]
             extracted = extract_name_from_page(page)
@@ -197,18 +220,31 @@ def merge_facility(
                 )
             output_path = output_dir / f"{user_key}.pdf"
 
-            # B/C マッチは元の姓（extracted.last_name）で行う（連番 suffix は出力名のみ）
-            b_match = _match_by_partial(extracted.last_name, plans)
-            c_match = _match_by_partial(extracted.last_name, reports)
+            # 同姓重複 fail-safe: B/C 添付をスキップして A のみ出力
+            if extracted.last_name in ambiguous_surnames:
+                b_match = None
+                c_match = None
+                ambiguous_bc_skipped.append(user_key)
+                logger.warning(
+                    "Ambiguous surname fail-safe: B/C skipped for page=%d key=%s",
+                    page_index + 1,
+                    user_key,
+                )
+            else:
+                # B/C マッチは元の姓（extracted.last_name）で行う
+                b_match = _match_by_partial(extracted.last_name, plans)
+                c_match = _match_by_partial(extracted.last_name, reports)
 
             # 先に排他的分岐で欠損カテゴリを確定（pop 依存を排除）
-            if b_match is None and c_match is None:
-                a_only.append(user_key)
-            else:
-                if b_match is None:
-                    b_missing.append(user_key)
-                if c_match is None:
-                    c_missing.append(user_key)
+            # ambiguous_bc_skipped は独立カテゴリで a_only/b_missing/c_missing には入れない
+            if extracted.last_name not in ambiguous_surnames:
+                if b_match is None and c_match is None:
+                    a_only.append(user_key)
+                else:
+                    if b_match is None:
+                        b_missing.append(user_key)
+                    if c_match is None:
+                        c_missing.append(user_key)
 
             sources: list[str] = ["A"]
             dst = fitz.open()
@@ -303,10 +339,12 @@ def merge_facility(
         b_missing=tuple(b_missing),
         c_missing=tuple(c_missing),
         name_conflicts=tuple(name_conflicts),
+        ambiguous_bc_skipped=tuple(ambiguous_bc_skipped),
     )
     logger.info(
         "merge_facility done: facility=%s success=%d extract_failed=%d "
-        "a_only=%d a_missing=%d b_missing=%d c_missing=%d conflicts=%d",
+        "a_only=%d a_missing=%d b_missing=%d c_missing=%d conflicts=%d "
+        "ambiguous_bc_skipped=%d",
         facility_name,
         len(report.success),
         len(report.extraction_failed_pages),
@@ -315,5 +353,6 @@ def merge_facility(
         len(report.b_missing),
         len(report.c_missing),
         len(report.name_conflicts),
+        len(report.ambiguous_bc_skipped),
     )
     return report
