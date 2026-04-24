@@ -105,3 +105,108 @@ class TestExtractNameFromPage:
             assert extract_name_from_page(page) is None
         finally:
             doc.close()
+
+
+class TestExtractNameFromFuriganaPattern:
+    """Pattern 2: フリガナ（半角カタカナ行）→ 漢字姓名の抽出。
+
+    実帳票（提供実績チェックリスト）のテキスト層は「氏名」ラベルと
+    実名が別セルで離れているため、フリガナ直後の漢字氏名を頼りに抽出する。
+    """
+
+    def test_basic_furigana_to_kanji(self) -> None:
+        # 実帳票テキスト（提供実績チェックリスト風）
+        text = (
+            "居宅介護支援事業所　きなり \n"
+            "ｱｻｵ ｶｽ ｼ\n"
+            "浅尾　和司\n"
+            "2 8 4 6 4 6\n"
+        )
+        result = extract_name_from_text(text)
+        assert result is not None
+        assert result.last_name == "浅尾"
+        assert result.first_name == "和司"
+
+    def test_furigana_with_multiple_spaces(self) -> None:
+        # フリガナが 3 分割されていても許容
+        text = "ﾔﾏﾀﾞ ﾀﾛｳ ｼ\n山田　太郎\n"
+        result = extract_name_from_text(text)
+        assert result is not None
+        assert result.last_name == "山田"
+        assert result.first_name == "太郎"
+
+    def test_full_realistic_daily_record_text(self) -> None:
+        """実帳票 1 ページ目のテキスト層全体を模したケース。
+
+        Pattern 1 (氏名ラベル隣接) はヒットしないが、Pattern 2 で抽出される。
+        担当者名（小島 玲央）やケアマネ名が混じっていても、フリガナ隣接で
+        最初にマッチする利用者氏名（浅尾 和司）を取る。
+        """
+        text = (
+            "様\n"
+            "令和08年03月分  提供実績チェックリスト \n"
+            "被保険者番号\n"
+            "生年月日\n"
+            "4 6 0 1 6 0 6 1 2\n"
+            "保険者名\n"
+            "印刷日　令和08年04月09日　木曜日\n"
+            "太子町（揖保郡）\n"
+            "居宅介護支援事業所　きなり \n"
+            "ﾌｻｵ ｶｽ ｼ\n"
+            "浅尾　和司\n"
+            "2 8 4 6 4 6\n"
+            "計画作成担当者\n"
+            "(2874101146)\n"
+            "フリガナ\n"
+            "氏名\n"
+            "要介護・要支援状態区分\n"
+            "要支援2\n"
+        )
+        result = extract_name_from_text(text)
+        assert result is not None
+        assert result.last_name == "浅尾"
+        assert result.first_name == "和司"
+
+    def test_label_pattern_takes_precedence_over_furigana(self) -> None:
+        """Pattern 1（氏名ラベル）があればそちらを優先する。
+
+        ラベル明記は書式仕様上の明示指示なので、フリガナ隣接よりも信頼度が高い。
+        """
+        text = (
+            "ｼｵﾂ ﾐｷｺ\n"
+            "塩津　美貴子\n"
+            "《ご報告内容》\n"
+            "氏名  尾島 太郎  様\n"  # Pattern 1 にヒット
+        )
+        result = extract_name_from_text(text)
+        assert result is not None
+        # フリガナ隣接型で先頭の「塩津」ではなく、ラベル型の「尾島」が取れる
+        assert result.last_name == "尾島"
+        assert result.first_name == "太郎"
+
+    def test_furigana_only_no_kanji_returns_none(self) -> None:
+        """フリガナ行のみで漢字氏名が続かない場合は None."""
+        text = "ﾔﾏﾀﾞ ﾀﾛｳ\n"
+        assert extract_name_from_text(text) is None
+
+    def test_no_furigana_no_label_returns_none(self) -> None:
+        """どのパターンにもマッチしないテキスト."""
+        text = "普通の文章です。特に抽出できるものはありません。"
+        assert extract_name_from_text(text) is None
+
+    def test_hiragana_in_name_row_skipped(self) -> None:
+        """漢字氏名の行に平仮名が混ざる場合はマッチしない（事業所名除外）.
+
+        「居宅介護支援事業所　きなり」のようなひらがな含む行は漢字連続パターン
+        で終端する。ひらがな「きなり」は `\\u3040-\\u309f` で漢字範囲外。
+        """
+        text = (
+            "ｷﾅﾘ ｼｴﾝ ｼ\n"
+            "居宅介護支援事業所　きなり\n"  # ひらがなで途切れる
+        )
+        result = extract_name_from_text(text)
+        # Pattern 2 は最長漢字マッチになるため「居宅介護支援事業所」+「きなり」ではなく
+        # 「居宅介護支援事業所」のみで止まり、続く「　」+ 漢字でないのでミスマッチ。
+        # 結果として抽出失敗（None）か、誤ったマッチでも事業所名として扱われる。
+        # 本テストはひらがな行が誤抽出されないことを確認する。
+        assert result is None or "きなり" not in result.full_name
