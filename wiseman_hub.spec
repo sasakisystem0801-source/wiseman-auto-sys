@@ -54,12 +54,15 @@ a = Analysis(
         "wiseman_hub.ui.session_picker",
         "wiseman_hub.ui.settings",
         "wiseman_hub.ui.common",
+        "wiseman_hub.ui.facility_merger_dialog",
         "wiseman_hub.pdf.pipeline",
         "wiseman_hub.pdf.merger",
         "wiseman_hub.pdf.matcher",
         "wiseman_hub.pdf.ocr_client",
         "wiseman_hub.pdf.session",
         "wiseman_hub.pdf.splitter",
+        "wiseman_hub.pdf.facility_merger",
+        "wiseman_hub.pdf.text_name_extractor",
         "wiseman_hub.config",
         # --rpa フラグで WisemanHub (app.py) を遅延 import する経路
         # （__main__.main() の `from wiseman_hub.app import WisemanHub`）
