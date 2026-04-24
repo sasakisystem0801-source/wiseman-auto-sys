@@ -14,7 +14,7 @@
   - ユーザーゴール「OCR（テキスト認識）による A+B+C 正しい順序結合」完全達成
 
 ### 実装範囲
-- **コア**: `src/wiseman_hub/pdf/facility_merger.py` (+319 行)
+- **コア**: `src/wiseman_hub/pdf/facility_merger.py` (+358 行)
   - `merge_facility(source_a, facility_dir, output_root)` 本体
   - Phase 1: A.pdf 各ページを分割 → 氏名抽出 → B/C 姓マッチ → 3 者結合
   - Phase 2: A 未マッチの B/C 残余を相互マッチして結合
