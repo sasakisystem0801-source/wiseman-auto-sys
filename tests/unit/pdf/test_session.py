@@ -371,6 +371,184 @@ class TestLoadErrors:
             load_session("missing-name", sessions_dir=sessions_dir)
 
 
+class TestPageIndexInvariant:
+    """load_session 時の page_index invariant 検証。
+
+    page_index は candidate を一意に識別するキーであり、破損 / 手動復旧 /
+    stale overwrite 由来の duplicate / 範囲外は別利用者 PDF 混入のリスク源
+    （medical PII 文脈）。load 時に境界で fail-hard する。
+    """
+
+    def _payload(
+        self,
+        tmp_path: Path,
+        session_id: str,
+        candidates: list[dict[str, Any]],
+        total_pages_a: int | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "schema_version": 1,
+            "session_id": session_id,
+            "status": "needs_review",
+            "created_at": "2026-04-25T00:00:00+00:00",
+            "updated_at": "2026-04-25T00:00:00+00:00",
+            "config_snapshot": {},
+            "source_a_path": str(tmp_path / "A.pdf"),
+            "candidates": candidates,
+            "a_page_pdf_bytes_dir": str(tmp_path / ".pages"),
+            "output_path": None,
+        }
+        if total_pages_a is not None:
+            payload["total_pages_a"] = total_pages_a
+        return payload
+
+    def _candidate(self, page_index: Any) -> dict[str, Any]:
+        return {
+            "page_index": page_index,
+            "user_name_ocr": "x",
+            "confidence": "high",
+            "status": "needs_confirmation",
+            "matched_b_path": None,
+            "matched_c_path": None,
+            "similar_candidates": [],
+        }
+
+    def test_load_accepts_valid_boundary_page_indexes(self, tmp_path: Path) -> None:
+        """happy-path: 0 と total_pages_a-1 の boundary value は共に valid。
+
+        invariant 検証ロジックの off-by-one regression 防御。
+        """
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        sid = "valid-boundaries"
+        payload = self._payload(
+            tmp_path,
+            sid,
+            [self._candidate(0), self._candidate(2), self._candidate(4)],  # 0, mid, total-1
+            total_pages_a=5,
+        )
+        (sessions_dir / f"{sid}.json").write_text(json.dumps(payload))
+
+        session = load_session(sid, sessions_dir=sessions_dir)
+
+        assert [c.page_index for c in session.candidates] == [0, 2, 4]
+        assert session.total_pages_a == 5
+
+    def test_load_rejects_non_int_page_index(self, tmp_path: Path) -> None:
+        """page_index が int でない場合 SessionCorruptedError。"""
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        for bad_value in ("0", 1.5, None):
+            sid = f"bad-type-{type(bad_value).__name__}"
+            payload = self._payload(tmp_path, sid, [self._candidate(bad_value)])
+            (sessions_dir / f"{sid}.json").write_text(json.dumps(payload))
+
+            with pytest.raises(SessionCorruptedError, match=r"non-int page_index"):
+                load_session(sid, sessions_dir=sessions_dir)
+
+    def test_load_rejects_bool_page_index(self, tmp_path: Path) -> None:
+        """bool は int サブクラスだが page_index としては invalid。"""
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        sid = "bad-bool"
+        payload = self._payload(tmp_path, sid, [self._candidate(True)])
+        (sessions_dir / f"{sid}.json").write_text(json.dumps(payload))
+
+        with pytest.raises(SessionCorruptedError, match=r"non-int page_index"):
+            load_session(sid, sessions_dir=sessions_dir)
+
+    def test_load_rejects_negative_page_index(self, tmp_path: Path) -> None:
+        """page_index が負値の場合 SessionCorruptedError。"""
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        sid = "negative"
+        payload = self._payload(tmp_path, sid, [self._candidate(-1)])
+        (sessions_dir / f"{sid}.json").write_text(json.dumps(payload))
+
+        with pytest.raises(SessionCorruptedError, match=r"negative page_index: -1"):
+            load_session(sid, sessions_dir=sessions_dir)
+
+    def test_load_rejects_duplicate_page_index(self, tmp_path: Path) -> None:
+        """同一 session 内で page_index が重複する場合 SessionCorruptedError。
+
+        page_index に基づく candidate 同定（confirm_dialog の page_index マッチや
+        Phase B の page artifact 読み込み）で別利用者へ B/C を誤添付する
+        リスクの防御線。エラーメッセージに重複値を含めて運用デバッグを支援する。
+        """
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        sid = "duplicate"
+        payload = self._payload(
+            tmp_path,
+            sid,
+            [self._candidate(0), self._candidate(0)],
+        )
+        (sessions_dir / f"{sid}.json").write_text(json.dumps(payload))
+
+        with pytest.raises(SessionCorruptedError, match=r"duplicate page_index=0"):
+            load_session(sid, sessions_dir=sessions_dir)
+
+    def test_load_rejects_out_of_range_page_index(self, tmp_path: Path) -> None:
+        """total_pages_a 設定時、page_index が範囲外なら SessionCorruptedError。"""
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        sid = "out-of-range"
+        # total_pages_a=5 → 有効 page_index は [0, 5)
+        payload = self._payload(
+            tmp_path,
+            sid,
+            [self._candidate(5)],
+            total_pages_a=5,
+        )
+        (sessions_dir / f"{sid}.json").write_text(json.dumps(payload))
+
+        with pytest.raises(
+            SessionCorruptedError,
+            match=r"page_index=5 >= total_pages_a=5",
+        ):
+            load_session(sid, sessions_dir=sessions_dir)
+
+    def test_load_rejects_bool_total_pages_a(self, tmp_path: Path) -> None:
+        """total_pages_a も bool は除外（page_index と対称な型契約）。
+
+        JSON で `true`/`false` が入った場合 isinstance(_, int) は通過してしまうため、
+        bool は明示除外する。
+        """
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        sid = "bool-total"
+        payload = self._payload(
+            tmp_path,
+            sid,
+            [self._candidate(0)],
+            total_pages_a=True,  # type: ignore[arg-type]
+        )
+        (sessions_dir / f"{sid}.json").write_text(json.dumps(payload))
+
+        with pytest.raises(SessionCorruptedError, match=r"total_pages_a"):
+            load_session(sid, sessions_dir=sessions_dir)
+
+    def test_load_skips_range_check_without_total_pages_a(self, tmp_path: Path) -> None:
+        """total_pages_a が None の場合、範囲検証はスキップ（型/一意性のみ）。
+
+        旧 schema 互換性維持。total_pages_a が記録されていないセッションでも load 可能。
+        """
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        sid = "no-total"
+        payload = self._payload(
+            tmp_path,
+            sid,
+            [self._candidate(999)],  # 大きな値だが total_pages_a 未設定なので通過
+            total_pages_a=None,
+        )
+        (sessions_dir / f"{sid}.json").write_text(json.dumps(payload))
+
+        # 範囲検証はスキップされるので例外は出ない
+        session = load_session(sid, sessions_dir=sessions_dir)
+        assert session.candidates[0].page_index == 999
+
+
 # ---------------------------------------------------------------------------
 # list / gc
 # ---------------------------------------------------------------------------

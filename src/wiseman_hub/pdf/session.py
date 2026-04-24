@@ -609,11 +609,29 @@ def _from_dict(data: dict[str, Any], session_id: str) -> Session:
     candidates = [_candidate_from_dict(c, session_id) for c in data["candidates"]]
 
     total_pages_a = data.get("total_pages_a")
-    if total_pages_a is not None and not isinstance(total_pages_a, int):
+    if total_pages_a is not None and (
+        isinstance(total_pages_a, bool) or not isinstance(total_pages_a, int)
+    ):
         raise SessionCorruptedError(
             f"total_pages_a must be int or absent in {session_id}: "
             f"{type(total_pages_a).__name__}"
         )
+
+    # page_index は candidate を一意に識別するキー。重複があると
+    # confirm_dialog などの page_index マッチで別利用者へ B/C を誤添付しうるため、
+    # load 時に invariant を境界で確定させる（uniqueness + range）。
+    seen: set[int] = set()
+    for c in candidates:
+        if c.page_index in seen:
+            raise SessionCorruptedError(
+                f"duplicate page_index={c.page_index} in {session_id} candidates"
+            )
+        seen.add(c.page_index)
+        if isinstance(total_pages_a, int) and c.page_index >= total_pages_a:
+            raise SessionCorruptedError(
+                f"candidate in {session_id} has page_index={c.page_index} "
+                f">= total_pages_a={total_pages_a}"
+            )
 
     return Session(
         session_id=data["session_id"],
@@ -639,6 +657,19 @@ def _candidate_from_dict(data: dict[str, Any], session_id: str) -> UserCandidate
     if missing:
         raise SessionCorruptedError(
             f"candidate in {session_id} missing required fields: {missing}"
+        )
+
+    # bool は int サブクラスだが page_index 値としては不正なので明示除外する。
+    # （uniqueness と total_pages_a 範囲は _from_dict で session 単位に検証）
+    page_index = data["page_index"]
+    if isinstance(page_index, bool) or not isinstance(page_index, int):
+        raise SessionCorruptedError(
+            f"candidate in {session_id} has non-int page_index: "
+            f"{type(page_index).__name__}={page_index!r}"
+        )
+    if page_index < 0:
+        raise SessionCorruptedError(
+            f"candidate in {session_id} has negative page_index: {page_index}"
         )
 
     try:
