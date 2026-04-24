@@ -38,11 +38,12 @@ logger = logging.getLogger(__name__)
 
 
 class LauncherAction(enum.Enum):
-    """ランチャーの 3 つの主要操作。"""
+    """ランチャーの主要操作。"""
 
     RUN_PDF_MERGE = "run_pdf_merge"
     OPEN_REVIEW = "open_review"
     OPEN_SETTINGS = "open_settings"
+    OPEN_FACILITY_MERGER = "open_facility_merger"
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,7 @@ CANCEL_RESULT = ReviewCallbackResult()
 _BTN_RUN_PDF_MERGE = "PDF マージ処理を実行"
 _BTN_OPEN_REVIEW = "確認待ちセッション"
 _BTN_OPEN_SETTINGS = "設定"
+_BTN_OPEN_FACILITY_MERGER = "事業所フォルダ結合"
 
 _TITLE_CONFIG_MISSING = "設定が未完了"
 _MSG_CONFIG_MISSING = (
@@ -139,6 +141,7 @@ class Launcher:
         on_open_review: Callable[[], ReviewCallbackResult] | None = None,
         on_run_phase_b: Callable[[str], None] | None = None,
         on_open_settings: Callable[[], None] | None = None,
+        on_open_facility_merger: Callable[[], None] | None = None,
         on_config_missing: Callable[[], None] | None = None,
         messagebox_fn: MessageBoxLike | None = None,
     ) -> None:
@@ -159,6 +162,7 @@ class Launcher:
         self._on_open_review = on_open_review
         self._on_run_phase_b = on_run_phase_b
         self._on_open_settings = on_open_settings
+        self._on_open_facility_merger = on_open_facility_merger
         self._on_config_missing = on_config_missing
 
         self._owns_root = root is None
@@ -180,7 +184,7 @@ class Launcher:
     def _build_ui(self) -> None:
         root = self._root
         root.title("Wiseman PDF ツール")
-        root.geometry("420x280")
+        root.geometry("420x340")
 
         ttk.Label(
             root,
@@ -202,18 +206,35 @@ class Launcher:
             text=_BTN_OPEN_REVIEW,
             command=lambda: self.invoke_action(LauncherAction.OPEN_REVIEW),
         )
+        self._btn_facility_merger = ttk.Button(
+            btn_frame,
+            text=_BTN_OPEN_FACILITY_MERGER,
+            command=lambda: self.invoke_action(
+                LauncherAction.OPEN_FACILITY_MERGER
+            ),
+        )
         self._btn_settings = ttk.Button(
             btn_frame,
             text=_BTN_OPEN_SETTINGS,
             command=lambda: self.invoke_action(LauncherAction.OPEN_SETTINGS),
         )
 
-        for btn in (self._btn_run, self._btn_review, self._btn_settings):
+        for btn in (
+            self._btn_run,
+            self._btn_review,
+            self._btn_facility_merger,
+            self._btn_settings,
+        ):
             btn.pack(fill="x", pady=6, ipady=6)
 
-    def button_labels(self) -> tuple[str, str, str]:
-        """各ボタンのラベル（テスト用）。"""
-        return (_BTN_RUN_PDF_MERGE, _BTN_OPEN_REVIEW, _BTN_OPEN_SETTINGS)
+    def button_labels(self) -> tuple[str, str, str, str]:
+        """各ボタンのラベル（テスト用）。順序: PDFマージ / 確認 / 事業所結合 / 設定。"""
+        return (
+            _BTN_RUN_PDF_MERGE,
+            _BTN_OPEN_REVIEW,
+            _BTN_OPEN_FACILITY_MERGER,
+            _BTN_OPEN_SETTINGS,
+        )
 
     def reload_config(self, config: AppConfig) -> None:
         """設定 GUI で保存された直後に呼ぶ。以降の ``validate_config_ready`` 判定が新値で行われる。"""
@@ -236,6 +257,12 @@ class Launcher:
                     self._on_open_settings,
                     _TITLE_SETTINGS_PLACEHOLDER,
                     _MSG_SETTINGS_PLACEHOLDER,
+                )
+            case LauncherAction.OPEN_FACILITY_MERGER:
+                self._invoke_or_show(
+                    self._on_open_facility_merger,
+                    _TITLE_UNIMPL,
+                    "事業所フォルダ結合ダイアログ（未統合）",
                 )
             case _:
                 raise ValueError(f"Unhandled LauncherAction: {action}")
@@ -469,7 +496,12 @@ class Launcher:
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
         state = ["disabled"] if busy else ["!disabled"]
-        for btn in (self._btn_run, self._btn_review, self._btn_settings):
+        for btn in (
+            self._btn_run,
+            self._btn_review,
+            self._btn_facility_merger,
+            self._btn_settings,
+        ):
             btn.state(state)  # type: ignore[no-untyped-call]
 
     def _invoke_or_show(
