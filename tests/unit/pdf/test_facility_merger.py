@@ -437,8 +437,10 @@ class TestMergeFacility:
           荒木: A + C のみ → 2 ページ、順序 A→C（B 欠損）
           日浦: A のみ → 1 ページ（B/C 両方欠損）
 
-        各ページに `[SRC:A|B|C]` と利用者ごとに一意な姓タグを仕込み、
-        他利用者の資料が混入していないことも同時に確認する。
+        `[SRC:A|B|C]` と `[USER:xxx]` は **本テスト専用の in-page 識別タグ** で、
+        `merge_facility` 本体はこれらを認識・要求しない（通常の帳票には存在しない）。
+        PyMuPDF `page.get_text()` 経由で出力 PDF のページ順序と非混入を
+        内容レベル検証するためだけに注入している合成マーカーである。
         """
         # A.pdf: 5 ページ 5 利用者、氏名パターン + ソース/姓タグ
         _make_pdf(
@@ -534,9 +536,10 @@ class TestMergeFacility:
                 f"{user_key}: page count mismatch "
                 f"(expected {len(per_page)}, got {len(texts)})"
             )
+            # enumerate 順 = 期待順。per_page リストと page_idx の対応関係で
+            # A→B→C の **順序** 保証を行う（各 assert は単ページの tag 存在確認）。
             for page_idx, (src, user_tag) in enumerate(per_page):
                 page_text = texts[page_idx]
-                # A→B→C の **順序** 保証
                 assert f"[SRC:{src}]" in page_text, (
                     f"{user_key} page {page_idx}: "
                     f"expected [SRC:{src}], got text={page_text!r}"
