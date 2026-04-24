@@ -18,7 +18,7 @@ import contextlib
 import logging
 import tkinter as tk
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from tkinter import filedialog, ttk
 
@@ -138,7 +138,7 @@ class ConfirmDialog:
         *,
         root: tk.Tk | None = None,
         parent: tk.Misc | None = None,
-        save_session_fn: Callable[..., Path] = save_session,
+        save_session_fn: Callable[..., Session] = save_session,
         askopenfilename_fn: Callable[..., str] = filedialog.askopenfilename,
         messagebox_fn: MessageBoxLike | None = None,
     ) -> None:
@@ -488,7 +488,7 @@ class ConfirmDialog:
         - 呼出側は UI 終了後にセッションを **必ず再ロード** し、メモリ上の session を捨てること。
           これで on-disk の旧状態から再開できる（未解決扱いで再提示される）。
         """
-        resolve_candidate(
+        self._session = resolve_candidate(
             self._session,
             page_index,
             status=status,
@@ -497,7 +497,9 @@ class ConfirmDialog:
             clear_similar=clear_similar,
         )
         # fail-fast: 例外は呼出元に伝播させる（捕捉しない）
-        self._save_session_fn(self._session, sessions_dir=self._sessions_dir)
+        self._session = self._save_session_fn(
+            self._session, sessions_dir=self._sessions_dir
+        )
 
         self._refresh_tree()
         self._check_all_resolved()
@@ -597,10 +599,11 @@ def resolve_candidate(
     matched_c: str | None,
     clear_similar: bool = False,
 ) -> Session:
-    """指定 page_index の candidate を新 status と matched パスで更新する。
+    """指定 page_index の candidate を新 status と matched パスで更新した新 Session を返す。
 
-    副作用: ``session.candidates`` list を差し替える（in-place）。戻り値は同じ
-    ``session`` 参照（chain 用）。該当 page_index が存在しない場合は何もしない。
+    Issue #44 immutable 化: 元の ``session`` は mutation されず、``candidates`` を
+    置換した新 Session を返す。該当 page_index が存在しない場合は同じ内容の新 Session
+    を返す（candidates 自体は新 list として構築される）。
     ``similar_candidates`` は ``clear_similar=True`` で空にする（却下時に使用）。
     """
     new_candidates: list[UserCandidate] = []
@@ -620,8 +623,7 @@ def resolve_candidate(
                 similar_candidates=list(similar),
             )
         )
-    session.candidates = new_candidates
-    return session
+    return replace(session, candidates=new_candidates)
 
 
 def log_operation(session_id: str, cand: UserCandidate, op: str) -> None:

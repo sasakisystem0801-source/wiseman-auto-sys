@@ -73,6 +73,8 @@ def _needs_confirmation_candidate(
     page_index: int = 1,
     name: str = "塩津 美貴子",
     with_similar: bool = True,
+    matched_b_path: str | None = None,
+    matched_c_path: str | None = None,
 ) -> UserCandidate:
     similar = (
         [
@@ -97,8 +99,8 @@ def _needs_confirmation_candidate(
         user_name_ocr=name,
         confidence="medium",
         status=PairStatus.NEEDS_CONFIRMATION,
-        matched_b_path=None,
-        matched_c_path=None,
+        matched_b_path=matched_b_path,
+        matched_c_path=matched_c_path,
         similar_candidates=similar,
     )
 
@@ -143,7 +145,7 @@ class TestResolveCandidate:
         session = _make_session(
             candidates=[_needs_confirmation_candidate(page_index=1)]
         )
-        resolve_candidate(
+        session = resolve_candidate(
             session,
             1,
             status=PairStatus.CONFIRMED,
@@ -157,10 +159,10 @@ class TestResolveCandidate:
 
     def test_reject_from_needs_confirmation_clears_matched(self) -> None:
         """AC-UI-3: 却下 → REJECTED + matched 全 None + similar クリア"""
-        cand = _needs_confirmation_candidate(page_index=1)
-        cand.matched_b_path = "/in/B.pdf"  # 事前にセット
+        # Issue #44: UserCandidate は frozen のため matched_b_path は構築時に渡す。
+        cand = _needs_confirmation_candidate(page_index=1, matched_b_path="/in/B.pdf")
         session = _make_session(candidates=[cand])
-        resolve_candidate(
+        session = resolve_candidate(
             session,
             1,
             status=PairStatus.REJECTED,
@@ -177,7 +179,7 @@ class TestResolveCandidate:
     def test_reject_from_no_match(self) -> None:
         """AC-UI-3: NO_MATCH → REJECTED も許容"""
         session = _make_session(candidates=[_no_match_candidate(page_index=2)])
-        resolve_candidate(
+        session = resolve_candidate(
             session,
             2,
             status=PairStatus.REJECTED,
@@ -189,7 +191,7 @@ class TestResolveCandidate:
     def test_manual_select_stores_paths(self) -> None:
         """AC-UI-4: MANUALLY_SELECTED + 指定パス"""
         session = _make_session(candidates=[_no_match_candidate(page_index=2)])
-        resolve_candidate(
+        session = resolve_candidate(
             session,
             2,
             status=PairStatus.MANUALLY_SELECTED,
@@ -204,7 +206,7 @@ class TestResolveCandidate:
     def test_manual_select_partial_only_b(self) -> None:
         """AC-UI-4: C だけ None も許容（片方キャンセル）"""
         session = _make_session(candidates=[_no_match_candidate(page_index=2)])
-        resolve_candidate(
+        session = resolve_candidate(
             session,
             2,
             status=PairStatus.MANUALLY_SELECTED,
@@ -217,10 +219,10 @@ class TestResolveCandidate:
 
     def test_skip_clears_matched(self) -> None:
         """AC-UI-5: SKIPPED + matched 全 None"""
-        cand = _needs_confirmation_candidate(page_index=1)
-        cand.matched_b_path = "/in/B.pdf"
+        # Issue #44: UserCandidate は frozen のため、matched_b_path は構築時に指定する。
+        cand = _needs_confirmation_candidate(page_index=1, matched_b_path="/in/B.pdf")
         session = _make_session(candidates=[cand])
-        resolve_candidate(
+        session = resolve_candidate(
             session,
             1,
             status=PairStatus.SKIPPED,
@@ -240,7 +242,7 @@ class TestResolveCandidate:
                 _no_match_candidate(page_index=2),
             ]
         )
-        resolve_candidate(
+        session = resolve_candidate(
             session,
             99,
             status=PairStatus.CONFIRMED,
@@ -258,23 +260,28 @@ class TestResolveCandidate:
                 _no_match_candidate(page_index=2),
             ]
         )
-        resolve_candidate(
+        session = resolve_candidate(
             session, 1, status=PairStatus.CONFIRMED, matched_b="/b", matched_c="/c"
         )
         assert session.candidates[0].status == PairStatus.AUTO_MATCHED
         assert session.candidates[2].status == PairStatus.NO_MATCH
 
-    def test_returns_same_session_reference(self) -> None:
+    def test_returns_new_session_preserving_original(self) -> None:
+        """Issue #44: resolve_candidate は新 Session を返し、元 session は不変。"""
         session = _make_session(candidates=[_needs_confirmation_candidate(page_index=1)])
+        original_status = session.candidates[0].status
         result = resolve_candidate(
             session, 1, status=PairStatus.SKIPPED, matched_b=None, matched_c=None
         )
-        assert result is session
+        # 新仕様: 戻り値は別インスタンス、元 session は mutation されていない。
+        assert result is not session
+        assert session.candidates[0].status == original_status
+        assert result.candidates[0].status == PairStatus.SKIPPED
 
     def test_preserves_similar_by_default(self) -> None:
         """承認や手動選択時は similar を残す（監査用、却下時のみクリア）"""
         session = _make_session(candidates=[_needs_confirmation_candidate(page_index=1)])
-        resolve_candidate(
+        session = resolve_candidate(
             session,
             1,
             status=PairStatus.CONFIRMED,
@@ -426,20 +433,20 @@ class TestAllResolvedDetection:
         )
         assert not session.all_candidates_resolved
 
-        resolve_candidate(
+        session = resolve_candidate(
             session, 1, status=PairStatus.CONFIRMED, matched_b="/b1", matched_c="/c1"
         )
-        resolve_candidate(
+        session = resolve_candidate(
             session, 2, status=PairStatus.REJECTED, matched_b=None, matched_c=None
         )
-        resolve_candidate(
+        session = resolve_candidate(
             session,
             3,
             status=PairStatus.MANUALLY_SELECTED,
             matched_b="/mb",
             matched_c="/mc",
         )
-        resolve_candidate(
+        session = resolve_candidate(
             session, 4, status=PairStatus.SKIPPED, matched_b=None, matched_c=None
         )
 
@@ -453,7 +460,7 @@ class TestAllResolvedDetection:
                 _no_match_candidate(page_index=2),
             ]
         )
-        resolve_candidate(
+        session = resolve_candidate(
             session, 1, status=PairStatus.CONFIRMED, matched_b="/b", matched_c="/c"
         )
         assert not session.all_candidates_resolved
@@ -516,22 +523,28 @@ class TestResult:
             r.session = _make_session()  # type: ignore[misc]
 
     def test_resolved_all_is_property_not_stored(self) -> None:
-        """resolved_all は派生値（property）。session 変更で値が追従する"""
+        """resolved_all は派生値（property）。session の状態を直接反映する（二重真実なし）。
+
+        Issue #44: Session immutable 化により resolve_candidate は新 Session を返すため、
+        旧テストの「同一 session 参照が mutation で追従」モデルは成立しない。本テストでは
+        「property として session 状態を計算し、保存値ではない」ことを 2 つの
+        ConfirmDialogResult で検証する。
+        """
         session = _make_session(
             candidates=[_needs_confirmation_candidate(page_index=1)]
         )
-        r = ConfirmDialogResult(session=session)
-        assert r.resolved_all is False
+        r_before = ConfirmDialogResult(session=session)
+        assert r_before.resolved_all is False
 
-        resolve_candidate(
+        updated_session = resolve_candidate(
             session, 1, status=PairStatus.CONFIRMED, matched_b="/b", matched_c="/c"
         )
-        # UI 終了後に呼出側が session を変更しても resolved_all は追従する（二重真実なし）
-        assert r.resolved_all is True
+        r_after = ConfirmDialogResult(session=updated_session)
+        assert r_after.resolved_all is True
 
         # property のため setter は存在しない
         with pytest.raises(AttributeError):
-            r.resolved_all = False  # type: ignore[misc]
+            r_before.resolved_all = False  # type: ignore[misc]
 
     def test_aborted_forces_resolved_all_false(self) -> None:
         """aborted=True なら候補が全解決済みでも resolved_all は False（業務事故防止）

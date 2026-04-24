@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
@@ -220,7 +220,7 @@ def _build_candidate(
             "page %d: low-confidence OCR overrides auto_matched -> needs_confirmation",
             page_index,
         )
-        candidate.status = PairStatus.NEEDS_CONFIRMATION
+        candidate = replace(candidate, status=PairStatus.NEEDS_CONFIRMATION)
 
     return candidate
 
@@ -307,25 +307,36 @@ def run_phase_a(
     )
 
     with with_session_lock(sessions_dir, session.session_id):
-        # resume の TOCTOU 対策: lock 取得前に discard されている可能性があるため
-        # 再確認する。lock 取得後は他プロセスが触れないので以降はこの session を信頼できる。
+        # resume の TOCTOU 対策 (Codex HIGH): lock 取得前に他プロセスが遷移・保存
+        # していた可能性があるため、stale session を使い続けず必ず fresh reload する。
+        # 旧実装は load_session の戻り値を捨てていたため、同一 session_id への二重
+        # resume で後続プロセスが先行プロセスの結果を stale で上書きし、B/C の
+        # 再マッチで異なる利用者 PDF が混入するリスクがあった。
         if is_resume:
             try:
-                load_session(session.session_id, sessions_dir=sessions_dir)
+                session = load_session(session.session_id, sessions_dir=sessions_dir)
             except SessionNotFoundError as e:
                 raise SessionNotFoundError(
                     f"session {session.session_id} was removed while waiting for "
                     f"lock (likely --discard race); aborting resume."
                 ) from e
+            # fresh session が依然 resume 可能な状態か再検証する（別プロセスが先に
+            # READY_TO_MERGE / COMPLETED に進めていた場合は resume 拒否）。
+            if session.status not in _RESUMABLE_STATUSES:
+                raise ValueError(
+                    f"session {session.session_id} is no longer resumable "
+                    f"(status became {session.status.value!r} during lock wait); "
+                    f"expected one of {sorted(s.value for s in _RESUMABLE_STATUSES)}"
+                )
 
         # resume の場合、interrupted → running に遷移（失敗時はそのまま残留）
         if session.status == SessionStatus.INTERRUPTED_PHASE_A:
-            transition_session(session, SessionStatus.RUNNING_PHASE_A)
-        save_session(session, sessions_dir=sessions_dir)
+            session = transition_session(session, SessionStatus.RUNNING_PHASE_A)
+        session = save_session(session, sessions_dir=sessions_dir)
 
         # split は高速なため resume でも再実行（a_page_pdf_bytes_dir には残骸があり得る）
         pages = split_pdf_with_bbox(source_a_path, config.user_name_bbox)
-        session.total_pages_a = len(pages)
+        session = replace(session, total_pages_a=len(pages))
 
         page_dir = _prepare_page_dir(session)
 
@@ -344,10 +355,10 @@ def run_phase_a(
                     ocr_result=ocr_result,
                     matcher=matcher,
                 )
-                session.candidates.append(candidate)
+                session = replace(session, candidates=[*session.candidates, candidate])
 
                 # 1 ページ処理完了ごとに永続化（中断耐性）
-                save_session(session, sessions_dir=sessions_dir)
+                session = save_session(session, sessions_dir=sessions_dir)
         except (Exception, KeyboardInterrupt) as exc:
             # Exception 派生（OcrServerError 等）と KeyboardInterrupt を INTERRUPTED 扱い。
             # SystemExit / GeneratorExit は BaseException 直下のため捕捉せず通過させる
@@ -361,8 +372,8 @@ def run_phase_a(
                 type(exc).__name__,
             )
             try:
-                transition_session(session, SessionStatus.INTERRUPTED_PHASE_A)
-                save_session(session, sessions_dir=sessions_dir)
+                session = transition_session(session, SessionStatus.INTERRUPTED_PHASE_A)
+                session = save_session(session, sessions_dir=sessions_dir)
             except Exception as save_exc:
                 logger.error(
                     "failed to save INTERRUPTED state: session=%s exc=%s",
@@ -374,10 +385,13 @@ def run_phase_a(
         # 全ページ処理完了
         # ページ順を保つためソート（resume で不正挿入があった場合の保険）。
         # save 前に実施してディスクと戻り値の順序を揃える。
-        session.candidates.sort(key=lambda c: c.page_index)
+        session = replace(
+            session,
+            candidates=sorted(session.candidates, key=lambda c: c.page_index),
+        )
         final = _finalize_status(session)
-        transition_session(session, final)
-        save_session(session, sessions_dir=sessions_dir)
+        session = transition_session(session, final)
+        session = save_session(session, sessions_dir=sessions_dir)
         logger.info(
             "run_phase_a done: session=%s status=%s candidates=%d",
             session.session_id,
@@ -487,8 +501,8 @@ def run_phase_b(
     )
 
     with with_session_lock(sessions_dir, session.session_id):
-        transition_session(session, SessionStatus.RUNNING_PHASE_B)
-        save_session(session, sessions_dir=sessions_dir)
+        session = transition_session(session, SessionStatus.RUNNING_PHASE_B)
+        session = save_session(session, sessions_dir=sessions_dir)
 
         try:
             users = _build_user_page_sources(session)
@@ -516,8 +530,8 @@ def run_phase_b(
                 type(exc).__name__,
             )
             try:
-                transition_session(session, SessionStatus.INTERRUPTED_PHASE_B)
-                save_session(session, sessions_dir=sessions_dir)
+                session = transition_session(session, SessionStatus.INTERRUPTED_PHASE_B)
+                session = save_session(session, sessions_dir=sessions_dir)
             except Exception as save_exc:
                 logger.error(
                     "failed to save INTERRUPTED_PHASE_B: session=%s exc=%s",
@@ -526,9 +540,9 @@ def run_phase_b(
                 )
             raise
 
-        session.output_path = str(output_path)
-        transition_session(session, SessionStatus.COMPLETED)
-        save_session(session, sessions_dir=sessions_dir)
+        session = replace(session, output_path=str(output_path))
+        session = transition_session(session, SessionStatus.COMPLETED)
+        session = save_session(session, sessions_dir=sessions_dir)
         # PII 防御: output_path は出力先パスが PII を含む運用想定のためログに出さない。
         # 成功時の output PDF パスは呼出側で session.output_path 経由で参照する（Issue #75）。
         logger.info(

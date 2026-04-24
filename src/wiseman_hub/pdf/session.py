@@ -22,7 +22,7 @@ import time
 from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from glob import glob
@@ -122,9 +122,17 @@ _MATCH_TO_PAIR: dict[MatchStatus, PairStatus] = {
 }
 
 
-@dataclass
+@dataclass(frozen=True)
 class UserCandidate:
-    """1 利用者ページに紐づく状態。"""
+    """1 利用者ページに紐づく状態（Issue #44: frozen immutable）。
+
+    属性を更新する場合は ``dataclasses.replace`` で新インスタンスを構築する。
+
+    注意: ``similar_candidates`` は ``list[CandidateState]`` のため、frozen=True で
+    あっても要素の append/remove など in-place 変更は型レベルでは防げない。変更時は
+    ``replace(candidate, similar_candidates=[...])`` で新 list を渡すこと。
+    型レベルでの deep immutability は Issue #117 で ``tuple`` へ移行予定。
+    """
 
     page_index: int
     user_name_ocr: str
@@ -172,8 +180,19 @@ class UserCandidate:
         )
 
 
-@dataclass
+@dataclass(frozen=True)
 class Session:
+    """Phase A/B のセッション状態（Issue #44: frozen immutable）。
+
+    属性を更新する場合は ``dataclasses.replace`` で新インスタンスを構築する。
+    ``save_session`` / ``transition_session`` は元 session を mutation せず新 Session を返す。
+
+    注意: ``candidates`` は ``list[UserCandidate]`` のため、frozen=True であっても
+    ``session.candidates.append(...)`` のような list 要素の in-place 変更は型レベル
+    では防げない。新しい候補集合を構成する場合は必ず ``replace(session, candidates=[...])``
+    で新 list を渡すこと。型レベルでの deep immutability は Issue #117 で ``tuple`` へ移行予定。
+    """
+
     session_id: str
     status: SessionStatus
     created_at: str
@@ -310,8 +329,12 @@ _VALID_TRANSITIONS: dict[SessionStatus, frozenset[SessionStatus]] = {
 }
 
 
-def transition_session(session: Session, next_status: SessionStatus) -> None:
-    """`session.status` を `next_status` に遷移させる。
+def transition_session(session: Session, next_status: SessionStatus) -> Session:
+    """`session.status` を `next_status` に遷移させた新 ``Session`` を返す。
+
+    Issue #44 immutable 化: 元の ``session`` は mutation されず、status と updated_at を
+    差し替えた新インスタンスを返す。呼出側は ``session = transition_session(session, ...)``
+    のように戻り値で置き換えること。
 
     ADR-010 の状態遷移図と整合しない遷移は `InvalidTransitionError` を送出する。
     `READY_TO_MERGE` への遷移は `session.all_candidates_resolved` を追加検証する
@@ -347,7 +370,11 @@ def transition_session(session: Session, next_status: SessionStatus) -> None:
         session.status.value,
         next_status.value,
     )
-    session.status = next_status
+    return replace(
+        session,
+        status=next_status,
+        updated_at=datetime.now(UTC).isoformat(),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -381,7 +408,12 @@ def validate_session_id(session_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _session_path(session_id: str, sessions_dir: Path) -> Path:
+def session_path(session_id: str, sessions_dir: Path) -> Path:
+    """``session_id`` に対応する JSON 保存先パスを返す（session 存在の保証はしない）。
+
+    Issue #44 以前は private ``_session_path`` だったが、``save_session`` の戻り値を
+    ``Session`` に変更したため、ファイルパスが必要な呼出側向けに public 化した。
+    """
     validate_session_id(session_id)
     return sessions_dir / f"{session_id}.json"
 
@@ -494,10 +526,13 @@ def _sweep_stale_session_tmp(
         logger.warning("session tmp sweep failures: %s", dict(failures))
 
 
-def save_session(session: Session, *, sessions_dir: Path) -> Path:
-    """セッションを JSON としてアトミックに保存する。
+def save_session(session: Session, *, sessions_dir: Path) -> Session:
+    """セッションを JSON としてアトミックに保存し、``updated_at`` を更新した新 Session を返す。
 
-    副作用: ``session.updated_at`` を現在時刻で上書きする（監査ログと整合させるため）。
+    Issue #44 immutable 化: 元の ``session`` は mutation されず、``updated_at`` のみを
+    現在時刻に差し替えた新インスタンスを構築し、それをシリアライズして保存する。
+    呼出側は ``session = save_session(session, ...)`` のように戻り値で置き換えること。
+    保存先パスが必要な場合は ``session_path(session_id, sessions_dir)`` を使う。
     """
     _ensure_sessions_dir(sessions_dir)
     validate_session_id(session.session_id)
@@ -505,24 +540,24 @@ def save_session(session: Session, *, sessions_dir: Path) -> Path:
     # 頻繁な glob だが sessions_dir のファイル数は通常小さく、mtime で並行保護。
     _sweep_stale_session_tmp(sessions_dir)
 
-    session.updated_at = datetime.now(UTC).isoformat()
+    refreshed = replace(session, updated_at=datetime.now(UTC).isoformat())
 
-    data = _to_dict(session)
+    data = _to_dict(refreshed)
     payload = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
 
-    target = _session_path(session.session_id, sessions_dir)
+    target = session_path(refreshed.session_id, sessions_dir)
     # tmp cleanup は atomic_io 側の finally で BaseException 含む全例外時に実施される。
     # write_bytes_atomically は fsync 標準なのでセッション保存の耐障害性要件を満たす。
     # prefix は atomic_io のデフォルト "." を採用（session ディレクトリに sweep 機構は
     # 存在しないため、旧実装の ``.{session_id}.`` prefix を維持する必要はない）。
     write_bytes_atomically(target, payload)
-    return target
+    return refreshed
 
 
 def load_session(session_id: str, *, sessions_dir: Path) -> Session:
     """JSON からセッションを復元する。"""
     validate_session_id(session_id)
-    path = _session_path(session_id, sessions_dir)
+    path = session_path(session_id, sessions_dir)
     if not path.exists():
         raise SessionNotFoundError(f"session not found: {session_id}")
 
@@ -723,7 +758,7 @@ def gc_old_sessions(*, sessions_dir: Path, older_than_days: int = 30) -> list[st
             updated = updated.replace(tzinfo=UTC)
 
         if updated < threshold:
-            path = _session_path(session_id, sessions_dir)
+            path = session_path(session_id, sessions_dir)
             try:
                 remove_session_artifacts(s, sessions_dir)
                 path.unlink()
