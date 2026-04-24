@@ -73,8 +73,16 @@ class FacilityMergeReport:
 
 
 def _collect_pdfs_by_stem(directory: Path) -> dict[str, Path]:
-    """ディレクトリ内の *.pdf をファイル名 stem → Path でマップ化する。"""
+    """ディレクトリ内の *.pdf をファイル名 stem → Path でマップ化する。
+
+    ディレクトリ不在時は空 dict を返すが **warning ログを出す** ことで、
+    UNC 一時的アクセス失敗等によるデータ欠損の silent drop を可視化する
+    （Windows SMB share でネットワーク断時の偽陰性対策）。
+    """
     if not directory.exists():
+        logger.warning(
+            "PDF source directory not found (treating as empty): %s", directory.name
+        )
         return {}
     return {p.stem: p for p in sorted(directory.glob("*.pdf"))}
 
@@ -118,7 +126,9 @@ def merge_facility(
 
     Raises:
         FileNotFoundError: source_a_pdf または facility_dir が存在しない
-        PdfMergeError: PDF 読込/書込失敗
+        PdfCorruptedError: A.pdf が空・破損・非PDF（splitter._open_pdf_or_raise 由来）
+        PdfEncryptedError: A.pdf が暗号化されている（同上）
+        PdfMergeError: B/C 読込または出力書込失敗
     """
     if not source_a_pdf.exists():
         raise FileNotFoundError(f"Source A PDF not found: {source_a_pdf}")

@@ -95,10 +95,16 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.output_root),
         )
     except FileNotFoundError as e:
+        # FileNotFoundError は filename 属性のみ、PII を含まない前提で許容
         print(f"ERROR: {e}", file=sys.stderr)
         return 2
     except Exception as e:
-        print(f"ERROR ({type(e).__name__}): {e}", file=sys.stderr)
+        # PII 防御: 第三者例外（OSError.filename に絶対パス等）は型名のみ表示。
+        # 詳細は logger 経路で取得する。
+        logging.getLogger(__name__).exception(
+            "merge_facility failed with %s", type(e).__name__
+        )
+        print(f"ERROR ({type(e).__name__})", file=sys.stderr)
         return 1
 
     _print_report(report)
