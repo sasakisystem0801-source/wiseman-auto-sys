@@ -423,3 +423,135 @@ class TestMergeFacility:
         # 排他: a_only に入ったら b_missing / c_missing には入らない
         assert "荒木" not in report.b_missing
         assert "荒木" not in report.c_missing
+
+    def test_multi_user_ordered_merge_verifies_page_content(
+        self, workspace: dict[str, Path]
+    ) -> None:
+        """複数利用者の A を分割し、結合可能な B/C のみ **順番通り (A→B→C)** で
+        再結合することを、出力 PDF の各ページ **内容レベル** まで検証する。
+
+        シナリオ:
+          塩津: A + B + C → 3 ページ、順序 A→B→C
+          尾島: A + B + C → 3 ページ、順序 A→B→C
+          藤野: A + B のみ → 2 ページ、順序 A→B（C 欠損）
+          荒木: A + C のみ → 2 ページ、順序 A→C（B 欠損）
+          日浦: A のみ → 1 ページ（B/C 両方欠損）
+
+        `[SRC:A|B|C]` と `[USER:xxx]` は **本テスト専用の in-page 識別タグ** で、
+        `merge_facility` 本体はこれらを認識・要求しない（通常の帳票には存在しない）。
+        PyMuPDF `page.get_text()` 経由で出力 PDF のページ順序と非混入を
+        内容レベル検証するためだけに注入している合成マーカーである。
+        """
+        # A.pdf: 5 ページ 5 利用者、氏名パターン + ソース/姓タグ
+        _make_pdf(
+            workspace["a_pdf"],
+            [
+                "氏名 塩津 美貴子 様 [SRC:A][USER:shiotsu]",
+                "氏名 尾島 太郎 様 [SRC:A][USER:ojima]",
+                "氏名 藤野 花子 様 [SRC:A][USER:fujino]",
+                "氏名 荒木 千春 様 [SRC:A][USER:araki]",
+                "氏名 日浦 太一 様 [SRC:A][USER:hiura]",
+            ],
+        )
+        # B (運動機能向上計画書): 塩津 / 尾島 / 藤野 のみ（荒木・日浦は B なし）
+        _make_pdf(
+            workspace["plan_dir"] / "塩津.pdf",
+            ["計画書 塩津 [SRC:B][USER:shiotsu]"],
+        )
+        _make_pdf(
+            workspace["plan_dir"] / "尾島.pdf",
+            ["計画書 尾島 [SRC:B][USER:ojima]"],
+        )
+        _make_pdf(
+            workspace["plan_dir"] / "藤野.pdf",
+            ["計画書 藤野 [SRC:B][USER:fujino]"],
+        )
+        # C (経過報告書): 塩津 / 尾島 / 荒木 のみ（藤野・日浦は C なし）
+        _make_pdf(
+            workspace["report_dir"] / "塩津.pdf",
+            ["経過 塩津 [SRC:C][USER:shiotsu]"],
+        )
+        _make_pdf(
+            workspace["report_dir"] / "尾島.pdf",
+            ["経過 尾島 [SRC:C][USER:ojima]"],
+        )
+        _make_pdf(
+            workspace["report_dir"] / "荒木.pdf",
+            ["経過 荒木 [SRC:C][USER:araki]"],
+        )
+
+        report = merge_facility(
+            workspace["a_pdf"], workspace["facility_dir"], workspace["output_root"]
+        )
+
+        # ---- レポートレベルの検証 ----
+        entries = {e.user_key: e for e in report.success}
+        assert set(entries.keys()) == {"塩津", "尾島", "藤野", "荒木", "日浦"}
+        assert entries["塩津"].sources_used == ("A", "B", "C")
+        assert entries["尾島"].sources_used == ("A", "B", "C")
+        assert entries["藤野"].sources_used == ("A", "B")
+        assert entries["荒木"].sources_used == ("A", "C")
+        assert entries["日浦"].sources_used == ("A",)
+
+        # 欠損カテゴリの排他性
+        assert "藤野" in report.c_missing
+        assert "荒木" in report.b_missing
+        assert "日浦" in report.a_only
+        assert "日浦" not in report.b_missing
+        assert "日浦" not in report.c_missing
+        # A は全員マッチしているので a_missing は空
+        assert report.a_missing == ()
+        # 氏名抽出は全ページ成功
+        assert report.extraction_failed_pages == ()
+
+        facility_out = workspace["output_root"] / "きなり(メール)"
+
+        # ---- 出力 PDF の内容レベル検証（ページ順序 + 混入なし） ----
+        def _page_texts(path: Path) -> list[str]:
+            doc = fitz.open(path)
+            try:
+                return [doc[i].get_text() for i in range(doc.page_count)]
+            finally:
+                doc.close()
+
+        expected = {
+            "塩津": [("A", "shiotsu"), ("B", "shiotsu"), ("C", "shiotsu")],
+            "尾島": [("A", "ojima"), ("B", "ojima"), ("C", "ojima")],
+            "藤野": [("A", "fujino"), ("B", "fujino")],
+            "荒木": [("A", "araki"), ("C", "araki")],
+            "日浦": [("A", "hiura")],
+        }
+        other_users = {
+            "塩津": ["ojima", "fujino", "araki", "hiura"],
+            "尾島": ["shiotsu", "fujino", "araki", "hiura"],
+            "藤野": ["shiotsu", "ojima", "araki", "hiura"],
+            "荒木": ["shiotsu", "ojima", "fujino", "hiura"],
+            "日浦": ["shiotsu", "ojima", "fujino", "araki"],
+        }
+        for user_key, per_page in expected.items():
+            out_path = facility_out / f"{user_key}.pdf"
+            assert out_path.exists(), f"{user_key} output missing"
+            texts = _page_texts(out_path)
+            assert len(texts) == len(per_page), (
+                f"{user_key}: page count mismatch "
+                f"(expected {len(per_page)}, got {len(texts)})"
+            )
+            # enumerate 順 = 期待順。per_page リストと page_idx の対応関係で
+            # A→B→C の **順序** 保証を行う（各 assert は単ページの tag 存在確認）。
+            for page_idx, (src, user_tag) in enumerate(per_page):
+                page_text = texts[page_idx]
+                assert f"[SRC:{src}]" in page_text, (
+                    f"{user_key} page {page_idx}: "
+                    f"expected [SRC:{src}], got text={page_text!r}"
+                )
+                # 正しい利用者の資料
+                assert f"[USER:{user_tag}]" in page_text, (
+                    f"{user_key} page {page_idx}: "
+                    f"expected [USER:{user_tag}], got text={page_text!r}"
+                )
+                # 他利用者の資料混入なし
+                for other in other_users[user_key]:
+                    assert f"[USER:{other}]" not in page_text, (
+                        f"{user_key} page {page_idx}: "
+                        f"other user {other} leaked, text={page_text!r}"
+                    )
