@@ -57,6 +57,26 @@ class _LauncherLike(Protocol):
     def get_root(self) -> tk.Misc: ...
 
 
+def _make_facility_merger_callback(
+    get_launcher: Callable[[], _LauncherLike],
+) -> Callable[[], None]:
+    """Launcher に注入する「事業所フォルダ結合」コールバックを組み立てる。
+
+    クリック時に FacilityMergerDialog を開き、wait_window でモーダル待機する。
+    実行結果は dialog 内の Text widget に表示され、ダイアログ閉鎖後に制御が戻る。
+    """
+
+    def open_facility_merger() -> None:
+        from wiseman_hub.ui.facility_merger_dialog import FacilityMergerDialog
+
+        launcher = get_launcher()
+        dialog = FacilityMergerDialog(parent=launcher.get_root())
+        # モーダル待機（ダイアログが閉じられるまで制御を返さない）
+        dialog.get_toplevel().wait_window()
+
+    return open_facility_merger
+
+
 def _make_settings_callback(
     config_path: Path,
     get_launcher: Callable[[], _LauncherLike],
@@ -406,6 +426,9 @@ def main() -> None:
                 on_run_phase_b=_make_phase_b_callback(config_path),
                 on_open_settings=_make_settings_callback(
                     config_path, _get_launcher
+                ),
+                on_open_facility_merger=_make_facility_merger_callback(
+                    _get_launcher
                 ),
             )
             launcher_ref[0] = launcher

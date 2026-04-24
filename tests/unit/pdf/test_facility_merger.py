@@ -274,6 +274,102 @@ class TestMergeFacility:
         assert len(fujino_entries) == 1
         assert fujino_entries[0].sources_used == ("B", "C")
 
+    def test_single_char_stem_does_not_misuse_match(
+        self, workspace: dict[str, Path]
+    ) -> None:
+        """1 文字 stem（例: `田.pdf`）は「姓に含まれる」ルールでの誤マッチを起こさない。
+        `田.pdf` が B にあっても、A 抽出姓「田中」に対して誤マッチしてはいけない。
+        完全一致および「stem が姓を含む」ルールの方は許可（`田` が `田中` を含むことは
+        真ではないため、これは元々発動しない）。"""
+        _make_pdf(workspace["a_pdf"], ["氏名 田中 太郎 様"])
+        _make_pdf(workspace["plan_dir"] / "田.pdf", ["計画書 田（1文字）"])
+        workspace["report_dir"].mkdir(parents=True)
+
+        report = merge_facility(
+            workspace["a_pdf"], workspace["facility_dir"], workspace["output_root"]
+        )
+
+        # 田中 エントリは A のみ + B マッチせず（1 文字 stem 除外）
+        tanaka = next(e for e in report.success if e.user_key == "田中")
+        assert tanaka.sources_used == ("A",)
+        assert "田中" in report.a_only  # B/C 両方無し扱い
+        # 田.pdf は Phase 2 で残余として B のみエントリ化される
+        ta_entry = [e for e in report.success if e.user_key == "田"]
+        assert len(ta_entry) == 1
+        assert ta_entry[0].sources_used == ("B",)
+
+    def test_three_same_surname_sequential_suffixes(
+        self, workspace: dict[str, Path]
+    ) -> None:
+        """同姓 3 名以上: `田中` / `田中_2` / `田中_3` と連番継続。"""
+        _make_pdf(
+            workspace["a_pdf"],
+            [
+                "氏名 田中 太郎 様",
+                "氏名 田中 花子 様",
+                "氏名 田中 次郎 様",
+            ],
+        )
+        workspace["plan_dir"].mkdir(parents=True)
+        workspace["report_dir"].mkdir(parents=True)
+
+        report = merge_facility(
+            workspace["a_pdf"], workspace["facility_dir"], workspace["output_root"]
+        )
+
+        keys = {e.user_key for e in report.success}
+        assert keys == {"田中", "田中_2", "田中_3"}
+        assert "田中_2" in report.name_conflicts
+        assert "田中_3" in report.name_conflicts
+        out = workspace["output_root"] / "きなり(メール)"
+        assert (out / "田中.pdf").exists()
+        assert (out / "田中_2.pdf").exists()
+        assert (out / "田中_3.pdf").exists()
+
+    def test_phase2_inverted_c_to_b_name_variation(
+        self, workspace: dict[str, Path]
+    ) -> None:
+        """Phase 2 逆対称: B 側が姓のみ、C 側に【姓様】形式でも同一エントリに統合される。
+        Phase 2 は B 主導でマッチを試みるが、「姓が stem を含む」ルール (len>=2) により
+        B の `藤野` は C の `【藤野様】` にマッチする。"""
+        _make_pdf(workspace["a_pdf"], ["氏名 荒木 千春 様"])
+        _make_pdf(workspace["plan_dir"] / "藤野.pdf", ["計画書 藤野"])
+        _make_pdf(workspace["report_dir"] / "【藤野様】.pdf", ["経過 藤野"])
+
+        report = merge_facility(
+            workspace["a_pdf"], workspace["facility_dir"], workspace["output_root"]
+        )
+
+        # 藤野エントリが 1 つだけ、B+C 結合されている
+        fujino_entries = [e for e in report.success if "藤野" in e.user_key]
+        assert len(fujino_entries) == 1
+        assert fujino_entries[0].sources_used == ("B", "C")
+
+    def test_pii_not_in_missing_lists(self, workspace: dict[str, Path]) -> None:
+        """欠損リスト（a_only/a_missing/b_missing/c_missing/name_conflicts）には
+        user_key（姓 or stem）のみが含まれ、full_name（フルネーム）は含まれない。"""
+        _make_pdf(workspace["a_pdf"], ["氏名 荒木 千春 様"])
+        workspace["plan_dir"].mkdir(parents=True)
+        workspace["report_dir"].mkdir(parents=True)
+
+        report = merge_facility(
+            workspace["a_pdf"], workspace["facility_dir"], workspace["output_root"]
+        )
+
+        for field_name in (
+            "a_only",
+            "a_missing",
+            "b_missing",
+            "c_missing",
+            "name_conflicts",
+        ):
+            values = getattr(report, field_name)
+            for v in values:
+                # full_name (荒木 千春 / 荒木 千春様) の名部分を含まない
+                assert "千春" not in v, (
+                    f"{field_name} contains full name fragment: {v}"
+                )
+
     def test_a_only_not_double_counted_in_missing(
         self, workspace: dict[str, Path]
     ) -> None:
