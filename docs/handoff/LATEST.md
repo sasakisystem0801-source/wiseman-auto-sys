@@ -1,10 +1,10 @@
-# Handoff: facility_merger 回帰テスト強化 + exe 配布準備完了（Session 20 終了時点）
+# Handoff: facility_merger 回帰テスト強化 + exe 配布準備 + 1-C runbook 完備（Session 20 終了時点）
 
 **更新日**: 2026-04-24
-**ブランチ**: main（clean、PR #110 + #111 マージ済）
-**main**: 5059823 (PR #111 squash merged: feat(spec): facility_merger hiddenimports 追加)
+**ブランチ**: main（clean、PR #110 + #111 + #112 + #113 マージ済）
+**main**: cfb7128 (PR #113 squash merged: docs(runbook): 1-C exe 再配布専用ランブック新設)
 
-## セッション 20 の成果（テスト + spec 更新、合計 +135 行）
+## セッション 20 の成果（4 PR、合計 +492 / -25 行）
 
 ### マージ済み
 - **PR #110**: test(facility_merger): 複数利用者 × 混在可用性シナリオで A→B→C 順序と非混入を検証
@@ -18,6 +18,14 @@
   - `wiseman_hub.ui.facility_merger_dialog` / `wiseman_hub.pdf.facility_merger` / `wiseman_hub.pdf.text_name_extractor` を hiddenimports に明示
   - macOS smoke build で 3 モジュールの `Hidden import not found` warning 無しを事前検証
   - `/review-pr` code-reviewer: blocker/important/nice-to-have 全 0 件 → approve 推奨
+
+- **PR #112**: docs(handoff): Session 20 ハンドオフ更新（+110 / -19 行、本ドキュメントの初版）
+
+- **PR #113**: docs(runbook): 1-C exe 再配布専用ランブック新設（Windows 実機単独完走支援）
+  - 2 files, +247 / -6 lines
+  - 新規 `docs/handoff/1c-exe-redistribution-runbook.md`（Phase 0-5、rollback 手順付き、20-30 分想定）
+  - 既存 `folder-merger-mvp-runbook.md` は「ソース実行での MVP 検証」向けで exe 配布フロー未カバーだったギャップを解消
+  - Claude 不在の Windows 実機作業で stuck 発生を最小化する目的
 
 ### 次スプリント方針（Codex セカンドオピニオンで確定）
 
@@ -303,6 +311,7 @@ git pull --ff-only
 ### Session 20 成果物（本セッション）
 - `tests/unit/pdf/test_facility_merger.py`: `test_multi_user_ordered_merge_verifies_page_content`（5 利用者 × 混在可用性 × 内容レベル順序検証）追加
 - `wiseman_hub.spec`: facility_merger 関連 3 モジュールを hiddenimports に明示
+- `docs/handoff/1c-exe-redistribution-runbook.md`: 1-C Windows 実機作業専用ランブック（Phase 0-5 + rollback、238 行）新設
 
 ### Session 19 成果物
 - `src/wiseman_hub/pdf/facility_merger.py`: merge_facility() 本体、9 フィールド報告 dataclass、Phase 1/2 両対称マッチ
