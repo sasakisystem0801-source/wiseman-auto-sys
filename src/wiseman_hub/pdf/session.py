@@ -609,15 +609,17 @@ def _from_dict(data: dict[str, Any], session_id: str) -> Session:
     candidates = [_candidate_from_dict(c, session_id) for c in data["candidates"]]
 
     total_pages_a = data.get("total_pages_a")
-    if total_pages_a is not None and not isinstance(total_pages_a, int):
+    if total_pages_a is not None and (
+        isinstance(total_pages_a, bool) or not isinstance(total_pages_a, int)
+    ):
         raise SessionCorruptedError(
             f"total_pages_a must be int or absent in {session_id}: "
             f"{type(total_pages_a).__name__}"
         )
 
-    # Issue #49: page_index invariant 検証（uniqueness + range）。
-    # 同姓重複時に confirm_dialog の page_index マッチで別利用者へ B/C を誤添付する
-    # リスクを load 時点で遮断する。
+    # page_index は candidate を一意に識別するキー。重複があると
+    # confirm_dialog などの page_index マッチで別利用者へ B/C を誤添付しうるため、
+    # load 時に invariant を境界で確定させる（uniqueness + range）。
     seen: set[int] = set()
     for c in candidates:
         if c.page_index in seen:
@@ -657,9 +659,8 @@ def _candidate_from_dict(data: dict[str, Any], session_id: str) -> UserCandidate
             f"candidate in {session_id} missing required fields: {missing}"
         )
 
-    # Issue #49: page_index invariant 検証（type / non-negative）。
-    # 一意性と total_pages_a 範囲は session 全体の検証として _from_dict で行う。
-    # bool は int サブクラスだが page_index 値としては不正なので除外する。
+    # bool は int サブクラスだが page_index 値としては不正なので明示除外する。
+    # （uniqueness と total_pages_a 範囲は _from_dict で session 単位に検証）
     page_index = data["page_index"]
     if isinstance(page_index, bool) or not isinstance(page_index, int):
         raise SessionCorruptedError(

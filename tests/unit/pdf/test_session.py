@@ -372,10 +372,11 @@ class TestLoadErrors:
 
 
 class TestPageIndexInvariant:
-    """Issue #49: load_session 時の page_index invariant 検証。
+    """load_session 時の page_index invariant 検証。
 
-    medical PII 文脈で同姓重複時に別利用者 PDF 混入を防ぐ防御線。
-    破損 / 手動復旧 / stale overwrite 由来の duplicate page_index を早期検出する。
+    page_index は candidate を一意に識別するキーであり、破損 / 手動復旧 /
+    stale overwrite 由来の duplicate / 範囲外は別利用者 PDF 混入のリスク源
+    （medical PII 文脈）。load 時に境界で fail-hard する。
     """
 
     def _payload(
@@ -412,8 +413,29 @@ class TestPageIndexInvariant:
             "similar_candidates": [],
         }
 
+    def test_load_accepts_valid_boundary_page_indexes(self, tmp_path: Path) -> None:
+        """happy-path: 0 と total_pages_a-1 の boundary value は共に valid。
+
+        invariant 検証ロジックの off-by-one regression 防御。
+        """
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        sid = "valid-boundaries"
+        payload = self._payload(
+            tmp_path,
+            sid,
+            [self._candidate(0), self._candidate(2), self._candidate(4)],  # 0, mid, total-1
+            total_pages_a=5,
+        )
+        (sessions_dir / f"{sid}.json").write_text(json.dumps(payload))
+
+        session = load_session(sid, sessions_dir=sessions_dir)
+
+        assert [c.page_index for c in session.candidates] == [0, 2, 4]
+        assert session.total_pages_a == 5
+
     def test_load_rejects_non_int_page_index(self, tmp_path: Path) -> None:
-        """AC-PI-1: page_index が int でない場合 SessionCorruptedError。"""
+        """page_index が int でない場合 SessionCorruptedError。"""
         sessions_dir = tmp_path / ".sessions"
         sessions_dir.mkdir()
         for bad_value in ("0", 1.5, None):
@@ -421,36 +443,37 @@ class TestPageIndexInvariant:
             payload = self._payload(tmp_path, sid, [self._candidate(bad_value)])
             (sessions_dir / f"{sid}.json").write_text(json.dumps(payload))
 
-            with pytest.raises(SessionCorruptedError, match="page_index"):
+            with pytest.raises(SessionCorruptedError, match=r"non-int page_index"):
                 load_session(sid, sessions_dir=sessions_dir)
 
     def test_load_rejects_bool_page_index(self, tmp_path: Path) -> None:
-        """AC-PI-1 (補強): bool は int サブクラスだが page_index としては invalid。"""
+        """bool は int サブクラスだが page_index としては invalid。"""
         sessions_dir = tmp_path / ".sessions"
         sessions_dir.mkdir()
         sid = "bad-bool"
         payload = self._payload(tmp_path, sid, [self._candidate(True)])
         (sessions_dir / f"{sid}.json").write_text(json.dumps(payload))
 
-        with pytest.raises(SessionCorruptedError, match="page_index"):
+        with pytest.raises(SessionCorruptedError, match=r"non-int page_index"):
             load_session(sid, sessions_dir=sessions_dir)
 
     def test_load_rejects_negative_page_index(self, tmp_path: Path) -> None:
-        """AC-PI-2: page_index が負値の場合 SessionCorruptedError。"""
+        """page_index が負値の場合 SessionCorruptedError。"""
         sessions_dir = tmp_path / ".sessions"
         sessions_dir.mkdir()
         sid = "negative"
         payload = self._payload(tmp_path, sid, [self._candidate(-1)])
         (sessions_dir / f"{sid}.json").write_text(json.dumps(payload))
 
-        with pytest.raises(SessionCorruptedError, match="page_index"):
+        with pytest.raises(SessionCorruptedError, match=r"negative page_index: -1"):
             load_session(sid, sessions_dir=sessions_dir)
 
     def test_load_rejects_duplicate_page_index(self, tmp_path: Path) -> None:
-        """AC-PI-3: 同一 session 内で page_index が重複する場合 SessionCorruptedError。
+        """同一 session 内で page_index が重複する場合 SessionCorruptedError。
 
-        同姓重複時に confirm_dialog.py:610 の page_index マッチングで
-        別利用者へ B/C を誤添付するリスクの防御線。
+        page_index に基づく candidate 同定（confirm_dialog の page_index マッチや
+        Phase B の page artifact 読み込み）で別利用者へ B/C を誤添付する
+        リスクの防御線。エラーメッセージに重複値を含めて運用デバッグを支援する。
         """
         sessions_dir = tmp_path / ".sessions"
         sessions_dir.mkdir()
@@ -462,11 +485,11 @@ class TestPageIndexInvariant:
         )
         (sessions_dir / f"{sid}.json").write_text(json.dumps(payload))
 
-        with pytest.raises(SessionCorruptedError, match="duplicate page_index"):
+        with pytest.raises(SessionCorruptedError, match=r"duplicate page_index=0"):
             load_session(sid, sessions_dir=sessions_dir)
 
     def test_load_rejects_out_of_range_page_index(self, tmp_path: Path) -> None:
-        """AC-PI-4: total_pages_a 設定時、page_index が範囲外なら SessionCorruptedError。"""
+        """total_pages_a 設定時、page_index が範囲外なら SessionCorruptedError。"""
         sessions_dir = tmp_path / ".sessions"
         sessions_dir.mkdir()
         sid = "out-of-range"
@@ -479,11 +502,34 @@ class TestPageIndexInvariant:
         )
         (sessions_dir / f"{sid}.json").write_text(json.dumps(payload))
 
-        with pytest.raises(SessionCorruptedError, match="page_index"):
+        with pytest.raises(
+            SessionCorruptedError,
+            match=r"page_index=5 >= total_pages_a=5",
+        ):
+            load_session(sid, sessions_dir=sessions_dir)
+
+    def test_load_rejects_bool_total_pages_a(self, tmp_path: Path) -> None:
+        """total_pages_a も bool は除外（page_index と対称な型契約）。
+
+        JSON で `true`/`false` が入った場合 isinstance(_, int) は通過してしまうため、
+        bool は明示除外する。
+        """
+        sessions_dir = tmp_path / ".sessions"
+        sessions_dir.mkdir()
+        sid = "bool-total"
+        payload = self._payload(
+            tmp_path,
+            sid,
+            [self._candidate(0)],
+            total_pages_a=True,  # type: ignore[arg-type]
+        )
+        (sessions_dir / f"{sid}.json").write_text(json.dumps(payload))
+
+        with pytest.raises(SessionCorruptedError, match=r"total_pages_a"):
             load_session(sid, sessions_dir=sessions_dir)
 
     def test_load_skips_range_check_without_total_pages_a(self, tmp_path: Path) -> None:
-        """AC-PI-5: total_pages_a が None の場合、範囲検証はスキップ（型/一意性のみ）。
+        """total_pages_a が None の場合、範囲検証はスキップ（型/一意性のみ）。
 
         旧 schema 互換性維持。total_pages_a が記録されていないセッションでも load 可能。
         """
