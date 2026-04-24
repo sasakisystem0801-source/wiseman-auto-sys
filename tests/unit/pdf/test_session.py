@@ -1733,3 +1733,48 @@ class TestImmutability:
 
         with pytest.raises(_dc.FrozenInstanceError):
             loaded.updated_at = "2030-01-01T00:00:00+00:00"  # type: ignore[misc]
+
+    def test_save_session_io_failure_does_not_mutate_input(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC-IM-2 強化: save_session の IO 失敗時、入力 session は mutation されない。
+
+        `write_bytes_atomically` を OSError で失敗させ、例外後に元 session の
+        updated_at が保持されていることを検証する（frozen 契約の強化）。
+        """
+        from wiseman_hub.pdf import session as session_mod
+
+        sessions_dir = tmp_path / ".sessions"
+        original_updated_at = "2020-01-01T00:00:00+00:00"
+        s = _make_session(tmp_path, updated_at=original_updated_at)
+
+        def failing_write(*args: Any, **kwargs: Any) -> None:
+            raise OSError("simulated disk full")
+
+        monkeypatch.setattr(session_mod, "write_bytes_atomically", failing_write)
+
+        with pytest.raises(OSError, match="simulated disk full"):
+            save_session(s, sessions_dir=sessions_dir)
+
+        # 元 session は mutation されていない（frozen + replace の合成効果）
+        assert s.updated_at == original_updated_at
+
+    def test_transition_session_invalid_does_not_mutate_input(
+        self, tmp_path: Path
+    ) -> None:
+        """AC-IM-3 強化: InvalidTransitionError 送出時、入力 session は mutation されない。
+
+        frozen 化により論理的には破綻しないが、将来 pre-validation に mutation を混入
+        させる regression を構造的に防ぐ。
+        """
+        s = _make_session(tmp_path, status=SessionStatus.RUNNING_PHASE_A)
+        original_status = s.status
+        original_updated_at = s.updated_at
+
+        # RUNNING_PHASE_A → COMPLETED は ADR-010 状態遷移表にない
+        with pytest.raises(InvalidTransitionError):
+            transition_session(s, SessionStatus.COMPLETED)
+
+        # 元 session は mutation されていない
+        assert s.status == original_status
+        assert s.updated_at == original_updated_at

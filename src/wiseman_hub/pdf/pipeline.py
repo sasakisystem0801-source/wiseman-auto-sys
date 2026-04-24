@@ -220,7 +220,6 @@ def _build_candidate(
             "page %d: low-confidence OCR overrides auto_matched -> needs_confirmation",
             page_index,
         )
-        # Issue #44: UserCandidate は frozen のため replace で昇格。
         candidate = replace(candidate, status=PairStatus.NEEDS_CONFIRMATION)
 
     return candidate
@@ -308,19 +307,29 @@ def run_phase_a(
     )
 
     with with_session_lock(sessions_dir, session.session_id):
-        # resume の TOCTOU 対策: lock 取得前に discard されている可能性があるため
-        # 再確認する。lock 取得後は他プロセスが触れないので以降はこの session を信頼できる。
+        # resume の TOCTOU 対策 (Codex HIGH): lock 取得前に他プロセスが遷移・保存
+        # していた可能性があるため、stale session を使い続けず必ず fresh reload する。
+        # 旧実装は load_session の戻り値を捨てていたため、同一 session_id への二重
+        # resume で後続プロセスが先行プロセスの結果を stale で上書きし、B/C の
+        # 再マッチで異なる利用者 PDF が混入するリスクがあった。
         if is_resume:
             try:
-                load_session(session.session_id, sessions_dir=sessions_dir)
+                session = load_session(session.session_id, sessions_dir=sessions_dir)
             except SessionNotFoundError as e:
                 raise SessionNotFoundError(
                     f"session {session.session_id} was removed while waiting for "
                     f"lock (likely --discard race); aborting resume."
                 ) from e
+            # fresh session が依然 resume 可能な状態か再検証する（別プロセスが先に
+            # READY_TO_MERGE / COMPLETED に進めていた場合は resume 拒否）。
+            if session.status not in _RESUMABLE_STATUSES:
+                raise ValueError(
+                    f"session {session.session_id} is no longer resumable "
+                    f"(status became {session.status.value!r} during lock wait); "
+                    f"expected one of {sorted(s.value for s in _RESUMABLE_STATUSES)}"
+                )
 
         # resume の場合、interrupted → running に遷移（失敗時はそのまま残留）
-        # Issue #44: transition_session / save_session は新 Session を返す。
         if session.status == SessionStatus.INTERRUPTED_PHASE_A:
             session = transition_session(session, SessionStatus.RUNNING_PHASE_A)
         session = save_session(session, sessions_dir=sessions_dir)
@@ -346,7 +355,6 @@ def run_phase_a(
                     ocr_result=ocr_result,
                     matcher=matcher,
                 )
-                # Issue #44: candidates list も immutable 化。新 list で replace。
                 session = replace(session, candidates=[*session.candidates, candidate])
 
                 # 1 ページ処理完了ごとに永続化（中断耐性）
@@ -377,7 +385,6 @@ def run_phase_a(
         # 全ページ処理完了
         # ページ順を保つためソート（resume で不正挿入があった場合の保険）。
         # save 前に実施してディスクと戻り値の順序を揃える。
-        # Issue #44: in-place sort は frozen 下で禁止、sorted で新 list → replace。
         session = replace(
             session,
             candidates=sorted(session.candidates, key=lambda c: c.page_index),

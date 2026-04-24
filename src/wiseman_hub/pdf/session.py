@@ -130,8 +130,8 @@ class UserCandidate:
 
     注意: ``similar_candidates`` は ``list[CandidateState]`` のため、frozen=True で
     あっても要素の append/remove など in-place 変更は型レベルでは防げない。変更時は
-    ``replace(candidate, similar_candidates=[...])`` で新 list を渡すこと。将来的には
-    ``tuple[CandidateState, ...]`` への型移行を検討中（``Session.candidates`` と統一）。
+    ``replace(candidate, similar_candidates=[...])`` で新 list を渡すこと。
+    型レベルでの deep immutability は Issue #117 で ``tuple`` へ移行予定。
     """
 
     page_index: int
@@ -190,7 +190,7 @@ class Session:
     注意: ``candidates`` は ``list[UserCandidate]`` のため、frozen=True であっても
     ``session.candidates.append(...)`` のような list 要素の in-place 変更は型レベル
     では防げない。新しい候補集合を構成する場合は必ず ``replace(session, candidates=[...])``
-    で新 list を渡すこと。将来的には ``tuple[UserCandidate, ...]`` への型移行を検討中。
+    で新 list を渡すこと。型レベルでの deep immutability は Issue #117 で ``tuple`` へ移行予定。
     """
 
     session_id: str
