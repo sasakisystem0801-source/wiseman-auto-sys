@@ -4,18 +4,18 @@
 **ブランチ**: main（clean、PR #115 + #116 マージ済）
 **main**: 28c1440 (PR #116 squash merged: refactor(session): Issue #44 Session/UserCandidate 完全 immutable 化)
 
-## セッション 21 の成果（2 PR、合計 +736 / -144 行）
+## セッション 21 の成果（2 PR、合計 +687 / -143 行）
 
 ### マージ済み
 - **PR #115**: docs(runbook): 1-C に Phase 3-B（既存機能 regression smoke）追加（Issue #80 手動部分カバー）
-  - 1 file, +49 / -1 行（fix-up 2 commits）
+  - 1 file, +48 / -1 行（fix-up 2 commits）
   - 1-C Windows 実機セッションで `facility_merger` 以外の既存機能（Phase A マージ / Phase B 確認）起動を確認する任意 section 追加
   - Issue #80 の「手動 smoke 部分」をカバー（Issue #80 本体の CI 自動化はタスク 15 で別途）
   - 1-C 完走判定に影響しない fail-safe 設計（3-B 失敗は別件 regression として記録）
   - `/review-pr` 2 エージェント並列（comment-analyzer / code-reviewer）→ approve 推奨、nice-to-have 1 件反映
 
 - **PR #116**: refactor(session): Issue #44 Session/UserCandidate 完全 immutable 化
-  - 9 files, +687 / -143 行（2 commits: 初版 + Codex HIGH fix-up）
+  - 9 files, +639 / -142 行（2 commits: 初版 + Codex HIGH fix-up）
   - `Session` / `UserCandidate` を `@dataclass(frozen=True)` 化、7 箇所の mutation を `dataclasses.replace` に置換
   - `save_session(session) -> Session` / `transition_session(session, ns) -> Session` 戻り値契約変更
   - `session_path()` public 化（旧 `_session_path` 削除）
@@ -88,7 +88,7 @@
 - **Partial Update CRITICAL の威力**: CLAUDE.md「DBにPartial Update する関数を追加/変更 → テストに更新対象外フィールドの値が変化しないこと」規範により、AC-IM-2/3 の「更新対象外フィールド全列挙の for-loop 検証」が導出された。この構造が save_session/transition_session の silent mutation regression を確実に捕捉する
 
 ### 総変更量（Session 21）
-- 2 PRs, 10 files changed, +736 / -144 行
+- 2 PRs, 10 files changed, +687 / -143 行
 - テスト件数: 538 passed → **551 passed**（+13: AC-IM テスト 9 + Codex HIGH regression 1 + `_build_candidate` / `save_session` IO 失敗 / `transition_session` invalid の mutation 検証 3）
 - skip: 68（変化なし）
 - 全ローカル検証 PASS（pytest 551 / ruff / mypy 33 source files）
