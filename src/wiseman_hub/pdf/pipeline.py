@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
@@ -220,7 +220,8 @@ def _build_candidate(
             "page %d: low-confidence OCR overrides auto_matched -> needs_confirmation",
             page_index,
         )
-        candidate.status = PairStatus.NEEDS_CONFIRMATION
+        # Issue #44: UserCandidate は frozen のため replace で昇格。
+        candidate = replace(candidate, status=PairStatus.NEEDS_CONFIRMATION)
 
     return candidate
 
@@ -319,13 +320,14 @@ def run_phase_a(
                 ) from e
 
         # resume の場合、interrupted → running に遷移（失敗時はそのまま残留）
+        # Issue #44: transition_session / save_session は新 Session を返す。
         if session.status == SessionStatus.INTERRUPTED_PHASE_A:
-            transition_session(session, SessionStatus.RUNNING_PHASE_A)
-        save_session(session, sessions_dir=sessions_dir)
+            session = transition_session(session, SessionStatus.RUNNING_PHASE_A)
+        session = save_session(session, sessions_dir=sessions_dir)
 
         # split は高速なため resume でも再実行（a_page_pdf_bytes_dir には残骸があり得る）
         pages = split_pdf_with_bbox(source_a_path, config.user_name_bbox)
-        session.total_pages_a = len(pages)
+        session = replace(session, total_pages_a=len(pages))
 
         page_dir = _prepare_page_dir(session)
 
@@ -344,10 +346,11 @@ def run_phase_a(
                     ocr_result=ocr_result,
                     matcher=matcher,
                 )
-                session.candidates.append(candidate)
+                # Issue #44: candidates list も immutable 化。新 list で replace。
+                session = replace(session, candidates=[*session.candidates, candidate])
 
                 # 1 ページ処理完了ごとに永続化（中断耐性）
-                save_session(session, sessions_dir=sessions_dir)
+                session = save_session(session, sessions_dir=sessions_dir)
         except (Exception, KeyboardInterrupt) as exc:
             # Exception 派生（OcrServerError 等）と KeyboardInterrupt を INTERRUPTED 扱い。
             # SystemExit / GeneratorExit は BaseException 直下のため捕捉せず通過させる
@@ -361,8 +364,8 @@ def run_phase_a(
                 type(exc).__name__,
             )
             try:
-                transition_session(session, SessionStatus.INTERRUPTED_PHASE_A)
-                save_session(session, sessions_dir=sessions_dir)
+                session = transition_session(session, SessionStatus.INTERRUPTED_PHASE_A)
+                session = save_session(session, sessions_dir=sessions_dir)
             except Exception as save_exc:
                 logger.error(
                     "failed to save INTERRUPTED state: session=%s exc=%s",
@@ -374,10 +377,14 @@ def run_phase_a(
         # 全ページ処理完了
         # ページ順を保つためソート（resume で不正挿入があった場合の保険）。
         # save 前に実施してディスクと戻り値の順序を揃える。
-        session.candidates.sort(key=lambda c: c.page_index)
+        # Issue #44: in-place sort は frozen 下で禁止、sorted で新 list → replace。
+        session = replace(
+            session,
+            candidates=sorted(session.candidates, key=lambda c: c.page_index),
+        )
         final = _finalize_status(session)
-        transition_session(session, final)
-        save_session(session, sessions_dir=sessions_dir)
+        session = transition_session(session, final)
+        session = save_session(session, sessions_dir=sessions_dir)
         logger.info(
             "run_phase_a done: session=%s status=%s candidates=%d",
             session.session_id,
@@ -487,8 +494,8 @@ def run_phase_b(
     )
 
     with with_session_lock(sessions_dir, session.session_id):
-        transition_session(session, SessionStatus.RUNNING_PHASE_B)
-        save_session(session, sessions_dir=sessions_dir)
+        session = transition_session(session, SessionStatus.RUNNING_PHASE_B)
+        session = save_session(session, sessions_dir=sessions_dir)
 
         try:
             users = _build_user_page_sources(session)
@@ -516,8 +523,8 @@ def run_phase_b(
                 type(exc).__name__,
             )
             try:
-                transition_session(session, SessionStatus.INTERRUPTED_PHASE_B)
-                save_session(session, sessions_dir=sessions_dir)
+                session = transition_session(session, SessionStatus.INTERRUPTED_PHASE_B)
+                session = save_session(session, sessions_dir=sessions_dir)
             except Exception as save_exc:
                 logger.error(
                     "failed to save INTERRUPTED_PHASE_B: session=%s exc=%s",
@@ -526,9 +533,9 @@ def run_phase_b(
                 )
             raise
 
-        session.output_path = str(output_path)
-        transition_session(session, SessionStatus.COMPLETED)
-        save_session(session, sessions_dir=sessions_dir)
+        session = replace(session, output_path=str(output_path))
+        session = transition_session(session, SessionStatus.COMPLETED)
+        session = save_session(session, sessions_dir=sessions_dir)
         # PII 防御: output_path は出力先パスが PII を含む運用想定のためログに出さない。
         # 成功時の output PDF パスは呼出側で session.output_path 経由で参照する（Issue #75）。
         logger.info(

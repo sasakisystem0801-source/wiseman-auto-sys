@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,22 @@ from wiseman_hub.ui.confirm_dialog import ConfirmDialogResult
 # ---------------------------------------------------------------------------
 # Test fixtures
 # ---------------------------------------------------------------------------
+
+
+def _promote_needs_confirmation(
+    candidates: list[UserCandidate],
+) -> list[UserCandidate]:
+    """NEEDS_CONFIRMATION の候補のみ CONFIRMED に昇格した新 list を返す。
+
+    race 系テストと _FakeDialog.resolve_in_run で共通する「全未解決候補の承認」
+    パターンを DRY 化するための小 helper。
+    """
+    return [
+        replace(c, status=PairStatus.CONFIRMED)
+        if c.status == PairStatus.NEEDS_CONFIRMATION
+        else c
+        for c in candidates
+    ]
 
 
 def _resolved_candidate(page_index: int = 0) -> UserCandidate:
@@ -109,13 +126,20 @@ class _FakeDialog:
     def run(self) -> ConfirmDialogResult:
         self.call_count += 1
         if self._on_run is not None:
-            self._on_run(self._session, self._sessions_dir)
+            # Issue #44: race 系テストは on_run 戻り値で FakeDialog._session を差し替える
+            # ことで、他プロセス先回りや巻戻し模倣後の dialog 内 session 状態を表現する。
+            # 戻り値が None（既存コールバック）なら session は維持する。
+            updated = self._on_run(self._session, self._sessions_dir)
+            if updated is not None:
+                self._session = updated
         if self._resolve_in_run and not self._result_aborted:
-            # 全候補を CONFIRMED に遷移させて save（本物 ConfirmDialog と同じ契約）
-            for c in self._session.candidates:
-                if c.status == PairStatus.NEEDS_CONFIRMATION:
-                    c.status = PairStatus.CONFIRMED
-            save_session(self._session, sessions_dir=self._sessions_dir)
+            self._session = replace(
+                self._session,
+                candidates=_promote_needs_confirmation(self._session.candidates),
+            )
+            self._session = save_session(
+                self._session, sessions_dir=self._sessions_dir
+            )
         return ConfirmDialogResult(
             session=self._session, aborted=self._result_aborted
         )
@@ -234,20 +258,19 @@ class TestReadyToMergeEarlyReturn:
         sessions_dir = tmp_path / ".sessions"
         session = _make_needs_review_session(tmp_path)
 
-        # dialog 中に候補を解決（in-memory + disk）し、同時に他プロセスが
-        # 先回りして READY_TO_MERGE 遷移させた状況を模倣する
-        def race_to_ready(s: Session, d: Path) -> None:
-            # 1) in-memory 側を解決（resolved_all=True のシグナルを dialog 側で維持）
-            for c in s.candidates:
-                if c.status == PairStatus.NEEDS_CONFIRMATION:
-                    c.status = PairStatus.CONFIRMED
-            # 2) ディスクを直接 READY_TO_MERGE に書き換え（他プロセス先回りの模倣）
+        # dialog 中に候補を解決 + 他プロセスが先回りして READY_TO_MERGE 遷移させた状況。
+        # Issue #44: on_run 戻り値で FakeDialog._session を差し替えることで in-memory
+        # も resolved 状態にする（FakeDialog._session.candidates が resolved_all=True
+        # を満たさないと review_flow が unresolved で早期 return してしまうため）。
+        def race_to_ready(s: Session, d: Path) -> Session:
             racer = load_session(s.session_id, sessions_dir=d)
-            for c in racer.candidates:
-                if c.status == PairStatus.NEEDS_CONFIRMATION:
-                    c.status = PairStatus.CONFIRMED
-            racer.status = SessionStatus.READY_TO_MERGE
+            racer = replace(
+                racer,
+                candidates=_promote_needs_confirmation(racer.candidates),
+                status=SessionStatus.READY_TO_MERGE,
+            )
             save_session(racer, sessions_dir=d)
+            return racer
 
         factory = _make_factory(on_run=race_to_ready, resolve_in_run=False)
 
@@ -450,16 +473,24 @@ class TestConcurrentModification:
         sessions_dir = tmp_path / ".sessions"
         session = _make_needs_review_session(tmp_path)
 
-        # dialog の on_run で候補を解決 + ディスク上 status を COMPLETED に書換
-        def race_to_completed(s: Session, d: Path) -> None:
-            for c in s.candidates:
-                if c.status == PairStatus.NEEDS_CONFIRMATION:
-                    c.status = PairStatus.CONFIRMED
-            save_session(s, sessions_dir=d)
-            # 他プロセスが COMPLETED 遷移させた状態を模倣
+        # dialog の on_run で候補を解決 + ディスク上 status を COMPLETED に書換。
+        # Issue #44: on_run 戻り値で dialog 内 session も resolved 化し in-memory
+        # を resolved_all=True に保つ（review_flow が unresolved で早期 return しないように）。
+        def race_to_completed(s: Session, d: Path) -> Session:
+            # dialog 内 in-memory 用: candidates を CONFIRMED にした session
+            in_memory = replace(
+                s,
+                candidates=_promote_needs_confirmation(s.candidates),
+            )
+            # Disk は他プロセスが COMPLETED 遷移させた状態を模倣（candidates も解決済）
             racer = load_session(s.session_id, sessions_dir=d)
-            racer.status = SessionStatus.COMPLETED
+            racer = replace(
+                racer,
+                candidates=in_memory.candidates,
+                status=SessionStatus.COMPLETED,
+            )
             save_session(racer, sessions_dir=d)
+            return in_memory
 
         factory = _make_factory(on_run=race_to_completed, resolve_in_run=False)
 
@@ -479,17 +510,23 @@ class TestConcurrentModification:
         sessions_dir = tmp_path / ".sessions"
         session = _make_needs_review_session(tmp_path)
 
-        def race_unresolve(s: Session, d: Path) -> None:
-            # dialog は候補を CONFIRMED にして save するが、後から別プロセスが
-            # NEEDS_CONFIRMATION に戻した状態を模倣
-            for c in s.candidates:
-                if c.status == PairStatus.NEEDS_CONFIRMATION:
-                    c.status = PairStatus.CONFIRMED
-            save_session(s, sessions_dir=d)
+        # Issue #44: on_run 戻り値で dialog 内 session を resolved 化し、
+        # disk は別プロセスにより NEEDS_CONFIRMATION に巻き戻された状態を模倣する。
+        def race_unresolve(s: Session, d: Path) -> Session:
+            # dialog 内: 全 candidates を CONFIRMED に
+            in_memory = replace(
+                s,
+                candidates=_promote_needs_confirmation(s.candidates),
+            )
+            # disk: 他プロセスが candidates を NEEDS_CONFIRMATION に巻き戻した
             racer = load_session(s.session_id, sessions_dir=d)
-            for c in racer.candidates:
-                c.status = PairStatus.NEEDS_CONFIRMATION
+            reverted = [
+                replace(c, status=PairStatus.NEEDS_CONFIRMATION)
+                for c in racer.candidates
+            ]
+            racer = replace(racer, candidates=reverted)
             save_session(racer, sessions_dir=d)
+            return in_memory
 
         factory = _make_factory(on_run=race_unresolve, resolve_in_run=False)
 

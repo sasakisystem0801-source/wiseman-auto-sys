@@ -384,6 +384,63 @@ class TestInterruption:
         # ページ順は保証される
         assert [c.page_index for c in resumed.candidates] == [0, 1, 2]
 
+    def test_run_phase_a_does_not_mutate_input_session_on_resume(
+        self, tmp_path: Path
+    ) -> None:
+        """AC-IM-4: resume 時に渡した入力 session は mutation されない（Issue #44）。
+
+        run_phase_a 後も呼出側が保持する元 session の全フィールドは replace 以前の値の
+        まま。新状態は戻り値 session 経由でのみ受け取る契約を直接検証する。
+        """
+        a_pdf = _make_pdf_file(tmp_path, "A.pdf", num_pages=2)
+        sessions_dir = tmp_path / ".sessions"
+
+        # 1 回目: 2 ページ目で中断 → INTERRUPTED_PHASE_A セッション作成
+        ocr1 = FakeOcrClient([_ocr_high("u0"), KeyboardInterrupt()])
+        matcher1 = FakeMatcher({"u0": _match_auto()})
+        with pytest.raises(KeyboardInterrupt):
+            run_phase_a(
+                source_a_path=a_pdf,
+                config=_config(tmp_path),
+                ocr_client=ocr1,
+                matcher=matcher1,
+                sessions_dir=sessions_dir,
+            )
+        sid = list_sessions(sessions_dir=sessions_dir)[0]
+        original = load_session(sid, sessions_dir=sessions_dir)
+
+        # mutation 検知用の全フィールドスナップショット
+        snap = {
+            "status": original.status,
+            "updated_at": original.updated_at,
+            "candidates": list(original.candidates),
+            "total_pages_a": original.total_pages_a,
+            "output_path": original.output_path,
+            "session_id": original.session_id,
+            "created_at": original.created_at,
+        }
+
+        # 2 回目: resume 実行
+        ocr2 = FakeOcrClient([_ocr_high("u1")])
+        matcher2 = FakeMatcher({"u1": _match_auto()})
+        resumed = run_phase_a(
+            source_a_path=a_pdf,
+            config=_config(tmp_path),
+            ocr_client=ocr2,
+            matcher=matcher2,
+            sessions_dir=sessions_dir,
+            session=original,
+        )
+        # 戻り値 session は期待通り進行
+        assert resumed.status == SessionStatus.READY_TO_MERGE
+        assert resumed is not original
+
+        # 元 session は全フィールド不変（AC-IM-4 CRITICAL）
+        for field_name, expected in snap.items():
+            assert getattr(original, field_name) == expected, (
+                f"run_phase_a が input session の {field_name} を mutation した"
+            )
+
     def test_resume_rejects_modified_source_a(self, tmp_path: Path) -> None:
         """Codex HIGH-3: source A が差し替えられたら resume 拒否。"""
         from wiseman_hub.pdf.pipeline import SourceAFingerprintMismatchError
@@ -831,6 +888,53 @@ class TestRunPhaseBHappyPath:
         reloaded = load_session(session.session_id, sessions_dir=sessions_dir)
         assert reloaded.status == SessionStatus.COMPLETED
         assert reloaded.output_path == str(output)
+
+
+    def test_run_phase_b_does_not_mutate_input_session(
+        self, tmp_path: Path
+    ) -> None:
+        """AC-IM-5: run_phase_b に渡した入力 session は mutation されない（Issue #44）。
+
+        Phase B 完了後、元 session の status / output_path / updated_at が replace 以前
+        の値のまま維持されていることを直接検証する。
+        """
+        sessions_dir = tmp_path / ".sessions"
+        (tmp_path / "B_u0.pdf").write_bytes(_single_page_pdf_bytes("B:u0"))
+        (tmp_path / "C_u0.pdf").write_bytes(_single_page_pdf_bytes("C:u0"))
+        session = _make_phase_b_session(
+            tmp_path=tmp_path,
+            sessions_dir=sessions_dir,
+            status=SessionStatus.READY_TO_MERGE,
+            candidates=[
+                _cand(page_index=0, name="u0", status=PairStatus.AUTO_MATCHED),
+            ],
+        )
+
+        snap = {
+            "status": session.status,
+            "output_path": session.output_path,
+            "updated_at": session.updated_at,
+            "candidates": list(session.candidates),
+        }
+
+        output = tmp_path / "out" / "merged.pdf"
+        result = run_phase_b(
+            session=session,
+            config=_config(tmp_path),
+            sessions_dir=sessions_dir,
+            output_path=output,
+        )
+
+        # 戻り値 session は期待通り進行
+        assert result.status == SessionStatus.COMPLETED
+        assert result.output_path == str(output)
+        assert result is not session
+
+        # 元 session は全フィールド不変（AC-IM-5 CRITICAL）
+        for field_name, expected in snap.items():
+            assert getattr(session, field_name) == expected, (
+                f"run_phase_b が input session の {field_name} を mutation した"
+            )
 
 
 class TestRunPhaseBExclusion:

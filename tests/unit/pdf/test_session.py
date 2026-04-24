@@ -104,11 +104,16 @@ def _make_session(tmp_path: Path, **overrides) -> Session:
 
 class TestSaveLoad:
     def test_round_trip_empty_candidates(self, tmp_path: Path) -> None:
+        from wiseman_hub.pdf.session import session_path
+
         sessions_dir = tmp_path / ".sessions"
         s = _make_session(tmp_path)
 
-        path = save_session(s, sessions_dir=sessions_dir)
+        saved = save_session(s, sessions_dir=sessions_dir)
 
+        # Issue #44: save_session は新 Session を返す。path は session_path で取得。
+        assert saved.session_id == s.session_id
+        path = session_path(s.session_id, sessions_dir)
         assert path.exists()
         assert path.parent == sessions_dir
 
@@ -834,7 +839,7 @@ class TestTransitionSessionValid:
             status=SessionStatus.RUNNING_PHASE_A,
             candidates=[_unresolved_candidate()],
         )
-        transition_session(s, SessionStatus.NEEDS_REVIEW)
+        s = transition_session(s, SessionStatus.NEEDS_REVIEW)
         assert s.status == SessionStatus.NEEDS_REVIEW
 
     def test_running_a_to_ready_to_merge_all_resolved(self, tmp_path: Path) -> None:
@@ -843,12 +848,12 @@ class TestTransitionSessionValid:
             status=SessionStatus.RUNNING_PHASE_A,
             candidates=[_resolved_candidate()],
         )
-        transition_session(s, SessionStatus.READY_TO_MERGE)
+        s = transition_session(s, SessionStatus.READY_TO_MERGE)
         assert s.status == SessionStatus.READY_TO_MERGE
 
     def test_running_a_to_interrupted_a(self, tmp_path: Path) -> None:
         s = _make_session(tmp_path, status=SessionStatus.RUNNING_PHASE_A)
-        transition_session(s, SessionStatus.INTERRUPTED_PHASE_A)
+        s = transition_session(s, SessionStatus.INTERRUPTED_PHASE_A)
         assert s.status == SessionStatus.INTERRUPTED_PHASE_A
 
     def test_needs_review_to_ready_when_all_resolved(self, tmp_path: Path) -> None:
@@ -857,7 +862,7 @@ class TestTransitionSessionValid:
             status=SessionStatus.NEEDS_REVIEW,
             candidates=[_resolved_candidate(0), _resolved_candidate(1)],
         )
-        transition_session(s, SessionStatus.READY_TO_MERGE)
+        s = transition_session(s, SessionStatus.READY_TO_MERGE)
         assert s.status == SessionStatus.READY_TO_MERGE
 
     def test_ready_to_merge_to_running_b(self, tmp_path: Path) -> None:
@@ -866,7 +871,7 @@ class TestTransitionSessionValid:
             status=SessionStatus.READY_TO_MERGE,
             candidates=[_resolved_candidate()],
         )
-        transition_session(s, SessionStatus.RUNNING_PHASE_B)
+        s = transition_session(s, SessionStatus.RUNNING_PHASE_B)
         assert s.status == SessionStatus.RUNNING_PHASE_B
 
     def test_running_b_to_completed(self, tmp_path: Path) -> None:
@@ -875,22 +880,22 @@ class TestTransitionSessionValid:
             status=SessionStatus.RUNNING_PHASE_B,
             candidates=[_resolved_candidate()],
         )
-        transition_session(s, SessionStatus.COMPLETED)
+        s = transition_session(s, SessionStatus.COMPLETED)
         assert s.status == SessionStatus.COMPLETED
 
     def test_running_b_to_interrupted_b(self, tmp_path: Path) -> None:
         s = _make_session(tmp_path, status=SessionStatus.RUNNING_PHASE_B)
-        transition_session(s, SessionStatus.INTERRUPTED_PHASE_B)
+        s = transition_session(s, SessionStatus.INTERRUPTED_PHASE_B)
         assert s.status == SessionStatus.INTERRUPTED_PHASE_B
 
     def test_interrupted_a_to_running_a_resume(self, tmp_path: Path) -> None:
         s = _make_session(tmp_path, status=SessionStatus.INTERRUPTED_PHASE_A)
-        transition_session(s, SessionStatus.RUNNING_PHASE_A)
+        s = transition_session(s, SessionStatus.RUNNING_PHASE_A)
         assert s.status == SessionStatus.RUNNING_PHASE_A
 
     def test_interrupted_b_to_running_b_resume(self, tmp_path: Path) -> None:
         s = _make_session(tmp_path, status=SessionStatus.INTERRUPTED_PHASE_B)
-        transition_session(s, SessionStatus.RUNNING_PHASE_B)
+        s = transition_session(s, SessionStatus.RUNNING_PHASE_B)
         assert s.status == SessionStatus.RUNNING_PHASE_B
 
 
@@ -1579,3 +1584,152 @@ class TestStaleTmpSweep:
 
         assert recent.exists()
         assert not stale.exists()
+
+
+# ---------------------------------------------------------------------------
+# Issue #44: Session/UserCandidate immutable 化（AC-IM-1, 2, 3, 8）
+# ---------------------------------------------------------------------------
+
+
+class TestImmutability:
+    """frozen dataclass + replace パターンによる mutation 排除の検証。
+
+    - AC-IM-1: Session / UserCandidate は frozen（属性代入で FrozenInstanceError）
+    - AC-IM-2: save_session は新 Session を返し updated_at 以外は Partial Update 契約
+    - AC-IM-3: transition_session は新 Session を返し status/updated_at 以外は Partial Update 契約
+    - AC-IM-8: load_session で復元した Session も frozen
+    """
+
+    def test_session_frozen_rejects_attribute_assignment(self, tmp_path: Path) -> None:
+        """AC-IM-1: Session インスタンスへの属性代入は FrozenInstanceError を送出する。"""
+        import dataclasses as _dc
+
+        s = _make_session(tmp_path)
+        with pytest.raises(_dc.FrozenInstanceError):
+            s.updated_at = "2030-01-01T00:00:00+00:00"  # type: ignore[misc]
+        with pytest.raises(_dc.FrozenInstanceError):
+            s.status = SessionStatus.COMPLETED  # type: ignore[misc]
+
+    def test_user_candidate_frozen_rejects_attribute_assignment(self) -> None:
+        """AC-IM-1: UserCandidate インスタンスへの属性代入は FrozenInstanceError を送出する。"""
+        import dataclasses as _dc
+
+        c = UserCandidate(
+            page_index=0,
+            user_name_ocr="TEST",
+            confidence="high",
+            status=PairStatus.NEEDS_CONFIRMATION,
+            matched_b_path=None,
+            matched_c_path=None,
+        )
+        with pytest.raises(_dc.FrozenInstanceError):
+            c.status = PairStatus.CONFIRMED  # type: ignore[misc]
+        with pytest.raises(_dc.FrozenInstanceError):
+            c.page_index = 99  # type: ignore[misc]
+
+    def test_save_session_returns_new_session_with_refreshed_updated_at(
+        self, tmp_path: Path
+    ) -> None:
+        """AC-IM-2: save_session は新 Session を返し updated_at が更新される。元は不変。"""
+        sessions_dir = tmp_path / ".sessions"
+        original_updated_at = "2020-01-01T00:00:00+00:00"
+        s = _make_session(tmp_path, updated_at=original_updated_at)
+
+        new_s = save_session(s, sessions_dir=sessions_dir)
+
+        # 戻り値は Session 型（新インスタンス）
+        assert isinstance(new_s, Session)
+        assert new_s is not s
+        # updated_at は現在時刻で更新されている
+        assert new_s.updated_at != original_updated_at
+        assert datetime.fromisoformat(new_s.updated_at) > datetime.fromisoformat(
+            original_updated_at
+        )
+        # 元 Session は mutation されていない（Partial Update CRITICAL）
+        assert s.updated_at == original_updated_at
+
+    def test_save_session_partial_update_preserves_other_fields(
+        self, tmp_path: Path
+    ) -> None:
+        """AC-IM-2 (CRITICAL): save_session は updated_at 以外の全フィールドを保存する。"""
+        sessions_dir = tmp_path / ".sessions"
+        s = _make_session(
+            tmp_path,
+            status=SessionStatus.NEEDS_REVIEW,
+            total_pages_a=42,
+            output_path="/tmp/out.pdf",
+        )
+
+        new_s = save_session(s, sessions_dir=sessions_dir)
+
+        for field_name in (
+            "session_id",
+            "status",
+            "created_at",
+            "config_snapshot",
+            "source_a_path",
+            "candidates",
+            "a_page_pdf_bytes_dir",
+            "output_path",
+            "total_pages_a",
+        ):
+            assert getattr(new_s, field_name) == getattr(s, field_name), (
+                f"save_session が {field_name} を意図せず変更した"
+            )
+
+    def test_transition_session_returns_new_session(self, tmp_path: Path) -> None:
+        """AC-IM-3: transition_session は新 Session を返し status が更新される。元は不変。"""
+        s = _make_session(tmp_path, status=SessionStatus.RUNNING_PHASE_A)
+        original_updated_at = s.updated_at
+        original_status = s.status
+
+        new_s = transition_session(s, SessionStatus.INTERRUPTED_PHASE_A)
+
+        assert isinstance(new_s, Session)
+        assert new_s is not s
+        assert new_s.status == SessionStatus.INTERRUPTED_PHASE_A
+        # updated_at も更新される（遷移時刻の記録）
+        assert new_s.updated_at != original_updated_at
+        # 元 Session は mutation されていない（Partial Update CRITICAL）
+        assert s.status == original_status
+        assert s.updated_at == original_updated_at
+
+    def test_transition_session_partial_update_preserves_other_fields(
+        self, tmp_path: Path
+    ) -> None:
+        """AC-IM-3 (CRITICAL): transition_session は status/updated_at 以外の全フィールドを保存する。"""
+        s = _make_session(
+            tmp_path,
+            status=SessionStatus.RUNNING_PHASE_A,
+            total_pages_a=7,
+            output_path="/tmp/out.pdf",
+        )
+
+        new_s = transition_session(s, SessionStatus.INTERRUPTED_PHASE_A)
+
+        for field_name in (
+            "session_id",
+            "created_at",
+            "config_snapshot",
+            "source_a_path",
+            "candidates",
+            "a_page_pdf_bytes_dir",
+            "output_path",
+            "total_pages_a",
+        ):
+            assert getattr(new_s, field_name) == getattr(s, field_name), (
+                f"transition_session が {field_name} を意図せず変更した"
+            )
+
+    def test_load_session_returns_frozen_session(self, tmp_path: Path) -> None:
+        """AC-IM-8: JSON round-trip 後の Session も frozen である。"""
+        import dataclasses as _dc
+
+        sessions_dir = tmp_path / ".sessions"
+        s = _make_session(tmp_path)
+        save_session(s, sessions_dir=sessions_dir)
+
+        loaded = load_session(s.session_id, sessions_dir=sessions_dir)
+
+        with pytest.raises(_dc.FrozenInstanceError):
+            loaded.updated_at = "2030-01-01T00:00:00+00:00"  # type: ignore[misc]

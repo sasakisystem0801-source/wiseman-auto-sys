@@ -11,6 +11,7 @@ from __future__ import annotations
 # ここでは importlib で明示的にロードする。
 import importlib.util
 import sys
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -535,33 +536,28 @@ class FakeDialog:
         self.ran = False
 
     def run(self) -> Any:
-        """resolver で session.candidates を書き換え + save してから結果を返す。"""
+        """resolver で新 session を得て save してから結果を返す（Issue #44 immutable）。"""
         from wiseman_hub.pdf.session import save_session as _save
         from wiseman_hub.ui.confirm_dialog import ConfirmDialogResult
 
         self.ran = True
         if self._resolver is not None:
-            self._resolver(self._session)
-            _save(self._session, sessions_dir=self._sessions_dir)
+            self._session = self._resolver(self._session)
+            self._session = _save(self._session, sessions_dir=self._sessions_dir)
         return ConfirmDialogResult(session=self._session, aborted=self._aborted)
 
 
-def _resolve_all_auto(session: Session) -> None:
-    """全候補を AUTO_MATCHED 相当に解決するリゾルバ（承認操作のスタブ）。"""
-    from wiseman_hub.pdf.session import PairStatus, UserCandidate
+def _resolve_all_auto(session: Session) -> Session:
+    """全候補を AUTO_MATCHED 相当に解決したリゾルバ（承認操作のスタブ）の新 Session を返す。"""
+    from wiseman_hub.pdf.session import PairStatus
 
-    session.candidates = [
-        UserCandidate(
-            page_index=c.page_index,
-            user_name_ocr=c.user_name_ocr,
-            confidence=c.confidence,
-            status=PairStatus.CONFIRMED,
-            matched_b_path=c.matched_b_path,
-            matched_c_path=c.matched_c_path,
-            similar_candidates=[],
-        )
-        for c in session.candidates
-    ]
+    return replace(
+        session,
+        candidates=[
+            replace(c, status=PairStatus.CONFIRMED, similar_candidates=[])
+            for c in session.candidates
+        ],
+    )
 
 
 class TestReviewCommand:

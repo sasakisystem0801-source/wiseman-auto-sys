@@ -170,8 +170,10 @@ def resolve_review_session(
                     session_id,
                     detail=fresh.status.value,
                 )
-            transition_session(fresh, SessionStatus.READY_TO_MERGE)
-            save_session(fresh, sessions_dir=sessions_dir)
+            fresh = transition_session(fresh, SessionStatus.READY_TO_MERGE)
+            # save_session の戻り値も受けてパターンを pipeline.py と統一する
+            # （将来 fresh を以降で参照する変更が入っても stale session を掴まないため）。
+            fresh = save_session(fresh, sessions_dir=sessions_dir)
     except (BlockingIOError, OSError) as exc:
         logger.error(
             "session %s transition save failed: %s",
