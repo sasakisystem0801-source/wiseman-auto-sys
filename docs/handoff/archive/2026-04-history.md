@@ -124,3 +124,140 @@
     - WSH 無効 / ConstrainedLanguage fallback
     - `%USERPROFILE%\wiseman-hub\` を MVP 既定化（C:\ 直下は標準ユーザー書込不可）
     - FilePublisher allowlist は未署名 exe に不正確 → Hash / FilePath ルールのみ
+
+---
+
+## セッション 15 の成果（サマリー）
+- **PR #96**: Issue #73 - `on_open_review` `ReviewCallbackResult` dataclass 化 + 8 cancel path → `CANCEL_RESULT` sentinel。**Issue #73 CLOSED**, Net: -1
+
+## セッション 16 の成果（サマリー）
+- **PR #100**: Issue #72 + #97 - review_flow 共通化（6 files, +1410/-129）。CLI/GUI 二重実装を `pdf/review_flow.resolve_review_session` に集約。**Issue #72 + #97 CLOSED**, Net: -2
+
+## セッション 17 の成果（サマリー）
+- **PR #102**: Issue #68 - `validate_form` 戻り値 `ValidationError` enum 化（2 files, +246/-52）。`ValidationCode` (StrEnum 10 種) + `match/case` + `typing.assert_never`。**Issue #68 CLOSED**, Net: -1
+
+## セッション 18 の成果（サマリー）
+- **PR #104**: Issue #38 - `atomic_io` ユーティリティ抽出（7 files, +540/-72）。`write_bytes_atomically` + `save_atomically` 新設、merger/session/config 置換。**Issue #38 CLOSED**
+- **PR #106**: Issue #105 - session `_sweep_stale_session_tmp` 追加（3 files, +329/-1）。mtime 60s 閾値、`except OSError` 分割（FileNotFoundError silent + Counter 型別集計）。**Issue #105 CLOSED**
+- Net: **-1**
+
+---
+
+## セッション 19 の成果（最大コミット: +2,245 行）
+
+### マージ済み
+- **PR #108**: feat(pdf): facility_merger - 事業所フォルダ PDF 結合 (MVP 暫定)
+  - 12 files, +2,245 lines / 5 commits（feat + refactor + ui + fix + docs）
+  - **「A提供実績 + B運動機能向上計画書 + C経過報告書」を利用者単位で結合する新機能**
+  - **Windows 実機で 18 ページ A から 19 名全員の氏名抽出成功、3 種全結合含め 19 件出力達成**
+  - ユーザーゴール「OCR（テキスト認識）による A+B+C 正しい順序結合」完全達成
+
+### 実装範囲
+- **コア**: `src/wiseman_hub/pdf/facility_merger.py` (+358 行)
+  - `merge_facility(source_a, facility_dir, output_root)` 本体
+  - Phase 1: A.pdf 各ページを分割 → 氏名抽出 → B/C 姓マッチ → 3 者結合
+  - Phase 2: A 未マッチの B/C 残余を相互マッチして結合
+  - 9 フィールドの `FacilityMergeReport`（success / extraction_failed_pages / a_only / a_missing / b_missing / c_missing / name_conflicts / ambiguous_bc_skipped）
+  - 既存 `splitter._extract_single_page_pdf` / `merger._append_pdf_file` / `merger._save_atomically` を private 再利用（将来 public 化予定）
+- **氏名抽出**: `src/wiseman_hub/pdf/text_name_extractor.py` (+96 行)
+  - Pattern 1（ラベル隣接型）: `氏名 姓 名 様` — 計画書・経過報告書向け
+  - Pattern 2（フリガナ隣接型）: `半角カタカナ行 + 改行 + 漢字姓名` — 提供実績チェックリスト向け（実帳票で「氏名」ラベルと実名が別セルで離れているケース対応）
+  - OCR 不要（全て `page.get_text()` によるテキスト層抽出）
+- **CLI**: `scripts/merge_facility.py` (+274 行)
+  - 本実行モード + `--diag` 事前診断モード（書込なしで氏名抽出 / B/C マッチプラン表示）
+- **GUI**: `src/wiseman_hub/ui/facility_merger_dialog.py` (+275 行) + `launcher.py` 修正
+  - Launcher 4 ボタン目「事業所フォルダ結合」追加
+  - Toplevel ダイアログ（A.pdf / 事業所フォルダ / 出力ルート の 3 入力 + 実行 + 結果テキスト）
+- **テスト**: 新規 30 tests（facility 17 + text_name 17 + dialog 5、dialog は Tk_required で skip 許容）
+- **ドキュメント**: `docs/handoff/folder-merger-mvp-runbook.md`（30 分完走ランブック）+ `folder-merger-mvp-testing.md`（検証結果テンプレート）
+
+### Windows 実機検証の実経過（AC-FM-7 完走）
+1. TeamViewer 接続 → `git pull` → `uv sync` → `pytest` 通過
+2. `--diag` 初回実行: **A.pdf 18 ページ全てで氏名抽出失敗**
+3. 原因調査（`fitz.Page.get_text()` の生 repr 確認）: 提供実績チェックリストのテキスト層は「氏名」ラベルと実名が**別セル**で配置されており、既存 Pattern 1 がマッチせず
+4. Pattern 2（フリガナ隣接型）を追加実装 + push
+5. 再診断: **18 ページ全員の氏名抽出成功**（浅尾 和司 / 塩津 美喜子 / 尾島 亮子 他）
+6. 本実行: **19 件出力**（A+B+C: 2 件 [塩津・尾島] / A+B: 1 件 [藤野] / A+C: 4 件 / A のみ: 11 件 / Phase 2: 1 件 [asao]）
+7. 塩津.pdf 目視確認: **A（提供実績）→ B（運動器機能向上計画書）→ C（利用経過報告書）の順序で別人混入なく結合成功**
+8. GUI 経由実行: 同じ 19 件結合成功、PII 防御（full_name 非表示）動作確認
+
+### Session 19 の学び
+- **Codex セカンドオピニオンが致命バグを事前検知**: 6 並列 review-pr が見逃していた「同姓 2 名 + B/C 1 ファイルで誤添付」を Codex が HIGH 指摘、Windows 実機検証前に fail-safe で構造防止完了。医療データ文脈で不可欠なレビュー構成
+- **実データを見てから正規表現を書く**: 最初の「氏名 姓 名 様」パターンは Image #17（A.pdf 1 ページ目スクショ）のレイアウト先行イメージで書いてしまい、実際のテキスト層順序に合わなかった。Windows で `page.get_text()` の repr を見て初めて実データ構造が判明。テキスト層 PDF でも**「見た目」と「テキスト順序」は別物**
+- **事前診断モード (`--diag`) の価値**: 書込なしで「実データ × 実装の整合」を早期検知できる設計が実機 1 発成功に直結。18 ページ抽出失敗の段階で本実行を止め、手戻りゼロで Pattern 2 追加に転換できた
+- **ファイル名表記揺れの実運用確認**: A/B で「塩津 美喜子」、C で「塩津 美貴子」と漢字が違うケース（実運用の現実）でも、姓「塩津」の部分一致マッチで同一人物として正しく結合できた。表記揺れ対応の設計価値
+
+### 総変更量（Session 19）
+- 12 files changed, +2,245 / -8 lines
+- テスト件数: 502 passed → **537 passed**（+35: facility_merger 17 + text_name_extractor 17 + launcher 1 更新）
+
+---
+
+## セッション 20 の成果（4 PR、合計 +492 / -25 行）
+
+### マージ済み
+- **PR #110**: test(facility_merger): 複数利用者 × 混在可用性シナリオで A→B→C 順序と非混入を検証
+  - 1 file, +132 lines（docstring 改善含む 2 commits）
+  - Session 19 の Windows 実機 19 件結合のうち**目視確認は 1 件のみ**だったギャップを自動回帰テストで担保
+  - `[SRC:A|B|C][USER:xxx]` 合成タグで 5 利用者 × 混在可用性（A+B+C / A+B / A+C / A のみ）を内容レベル検証
+  - `/review-pr` 4 エージェント並列 → Important 1 件（docstring 明文化）対応、triage 基準未満 nice-to-have 5 件は PR コメント記録のみ
+
+- **PR #111**: feat(spec): PyInstaller spec に facility_merger hiddenimports 追加（タスク 1-C 準備）
+  - 1 file, +3 lines
+  - `wiseman_hub.ui.facility_merger_dialog` / `wiseman_hub.pdf.facility_merger` / `wiseman_hub.pdf.text_name_extractor` を hiddenimports に明示
+  - macOS smoke build で 3 モジュールの `Hidden import not found` warning 無しを事前検証
+
+- **PR #112**: docs(handoff): Session 20 ハンドオフ更新
+
+- **PR #113**: docs(runbook): 1-C exe 再配布専用ランブック新設（Windows 実機単独完走支援）
+  - 2 files, +247 / -6 lines
+  - 新規 `docs/handoff/1c-exe-redistribution-runbook.md`（Phase 0-5、rollback 手順付き、20-30 分想定）
+
+### 次スプリント方針（Codex セカンドオピニオンで確定）
+
+**実行順: PR1（1-C 配布）→ 実運用 1 回 → PR2（1-B 内容抽出）→ 必要なら 1-A → 1-D/1-E**
+
+Codex 回答の核心:
+> 現状の最大リスクは品質不足より「配布されず業務価値が発生しない」こと。MVP は E2E 済で A のみ出力も業務上の最低線を満たすため、まず限定展開して実データを得る判断に納得感がある。1-C と 1-B を同一 PR にすると配布トラブル時の切り分けが悪化する。
+
+### Session 20 の学び
+- **Codex の PM/PL 的判断で優先度確信**: 「配布されないと業務価値ゼロ」という視点を明言してもらうことで、1-A/1-B の誘惑（技術的に面白い match 率改善）より 1-C（退屈な配布作業）が先、という判断に納得感が出た
+- **spec 更新を独立 PR にする価値**: 1-C を「spec 更新（PR 化可能）」と「Windows 実機作業（物理作業）」に分離したことで、Claude 側の貢献部分を明確化
+- **内容レベルテストは目視確認の代替として強力**: `[SRC:X][USER:xxx]` 合成タグ方式でユニットテスト内で 5 利用者 × 4 パターン × ページ順序 + 非混入を自動検証
+
+### 総変更量（Session 20）
+- 2 PRs, 2 files changed, +135 / -0 lines
+- テスト件数: 537 passed → **538 passed**（+1）
+
+---
+
+## セッション 21 の成果（2 PR、合計 +687 / -143 行）
+
+### マージ済み
+- **PR #115**: docs(runbook): 1-C に Phase 3-B（既存機能 regression smoke）追加（Issue #80 手動部分カバー）
+  - 1 file, +48 / -1 行
+  - 1-C Windows 実機セッションで `facility_merger` 以外の既存機能（Phase A マージ / Phase B 確認）起動を確認する任意 section 追加
+  - 1-C 完走判定に影響しない fail-safe 設計
+
+- **PR #116**: refactor(session): Issue #44 Session/UserCandidate 完全 immutable 化
+  - 9 files, +639 / -142 行（2 commits: 初版 + Codex HIGH fix-up）
+  - `Session` / `UserCandidate` を `@dataclass(frozen=True)` 化、7 箇所の mutation を `dataclasses.replace` に置換
+  - `save_session(session) -> Session` / `transition_session(session, ns) -> Session` 戻り値契約変更
+  - AC-IM-1〜9 テスト群追加（9 テスト）+ Partial Update CRITICAL 契約の全フィールド列挙検証
+  - **Codex HIGH-1 (resume TOCTOU)**: `run_phase_a` が lock 取得後に `load_session` 戻り値を捨てて stale session を使い続けていたバグを構造的修正。同一 session_id への二重 resume で別利用者 PDF 混入のリスクを排除
+
+### Issue Net 変化（Session 21）
+- Close: 2 件（#44 / #118 — #49 と重複統合）
+- 起票: 2 件（#117 tuple 化 follow-up / #118 page_index 検証 → #49 統合）
+- Priority 昇格: 1 件（#49 P2 LOW → P1 bug、Codex HIGH rating 9+ 評価）
+- Net: 0 件
+
+### Session 21 の学び
+- **Codex セカンドオピニオンの投資対効果**: 6 エージェント (5 /review-pr + Codex) のうち Codex のみが HIGH-1 (resume TOCTOU) を検出。medical PII 文脈では Codex レベルの批判的レビューが不可欠
+- **既存 Issue との重複防止**: #118 起票直後に #49 との重複を発見。新 Issue 起票前に `gh issue list` で既存検索を徹底すべき
+- **under-triage の再評価**: #49 が LOW (2026-04-20) だったが、Codex HIGH 評価により P1 bug 昇格。古い triage は鮮度を失うため、関連 PR レビュー時に既存 Issue の priority 再評価を検討すべき
+- **frozen + replace パターンの徹底**: 7 mutation 箇所の網羅的書き換えに加え、呼出側で `session = save_session(...)` / `session = transition_session(...)` の戻り値受取を全箇所で統一
+
+### 総変更量（Session 21）
+- 2 PRs, 10 files changed, +687 / -143 行
+- テスト件数: 538 passed → **551 passed**（+13: AC-IM テスト 9 + Codex HIGH regression 1 + mutation 検証 3）
