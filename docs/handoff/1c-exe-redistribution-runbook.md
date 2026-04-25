@@ -42,23 +42,27 @@ git pull --ff-only
 git log --oneline -5
 ```
 
-**期待 commit 順（最新から）**:
+**期待 commit（最新 5 件、Session 22 終了時点）**:
 ```
-d4fdfff docs(handoff): Session 20 ハンドオフ更新 ... (#112)
-5059823 feat(spec): PyInstaller spec に facility_merger モジュールの hiddenimports 追加 (#111)
-f63d82a test(facility_merger): 複数利用者 × 混在可用性シナリオで ... (#110)
+af46db7 docs(handoff): Session 22 終了時点のハンドオフ更新 (#121)
+5f19e08 fix(session): Issue #49 page_index invariant 検証を load 時に追加 (P1 bug) (#120)
+b7e62b2 docs(handoff): Session 21 終了時点のハンドオフ更新 (#119)
+28c1440 refactor(session): Issue #44 Session/UserCandidate 完全 immutable 化 (#116)
+0eedb5e docs(runbook): 1-C に Phase 3-B（既存機能 regression smoke）追加（Issue #80 手動部分カバー） (#115)
 ```
 
-`5059823` が含まれていない場合は **Phase 1 に進まない**（spec が未更新＝ビルドが落ちるリスク）。
+最低条件: `5059823 feat(spec): ... facility_merger モジュールの hiddenimports 追加 (#111)` が `git log` に含まれていること。含まれていない場合は **Phase 1 に進まない**（spec が未更新＝ビルドが落ちるリスク）。
 
 ### 0-4. 依存同期 + ユニットテスト
 
 ```powershell
-uv sync
+uv sync --extra dev
 uv run pytest -q
 ```
 
-**期待**: `538 passed, 68 skipped`。fail があれば Phase 1 に進まず原因を共有。
+**重要**: `uv sync` だけでは dev extras（`pyinstaller` / `ruff` / `mypy` / `pytest` 等）が削除される。Phase 1 のビルドで `Failed to spawn pyinstaller` が出るので **必ず `--extra dev` を付ける**。
+
+**期待**: `559 passed, 68 skipped`（Session 22 終了時点。`538 passed` は Session 19 時点の旧値）。fail があれば Phase 1 に進まず原因を共有。
 
 ---
 
@@ -257,7 +261,8 @@ Get-ChildItem "$HOME\wiseman-hub\wiseman_hub.exe.bak-*"
 
 | 症状 | 原因候補 | 対応 |
 |------|---------|------|
-| `uv sync` で失敗 | 仮想環境破損 | `Remove-Item .venv -Recurse -Force; uv sync` |
+| `uv sync --extra dev` で失敗 | 仮想環境破損 | `Remove-Item .venv -Recurse -Force; uv sync --extra dev` |
+| `Failed to spawn pyinstaller` | `--extra dev` 忘れで dev extras 削除 | `uv sync --extra dev` で dev tools 復旧、Phase 1 再実行 |
 | pyinstaller が `ModuleNotFoundError` | spec の hiddenimports 漏れ | ビルドログを Phase 4 rollback 後に共有 |
 | ビルドは成功するが exe 起動で無反応 | Windows Defender が隔離 | Defender 除外設定 or SmartScreen「実行」押下 |
 | Launcher は起動するが 4 ボタン目が無い | 古い exe を掴んでいる / 上書き失敗 | Phase 2-1 を再実行、LastWriteTime を再確認 |
