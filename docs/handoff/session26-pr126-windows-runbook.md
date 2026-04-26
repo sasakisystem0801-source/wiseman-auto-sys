@@ -6,7 +6,12 @@
 - Windows 11 PC（本番配布先）に TeamViewer で接続可能
 - `main` ブランチに PR #126/#127 が merge 済（HEAD: `d83a3de`）
 - 既存 exe が `%USERPROFILE%\wiseman-hub\wiseman_hub.exe` に配置済
-- 所要時間: 30-45 分（ビルド 5 分 + 配布 1 分 + 動作確認 25-35 分）
+- 所要時間: 40-55 分内訳:
+  - Phase 0 事前確認 + main 同期 + 依存同期: 5-10 分
+  - Phase 1 ビルド: 5 分
+  - Phase 2 配布: 1 分
+  - Phase 3 動作確認: 25-35 分
+  - Phase 5 完走処理（ADR + handoff 更新 + PR 作成）: 10 分
 
 **このランブックの完走で達成されること**:
 1. ✅ PR #126 の新機能入り exe が本番配布先に配置される
@@ -251,26 +256,33 @@ Start-Process "$dist\wiseman_hub.exe"
 
 ### 5-1. ADR-013 Accepted 昇格（PR #126 完走）
 
-`docs/adr/013-facility-root-bulk-merge.md` の Status を `Proposed` → `Accepted` に変更。Windows 実機検証の実測結果を「Consequences」セクションに追記:
+`docs/adr/013-facility-root-bulk-merge.md` で以下を実施:
 
-- AC-7 / AC-11 / AC-13 全て本番経路で動作確認
-- 一括実行・停止・完了サマリの動作確認
-- AC-12 出力 PDF 除外による再実行ループ防止の動作確認
+1. **Status 行を更新**: `**Proposed (2026-04-27)**` → `**Accepted (2026-04-27)**`、検証完了サマリを追記
+2. **新規セクション追加**: `## Session 26 実機検証結果（Accepted 昇格根拠）` を「Acceptance Criteria」セクションの後に追加し、検証環境・実測結果テーブル・観察事項を記載
+3. **AC テーブル更新**: AC-7 / AC-11 / AC-13 の status カラムを `⏳ Windows 実機` から `✅ Windows 実機（Session 26、...詳細）` に更新
+4. **「業務リスク」表更新**: 「UNC パスでの実ファイル検証なし」を「✅ Session 26 で解消」に変更
+
+⚠ 既存 ADR には「Consequences」セクションは存在せず、日本語の「## 影響」セクションを使用。「## 影響」は ADR の意思決定時点での想定影響を記録するセクションであり、実機検証結果は別途「## Session N 実機検証結果」セクションを新設するのが本リポジトリの慣習（ADR-012 / ADR-013 の運用で確立）。
 
 ### 5-2. ADR-011 Accepted 昇格（タスク 14D 完走）
 
-`docs/adr/011-distribution-format.md` の Status を `Proposed` → `Accepted` に変更。PR #124 + #126 の本番稼働確認を「Consequences」セクションに追記。
+`docs/adr/011-distribution-format.md` で以下を実施:
+
+1. **Status 行を更新**: `**Proposed (2026-04-21)**` → `**Accepted (2026-04-27)**`、14D 達成サマリを追記
+2. **`## 14D Accepted 昇格条件` セクション内**: 既存の条件 1-4 リストを `✅ Session 26 達成` 注釈付きの達成記録に転換（条件文を活かしたまま結果を残す）
+3. **変更履歴に Session 26 完走を追記**
 
 ### 5-3. 完走 PR 作成
 
 ```powershell
 cd $HOME\Projects\wiseman-auto-sys
 git checkout -b docs/session26-adr-accepted
-# ADR-013 + ADR-011 編集後
-git add docs/adr/013-*.md docs/adr/011-*.md docs/handoff/LATEST.md
+# ADR-013 + ADR-011 + LATEST.md + 本ランブック編集後
+git add docs/adr/013-*.md docs/adr/011-*.md docs/handoff/LATEST.md docs/handoff/session26-pr126-windows-runbook.md
 git commit -m "docs(adr): ADR-013 + ADR-011 Accepted 昇格 - PR #126 Windows 実機検証完走"
 git push -u origin docs/session26-adr-accepted
-gh pr create --title "docs(adr): ADR-013 + ADR-011 Accepted 昇格（Session 26 / PR #126 実機検証完走）" --body "PR #126 の Windows 実機検証で AC-7/11/13 を含む全項目 PASS を確認。ADR-013 / ADR-011 を Accepted に昇格。"
+gh pr create --title "docs(adr): ADR-013 + ADR-011 Accepted 昇格（Session 26 / PR #126 実機検証完走）" --body "PR #126 の Windows 実機検証で AC-7/11/12/13 を含む 11 項目 PASS を確認。ADR-013 / ADR-011 を Accepted に昇格。"
 ```
 
 ### 5-4. バックアップ exe の整理
