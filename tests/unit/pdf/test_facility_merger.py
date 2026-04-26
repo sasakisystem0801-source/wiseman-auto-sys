@@ -491,6 +491,50 @@ class TestMergeFacilityRobustness:
         assert "荒木" not in report.c_missing
         assert "荒木" not in report.a_missing
 
+    def test_bc_dirs_missing_recorded_when_subfolders_absent(
+        self, tmp_path: Path
+    ) -> None:
+        """B/C サブフォルダ自体が不在の場合、bc_dirs_missing に記録される
+        （NW 一時断・タイポ等で全利用者が silent 除外になる重大警告ケース）。"""
+        facility_dir = tmp_path / "facility_no_subfolders"
+        facility_dir.mkdir()
+        a_pdf = tmp_path / "a.pdf"
+        _make_pdf(a_pdf, ["氏名 田中 一郎 様"])
+        output_root = tmp_path / "out"
+
+        report = merge_facility(a_pdf, facility_dir, output_root)
+
+        assert PLAN_DIR_NAME in report.bc_dirs_missing
+        assert REPORT_DIR_NAME in report.bc_dirs_missing
+        # 全利用者除外
+        assert "田中" in report.a_only
+        assert report.success == ()
+
+    def test_save_atomically_failure_keeps_success_empty(
+        self, workspace: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`_save_atomically` 失敗時、success リストには **誰も登録されない**
+        （旧構造の「書込前 append」による silent failure 誤報告を防ぐ）。"""
+        _make_pdf(workspace["a_pdf"], ["氏名 塩津 美貴子 様"])
+        _make_pdf(workspace["plan_dir"] / "塩津.pdf", ["計画書"])
+        _make_pdf(workspace["report_dir"] / "塩津.pdf", ["経過"])
+
+        # _save_atomically を例外送出にモンキーパッチ
+        from wiseman_hub.pdf import facility_merger as fm
+        from wiseman_hub.pdf.merger import PdfMergeError
+
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise PdfMergeError("simulated write failure")
+
+        monkeypatch.setattr(fm, "_save_atomically", boom)
+
+        with pytest.raises(PdfMergeError):
+            merge_facility(
+                workspace["a_pdf"],
+                workspace["facility_dir"],
+                workspace["output_root"],
+            )
+
     def test_single_char_stem_does_not_misuse_match(
         self, workspace: dict[str, Path]
     ) -> None:

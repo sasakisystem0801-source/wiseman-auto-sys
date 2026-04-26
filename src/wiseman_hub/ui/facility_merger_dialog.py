@@ -228,6 +228,28 @@ class FacilityMergerDialog:
         lines.append(f"出力先: {report.output_dir}")
         lines.append("=" * 50)
 
+        # 重大警告: B/C サブフォルダ自体が不在（NW 一時断・タイポで全利用者除外リスク）
+        if report.bc_dirs_missing:
+            lines.append("")
+            lines.append("⚠ 重大警告: 以下のサブフォルダが見つかりません")
+            for d in report.bc_dirs_missing:
+                lines.append(f"   ・{d}/")
+            lines.append(
+                "   → 全利用者が連結対象外になります。"
+                "事業所フォルダのパス・ネットワーク接続を確認してください。"
+            )
+            lines.append("")
+
+        # 重大警告: 氏名抽出失敗ページ（該当利用者は出力 PDF に含まれない）
+        if report.extraction_failed_pages:
+            pages = ", ".join(str(p + 1) for p in report.extraction_failed_pages)
+            lines.append(
+                f"⚠ 注意: A.pdf の {len(report.extraction_failed_pages)} ページで"
+                f"氏名抽出に失敗しました（ページ: {pages}）"
+            )
+            lines.append("   → 該当利用者は出力 PDF に含まれません")
+            lines.append("")
+
         if report.success:
             output_file = f"{report.facility_name}.pdf"
             lines.append(
@@ -239,9 +261,7 @@ class FacilityMergerDialog:
         else:
             lines.append("結合対象なし（ABC 全揃いの利用者がいません）")
 
-        if report.extraction_failed_pages:
-            pages = ", ".join(str(p + 1) for p in report.extraction_failed_pages)
-            lines.append(f"\n氏名抽出失敗（A.pdf ページ番号）: {pages}")
+        # 氏名抽出失敗の詳細表示は冒頭の重大警告で済ませているのでここでは省略
 
         excluded_total = (
             len(report.a_only)

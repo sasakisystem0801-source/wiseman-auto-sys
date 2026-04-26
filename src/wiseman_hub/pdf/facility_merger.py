@@ -49,34 +49,49 @@ REPORT_DIR_NAME: Final[str] = "経過報告書"
 
 @dataclass(frozen=True)
 class UserMergeEntry:
-    """1 利用者分のマージ情報。"""
+    """1 利用者分のマージ情報（新仕様: 連結された 1 利用者の論理識別子）。
 
-    user_key: str  # 出力ファイル名の stem（抽出された姓 または B/C の stem）
-    full_name: str  # 抽出されたフルネーム（A にマッチした場合）または user_key
-    sources_used: tuple[str, ...]  # ("A", "B", "C") などの使用ラベル
-    output_path: Path
+    新仕様では `success` 配下の全 entry は同一の `output_path`（事業所単位ファイル）
+    を共有する。各 entry は「事業所単位 PDF 内のどの利用者が連結されたか」を示す
+    論理レコードであり、利用者ごとに別ファイルを作るものではない。
+    """
+
+    user_key: str  # 事業所単位 PDF 内の論理識別子（抽出された姓ベース）
+    full_name: str  # **PII**: ログ・UI 出力禁止、user_key を使うこと
+    sources_used: tuple[str, ...]  # 新仕様では常に ("A", "B", "C")
+    output_path: Path  # **新仕様**: 全 success entry で同一の事業所単位ファイル
 
 
 @dataclass(frozen=True)
 class FacilityMergeReport:
     """事業所フォルダ処理結果。
 
-    欠損/コンフリクトは互いに重ならない独立集合で記録する:
-      - a_only: A のみ存在（B/C 両方なし）
-      - b_missing: A + C はあるが B なし（a_only と排他）
-      - c_missing: A + B はあるが C なし（a_only と排他）
+    **新仕様 (重要)**: `success` には ABC 全揃いの利用者のみが含まれる。
+    下記の除外カテゴリ（a_only / b_missing / c_missing / a_missing /
+    ambiguous_bc_skipped）に分類された利用者は **出力 PDF に含まれない**。
+
+    各カテゴリは互いに排他（同じ user_key が複数カテゴリに入ることはない）:
+      - a_only: A はあるが B/C 両方なし → 除外
+      - b_missing: A はあるが B 欠損（C 判定前に確定 → 除外）
+      - c_missing: A + B はあるが C 欠損 → 除外
+      - a_missing: B/C のみ存在し A にマッチなし → 除外
+      - ambiguous_bc_skipped: 同姓重複で fail-safe 適用 → 除外
+      - bc_dirs_missing: 事業所フォルダ配下に B/C サブフォルダ自体が無い場合の
+        ディレクトリ名（運用上の重大警告: NW 一時断・タイポ等で全利用者除外
+        になるため UI で明示的に警告する必要あり）
     """
 
     facility_name: str
     output_dir: Path
     success: tuple[UserMergeEntry, ...] = ()
     extraction_failed_pages: tuple[int, ...] = ()  # A.pdf で氏名抽出失敗したページ（0-based）
-    a_only: tuple[str, ...] = ()  # A のみ存在（B/C 両方なし）
-    a_missing: tuple[str, ...] = ()  # B/C はあるが A マッチなし
-    b_missing: tuple[str, ...] = ()  # A + C はあるが B なし
-    c_missing: tuple[str, ...] = ()  # A + B はあるが C なし
-    name_conflicts: tuple[str, ...] = ()  # 同姓で出力キーが衝突したため連番付与した user_key
-    ambiguous_bc_skipped: tuple[str, ...] = ()  # 同姓重複 fail-safe で B/C 添付を見送った user_key
+    a_only: tuple[str, ...] = ()  # A のみ存在（B/C 両方なし）→ 除外
+    a_missing: tuple[str, ...] = ()  # B/C のみ存在し A マッチなし → 除外
+    b_missing: tuple[str, ...] = ()  # A はあるが B 欠損 → 除外
+    c_missing: tuple[str, ...] = ()  # A + B はあるが C 欠損 → 除外
+    name_conflicts: tuple[str, ...] = ()  # 同姓で user_key 衝突した連番付与（旧仕様残骸）
+    ambiguous_bc_skipped: tuple[str, ...] = ()  # 同姓重複 fail-safe → 除外
+    bc_dirs_missing: tuple[str, ...] = ()  # B/C サブフォルダ自体が不在（重大警告）
 
 
 def _collect_pdfs_by_stem(directory: Path) -> dict[str, Path]:
@@ -151,6 +166,21 @@ def merge_facility(
 
     plan_dir = facility_dir / PLAN_DIR_NAME
     report_dir = facility_dir / REPORT_DIR_NAME
+
+    # B/C サブフォルダ不在は **重大警告**（NW 一時断・タイポ等で
+    # 全利用者が silent 除外になるため、UI で明示的に告知する）
+    bc_dirs_missing: list[str] = []
+    if not plan_dir.exists():
+        bc_dirs_missing.append(PLAN_DIR_NAME)
+        logger.error(
+            "B subdirectory missing (silent exclusion risk): %s", PLAN_DIR_NAME
+        )
+    if not report_dir.exists():
+        bc_dirs_missing.append(REPORT_DIR_NAME)
+        logger.error(
+            "C subdirectory missing (silent exclusion risk): %s", REPORT_DIR_NAME
+        )
+
     plans = _collect_pdfs_by_stem(plan_dir)
     reports = _collect_pdfs_by_stem(report_dir)
 
@@ -212,8 +242,10 @@ def merge_facility(
             extracted = extract_name_from_page(page)
             if extracted is None:
                 extraction_failed.append(page_index)
-                logger.warning(
-                    "Name extraction failed at page %d/%d",
+                # error 級: 該当ページの利用者は出力 PDF から完全に欠落するため
+                # production で見落とし防止に severity を warning から上げる
+                logger.error(
+                    "Name extraction failed at page %d/%d (user excluded from output)",
                     page_index + 1,
                     a_doc.page_count,
                 )
@@ -271,15 +303,19 @@ def merge_facility(
     a_missing = sorted(a_missing_set)
 
     # 出力フェーズ: 全揃いがあれば 1 ファイルに ABCABC... 連結、無ければ書き出さない
+    # **重要**: success リストへの登録は `_save_atomically` の **書込成功後** に行う。
+    # 旧構造（書込前 append）では _save_atomically 失敗時に「成功 N 件」報告が
+    # 残ったまま例外伝播し、UI に誤情報が出る silent failure リスクがあった。
     success: list[UserMergeEntry] = []
     if full_set_entries:
         dst = fitz.open()
         try:
+            pending_entries: list[UserMergeEntry] = []
             for user_key, a_bytes, b_path, c_path, full_name in full_set_entries:
                 _append_pdf_bytes(dst, a_bytes, "A")
                 _append_pdf_file(dst, b_path, "B")
                 _append_pdf_file(dst, c_path, "C")
-                success.append(
+                pending_entries.append(
                     UserMergeEntry(
                         user_key=user_key,
                         full_name=full_name,
@@ -288,6 +324,8 @@ def merge_facility(
                     )
                 )
             _save_atomically(dst, output_path)
+            # 書込成功後にのみ success に登録（失敗時は空のまま例外伝播）
+            success.extend(pending_entries)
         finally:
             dst.close()
 
@@ -302,6 +340,7 @@ def merge_facility(
         c_missing=tuple(c_missing),
         name_conflicts=tuple(name_conflicts),
         ambiguous_bc_skipped=tuple(ambiguous_bc_skipped),
+        bc_dirs_missing=tuple(bc_dirs_missing),
     )
     logger.info(
         "merge_facility done: facility=%s merged=%d extract_failed=%d "

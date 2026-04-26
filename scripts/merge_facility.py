@@ -240,6 +240,34 @@ def _print_report(report: FacilityMergeReport) -> None:
     print(f"事業所: {report.facility_name}")
     print(f"出力先: {report.output_dir}")
     print("=" * 60)
+
+    # 重大警告: B/C サブフォルダ自体が不在
+    if report.bc_dirs_missing:
+        print(
+            "\n⚠ 重大警告: 以下のサブフォルダが見つかりません",
+            file=sys.stderr,
+        )
+        for d in report.bc_dirs_missing:
+            print(f"   ・{d}/", file=sys.stderr)
+        print(
+            "   → 全利用者が連結対象外になります。"
+            "事業所フォルダのパス・ネットワーク接続を確認してください。\n",
+            file=sys.stderr,
+        )
+
+    # 重大警告: 氏名抽出失敗
+    if report.extraction_failed_pages:
+        pages = ", ".join(str(p + 1) for p in report.extraction_failed_pages)
+        print(
+            f"\n⚠ 注意: A.pdf の {len(report.extraction_failed_pages)} ページで"
+            f"氏名抽出に失敗しました（ページ: {pages}）",
+            file=sys.stderr,
+        )
+        print(
+            "   → 該当利用者は出力 PDF に含まれません\n",
+            file=sys.stderr,
+        )
+
     if report.success:
         output_file = f"{report.facility_name}.pdf"
         print(
@@ -251,9 +279,7 @@ def _print_report(report: FacilityMergeReport) -> None:
     else:
         print("結合対象なし（ABC 全揃いの利用者がいません）")
 
-    if report.extraction_failed_pages:
-        pages = ", ".join(str(p + 1) for p in report.extraction_failed_pages)
-        print(f"\n氏名抽出失敗（A.pdf ページ番号）: {pages}")
+    # 氏名抽出失敗の詳細表示は冒頭の重大警告で済ませているのでここでは省略
 
     excluded_total = (
         len(report.a_only)
