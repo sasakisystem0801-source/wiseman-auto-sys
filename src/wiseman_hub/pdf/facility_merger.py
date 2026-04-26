@@ -1,26 +1,32 @@
-"""事業所フォルダ PDF 結合（MVP 暫定実装）。
+"""事業所フォルダ PDF 結合。
 
-要件:
+新仕様（事業所単位 1 ファイル ABCABC 連結）:
   入力 A = 提供実績チェックリスト PDF（複数利用者 1 ページずつ、テキスト層あり）
   入力 B = `{事業所}/運動機能向上計画書/{姓 or ゆらぎ名}.pdf` フォルダ
   入力 C = `{事業所}/経過報告書/{姓 or ゆらぎ名}.pdf` フォルダ
-  出力   = `{output_root}/{事業所名}/{姓}.pdf` （A ページ + B + C を結合）
+  出力   = `{output_root}/{事業所名}/{事業所名}.pdf` の **単一ファイル**
+
+連結ルール:
+  - A + B + C 全て揃う利用者**のみ** A→B→C 順に連結し、A.pdf 出現順で並べる
+    → `A1+B1+C1+A2+B2+C2+...` の 1 ファイル
+  - 不揃い (A単独/A+B/A+C/B+C) は出力に含めず、カテゴリ別に report 記録
+  - 同姓重複 fail-safe: 同姓 2 名以上は ABC 全揃いに見えても除外
+    → `ambiguous_bc_skipped` に記録、誤添付より添付不足を優先
 
 今回スコープ:
   - A の各ページからテキスト層で氏名抽出（OCR 不要）
   - B/C はファイル名（stem）の**姓部分一致**でマッチ（【藤野様】↔ 藤野 等のゆらぎ吸収）
-  - 欠損は警告として report に記録し処理継続（片側のみでも出力）
-  - A にマッチせず B/C のみある利用者も B+C で出力
 
 スコープ外（将来拡張）:
   - B/C の PDF テキスト層から氏名抽出による内容ベースマッチ
   - OCR フォールバック（B/C がスキャン画像の場合）
-  - フリガナ正規化（asao ↔ 浅尾 等）
+  - フリガナ正規化による厳密五十音順ソート（現状は A.pdf 出現順を継承）
 """
 
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -118,7 +124,14 @@ def merge_facility(
     facility_dir: Path,
     output_root: Path,
 ) -> FacilityMergeReport:
-    """1 事業所分の A + B + C PDF を利用者単位で結合する。
+    """事業所フォルダの A + B + C PDF を **事業所単位 1 ファイル** に連結する。
+
+    新仕様:
+      - A + B + C 全揃いの利用者のみ、A→B→C 順で連結
+      - 利用者間は A.pdf 出現順で `A1+B1+C1+A2+B2+C2+...`
+      - 出力: `{output_root}/{facility_name}/{facility_name}.pdf` の単一ファイル
+      - 全揃い 0 名の場合は出力ファイル自体を作らない
+      - 不揃い・同姓重複利用者は出力に含めずカテゴリ別 report 記録
 
     Args:
         source_a_pdf: 提供実績 PDF（複数利用者、1 利用者 1 ページ、テキスト層あり）
@@ -144,21 +157,20 @@ def merge_facility(
     facility_name = facility_dir.name
     output_dir = output_root / facility_name
     output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"{facility_name}.pdf"
 
-    success: list[UserMergeEntry] = []
     extraction_failed: list[int] = []
     a_only: list[str] = []
     b_missing: list[str] = []
     c_missing: list[str] = []
-    matched_bc_stems: set[str] = set()
-    used_user_keys: set[str] = set()  # 出力ファイル名衝突検知用
+    a_missing_set: set[str] = set()  # B と C に同一 stem がある場合の重複防止
+    ambiguous_bc_skipped: list[str] = []
     name_conflicts: list[str] = []
-    ambiguous_bc_skipped: list[str] = []  # 同姓重複で B/C 添付を見送った user_key
+    used_user_keys: set[str] = set()
+    matched_bc_stems: set[str] = set()  # a_missing 計算用
 
     def _unique_key(base: str) -> tuple[str, bool]:
-        """base が使用済なら連番を付与してユニーク化する。
-        戻り値: (key, 衝突したか)
-        """
+        """base が使用済なら連番を付与してユニーク化（同姓重複の検知ログ用に維持）。"""
         if base not in used_user_keys:
             return base, False
         idx = 2
@@ -170,17 +182,16 @@ def merge_facility(
         "merge_facility start: A=%s facility=%s output=%s",
         source_a_pdf.name,
         facility_name,
-        output_dir,
+        output_path,
     )
 
-    # Phase 0: 姓の重複を事前検出（fail-safe 用）
-    # 同姓 2 名以上が A に存在する場合、ファイル名（姓）だけでは誰の B/C かを
-    # 区別できないため、該当姓については B/C 添付を一律スキップする。
-    # 「誤って他人の計画書/経過報告書を添付する」より「添付不足」のほうが害が小さい。
-    from collections import Counter
-
     a_doc = _open_pdf_or_raise(source_a_pdf)
+    # 全揃い利用者の連結データを A.pdf 出現順に蓄積
+    full_set_entries: list[
+        tuple[str, bytes, Path, Path, str]
+    ] = []  # (user_key, a_page_bytes, b_path, c_path, full_name)
     try:
+        # Phase 0: 同姓重複検出（fail-safe 用）
         surname_counts: Counter[str] = Counter()
         for page_index in range(a_doc.page_count):
             e = extract_name_from_page(a_doc[page_index])
@@ -191,12 +202,11 @@ def merge_facility(
         }
         if ambiguous_surnames:
             logger.warning(
-                "Ambiguous surnames detected (B/C attachment skipped for fail-safe): "
-                "count=%d",
+                "Ambiguous surnames detected (excluded for fail-safe): count=%d",
                 len(ambiguous_surnames),
             )
 
-        # Phase 1: A.pdf の各ページを処理
+        # Phase 1: A.pdf 各ページを処理し、ABC 全揃い利用者を抽出
         for page_index in range(a_doc.page_count):
             page = a_doc[page_index]
             extracted = extract_name_from_page(page)
@@ -213,119 +223,71 @@ def merge_facility(
             used_user_keys.add(user_key)
             if conflicted:
                 name_conflicts.append(user_key)
-                logger.warning(
-                    "Name conflict detected, suffixed: page=%d key=%s",
-                    page_index + 1,
-                    user_key,
-                )
-            output_path = output_dir / f"{user_key}.pdf"
 
-            # 同姓重複 fail-safe: B/C 添付をスキップして A のみ出力
+            # 同姓重複 fail-safe: 該当姓は ABC 全揃いに見えても除外
             if extracted.last_name in ambiguous_surnames:
-                b_match = None
-                c_match = None
                 ambiguous_bc_skipped.append(user_key)
                 logger.warning(
-                    "Ambiguous surname fail-safe: B/C skipped for page=%d key=%s",
+                    "Ambiguous surname fail-safe: excluded page=%d key=%s",
                     page_index + 1,
                     user_key,
                 )
-            else:
-                # B/C マッチは元の姓（extracted.last_name）で行う
-                b_match = _match_by_partial(extracted.last_name, plans)
-                c_match = _match_by_partial(extracted.last_name, reports)
+                continue
 
-            # 先に排他的分岐で欠損カテゴリを確定（pop 依存を排除）
-            # ambiguous_bc_skipped は独立カテゴリで a_only/b_missing/c_missing には入れない
-            if extracted.last_name not in ambiguous_surnames:
-                if b_match is None and c_match is None:
-                    a_only.append(user_key)
-                else:
-                    if b_match is None:
-                        b_missing.append(user_key)
-                    if c_match is None:
-                        c_missing.append(user_key)
+            b_match = _match_by_partial(extracted.last_name, plans)
+            c_match = _match_by_partial(extracted.last_name, reports)
 
-            sources: list[str] = ["A"]
-            dst = fitz.open()
-            try:
-                page_bytes = _extract_single_page_pdf(a_doc, page_index)
-                _append_pdf_bytes(dst, page_bytes, "A")
+            # 排他カテゴリ分類（不揃いは出力に含めず report のみ記録）
+            if b_match is None and c_match is None:
+                a_only.append(user_key)
+                continue
+            if b_match is None:
+                b_missing.append(user_key)
+                continue
+            if c_match is None:
+                c_missing.append(user_key)
+                continue
 
-                if b_match is not None:
-                    _append_pdf_file(dst, b_match[1], "B")
-                    sources.append("B")
-                    matched_bc_stems.add(f"B:{b_match[0]}")
+            # ABC 全揃い → 連結対象として蓄積
+            page_bytes = _extract_single_page_pdf(a_doc, page_index)
+            full_set_entries.append(
+                (user_key, page_bytes, b_match[1], c_match[1], extracted.full_name)
+            )
+            matched_bc_stems.add(f"B:{b_match[0]}")
+            matched_bc_stems.add(f"C:{c_match[0]}")
 
-                if c_match is not None:
-                    _append_pdf_file(dst, c_match[1], "C")
-                    sources.append("C")
-                    matched_bc_stems.add(f"C:{c_match[0]}")
-
-                _save_atomically(dst, output_path)
-                success.append(
-                    UserMergeEntry(
-                        user_key=user_key,
-                        full_name=extracted.full_name,
-                        sources_used=tuple(sources),
-                        output_path=output_path,
-                    )
-                )
-            finally:
-                dst.close()
+        # Phase 2: A にマッチしなかった B/C は a_missing にカテゴリ記録のみ
+        # （旧仕様の B+C 結合出力は廃止）
+        # set 使用: B と C に同一 stem がある場合の二重カウントを構造的に防ぐ
+        for stem in plans:
+            if f"B:{stem}" not in matched_bc_stems:
+                a_missing_set.add(stem)
+        for stem in reports:
+            if f"C:{stem}" not in matched_bc_stems:
+                a_missing_set.add(stem)
     finally:
         a_doc.close()
 
-    # Phase 2: A にマッチしなかった B/C の残り（B+C のみで結合）
-    # Phase 1 と同じ `_match_by_partial` を使い、B/C 間でもゆらぎ吸収する
-    remaining_b = {s: p for s, p in plans.items() if f"B:{s}" not in matched_bc_stems}
-    remaining_c = {s: p for s, p in reports.items() if f"C:{s}" not in matched_bc_stems}
-    a_missing: list[str] = []
-    # B stems を起点にして C と partial マッチ、マッチした C stem は消費
-    consumed_c_stems: set[str] = set()
-    entries_to_process: list[tuple[str, Path | None, Path | None]] = []
+    a_missing = sorted(a_missing_set)
 
-    for b_stem, b_path in sorted(remaining_b.items()):
-        # B 主導で C とマッチ
-        c_match = _match_by_partial(b_stem, remaining_c)
-        if c_match is not None and c_match[0] not in consumed_c_stems:
-            consumed_c_stems.add(c_match[0])
-            entries_to_process.append((b_stem, b_path, c_match[1]))
-        else:
-            entries_to_process.append((b_stem, b_path, None))
-
-    # 残った C（B と対応しないもの）を単独で追加
-    for c_stem, c_path in sorted(remaining_c.items()):
-        if c_stem not in consumed_c_stems:
-            entries_to_process.append((c_stem, None, c_path))
-
-    for stem, entry_b, entry_c in entries_to_process:
-        user_key, conflicted = _unique_key(stem)
-        used_user_keys.add(user_key)
-        if conflicted:
-            name_conflicts.append(user_key)
-        output_path = output_dir / f"{user_key}.pdf"
-        sources = []
+    # 出力フェーズ: 全揃いがあれば 1 ファイルに ABCABC... 連結、無ければ書き出さない
+    success: list[UserMergeEntry] = []
+    if full_set_entries:
         dst = fitz.open()
         try:
-            if entry_b is not None:
-                _append_pdf_file(dst, entry_b, "B")
-                sources.append("B")
-            if entry_c is not None:
-                _append_pdf_file(dst, entry_c, "C")
-                sources.append("C")
-            if not sources:
-                continue
-            _save_atomically(dst, output_path)
-            a_missing.append(user_key)
-            success.append(
-                UserMergeEntry(
-                    user_key=user_key,
-                    full_name=stem,
-                    sources_used=tuple(sources),
-                    output_path=output_path,
+            for user_key, a_bytes, b_path, c_path, full_name in full_set_entries:
+                _append_pdf_bytes(dst, a_bytes, "A")
+                _append_pdf_file(dst, b_path, "B")
+                _append_pdf_file(dst, c_path, "C")
+                success.append(
+                    UserMergeEntry(
+                        user_key=user_key,
+                        full_name=full_name,
+                        sources_used=("A", "B", "C"),
+                        output_path=output_path,
+                    )
                 )
-            )
+            _save_atomically(dst, output_path)
         finally:
             dst.close()
 
@@ -342,8 +304,8 @@ def merge_facility(
         ambiguous_bc_skipped=tuple(ambiguous_bc_skipped),
     )
     logger.info(
-        "merge_facility done: facility=%s success=%d extract_failed=%d "
-        "a_only=%d a_missing=%d b_missing=%d c_missing=%d conflicts=%d "
+        "merge_facility done: facility=%s merged=%d extract_failed=%d "
+        "a_only=%d a_missing=%d b_missing=%d c_missing=%d "
         "ambiguous_bc_skipped=%d",
         facility_name,
         len(report.success),
@@ -352,7 +314,6 @@ def merge_facility(
         len(report.a_missing),
         len(report.b_missing),
         len(report.c_missing),
-        len(report.name_conflicts),
         len(report.ambiguous_bc_skipped),
     )
     return report
