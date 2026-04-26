@@ -95,7 +95,13 @@ class UserNameBBox:
 
 @dataclass
 class PdfMergeConfig:
-    """PDF分割・条件付き再結合機能の設定。"""
+    """PDF分割・条件付き再結合機能の設定。
+
+    facility_root_dir: 事業所ルートフォルダ（複数事業所を一括処理する起点）。
+        配下に `{事業所名}/{運動機能向上計画書,経過報告書}/` 構造を持つ親ディレクトリ。
+        新ダイアログ FacilityRootManagerDialog（W4）で永続化する。
+        既存の input_dir / output_dir 等とは独立（旧 Phase A/B フローは無関係）。
+    """
 
     input_dir: str = ""
     output_dir: str = ""
@@ -105,6 +111,7 @@ class PdfMergeConfig:
     source_c_pattern: str = "C_{name}.pdf"
     concat_order: list[str] = field(default_factory=lambda: ["A", "B", "C"])
     user_name_bbox: UserNameBBox = field(default_factory=UserNameBBox)
+    facility_root_dir: str = ""
 
 
 @dataclass

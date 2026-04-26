@@ -377,6 +377,102 @@ output_dir = ""
         assert "山田太郎" in written
         assert "集計" in written
 
+    def test_facility_root_dir_default_empty(self) -> None:
+        """新規 AppConfig() で facility_root_dir はデフォルト空文字列。
+
+        未設定状態（初回起動）を表現するため、None ではなく "" をデフォルトとする
+        （他フィールドの慣例に合わせる）。
+        """
+        cfg = AppConfig()
+        assert cfg.pdf_merge.facility_root_dir == ""
+
+    def test_facility_root_dir_load_from_toml(self, tmp_path: Path) -> None:
+        """[pdf_merge] facility_root_dir = "..." が TOML から読み込まれる。"""
+        target = tmp_path / "facility_root.toml"
+        target.write_text(
+            """\
+[pdf_merge]
+facility_root_dir = "//Tera-station/share/03.FAX(事業所)"
+""",
+            encoding="utf-8",
+        )
+
+        cfg = load_config(target)
+
+        assert cfg.pdf_merge.facility_root_dir == "//Tera-station/share/03.FAX(事業所)"
+
+    def test_save_facility_root_dir_roundtrip(self, tmp_path: Path) -> None:
+        """facility_root_dir の save → load ラウンドトリップ。日本語・UNC 含む。"""
+        cfg = AppConfig()
+        cfg.pdf_merge.facility_root_dir = "//Tera-station/share/03.FAX(事業所)"
+
+        target = tmp_path / "roundtrip.toml"
+        save_config(cfg, target, create_if_missing=True)
+
+        reloaded = load_config(target)
+        assert (
+            reloaded.pdf_merge.facility_root_dir
+            == "//Tera-station/share/03.FAX(事業所)"
+        )
+
+    def test_save_facility_root_dir_does_not_break_existing_fields(
+        self, tmp_path: Path
+    ) -> None:
+        """facility_root_dir 追加で既存 PdfMergeConfig フィールドの値が変わらない。
+
+        CLAUDE.md MUST: Partial Update する関数の追加 → 「更新対象外フィールドの値が
+        変化しないこと」をテストに含める。
+        """
+        target = tmp_path / "partial.toml"
+        target.write_text(
+            """\
+[pdf_merge]
+input_dir = "/in"
+output_dir = "/out"
+source_a_filename = "A.pdf"
+source_d_filename = "D.pdf"
+source_b_pattern = "B_{name}.pdf"
+source_c_pattern = "C_{name}.pdf"
+concat_order = ["A", "C", "B"]
+
+[pdf_merge.user_name_bbox]
+x0 = 11.0
+y0 = 22.0
+x1 = 333.0
+y1 = 44.0
+dpi = 250
+""",
+            encoding="utf-8",
+        )
+        cfg = load_config(target)
+        cfg.pdf_merge.facility_root_dir = "/srv/facility"
+
+        save_config(cfg, target)
+        reloaded = load_config(target)
+
+        # 既存フィールドが変わらないこと（Partial Update 検証）
+        assert reloaded.pdf_merge.input_dir == "/in"
+        assert reloaded.pdf_merge.output_dir == "/out"
+        assert reloaded.pdf_merge.source_a_filename == "A.pdf"
+        assert reloaded.pdf_merge.source_d_filename == "D.pdf"
+        assert reloaded.pdf_merge.source_b_pattern == "B_{name}.pdf"
+        assert reloaded.pdf_merge.source_c_pattern == "C_{name}.pdf"
+        assert reloaded.pdf_merge.concat_order == ["A", "C", "B"]
+        assert reloaded.pdf_merge.user_name_bbox.x0 == 11.0
+        assert reloaded.pdf_merge.user_name_bbox.dpi == 250
+        # 新フィールドが反映されること
+        assert reloaded.pdf_merge.facility_root_dir == "/srv/facility"
+
+    def test_facility_root_dir_unset_when_section_missing(
+        self, tmp_path: Path
+    ) -> None:
+        """[pdf_merge] セクション自体がない TOML でも facility_root_dir は "" を返す。"""
+        target = tmp_path / "nopdfmerge.toml"
+        target.write_text('[app]\nversion = "1.0.0"\n', encoding="utf-8")
+
+        cfg = load_config(target)
+        assert cfg.pdf_merge.facility_root_dir == ""
+
     def test_save_concat_order_reorder(self, tmp_path: Path) -> None:
         """concat_order を並び替えても save/load で順序が保存される。"""
         target = tmp_path / "order.toml"
