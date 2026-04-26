@@ -357,6 +357,9 @@ class FacilityRootManagerDialog:
         self._top.geometry("760x520")
         self._top.transient(parent)  # type: ignore[arg-type]
         self._top.grab_set()
+        # X ボタン / Alt+F4 を _on_close に bind（実行中の強制クローズで worker thread が
+        # 宙吊りになるのを防ぐ）。confirm_dialog / session_picker と同じパターン。
+        self._top.protocol("WM_DELETE_WINDOW", self._on_close)
         install_tk_exception_guard(
             self._top, component="facility_root", messagebox=self._messagebox
         )
@@ -478,11 +481,17 @@ class FacilityRootManagerDialog:
     # ----- イベントハンドラ -----
 
     def _on_browse_root(self) -> None:
+        if self._busy:
+            # 実行中の再スキャンは進行中 items の candidate 参照と齟齬を起こすため抑止
+            return
         path = self._askdirectory(parent=self._top, title="ルートフォルダ選択")
         if path:
             self._do_scan(Path(path))
 
     def _on_rescan(self) -> None:
+        if self._busy:
+            # 実行中の再スキャンは progress_callback の facility_dir マッチを破壊するため抑止
+            return
         text = self._root_var.get().strip()
         if not text:
             self._messagebox.showerror(_TITLE_INVALID_INPUT, _MSG_NO_ROOT)
@@ -505,7 +514,9 @@ class FacilityRootManagerDialog:
             )
             return
         except Exception as e:  # noqa: BLE001 — ネットワーク断・権限等の汎用エラー
-            logger.exception("scan failed: %s", type(e).__name__)
+            # PII 防御: logger.exception はトレースバック経由で例外 message
+            # （絶対パス含む）を漏らすため使わない。bulk_runner と同じく型名のみ。
+            logger.error("scan failed: %s", type(e).__name__)
             self._messagebox.showerror(
                 _TITLE_SCAN_ERROR,
                 f"スキャン中にエラーが発生しました（{type(e).__name__}）。",
