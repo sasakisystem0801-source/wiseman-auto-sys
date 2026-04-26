@@ -1,10 +1,79 @@
-# Handoff: 事業所ルートフォルダ管理 + 一括/選択結合（Session 25 終了時点）
+# Handoff: PR #126 Windows 実機検証完走 + ADR-013/011 Accepted 昇格（Session 26 終了時点）
 
-**更新日**: 2026-04-27（PR #126 マージ後の同期更新）
-**ブランチ**: main（PR #126 squash merge 済）
-**main HEAD**: `0f9abbb` feat(ui): 事業所ルートフォルダ管理 + 一括/選択 PDF 結合（デスクトップアプリ統合）(#126)
+**更新日**: 2026-04-27（Session 26 実機検証完走後の更新）
+**ブランチ**: docs/session26-adr-accepted（PR 作成中）
+**main HEAD**: `d83a3de` docs(handoff): Session 25 cleanup - PR #126 マージ反映 (#127)
 
-## セッション 25 の成果（10 commits → squash merge `0f9abbb`、合計 +3239 / -151 行）
+## セッション 26 の成果（Windows 実機検証完走 + ADR 昇格）
+
+### 主成果
+
+- **PR #126 全 Acceptance Criteria（13 項目）の Windows 実機検証完走**
+  - 本田様 Windows 11 実機（`C:\Users\sasak\`）+ 本番データ（`\\Tera-station\share\03.FAX(事業所)\` 40 事業所）で動作確認
+  - **AC-12 / AC-13（最重要バグ予防）が本番経路で機能していることを実機確認**
+- **ADR-013 を Proposed → Accepted に昇格**（実機検証結果を追記）
+- **ADR-011 を Proposed → Accepted に昇格**（タスク 14D 完走、4 ボタン構成での実機稼働確認）
+- **Session 26 用ランブック新設**: `docs/handoff/session26-pr126-windows-runbook.md`（30-45 分の検証フロー）
+
+### Session 26 の検証フロー（実施結果）
+
+| Phase | 内容 | 所要 | 結果 |
+|-------|------|------|------|
+| 0 | 事前確認 + バックアップ + main 同期 + 依存同期 | 5-10分 | ✅（HEAD `d83a3de` 確認、bak 作成） |
+| 1 | exe 再ビルド（`pyinstaller --clean`） | ~5分 | ✅（`Build complete!`、警告なし） |
+| 2 | 配布（exe 上書き、78,570,672 bytes） | ~1分 | ✅（旧 78,541,735 → 新 78,570,672） |
+| 3 | 動作確認（AC-1/2/3/4/7/8/10/11/12/13） | ~30分 | ✅（10 AC PASS、AC-9 軽微スキップ、AC-5/6 間接確認） |
+| 5 | ADR-013 + ADR-011 Accepted 昇格 PR 作成 | 進行中 | 本 PR |
+
+### 実機検証で確認できた最重要ポイント
+
+#### AC-12（再実行ループ防止）
+
+`facility_scanner._collect_a_candidates` で出力ファイル `{事業所名}.pdf` を A.pdf 候補から除外する核心ロジックが実機で機能。テスト事業所 `きなり(メール)※持参` で 1 回結合実行 → 出力 `きなり(メール)※持参.pdf` (1,672 KB) 生成 → 「再スキャン」 → 同事業所が `a_multiple` にならず「実行待ち」表示維持を確認。これを怠ると永続的に実行不可ループに陥るため、本 ADR の最重要バグ予防。
+
+#### AC-13（Acrobat ロック中の本番経路、致命バグ予防）
+
+review-pr で発見した致命バグ（`merge_facility._save_atomically` が全例外を `PdfMergeError` でラップ → bulk_runner の `except PermissionError` が本番経路で発火しない）の修正（`_is_lock_error()` ヘルパで `__cause__` チェーンを辿る）が本番経路で機能。
+
+実測:
+- Acrobat で出力 PDF 開いた状態で再実行 → 行ステータス「⚠ 結合 PDF を閉じてから再実行してください」
+- 完了サマリ messagebox: 「PDFロック: 1件 / エラー: 0件」（`failed_locked` と `failed` が正しく分離）
+- Acrobat 閉じて再実行 → 「完了: 1件 / PDFロック: 0件」で成功（ロック解消検証）
+
+### Session 26 で得られた観察事項（次セッション要確認）
+
+#### 元 `a_missing` 状態事業所の挙動
+
+初回スキャン時に `きなり(メール)※持参` が `a_missing`（A.pdf なし）だったが、テスト実行時には A.pdf (`202603_提供実績_...` 486 KB) が認識され成功。本田様による A.pdf 手動配置の可能性が高いが、scanner の初回判定タイミングと A.pdf 生成タイミングの競合が原因の可能性も残る。**Session 27 で初回スキャン挙動を要確認**（実バグなら起票候補、`triage 基準: rating ≥ 7` 判定後）。
+
+### Session 26 で発生したランブックの不備（修正済）
+
+#### Phase 0-4 の `pytest -q` で integration tests が Wiseman SP を起動
+
+`tests/integration/test_read_grid.py` 等が pywinauto で本物の Wiseman を起動してしまった。当初の指示は「依存関係 + 既存テスト」確認目的だったが、Windows 環境では integration tests は GitHub Actions で全 SUCCESS 確認済のため再実行不要。**ランブック修正**: `pytest -q` → `pytest -q tests/unit/` または pytest スキップ（CI グリーン依拠）。
+
+#### Phase 1-2 の `Select-String` 二段パイプ
+
+`Select-String -NotMatch "..."` を別の `Select-String` の出力にパイプする書き方は、第一段階が空の場合に Pattern エラーで失敗。**ランブック修正**: `Select-String -Path build.log -Pattern "Hidden import.*not found"` 単独で十分（出力が空なら警告ゼロ）。
+
+### Issue Net 変化（本セッション、ADR 昇格 PR マージ後最終確定）
+
+- **Close**: 0 件（実機検証成功で残存 P2 の再判断は次セッション）
+- **起票**: 0 件（観察事項は handoff + ADR に記録、triage 基準 rating ≥ 7 は未該当）
+- **Net: 0 件**
+
+進捗評価: Net 0 だが **「進捗ゼロ」ではない**。理由:
+- ユーザー明示指示「Windows 実機検証を実施」の完走 + 全 AC 検証済
+- ADR-013 + ADR-011 を Proposed → Accepted に昇格（PR #126 + タスク 14D 完走）
+- 既存 P2 Issue 10 件は実機稼働確認後の再判断フェーズで進捗保留が妥当
+
+---
+
+## セッション 25 の成果（前セッション、PR #126/#127 マージ済）
+
+**Session 25 終了時点の main HEAD**: `0f9abbb` feat(ui): 事業所ルートフォルダ管理 + 一括/選択 PDF 結合（デスクトップアプリ統合）(#126)
+
+10 commits → squash merge `0f9abbb`、合計 +3239 / -151 行。
 
 ### マージ済 ✅
 

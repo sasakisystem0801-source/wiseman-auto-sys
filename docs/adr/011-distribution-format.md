@@ -1,13 +1,15 @@
 # ADR-011: 配布形式（PyInstaller onefile + 手動配布）
 
 ## ステータス
-**Proposed (2026-04-21)** — 14A 完了時点。14D で Accepted に昇格予定。
+**Accepted (2026-04-27)** — Session 26 で本田様の Windows 11 実機にて 14D 昇格条件 1-4 を達成。`wiseman_hub.exe` (78,570,672 bytes) を `d83a3de` HEAD で再ビルド + 配布、Launcher GUI 4 ボタン（PDFマージ処理 / 確認待ちセッション / 事業所フォルダ一括結合 / 設定）動作確認、UNC パス + 日本語事業所名（`\\Tera-station\share\03.FAX(事業所)`）での実環境動作確認、Phase A regression smoke 完走。SmartScreen は既存 hash reputation 確立済のため新規警告なし。コードサイニング要否は 1 施設運用継続のため当面なしを継続（運用補強で対応）。
 
 ### 変更履歴
 
+- 2026-04-21: 14A 完了、Proposed として作成
 - 2026-04-22: 14C 実装に伴い配布レイアウトを更新（`default.toml.sample` 命名に変更、
   `scripts/create_shortcut.ps1` を配布物に追加）。14C の施設 IT 担当者向け手順書
   `docs/handoff/14c-deploy.md` と整合。
+- 2026-04-27（Session 26）: PR #124 + #126 の本番稼働確認完了 → Accepted 昇格
 
 ## コンテキスト
 
@@ -133,13 +135,14 @@ MVP 1 施設運用ではこの補強で十分。2 施設目以降はコードサ
 - **10-2**: Windows 実機ビルド + E2E 検証（本田さん実施）、SmartScreen 挙動記録、
   14C の PS スクリプトの実機動作確認
 
-## 14D Accepted 昇格条件
+## 14D Accepted 昇格条件（達成記録）
 
 以下を全て満たした時点で本 ADR を Accepted に昇格する:
-1. 10-2 で Windows 11 実機にて `wiseman_hub.exe` ビルド + Launcher GUI 起動成功
-2. Launcher の 3 ボタン（PDF マージ処理 / 確認待ちセッション / 設定）が実機で動作
-3. SmartScreen 初回警告の挙動記録（Enterprise 環境での挙動含む）
-4. コードサイニング要否の 14D 判断記録
+
+1. ✅ **Session 26 達成**: 本田様 Windows 11 実機で `wiseman_hub.exe` (78,570,672 bytes / `d83a3de` HEAD) ビルド + Launcher GUI 起動成功。`uv run pyinstaller wiseman_hub.spec --clean --noconfirm` で Hidden import 警告なしの clean build。
+2. ✅ **Session 26 達成（4 ボタン構成に拡張）**: Launcher の **4 ボタン**（PDFマージ処理 / 確認待ちセッション / **事業所フォルダ一括結合** / 設定）が実機で動作。3 ボタン目は ADR-013（PR #126）で追加された新ダイアログ。
+3. ✅ **Session 26 記録**: 既存 exe 上書き配布のため hash reputation 既確立、新 exe でも SmartScreen 警告は発生せず。Enterprise 環境（MDE / WDAC）での挙動は本配布先 PC ではポリシー未適用、別 PC での運用展開時に再評価。
+4. ✅ **Session 26 判断**: 1 施設運用継続のためコードサイニングは引き続き非導入。運用補強（事前 hash 共有 + USB 直接配布）で当面対応。2 施設目展開時に再評価する閾値を維持。
 
 ## 参考
 

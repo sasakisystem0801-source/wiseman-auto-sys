@@ -2,7 +2,12 @@
 
 ## ステータス
 
-**Proposed (2026-04-27)** — 本 PR でコア実装完了、macOS でテスト 633 PASS / lint clean / mypy clean。Windows 実機検証は次セッションで本田様の実機（`C:\Users\sasak\wiseman-hub\`）にて実施予定。実機検証完了後 **Accepted** に昇格する（ADR-012 と同じ運用）。
+**Accepted (2026-04-27)** — Session 26 で本田様の Windows 11 実機（`C:\Users\sasak\wiseman-hub\`）にて Acceptance Criteria 13 項目中 **11 項目を実機動作確認**（AC-1/2/3/4/7/8/10/11/12/13 + AC-6 完了サマリ messagebox 経由）、AC-5（チェック OFF は出力されない）はテスト 1 件実行で他事業所が未出力であることから間接確認、AC-9（ルート未設定/不在/アクセス不可）は次セッション送り（軽微・リスク低）。`\\Tera-station\share\03.FAX(事業所)` 配下の本番データ（40 事業所、実行可能 18 / 警告 22）スキャン + 1 事業所（`きなり(メール)※持参` 6 名結合、出力 1,672 KB）テスト実行で動作確認。**AC-13** は review-pr で発見した致命バグ（`PdfMergeError(__cause__=PermissionError)` ラップ経路）の修正が本番経路で機能していることを実機で確認（Acrobat ロック中に `failed_locked` ステータス + 「結合 PDF を閉じてから再実行してください」文言、サマリ「PDFロック: 1件」）。**AC-12** は再スキャン後に出力ファイル `{事業所名}.pdf` が `a_multiple` を引き起こさないことを実機で確認（再実行ループ防止）。
+
+### 変更履歴
+
+- 2026-04-27（Session 25）: 本 ADR 作成（Proposed）、PR #126 マージ
+- 2026-04-27（Session 26）: Windows 実機検証完了 → Accepted 昇格
 
 ## コンテキスト
 
@@ -149,7 +154,7 @@ Evaluator 分離プロトコルの指摘から:
 |--------|------|---------|
 | MEDIUM | 上書き確認ダイアログなし | ユーザー判断「無条件上書き」確定済、UI サマリで明示。実機運用で問題が出たら追加検討 |
 | LOW | A_MULTIPLE 解決後も「PDF選択...」ボタン残置 | 機能上問題なし、UI 細部は次回 |
-| エッジ | UNC パスでの scanner / merge_facility 実ファイル検証なし | macOS 上で再現困難。Windows 実機検証で確認 |
+| エッジ | UNC パスでの scanner / merge_facility 実ファイル検証なし | ✅ Session 26 で本番 UNC パス + 日本語事業所名で動作確認、解消 |
 
 ## Acceptance Criteria（13 項目、本 PR で macOS テスト全 PASS）
 
@@ -161,13 +166,13 @@ Evaluator 分離プロトコルの指摘から:
 | AC-4 | A.pdf 2 件以上 → A_MULTIPLE、ファイル選択するまで実行不可 | scanner + ViewModel | ✅ |
 | AC-5 | チェック OFF は出力されない | bulk runner 統合 | ✅ |
 | AC-6 | 1 件失敗で残り続行 + サマリで件数明示 | bulk runner | ✅ |
-| AC-7 | 「フォルダ/PDF を開く」が macOS/Windows 両対応 | os_open + 手動 | ✅ macOS / ⏳ Windows 実機 |
+| AC-7 | 「フォルダ/PDF を開く」が macOS/Windows 両対応 | os_open + 手動 | ✅ macOS / ✅ Windows 実機（Session 26、Explorer + Adobe Acrobat 両方起動確認） |
 | AC-8 | 既存 merge_facility シグネチャ + 19 テストが PASS | pytest | ✅ 19/19 PASS 実測 |
 | AC-9 | ルート未設定/不在/アクセス不可で明示表示 | UI + 異常系 | ✅ |
 | AC-10 | 既存出力は無条件上書き + UI に明示 | bulk runner + サマリ | ✅ |
-| AC-11 | 日本語/UNC パスで scan/open/merge が失敗しない | UNC モック + 手動 | ✅ macOS / ⏳ Windows UNC 実機 |
+| AC-11 | 日本語/UNC パスで scan/open/merge が失敗しない | UNC モック + 手動 | ✅ macOS / ✅ Windows UNC 実機（Session 26、`\\Tera-station\share\03.FAX(事業所)` で日本語事業所名 + `(FAX)/(メール)` サフィックス含めて文字化けなし、scan/merge 成功） |
 | AC-12 | A.pdf 候補から `{事業所名}.pdf` を除外 | scanner 単体 | ✅（最重要、3 パターン PASS） |
-| AC-13 | Windows lock → 「PDFを閉じてから再実行」文言変換 | bulk runner + UI | ✅ |
+| AC-13 | Windows lock → 「PDFを閉じてから再実行」文言変換 | bulk runner + UI | ✅ Windows 実機（Session 26、Acrobat ロック中の `failed_locked` + 「結合 PDF を閉じてから再実行してください」文言、サマリ「PDFロック: 1件」、ロック解消後の再実行成功も確認） |
 
 ## 実装
 
@@ -199,13 +204,47 @@ PR `feat/facility-root-bulk-merge`（Session 25、本 ADR）:
 
 これらは 6 並列レビュー（PR #124 で実施）では未検出だった盲点で、Evaluator の独立判定の価値を改めて確認した。
 
+## Session 26 実機検証結果（Accepted 昇格根拠）
+
+### 検証環境
+
+- **PC**: 本田様 Windows 11 実機（`C:\Users\sasak\`）
+- **本番データ**: `\\Tera-station\share\03.FAX(事業所)\`（40 事業所、`(FAX)` / `(メール)` サフィックス付き日本語名）
+- **配布 exe**: `78,570,672 bytes` / `2026/04/27 7:13:10` ビルド（`d83a3de` HEAD で再ビルド + 配布）
+- **テスト対象事業所**: `きなり(メール)※持参`（6 名分の運動機能向上計画書 + 経過報告書）
+
+### 実測結果
+
+| 検証項目 | 期待 | 実測 | 判定 |
+|---------|------|------|------|
+| ランチャーボタンラベル | 「事業所フォルダ一括結合」 | 「事業所フォルダ一括結合」 | ✅ |
+| 配下事業所スキャン | 40 件列挙、B/C 両方ある事業所のみ実行可能 | 18 実行可能 / 22 警告 | ✅ |
+| `a_missing` 表示 | 「⚠ 事業所直下にPDFがありません」 | 一致 | ✅ AC-3 |
+| `a_multiple` 表示 + PDF選択ボタン | 「⚠ PDFが複数あります → 1つ選択してください」+ 「PDF選択...」 | 一致 | ✅ AC-4 |
+| サマリ表示 | 選択中 / 実行不可 / 上書き | 「選択中: 18件 / 実行不可: 22件 / 上書き: 0件」 | ✅ |
+| 1 事業所結合実行 | 6 名分 ABCABC 連結、`{事業所名}.pdf` 生成 | `きなり(メール)※持参.pdf` 1,672 KB 生成 | ✅ AC-8 |
+| 完了サマリ messagebox | 5 status 別件数表示 | 「完了: 1件 / 結合対象なし: 0件 / PDFロック: 0件 / エラー: 0件 / 未処理(停止): 0件」 | ✅ AC-6 / review-pr LOW-1 |
+| **AC-12 再スキャン後** | `{事業所名}.pdf` が A 候補から除外、`a_multiple` にならない | 再スキャン後「実行待ち」表示維持（`a_multiple` 不発火） | ✅ **最重要** |
+| AC-7 フォルダ/PDF を開く | Explorer + デフォルト PDF ビューア起動 | Explorer + Adobe Acrobat 両方起動 | ✅ |
+| **AC-13 Acrobat ロック中再実行** | `failed_locked` + 「PDFを閉じてから再実行」文言、サマリ「PDFロック: 1件」 | 「⚠ 結合 PDF を閉じてから再実行してください」+ サマリ「PDFロック: 1件 / 上書き: 1件」 | ✅ **最重要、本番経路バグ予防** |
+| AC-13 補足（ロック解消後） | 再実行成功 | 「完了: 1件 / PDFロック: 0件」、出力ファイル更新 | ✅ |
+| AC-1 永続化 | ランチャー再起動でルート復元 + 自動スキャン | UNC ルート欄表示維持 + 自動スキャン完走 | ✅ |
+| AC-10 既存上書き明示 | サマリ「上書き: 1件」 | 一致 | ✅ |
+
+### 未解決の観察事項（追跡中）
+
+ADR の永続性を保つため、追跡課題の詳細は handoff ドキュメントで管理する（`docs/handoff/LATEST.md` 参照）:
+
+- **元 `a_missing` 状態の事業所が結合実行で成功**: 初回スキャンと A.pdf 配置タイミングの競合可能性。本田様による A.pdf 手動配置が原因の可能性が高く、実装側のバグの根拠は未確認。
+- **`a_missing` → 「実行待ち」遷移**: 「再スキャン」ボタンで正常に状態更新されることを実機で確認、scanner ロジック自体は正常動作。
+
 ## 次ステップ
 
-### 短期（次セッション）
+### 短期（Session 26 で完了 ✅）
 
-- **Windows 実機検証**: 本田様の `C:\Users\sasak\wiseman-hub\` で AC-7 / AC-11 の UNC パス + Acrobat lock シナリオを目視確認
-- **配布 exe 再ビルド**: `docs/handoff/1c-exe-redistribution-runbook.md` に従って PyInstaller onefile を再生成
-- **ADR-013 Accepted 昇格**: 実機検証完了後、ステータス更新
+- **Windows 実機検証**: 本田様の `C:\Users\sasak\wiseman-hub\` で AC-7 / AC-11 / AC-12 / AC-13 を含む 11 項目を実機動作確認（上記「Session 26 実機検証結果」参照）
+- **配布 exe 再ビルド**: PyInstaller onefile 78,570,672 bytes 生成 + 配布完了（`d83a3de` HEAD）
+- **ADR-013 Accepted 昇格**: 本コミットで実施
 
 ### 中期
 
