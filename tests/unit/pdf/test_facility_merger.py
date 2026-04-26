@@ -491,6 +491,38 @@ class TestMergeFacilityRobustness:
         assert "荒木" not in report.c_missing
         assert "荒木" not in report.a_missing
 
+    def test_partial_user_bc_match_not_double_counted_in_a_missing(
+        self, workspace: dict[str, Path]
+    ) -> None:
+        """A に「三枝」あり + B「三枝.pdf」**なし** + C「三枝.pdf」あり のケース:
+
+        - 三枝は b_missing に分類される（A はあるが B 欠損で除外）
+        - C「三枝.pdf」は A の三枝とマッチしているので a_missing には**入らない**
+          （実機で発覚: 同一利用者が b_missing と a_missing 両方に出現する重複表示バグ）
+        """
+        _make_pdf(
+            workspace["a_pdf"],
+            ["氏名 三枝 太郎 様", "氏名 塩津 美貴子 様"],
+        )
+        # B: 塩津のみ（三枝なし）
+        _make_pdf(workspace["plan_dir"] / "塩津.pdf", ["計画書 塩津"])
+        # C: 三枝 + 塩津
+        _make_pdf(workspace["report_dir"] / "三枝.pdf", ["経過 三枝"])
+        _make_pdf(workspace["report_dir"] / "塩津.pdf", ["経過 塩津"])
+
+        report = merge_facility(
+            workspace["a_pdf"],
+            workspace["facility_dir"],
+            workspace["output_root"],
+        )
+
+        # 三枝は b_missing に入る（A はあるが B 欠損）
+        assert "三枝" in report.b_missing
+        # 三枝は a_missing には入らない（C の三枝.pdf は A の三枝にマッチ済）
+        assert "三枝" not in report.a_missing
+        # C の「三枝」stem も a_missing に入らない
+        # （A 側の user_key は「三枝」、C の stem も「三枝」なので同一表記でチェック）
+
     def test_bc_dirs_missing_recorded_when_subfolders_absent(
         self, tmp_path: Path
     ) -> None:

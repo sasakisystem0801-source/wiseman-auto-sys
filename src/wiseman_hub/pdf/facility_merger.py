@@ -269,6 +269,15 @@ def merge_facility(
             b_match = _match_by_partial(extracted.last_name, plans)
             c_match = _match_by_partial(extracted.last_name, reports)
 
+            # A にマッチした B/C は、ABC 全揃いでなくても matched_bc_stems に記録する。
+            # これを怠ると Phase 2 で「A にマッチしない B/C」として a_missing に
+            # 重複計上されるため、b_missing/c_missing と a_missing の両方に
+            # 同一利用者が表示されるバグになる（実機で発覚）。
+            if b_match is not None:
+                matched_bc_stems.add(f"B:{b_match[0]}")
+            if c_match is not None:
+                matched_bc_stems.add(f"C:{c_match[0]}")
+
             # 排他カテゴリ分類（不揃いは出力に含めず report のみ記録）
             if b_match is None and c_match is None:
                 a_only.append(user_key)
@@ -280,13 +289,11 @@ def merge_facility(
                 c_missing.append(user_key)
                 continue
 
-            # ABC 全揃い → 連結対象として蓄積
+            # ABC 全揃い → 連結対象として蓄積（matched_bc_stems への登録は上で完了済）
             page_bytes = _extract_single_page_pdf(a_doc, page_index)
             full_set_entries.append(
                 (user_key, page_bytes, b_match[1], c_match[1], extracted.full_name)
             )
-            matched_bc_stems.add(f"B:{b_match[0]}")
-            matched_bc_stems.add(f"C:{c_match[0]}")
 
         # Phase 2: A にマッチしなかった B/C は a_missing にカテゴリ記録のみ
         # （旧仕様の B+C 結合出力は廃止）
