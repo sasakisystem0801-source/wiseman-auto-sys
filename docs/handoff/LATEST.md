@@ -1,8 +1,8 @@
 # Handoff: PR #126 Windows 実機検証完走 + ADR-013/011 Accepted 昇格（Session 26 終了時点）
 
-**更新日**: 2026-04-27（Session 26 実機検証完走後の更新）
-**ブランチ**: docs/session26-adr-accepted（PR 作成中）
-**main HEAD**: `d83a3de` docs(handoff): Session 25 cleanup - PR #126 マージ反映 (#127)
+**更新日**: 2026-04-27（Session 26 / PR #128 マージ後の cleanup 同期更新）
+**ブランチ**: main（PR #128 squash merge 済）
+**main HEAD**: `1b3cfcf` docs(adr): ADR-013 + ADR-011 Accepted 昇格（Session 26 / PR #126 実機検証完走）(#128)
 
 ## セッション 26 の成果（Windows 実機検証完走 + ADR 昇格）
 
