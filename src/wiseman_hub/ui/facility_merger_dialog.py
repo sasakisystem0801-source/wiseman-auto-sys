@@ -218,36 +218,84 @@ class FacilityMergerDialog:
         self._btn_run.state(["!disabled"])  # type: ignore[no-untyped-call]
 
     def _render_report(self, report: FacilityMergeReport) -> None:
-        """結果サマリを表示エリアに描画する（PII 防御: user_key のみ）。"""
+        """結果サマリを表示エリアに描画する（PII 防御: user_key のみ）。
+
+        新仕様: 出力は事業所単位 1 ファイル `{facility_name}.pdf`。
+        """
         lines: list[str] = []
         lines.append("=" * 50)
         lines.append(f"事業所: {report.facility_name}")
         lines.append(f"出力先: {report.output_dir}")
         lines.append("=" * 50)
-        lines.append(f"成功: {len(report.success)} 件")
-        for entry in report.success:
-            mark = "+".join(entry.sources_used)
-            lines.append(f"  OK  {entry.user_key}.pdf  ({mark})")
 
+        # 重大警告: B/C サブフォルダ自体が不在（NW 一時断・タイポで全利用者除外リスク）
+        if report.bc_dirs_missing:
+            lines.append("")
+            lines.append("⚠ 重大警告: 以下のサブフォルダが見つかりません")
+            for d in report.bc_dirs_missing:
+                lines.append(f"   ・{d}/")
+            lines.append(
+                "   → 全利用者が連結対象外になります。"
+                "事業所フォルダのパス・ネットワーク接続を確認してください。"
+            )
+            lines.append("")
+
+        # 重大警告: 氏名抽出失敗ページ（該当利用者は出力 PDF に含まれない）
         if report.extraction_failed_pages:
             pages = ", ".join(str(p + 1) for p in report.extraction_failed_pages)
-            lines.append(f"\n氏名抽出失敗（ページ番号）: {pages}")
-        if report.a_only:
-            lines.append(f"A のみ（B/C 両方なし）: {', '.join(report.a_only)}")
-        if report.a_missing:
-            lines.append(f"A にマッチなし（B+C のみ結合）: {', '.join(report.a_missing)}")
-        if report.b_missing:
-            lines.append(f"B（計画書）なし: {', '.join(report.b_missing)}")
-        if report.c_missing:
-            lines.append(f"C（経過報告書）なし: {', '.join(report.c_missing)}")
-        if report.name_conflicts:
             lines.append(
-                f"同姓コンフリクト（連番付与）: {', '.join(report.name_conflicts)}"
+                f"⚠ 注意: A.pdf の {len(report.extraction_failed_pages)} ページで"
+                f"氏名抽出に失敗しました（ページ: {pages}）"
+            )
+            lines.append("   → 該当利用者は出力 PDF に含まれません")
+            lines.append("")
+
+        if report.success:
+            output_file = f"{report.facility_name}.pdf"
+            lines.append(
+                f"結合 {len(report.success)} 名 → {output_file} "
+                "(A→B→C 順で連結)"
+            )
+            for entry in report.success:
+                lines.append(f"  ✓ {entry.user_key}")
+        else:
+            lines.append("結合対象なし（ABC 全揃いの利用者がいません）")
+
+        # 氏名抽出失敗の詳細表示は冒頭の重大警告で済ませているのでここでは省略
+
+        excluded_total = (
+            len(report.a_only)
+            + len(report.b_missing)
+            + len(report.c_missing)
+            + len(report.a_missing)
+            + len(report.ambiguous_bc_skipped)
+        )
+        if excluded_total > 0:
+            lines.append(f"\n除外: {excluded_total} 名（出力 PDF に含まれません）")
+        if report.a_only:
+            lines.append(
+                f"  ・A のみ（B/C 両方なし）: {', '.join(report.a_only)}"
+            )
+        if report.b_missing:
+            lines.append(
+                f"  ・B（計画書）なし: {', '.join(report.b_missing)}"
+            )
+        if report.c_missing:
+            lines.append(
+                f"  ・C（経過報告書）なし: {', '.join(report.c_missing)}"
+            )
+        if report.a_missing:
+            lines.append(
+                f"  ・A にマッチなし（B/C のみ存在）: {', '.join(report.a_missing)}"
             )
         if report.ambiguous_bc_skipped:
             lines.append(
-                "同姓重複 fail-safe（B/C 添付見送り、A のみ出力）: "
+                "  ・同姓重複 fail-safe（誤添付防止）: "
                 f"{', '.join(report.ambiguous_bc_skipped)}"
+            )
+        if report.name_conflicts:
+            lines.append(
+                f"\n同姓コンフリクト（連番付与）: {', '.join(report.name_conflicts)}"
             )
 
         self._set_result_text("\n".join(lines) + "\n")
