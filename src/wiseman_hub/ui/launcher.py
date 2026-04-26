@@ -70,7 +70,7 @@ CANCEL_RESULT = ReviewCallbackResult()
 _BTN_RUN_PDF_MERGE = "PDF マージ処理を実行"
 _BTN_OPEN_REVIEW = "確認待ちセッション"
 _BTN_OPEN_SETTINGS = "設定"
-_BTN_OPEN_FACILITY_MERGER = "事業所フォルダ結合"
+_BTN_OPEN_FACILITY_MERGER = "事業所フォルダ一括結合"
 
 _TITLE_CONFIG_MISSING = "設定が未完了"
 _MSG_CONFIG_MISSING = (

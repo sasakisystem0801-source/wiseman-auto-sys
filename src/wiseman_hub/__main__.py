@@ -58,23 +58,46 @@ class _LauncherLike(Protocol):
 
 
 def _make_facility_merger_callback(
+    config_path: Path,
     get_launcher: Callable[[], _LauncherLike],
 ) -> Callable[[], None]:
-    """Launcher に注入する「事業所フォルダ結合」コールバックを組み立てる。
+    """Launcher に注入する「事業所フォルダ一括結合」コールバックを組み立てる（W5）。
 
-    クリック時に FacilityMergerDialog を開き、wait_window でモーダル待機する。
-    実行結果は dialog 内の Text widget に表示され、ダイアログ閉鎖後に制御が戻る。
+    新ダイアログ ``FacilityRootManagerDialog`` を起動する。ルートフォルダを
+    選択するだけで配下の事業所を自動検出し、チェックボックス UI で
+    一括 / 選択処理ができる。ルート設定は TOML に永続化される。
+
+    旧 ``FacilityMergerDialog``（単一事業所モーダル）は ``ui.facility_merger_dialog``
+    にコード資産として残置するが、ランチャーからの UI 経路はこちらに統一する。
+    新ダイアログは事業所が 1 つしかないルートでも動作するため機能上の劣化はない。
     """
 
-    def open_facility_merger() -> None:
-        from wiseman_hub.ui.facility_merger_dialog import FacilityMergerDialog
+    def open_facility_root_manager() -> None:
+        from wiseman_hub.config import load_config
+        from wiseman_hub.ui.facility_root_dialog import FacilityRootManagerDialog
 
         launcher = get_launcher()
-        dialog = FacilityMergerDialog(parent=launcher.get_root())
-        # モーダル待機（ダイアログが閉じられるまで制御を返さない）
+        # 設定 GUI で root 変更後にも追随する（13B/13C と同じパターン）
+        config = load_config(config_path)
+        dialog = FacilityRootManagerDialog(
+            parent=launcher.get_root(),
+            config=config,
+            config_path=config_path,
+        )
+        # モーダル待機
         dialog.get_toplevel().wait_window()
+        # ダイアログで root_dir 等が変更されている可能性 → Launcher を新設定で再ロード
+        try:
+            updated = load_config(config_path)
+        except (OSError, ValueError, TypeError) as exc:
+            logger.warning(
+                "load_config after facility_root dialog failed: %s",
+                type(exc).__name__,
+            )
+            return
+        launcher.reload_config(updated)
 
-    return open_facility_merger
+    return open_facility_root_manager
 
 
 def _make_settings_callback(
@@ -428,7 +451,7 @@ def main() -> None:
                     config_path, _get_launcher
                 ),
                 on_open_facility_merger=_make_facility_merger_callback(
-                    _get_launcher
+                    config_path, _get_launcher
                 ),
             )
             launcher_ref[0] = launcher
