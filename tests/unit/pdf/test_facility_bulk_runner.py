@@ -130,10 +130,11 @@ def test_empty_items_returns_empty(tmp_path: Path) -> None:
 
 
 def test_permission_error_yields_failed_locked(tmp_path: Path) -> None:
-    """PermissionError → FAILED_LOCKED + UI 向け文言（AC-13）。
+    """生 PermissionError → FAILED_LOCKED + UI 向け文言（AC-13、稀ケース）。
 
-    Windows で出力 PDF が Acrobat 等で開かれている場合、現場で頻発するため
-    「PDFを閉じてから再実行」文言で IT 非専門ユーザーを誘導する。
+    `merge_facility` 内部で `_save_atomically` を経由しない例外パスで生 PermissionError
+    が来た場合の保険。本番経路の主流は `PdfMergeError(__cause__=PermissionError)`
+    なので test_pdf_merge_error_with_permission_cause_yields_failed_locked が主担当。
     """
     items = [_make_item(tmp_path, "ロック中")]
 
@@ -149,6 +150,67 @@ def test_permission_error_yields_failed_locked(tmp_path: Path) -> None:
     assert "閉じ" in item.error_message  # 「閉じてから」「閉じて」のいずれか
     # 内部例外メッセージ（パス含む）が UI 文言に漏れない PII 防御
     assert "simulated" not in item.error_message
+
+
+def test_pdf_merge_error_with_permission_cause_yields_failed_locked(
+    tmp_path: Path,
+) -> None:
+    """**本番経路**: `PdfMergeError(__cause__=PermissionError)` → FAILED_LOCKED（AC-13）。
+
+    `merge_facility` 内の `_save_atomically` は **全例外を `PdfMergeError` でラップ** する
+    実装（merger.py:234-238）。そのため出力 PDF が Acrobat 等で開かれている Windows
+    ロックの典型ケースでは、生 PermissionError ではなく PdfMergeError が伝播してくる。
+
+    `_is_lock_error` ヘルパが `__cause__` を 1 段辿って PermissionError を検出し、
+    `BulkExecutionStatus.FAILED_LOCKED` + 「PDFを閉じてから再実行」文言に変換する。
+    """
+    from wiseman_hub.pdf.merger import PdfMergeError
+
+    items = [_make_item(tmp_path, "Acrobatでロック中")]
+
+    def fake_merge(a: Path, facility: Path, out: Path) -> FacilityMergeReport:
+        # _save_atomically が PermissionError を PdfMergeError でラップする挙動を模擬
+        try:
+            raise PermissionError("simulated [WinError 32] file in use")
+        except PermissionError as e:
+            raise PdfMergeError("Failed to save merged PDF (PermissionError)") from e
+
+    result = run_bulk_merge(items, merge_fn=fake_merge)
+
+    item = result[0]
+    assert item.status == BulkExecutionStatus.FAILED_LOCKED
+    assert item.error_message is not None
+    assert "PDF" in item.error_message
+    assert "閉じ" in item.error_message
+    # PII 防御: ラップされた内部メッセージは UI に漏れない
+    assert "WinError" not in item.error_message
+    assert "simulated" not in item.error_message
+
+
+def test_pdf_merge_error_without_permission_cause_yields_failed(
+    tmp_path: Path,
+) -> None:
+    """`PdfMergeError(__cause__=他のOSError等)` → FAILED（FAILED_LOCKED でない）。
+
+    DiskFull 等は「PDFを閉じる」では解決しないため、ロック分類から除外する。
+    """
+    from wiseman_hub.pdf.merger import PdfMergeError
+
+    items = [_make_item(tmp_path, "DiskFull")]
+
+    def fake_merge(a: Path, facility: Path, out: Path) -> FacilityMergeReport:
+        try:
+            raise OSError(28, "No space left on device")
+        except OSError as e:
+            raise PdfMergeError("Failed to save merged PDF (OSError)") from e
+
+    result = run_bulk_merge(items, merge_fn=fake_merge)
+
+    item = result[0]
+    assert item.status == BulkExecutionStatus.FAILED
+    # FAILED_LOCKED の文言（「PDFを閉じて」）にならないこと
+    assert item.error_message is not None
+    assert "閉じ" not in item.error_message
 
 
 def test_other_exception_yields_failed_with_type_name(tmp_path: Path) -> None:

@@ -253,7 +253,8 @@ class FacilityRootViewModel:
     def apply_item_update(self, item: BulkExecutionItem) -> None:
         """runner の progress_callback または完了結果を該当行に反映。
 
-        candidate identity（facility_dir）でマッチング。
+        candidate identity（facility_dir）でマッチング。マッチしない場合は
+        warning ログを出して silent skip（実行中に rows が再構築された等の race）。
         """
         for row in self.rows:
             if row.candidate.facility_dir == item.candidate.facility_dir:
@@ -262,6 +263,12 @@ class FacilityRootViewModel:
                 if item.report is not None:
                     row.success_count = len(item.report.success)
                 return
+        # 不一致は設計上想定外。UI rows と進行中 items の整合性が崩れた状態を
+        # fail-loud で記録し、silent failure を回避する（PII 防御で facility_name のみ）。
+        logger.warning(
+            "apply_item_update: no row matches facility=%s (rows replaced during run?)",
+            item.candidate.facility_name,
+        )
 
 
 # =============================================================================
@@ -526,11 +533,22 @@ class FacilityRootManagerDialog:
         self._vm.set_root_and_rows(root, candidates)
         self._root_var.set(str(root))
         # AppConfig 更新を永続化（既存ファイルなら無条件上書き、無ければ作成）
+        save_failed = False
         try:
             self._save_config_fn(self._config, self._config_path, create_if_missing=True)
         except Exception as e:  # noqa: BLE001 — 保存失敗で UI を止めない
-            logger.warning("save_config failed: %s", type(e).__name__)
+            # error レベル: 介護現場で「設定したのに次回反映されない」混乱の主因
+            logger.error(
+                "save_config failed (root_dir won't persist): %s", type(e).__name__
+            )
+            save_failed = True
         self._rebuild_rows()
+        if save_failed:
+            # サマリ行に控えめ警告を追記（モーダルではなく非侵襲、N=20 件運用で煩雑にしない）
+            self._summary_var.set(
+                self._summary_var.get()
+                + " ⚠ 設定保存失敗（次回起動時にルート再選択が必要）"
+            )
 
     def _on_select_all(self) -> None:
         self._vm.select_all()
@@ -617,7 +635,9 @@ class FacilityRootManagerDialog:
                     cancel_event=cancel,
                 )
             except Exception as e:  # noqa: BLE001 — runner からの予期せぬ伝播
-                logger.exception("bulk run failed: %s", type(e).__name__)
+                # PII 防御: logger.exception は traceback 経由で例外 message
+                # （絶対パス含む）を漏らすため使わない。_do_scan / bulk_runner と統一。
+                logger.error("bulk run failed (worker): %s", type(e).__name__)
                 # main thread で notify
                 with contextlib.suppress(RuntimeError, tk.TclError):
                     self._top.after(0, self._on_run_error, type(e).__name__)
@@ -642,6 +662,24 @@ class FacilityRootManagerDialog:
     def _on_run_done(self) -> None:
         self._set_busy(False)
         self._refresh_summary()
+        # 完了サマリを messagebox で明示告知。N=20 件処理で失敗を見落とすリスクを回避。
+        # 本 PR の主目的「サイレント失敗回避」に直結（review 指摘を反映）。
+        self._messagebox.showinfo("実行完了", self._build_completion_summary())
+
+    def _build_completion_summary(self) -> str:
+        """実行後の各 status 件数を集計したサマリ文字列を構築する。"""
+        counts: dict[BulkExecutionStatus, int] = {s: 0 for s in BulkExecutionStatus}
+        for row in self._vm.rows:
+            if row.execution_status is not None:
+                counts[row.execution_status] += 1
+        lines = [
+            f"完了: {counts[BulkExecutionStatus.SUCCESS]}件",
+            f"結合対象なし: {counts[BulkExecutionStatus.PARTIAL]}件",
+            f"PDFロック: {counts[BulkExecutionStatus.FAILED_LOCKED]}件",
+            f"エラー: {counts[BulkExecutionStatus.FAILED]}件",
+            f"未処理(停止): {counts[BulkExecutionStatus.CANCELLED_SKIPPED]}件",
+        ]
+        return "\n".join(lines)
 
     def _on_run_error(self, type_name: str) -> None:
         self._set_busy(False)

@@ -34,6 +34,24 @@ from wiseman_hub.pdf.facility_scanner import FacilityCandidate
 logger = logging.getLogger(__name__)
 
 
+def _is_lock_error(exc: BaseException) -> bool:
+    """`PermissionError`（Windows ファイルロックの典型）かを判定する。
+
+    `merge_facility` 内の `_save_atomically` は **全例外を `PdfMergeError` でラップ** する
+    実装になっている（merger.py:234-238）。そのため出力 PDF が Acrobat 等で開かれている
+    Windows ロックの典型ケースでは、生の `PermissionError` ではなく
+    `PdfMergeError(__cause__=PermissionError(...))` が伝播してくる。
+
+    本関数は `__cause__` チェーンを 1 段辿って `PermissionError` を検出する。
+    `PermissionError` は `OSError` のサブクラスだが「ロック」として狭く扱い、
+    DiskFull など他の `OSError` は通常の FAILED として処理する。
+    """
+    if isinstance(exc, PermissionError):
+        return True
+    cause = getattr(exc, "__cause__", None)
+    return isinstance(cause, PermissionError)
+
+
 MergeFn = Callable[[Path, Path, Path], FacilityMergeReport]
 ProgressCallback = Callable[[int, "BulkExecutionItem"], None]
 
@@ -144,24 +162,30 @@ def run_bulk_merge(
 
         try:
             report = fn(item.a_pdf_path, item.candidate.facility_dir, item.output_root)
-        except PermissionError as e:
-            # AC-13: Windows で出力 PDF が Acrobat 等で開かれている典型例
-            logger.error(
-                "merge_facility PermissionError (likely PDF lock): facility=%s type=%s",
-                item.candidate.facility_name,
-                type(e).__name__,
-            )
-            item.status = BulkExecutionStatus.FAILED_LOCKED
-            item.error_message = _MSG_LOCKED
         except Exception as e:  # noqa: BLE001 — 1 件失敗で他事業所を巻き込まない（AC-6）
-            # PII 防御: 例外メッセージ本文（パス含むことがある）はログにも UI にも出さない
-            logger.error(
-                "merge_facility failed: facility=%s type=%s",
-                item.candidate.facility_name,
-                type(e).__name__,
-            )
-            item.status = BulkExecutionStatus.FAILED
-            item.error_message = type(e).__name__
+            # AC-13: Windows で出力 PDF が Acrobat 等で開かれている典型例。
+            # 生 PermissionError と PdfMergeError(__cause__=PermissionError) の
+            # 両方を「ロック」として扱う（_save_atomically が全例外をラップするため）。
+            if _is_lock_error(e):
+                logger.warning(
+                    "merge_facility lock detected (PDF likely opened): "
+                    "facility=%s type=%s cause=%s",
+                    item.candidate.facility_name,
+                    type(e).__name__,
+                    type(e.__cause__).__name__ if e.__cause__ else "None",
+                )
+                item.status = BulkExecutionStatus.FAILED_LOCKED
+                item.error_message = _MSG_LOCKED
+            else:
+                # PII 防御: 例外メッセージ本文（パス含むことがある）はログにも UI にも出さない
+                logger.error(
+                    "merge_facility failed: facility=%s type=%s",
+                    item.candidate.facility_name,
+                    type(e).__name__,
+                )
+                item.status = BulkExecutionStatus.FAILED
+                # PdfMergeError は merge_facility のドメイン例外、UI には型名のみ
+                item.error_message = type(e).__name__
         else:
             item.report = report
             item.status = _classify_success(report)

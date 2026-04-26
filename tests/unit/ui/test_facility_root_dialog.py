@@ -382,6 +382,45 @@ class TestExecutableItems:
 # -----------------------------------------------------------------------------
 
 
+class TestApplyItemUpdateMismatch:
+    """`apply_item_update` で facility_dir が一致しない場合の挙動。
+
+    review 指摘 (silent-failure-hunter HIGH-1): 不一致時に silent return すると、
+    実行中再スキャン等の race で UI が「処理中…」のまま固まるリスク。
+    warning ログを出して fail-loud にする。
+    """
+
+    def test_unmatched_item_does_not_raise_and_logs_warning(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        vm = FacilityRootViewModel()
+        vm.set_root_and_rows(tmp_path, [_make_candidate(tmp_path, "実在")])
+
+        # 別ルートの candidate（rows に存在しない）
+        stranger_root = tmp_path / "別ルート"
+        stranger_root.mkdir()
+        stranger = _make_candidate(stranger_root, "幽霊事業所")
+        stray_item = BulkExecutionItem(
+            candidate=stranger,
+            a_pdf_path=stranger_root / "a.pdf",
+            output_root=stranger_root,
+            status=BulkExecutionStatus.SUCCESS,
+        )
+
+        with caplog.at_level(
+            logging.WARNING, logger="wiseman_hub.ui.facility_root_dialog"
+        ):
+            vm.apply_item_update(stray_item)  # 例外なくサイレント return せず警告
+
+        # 元の row には影響がない
+        assert vm.rows[0].execution_status is None
+        # warning ログに facility_name が記録される（PII 防御で type 名のみ）
+        logged = " ".join(r.getMessage() for r in caplog.records)
+        assert "no row matches" in logged or "rows replaced" in logged
+
+
 class TestUpdateAfterExecution:
     def test_apply_runner_result_updates_row_status(self, tmp_path: Path) -> None:
         """runner の戻り値を ViewModel に反映 → 該当行の execution_status が更新される。"""
