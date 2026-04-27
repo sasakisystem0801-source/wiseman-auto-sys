@@ -34,6 +34,7 @@
 - 本田様の Windows 11 実機検証（30-45 分完走可能）の準備を完成
 - ADR-014 §PR5 Accepted 昇格条件 で機械的判定可能な昇格条件を明記
 - review 指摘の I4-ca（launcher の `_btn_ex_extractor` disabled 漏れ）は rating 5-6 + 業務影響軽微で Issue 起票せず runbook 既知制限 note で対応（feedback_issue_triage.md 準拠）
+- CLAUDE.md (project) の ADR 数ドリフト（「001-006」記述）を本 handoff PR で同梱修正
 
 ---
 
@@ -78,7 +79,6 @@
 ### PR5 実機検証完走後の候補
 
 - **#80**: Windows 実機 smoke build で Phase B / OCR import 検証（ex_extractor 安定動作確認後）
-- **CLAUDE.md (project) ADR 数ドリフト**: 「001-006」記述を最新数に更新（本 handoff PR で同梱対応）
 
 ### 能動作業不要（monitor）
 
@@ -127,7 +127,10 @@
 
 ## 積み残し Issue
 
-### Session 29 で起票 / CLOSED
+### Session 29 で起票
+- なし（ドキュメント整備セッション）
+
+### Session 29 で CLOSED
 - なし（ドキュメント整備セッション）
 
 ### P1（open、継続）
