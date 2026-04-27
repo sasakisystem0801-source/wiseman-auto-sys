@@ -121,7 +121,6 @@ class TestSaveLoad:
         assert loaded.session_id == s.session_id
         assert loaded.status == s.status
         assert loaded.candidates == ()
-        # Issue #117: deep immutability — candidates must be tuple (not list).
         assert isinstance(loaded.candidates, tuple)
 
     def test_round_trip_with_candidates(self, tmp_path: Path) -> None:
@@ -150,7 +149,6 @@ class TestSaveLoad:
         assert len(loaded.candidates) == 1
         assert loaded.candidates[0].user_name_ocr == "塩津 美喜子"
         assert loaded.candidates[0].similar_candidates[0].extracted_name == "塩津美貴子"
-        # Issue #117: deep immutability — candidates and similar_candidates are tuples.
         assert isinstance(loaded.candidates, tuple)
         assert isinstance(loaded.candidates[0].similar_candidates, tuple)
 

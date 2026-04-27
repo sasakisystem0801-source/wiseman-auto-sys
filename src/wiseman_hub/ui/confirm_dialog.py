@@ -611,9 +611,7 @@ def resolve_candidate(
         if c.page_index != page_index:
             new_candidates.append(c)
             continue
-        similar: tuple[CandidateState, ...] = (
-            () if clear_similar else tuple(c.similar_candidates)
-        )
+        similar: tuple[CandidateState, ...] = () if clear_similar else c.similar_candidates
         new_candidates.append(
             UserCandidate(
                 page_index=c.page_index,
