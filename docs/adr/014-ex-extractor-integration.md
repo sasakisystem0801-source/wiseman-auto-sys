@@ -9,6 +9,33 @@
 - 2026-04-27: 本 ADR 作成（PR2 で初版を追加）
 - 2026-04-27: Evaluator 指摘 HIGH-1/HIGH-2 を反映（alias canonical 実在検証 + 語境界要求の追加）。テストデータを仮名化（PII 保護徹底、AC2-9 PARTIAL → PASS）
 - 2026-04-27: 5 agents + Codex 並列レビュー指摘を反映（alias 複数 hit → AMBIGUOUS_ALIAS、正規化完全一致複数 → AMBIGUOUS_EXACT、ResolveResult `__post_init__` 不変条件強制、空白除去廃止で境界文字化、UNMATCHED reason 細分化、`is_auto_distributable` プロパティ、`find_orphan_alias_canonicals` ヘルパー追加、ADR 自身の実名残置を仮名化）
+- 2026-04-27: PR3 実装着手。Codex セカンドオピニオン (HIGH 4 / MEDIUM 3 / LOW-MEDIUM 1) を反映:
+  - **HIGH-1 移行期 false negative 対策**: CLI 薄ラッパーに pending filename の stderr 列挙 + 暫定運用手順表示 + exit code 2 (新規) で「振り分け止まり」を現場へ明示
+  - **HIGH-3 CLI 互換境界の表現修正**: 「CLI 互換」ではなく「CLI **インターフェース** 互換、振り分けロジックは新 resolver により安全化により挙動変更」と明記
+  - **HIGH-6 adapter 例外時の部分生成 PDF**: `SfxExtractionFailed.partial_outputs` フィールドで保持、`ExtractionStatus.PARTIAL_OUTPUT` で表現、自動移動を構造的に禁止。`cleanup_warning` を primary error と分離
+  - **HIGH-8 AMBIGUOUS/UNMATCHED で SFX skip**: PR3 デフォルト維持。結果型は将来の `extract_for_review` モードに耐える形 (status enum + partial_outputs フィールド)
+  - **MEDIUM-2 adapter 設計**: `NotImplementedError` ではなく `UnsupportedSfxPlatformError` (RuntimeError 派生) を採用、`pywinauto` import を `_click_sfx_dialog` 内で遅延化し macOS の dry-run / `--help` 動作を保証
+  - **MEDIUM-4 結果型粒度**: `error: str` → `error_code: ExtractionErrorCode | None` + `error_detail: str | None` に分離、`ExtractionStatus` を新設して PR4 UI 分岐の単一判定ポイントを提供
+  - **MEDIUM-5 PII ログ防御**: ポリシーを「フルパス禁止 / 事業所名禁止 / candidates 禁止 / 抽出 PDF 名禁止 / filename のみ許容」に厳格化、caplog で直接検査
+- 2026-04-27: PR3 6 並列レビュー (evaluator + 5 agents) 指摘の HIGH を反映:
+  - **PR3-HIGH-A**: `MOVE_FAILED` 時に複数 PDF の途中まで成功した移動先を `ExtractionItem.partially_moved` フィールドで運用者へ可視化 (運用情報の消失防止、4 reviewer 重複検出)
+  - **PR3-HIGH-B**: `shutil.move` の `OSError` (クロスデバイス / 権限 / ネットワークドライブ切断) を捕捉し `MOVE_IO_ERROR` で構造化、`extract_directory` ループ最外殻でも想定外例外を `UNEXPECTED` として捕捉してバッチ続行を保証
+  - **PR3-HIGH-C**: `WindowsSfxAdapter.extract_pdf` の `OSError.str()` は Windows で full path を含むため `type(e).__name__` のみを `SfxExtractionFailed.detail` に伝搬 (PII 防御)
+  - **PR3-HIGH-D**: `_build_watch_dirs` の Desktop / Downloads 監視で SFX 実行中にユーザーが別途保存した無関係 PDF を誤配布するリスク → `_collect_new_pdfs` で `mtime >= sfx_start` フィルタを追加 (誤配布 KPI 直撃の構造的防御)
+  - **PR3-HIGH-G/M-1**: `partial_outputs` / `cleanup_warning` 設定時の silent 化を `logger.warning` 出力で解消 (filename + enum 値のみ、PII-safe)
+  - **PR3-HIGH-H**: `_click_sfx_dialog` の最外殻 `except Exception` に `logger.warning` で例外型名のみ出力 (UIA サービス停止 / 権限不足の根本原因切り分け用)
+  - **PR3-HIGH-I**: `assert matched is not None` を `if matched is None: raise RuntimeError` に変更 (`python -O` 実行時の silent NoneType 伝播防止)
+  - **PR3-HIGH-F**: CLI `_print_summary` に pending 件数の専用警告行 + cleanup_warning 別セクション + partially_moved 件数表示を追加 (現場運用での「振り分け止まり」即時検知)
+  - **L-1**: `WindowsSfxAdapter._terminate_proc` の `proc.kill()` 後 `wait(timeout=10)` 追加 (driver hang 時の無限待機防止)
+- 2026-04-27: PR #133 review-pr (6 並列再レビュー) で発見された新規 HIGH 6 件を反映:
+  - **PR3-NEW-1 (PII)**: `extract_directory` 例外捕捉で `logger.exception` を使うと traceback 経由で `OSError.args` の full path が漏洩する → `logger.warning` + `type(e).__name__` のみに変更
+  - **PR3-NEW-2 (resolver 二重呼び出し)**: 例外源が resolver の場合、フォールバックで再呼び出しすると同じ例外が二度目に発生しバッチ続行保護が破綻 → `try/except` で safe `UNMATCHED` フォールバック追加
+  - **PR3-NEW-3 (mtime グレース)**: `time.time()` は非単調、SFX 実行中の NTP 後方ステップで本来の PDF が誤って除外される → `_MTIME_GRACE_SEC = 5.0` のマージンで吸収
+  - **PR3-NEW-4 (silent skip 解消)**: `_collect_new_pdfs` の `stat()` 失敗を `logger.warning` + 型名で可視化 (network drive 切断 / 権限変化等の根本原因切り分け)
+  - **PR3-NEW-5 (システム例外)**: `MemoryError` / `RecursionError` を `extract_directory` ループで握り潰すと派生 OOM が連鎖 → 先に re-raise してバッチ即時停止
+  - **PR3-NEW-6 (不変条件)**: `partial_outputs` と `partially_moved` は status が排他なので同時非空にならないが、二重防御として `__post_init__` で排他検証を追加
+  - **PR3-NEW-MEDIUM**: CLI `logging.basicConfig` を `main()` 内に移動 (import 時の root logger 上書きを防ぎ、PR4 UI からの import を阻害しない)
+  - PII 保護方針セクションに `ex_extractor` モジュールおよび CLI レイヤの規定を追加 (orphan_alias_canonicals は alias 設定不整合通知用に canonical 名を例外的に出力する旨を明記、運用ドキュメントでの取り扱い注意を併記)
 
 ## コンテキスト
 
@@ -47,8 +74,8 @@ Codex セカンドオピニオンによる「1 PR で 1,200+ LOC は事故率高
 | # | スコープ | 状態 |
 |---|---------|-----|
 | PR1 | 設定スキーマ拡張（`ex_source_dir` + `facility_aliases`） | Merged (#130) |
-| PR2 | `pdf/facility_resolver` 単体（alias 優先 + 安全マッチング） | 本 PR |
-| PR3 | `pdf/ex_extractor` core 移植 + SFX adapter 化 + macOS fake runner + scripts ラッパー | 計画段階 |
+| PR2 | `pdf/facility_resolver` 単体（alias 優先 + 安全マッチング） | Merged (#131) |
+| PR3 | `pdf/ex_extractor` core 移植 + SFX adapter 化 + macOS fake runner + scripts ラッパー | 本 PR |
 | PR4 | UI 統合（dialog + launcher 5 ボタン化 + 手動振り分け UI） | 計画段階 |
 | PR5 | Windows 実機検証 + 修正 + settings.py タブ化（独立評価） | 計画段階 |
 
@@ -128,14 +155,72 @@ alias 辞書の canonical が `facility_names` に存在しない場合、当該
 - 例外メッセージには「衝突した alias 文字列」のみ含めて運用者の修正を助けるが、正式事業所名・他別名は出さない
 - 不正入力（空文字列、空白のみ）は例外を投げず `UNMATCHED` を返す（例外メッセージ経由の PII 漏洩防止）
 
+#### `ex_extractor` モジュール (PR3)
+
+- `logger` 出力は filename と enum 値（`ExtractionErrorCode` / `ExtractionStatus` の文字列値）のみ許容
+- 禁止: フルパス / facility_root_dir / matched_facility / candidates / 抽出 PDF 名 / OSError 例外メッセージ生文字列
+- `OSError.str()` 等の生例外メッセージは **必ず** `type(e).__name__` で型名のみ伝搬（Windows 環境では `OSError.args` に full path が含まれるため）
+- caplog で直接検査（テスト 4 件、PR3 で網羅）
+
+#### CLI レイヤ (`scripts/process_ex_files.py`)
+
+`_print_summary` は以下の例外規定で stderr 出力する:
+- 通常項目（成功 / pending / failed）: filename と enum 値のみ
+- `orphan_alias_canonicals`: alias 設定不整合の通知用に **canonical 名を例外的に出力**（運用者が TOML を修正するために必要）
+
+このため CLI ログは「事業所名を含む可能性がある PII データ」として扱う必要がある:
+- ログファイル化禁止 / SaaS log aggregator (Sentry / Datadog 等) 送信禁止
+- 運用者ローカル端末の stderr 出力に留める
+- PR4 UI では本警告を専用ダイアログ（外部送信なし）で表示することで上記制約を構造的に保証する予定
+
 ### Windows 専用機能の検証戦略
 
-`scripts/process_ex_files.py` の SFX ダイアログ自動操作（pywinauto）は Windows 実機でしか動作しない。PR3 で以下の構造に分離:
+`scripts/process_ex_files.py` の SFX ダイアログ自動操作（pywinauto）は Windows 実機でしか動作しない。PR3 で以下の構造に分離（実装確定）:
 
-- `_extract_with_sfx`: SFX 実行 adapter（実装は Windows のみ、macOS では `NotImplementedError`）
-- `extract_ex_file(adapter)`: 純粋ロジック（adapter を DI 受け取り、macOS で fake adapter を使ってテスト可能）
-- macOS 単体テスト: fake adapter で `.exe コピー → 抽出成功扱い → PDF 検出 → 移動 → cleanup` の挙動を保証
-- Windows 実機検証: PR5 で実施、合格基準を ADR / TEST_PLAN に明記
+- **`SfxAdapter` Protocol**: `extract_pdf(exe_path, watch_dirs) -> Sequence[Path]` の最小契約。失敗時は `SfxExtractionFailed` を投げる（`partial_outputs` で部分生成 PDF を伝搬可能）
+- **`WindowsSfxAdapter`**: 実機実装。constructor で `sys.platform != "win32"` なら `UnsupportedSfxPlatformError`。`pywinauto` は `_click_sfx_dialog` 内で **遅延 import**（macOS の dry-run / `--help` 動作保証）
+- **`FakeSfxAdapter`**: テスト用。`produced_pdfs` / `raise_on_extract` / `side_effect` で全分岐を macOS で再現可能
+- **macOS 単体テスト**（PR3 で実装、各 status 分岐網羅）: `.exe コピー → adapter 抽出 → PDF 移動 → cleanup` の SUCCESS / SKIPPED_AMBIGUOUS / SKIPPED_UNMATCHED / EXTRACT_FAILED / PARTIAL_OUTPUT / MOVE_FAILED 各分岐を fake adapter ベースで検証。`MOVE_IO_ERROR` / `partially_moved` / `UNEXPECTED` (ループ最外殻保護) / mtime フィルタ (Desktop 誤配布防止) も網羅
+- **Windows 実機検証**: PR5 で実施、合格基準を ADR / TEST_PLAN に明記
+
+### PR3 で確定した公開 API
+
+`src/wiseman_hub/pdf/ex_extractor.py` (新規):
+
+```python
+def extract_one(
+    ex_file: Path,
+    facility_root_dir: Path,
+    facility_names: list[str],
+    aliases: dict[str, list[str]],
+    adapter: SfxAdapter,
+) -> ExtractionItem
+
+def extract_directory(
+    source_dir: Path,
+    facility_root_dir: Path,
+    aliases: dict[str, list[str]],
+    adapter: SfxAdapter,
+) -> ExtractionResult
+```
+
+結果型:
+- `ExtractionStatus`: SUCCESS / SKIPPED_AMBIGUOUS / SKIPPED_UNMATCHED / EXTRACT_FAILED / PARTIAL_OUTPUT / MOVE_FAILED
+- `ExtractionErrorCode`: SFX_LAUNCH_FAILED / SFX_TIMEOUT / NO_PDF_PRODUCED / MOVE_CONFLICT / **MOVE_IO_ERROR** / COPY_FAILED / CLEANUP_FAILED / UNSUPPORTED_PLATFORM / **UNEXPECTED**
+- `ExtractionItem`: source_path / resolve_result / status / moved_pdfs / **partially_moved** / partial_outputs / error_code / error_detail / cleanup_warning（不変条件は `__post_init__` で強制、`partially_moved` は MOVE_FAILED 時のみ非空、`partial_outputs` と `partially_moved` は共存禁止）
+- `ExtractionResult`: items / orphan_alias_canonicals / pending_filenames + プロパティ success_count / pending_manual / failed
+
+### CLI 終了コード仕様（PR3 新規）
+
+`scripts/process_ex_files.py` 薄ラッパーは旧版の 0/1 から拡張し、3 段階:
+
+| code | 意味 | 旧版 |
+|------|------|------|
+| 0 | 全件 SUCCESS | 同（失敗 0 件） |
+| 2 | 一部 pending（AMBIGUOUS / UNMATCHED が存在） | **新規**（旧版は 0 扱いだった） |
+| 1 | 失敗あり（EXTRACT_FAILED / MOVE_FAILED / PARTIAL_OUTPUT）または致命的エラー | 同 |
+
+優先順位: 1 > 2 > 0（失敗があれば 1、失敗なしで pending があれば 2）。これにより本田様の現行運用で「振り分けが止まったか」を CI / シェルスクリプト経由で機械的に判定可能。
 
 ## 結果
 
