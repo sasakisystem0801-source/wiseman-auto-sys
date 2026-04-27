@@ -32,12 +32,13 @@
 - **起票**: 0 件
 - **Net: -1 件** ✅（KPI 進捗）
 
-### CI 全 4 ジョブ結果（PR #139）
+### CI 全ジョブ結果（PR #139、4 jobs / 3 workflows）
 
 | ジョブ | 結果 |
 |--------|------|
 | build-smoke (新設、windows-latest) | ✅ pass |
-| test-unit (3.11 / 3.12) | ✅ pass |
+| test-unit (3.11) | ✅ pass |
+| test-unit (3.12) | ✅ pass |
 | test-integration (既存、WinForms mock) | ✅ pass（挙動不変確認、AC-10 達成） |
 
 ### Acceptance Criteria 達成（AC-1〜AC-10）
@@ -185,7 +186,7 @@
 | ex_extractor PR5 実機検証実行 | ⏳ Session 31+（本田様作業） | - |
 | ADR-014 Accepted 昇格 | ⏳ 実機検証後 | - |
 | ex_extractor PR6 settings.py タブ化 | ⏳ 実機検証で要件確定後 | - |
-| Gemini 2.5 Flash retire 対応 (monitor) | ⏳ 2026-09-01 再評価 | #134 |
+| Gemini 2.5 Flash retire 対応 (monitor) | ⏳ 2026-09-16 retire 30 日前 / `asia-northeast1` GA 確認 | #134 |
 | 15 GitHub Actions + WIF | ⏳ GUI 安定後 | - |
 
 ---
