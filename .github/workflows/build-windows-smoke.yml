@@ -1,0 +1,81 @@
+name: Build Windows Smoke
+
+# PyInstaller で wiseman_hub.exe を Windows runner でビルドし、
+# `--smoke-test` 引数で hidden imports / DLL 解決を検証する（Issue #80）。
+#
+# 既存の test-windows-integration.yml は WinForms mock + pytest 用で責務が異なる。
+# 本ワークフローはビルド検証 + smoke 専用に分離している。
+#
+# untrusted input（issue/PR title/body 等）は使わない。github.sha のみ参照。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Build wiseman_hub.exe (PyInstaller)
+        run: uv run pyinstaller wiseman_hub.spec --clean --noconfirm
+
+      - name: Verify exe exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist\wiseman_hub.exe")) {
+            Write-Error "dist\wiseman_hub.exe was not produced by PyInstaller"
+            exit 1
+          }
+          $size = (Get-Item "dist\wiseman_hub.exe").Length
+          Write-Host "wiseman_hub.exe size: $size bytes"
+
+      - name: Run smoke test (hidden imports / DLL resolution)
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath "dist\wiseman_hub.exe" `
+            -ArgumentList "--smoke-test" `
+            -NoNewWindow `
+            -Wait `
+            -PassThru `
+            -RedirectStandardOutput "smoke-stdout.log" `
+            -RedirectStandardError "smoke-stderr.log"
+
+          Write-Host "===== smoke stdout ====="
+          Get-Content "smoke-stdout.log" -ErrorAction SilentlyContinue
+          Write-Host "===== smoke stderr ====="
+          Get-Content "smoke-stderr.log" -ErrorAction SilentlyContinue
+
+          if ($process.ExitCode -ne 0) {
+            Write-Error "smoke test failed with exit code $($process.ExitCode)"
+            exit $process.ExitCode
+          }
+          Write-Host "smoke test passed (exit 0)"
+
+      - name: Upload exe artifact (success only)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wiseman_hub-exe-${{ github.sha }}
+          path: dist/wiseman_hub.exe
+          retention-days: 7
+          if-no-files-found: error

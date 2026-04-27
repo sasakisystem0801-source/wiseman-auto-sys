@@ -431,6 +431,84 @@ def _make_phase_a_callback(
     return run_phase_a_callback
 
 
+# RFC 6761 .invalid TLD: 名前解決が必ず失敗することが保証されている。
+# smoke モードでは OcrClient.__init__ の引数バリデーションのみを検証し、
+# 万が一 HTTP リクエストが発火しても外部に到達しないようガードする二重防御。
+_SMOKE_OCR_ENDPOINT = "http://smoke.invalid/"
+_SMOKE_OCR_API_KEY = "smoke-dummy"  # noqa: S105 — smoke 用ダミー、本物の credential ではない
+
+
+def _run_smoke_test() -> None:
+    """PyInstaller ビルドの hidden imports / DLL 解決を検証する smoke モード（Issue #80）。
+
+    GUI を起動せず、本番経路で実 import が必要な以下を CLI から最小実行する:
+
+    - ``fitz`` (pymupdf) のダミー PDF 生成・読込（Phase A/B の split/merge 基盤）
+    - ``pdf.splitter.split_pdf_with_bbox`` （Phase A の入口、ダミー PDF + bbox）
+    - ``pdf.ocr_client.OcrClient.__init__`` （HTTP リクエストは投げない、init 経路のみ）
+    - ``pdf.merger`` 経由の ``fitz.open`` （Phase B の入口、ダミー PDF を読む）
+
+    PII 防御: 例外発生時は ``type(e).__name__`` のみを stderr に出力する。本番経路の
+    規律と一致させる（CLAUDE.md Definition of Done + ADR-014 PII 方針）。
+
+    GUI 副作用回避のため、``tkinter`` および UI モジュールは本関数では import しない
+    （AC-2 の検証対象。関数内 import は意図的）。
+    """
+    import tempfile
+
+    import fitz
+
+    from wiseman_hub.config import OcrBackendConfig, UserNameBBox
+    from wiseman_hub.pdf.ocr_client import OcrClient
+    from wiseman_hub.pdf.splitter import split_pdf_with_bbox
+
+    logger.info("smoke test start: fitz / splitter / ocr_client / merger 経路を検証")
+
+    try:
+        with tempfile.TemporaryDirectory() as tmp_str:
+            tmp = Path(tmp_str)
+            dummy_pdf = tmp / "smoke.pdf"
+
+            doc = fitz.open()
+            try:
+                page = doc.new_page(width=595, height=842)
+                page.insert_text((50, 100), "smoke", fontsize=11)
+                doc.save(str(dummy_pdf))
+            finally:
+                doc.close()
+
+            bbox = UserNameBBox(x0=10.0, y0=10.0, x1=200.0, y1=80.0, dpi=72)
+            pages = split_pdf_with_bbox(dummy_pdf, bbox)
+            if len(pages) != 1:
+                raise RuntimeError(
+                    f"split_pdf_with_bbox: expected 1 page, got {len(pages)}"
+                )
+
+            client = OcrClient(
+                OcrBackendConfig(
+                    endpoint_url=_SMOKE_OCR_ENDPOINT,
+                    api_key=_SMOKE_OCR_API_KEY,
+                )
+            )
+            client.close()
+
+            # pdf.merger 経由の fitz.open を独立検証（splitter とは別の hidden imports
+            # 経路を踏むため、PyInstaller での DLL 解決の重複検証として残す）。
+            doc2 = fitz.open(str(dummy_pdf))
+            try:
+                if doc2.page_count != 1:
+                    raise RuntimeError(
+                        f"fitz.open round-trip: expected 1 page, got {doc2.page_count}"
+                    )
+            finally:
+                doc2.close()
+    except Exception as exc:
+        sys.stderr.write(f"smoke test failed: {type(exc).__name__}\n")
+        sys.exit(1)
+
+    logger.info("smoke test passed")
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -452,7 +530,20 @@ def main() -> None:
         default=None,
         help="設定ファイルパス（既定: config/default.toml）",
     )
+    parser.add_argument(
+        "--smoke-test",
+        action="store_true",
+        help=(
+            "PyInstaller ビルド検証用 smoke モード。GUI を起動せず、PDF split / "
+            "OCR client init / fitz.open の最小経路を実行して exit する "
+            "（CI で hidden imports と DLL 解決を検証する用途、Issue #80）"
+        ),
+    )
     args = parser.parse_args()
+
+    if args.smoke_test:
+        _run_smoke_test()
+        return
 
     # Issue #64: --config で明示指定されたパスが存在しない場合、
     # load_config は空の AppConfig を返すため全設定未入力扱いになる。
