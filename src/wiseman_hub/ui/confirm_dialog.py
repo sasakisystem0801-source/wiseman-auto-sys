@@ -17,7 +17,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import tkinter as tk
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from tkinter import filedialog, ttk
@@ -601,9 +601,9 @@ def resolve_candidate(
 ) -> Session:
     """指定 page_index の candidate を新 status と matched パスで更新した新 Session を返す。
 
-    Issue #44 immutable 化: 元の ``session`` は mutation されず、``candidates`` を
+    Issue #44/#117 immutable 化: 元の ``session`` は mutation されず、``candidates`` を
     置換した新 Session を返す。該当 page_index が存在しない場合は同じ内容の新 Session
-    を返す（candidates 自体は新 list として構築される）。
+    を返す（candidates 自体は新 tuple として構築される）。
     ``similar_candidates`` は ``clear_similar=True`` で空にする（却下時に使用）。
     """
     new_candidates: list[UserCandidate] = []
@@ -611,7 +611,9 @@ def resolve_candidate(
         if c.page_index != page_index:
             new_candidates.append(c)
             continue
-        similar = [] if clear_similar else c.similar_candidates
+        similar: tuple[CandidateState, ...] = (
+            () if clear_similar else tuple(c.similar_candidates)
+        )
         new_candidates.append(
             UserCandidate(
                 page_index=c.page_index,
@@ -620,10 +622,10 @@ def resolve_candidate(
                 status=status,
                 matched_b_path=matched_b,
                 matched_c_path=matched_c,
-                similar_candidates=list(similar),
+                similar_candidates=similar,
             )
         )
-    return replace(session, candidates=new_candidates)
+    return replace(session, candidates=tuple(new_candidates))
 
 
 def log_operation(session_id: str, cand: UserCandidate, op: str) -> None:
@@ -660,7 +662,7 @@ def compute_approve_decision(
 
 
 def _pick_first_by_kind(
-    similar: list[CandidateState], kind: SourceKind
+    similar: Sequence[CandidateState], kind: SourceKind
 ) -> str | None:
     """similar_candidates の先頭から、指定 kind (B/C) の path を返す（無ければ None）。"""
     return next((c.path for c in similar if c.kind == kind), None)

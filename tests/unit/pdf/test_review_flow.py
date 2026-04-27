@@ -65,7 +65,7 @@ def _resolved_candidate(page_index: int = 0) -> UserCandidate:
         status=PairStatus.AUTO_MATCHED,
         matched_b_path=None,
         matched_c_path=None,
-        similar_candidates=[],
+        similar_candidates=(),
     )
 
 
@@ -77,7 +77,7 @@ def _unresolved_candidate(page_index: int = 0) -> UserCandidate:
         status=PairStatus.NEEDS_CONFIRMATION,
         matched_b_path=None,
         matched_c_path=None,
-        similar_candidates=[],
+        similar_candidates=(),
     )
 
 
@@ -96,7 +96,7 @@ def _make_needs_review_session(
         updated_at=datetime.now(UTC).isoformat(),
         config_snapshot={"input_dir": str(tmp_path), "concat_order": ["A", "B", "C"]},
         source_a_path=str(tmp_path / "A.pdf"),
-        candidates=[candidate],
+        candidates=(candidate,),
         a_page_pdf_bytes_dir=str(tmp_path / ".pages"),
         output_path=None,
     )

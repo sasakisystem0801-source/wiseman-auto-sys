@@ -20,9 +20,9 @@ import secrets
 import shutil
 import time
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from glob import glob
@@ -124,14 +124,12 @@ _MATCH_TO_PAIR: dict[MatchStatus, PairStatus] = {
 
 @dataclass(frozen=True)
 class UserCandidate:
-    """1 利用者ページに紐づく状態（Issue #44: frozen immutable）。
+    """1 利用者ページに紐づく状態（Issue #44/#117: deep immutable）。
 
     属性を更新する場合は ``dataclasses.replace`` で新インスタンスを構築する。
-
-    注意: ``similar_candidates`` は ``list[CandidateState]`` のため、frozen=True で
-    あっても要素の append/remove など in-place 変更は型レベルでは防げない。変更時は
-    ``replace(candidate, similar_candidates=[...])`` で新 list を渡すこと。
-    型レベルでの deep immutability は Issue #117 で ``tuple`` へ移行予定。
+    ``similar_candidates`` は ``tuple`` のため、要素の append/remove など in-place
+    変更は型レベルで禁止される（Issue #117）。新しい候補集合を構成する場合は
+    ``replace(candidate, similar_candidates=(...))`` で新 tuple を渡すこと。
     """
 
     page_index: int
@@ -140,7 +138,7 @@ class UserCandidate:
     status: PairStatus
     matched_b_path: str | None
     matched_c_path: str | None
-    similar_candidates: list[CandidateState] = field(default_factory=list)
+    similar_candidates: tuple[CandidateState, ...] = ()
 
     @property
     def is_resolved(self) -> bool:
@@ -168,7 +166,7 @@ class UserCandidate:
             matched_c_path=str(match_result.matched_c_path)
             if match_result.matched_c_path
             else None,
-            similar_candidates=[
+            similar_candidates=tuple(
                 CandidateState(
                     path=str(c.path),
                     kind=c.kind,
@@ -176,30 +174,29 @@ class UserCandidate:
                     extracted_name=c.extracted_name,
                 )
                 for c in match_result.similar_candidates
-            ],
+            ),
         )
 
 
 @dataclass(frozen=True)
 class Session:
-    """Phase A/B のセッション状態（Issue #44: frozen immutable）。
+    """Phase A/B のセッション状態（Issue #44/#117: deep immutable）。
 
     属性を更新する場合は ``dataclasses.replace`` で新インスタンスを構築する。
     ``save_session`` / ``transition_session`` は元 session を mutation せず新 Session を返す。
-
-    注意: ``candidates`` は ``list[UserCandidate]`` のため、frozen=True であっても
-    ``session.candidates.append(...)`` のような list 要素の in-place 変更は型レベル
-    では防げない。新しい候補集合を構成する場合は必ず ``replace(session, candidates=[...])``
-    で新 list を渡すこと。型レベルでの deep immutability は Issue #117 で ``tuple`` へ移行予定。
+    ``candidates`` は ``tuple``、``config_snapshot`` は ``Mapping`` のため、要素の
+    append/remove や key の上書きなど in-place 変更は型レベルで禁止される（Issue #117）。
+    新しい候補集合を構成する場合は ``replace(session, candidates=(...))`` で新 tuple を
+    渡すこと。
     """
 
     session_id: str
     status: SessionStatus
     created_at: str
     updated_at: str
-    config_snapshot: dict[str, Any]
+    config_snapshot: Mapping[str, Any]
     source_a_path: str
-    candidates: list[UserCandidate]
+    candidates: tuple[UserCandidate, ...]
     a_page_pdf_bytes_dir: str
     output_path: str | None
     # Phase A 完了時の総ページ数。resume 時に「未処理ページ」判定と進捗表示に使う。
@@ -606,7 +603,7 @@ def _from_dict(data: dict[str, Any], session_id: str) -> Session:
     except ValueError as e:
         raise SessionCorruptedError(f"invalid status for {session_id}: {e}") from e
 
-    candidates = [_candidate_from_dict(c, session_id) for c in data["candidates"]]
+    candidates = tuple(_candidate_from_dict(c, session_id) for c in data["candidates"])
 
     total_pages_a = data.get("total_pages_a")
     if total_pages_a is not None and (
@@ -684,7 +681,7 @@ def _candidate_from_dict(data: dict[str, Any], session_id: str) -> UserCandidate
             f"invalid confidence in {session_id}: {data['confidence']!r}"
         )
 
-    similar = []
+    similar: list[CandidateState] = []
     for c in data.get("similar_candidates", []):
         sim_missing = [k for k in _SIMILAR_REQUIRED if k not in c]
         if sim_missing:
@@ -711,7 +708,7 @@ def _candidate_from_dict(data: dict[str, Any], session_id: str) -> UserCandidate
         status=status,
         matched_b_path=data.get("matched_b_path"),
         matched_c_path=data.get("matched_c_path"),
-        similar_candidates=similar,
+        similar_candidates=tuple(similar),
     )
 
 

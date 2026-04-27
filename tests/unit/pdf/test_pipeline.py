@@ -460,7 +460,7 @@ class TestInterruption:
         snap = {
             "status": original.status,
             "updated_at": original.updated_at,
-            "candidates": list(original.candidates),
+            "candidates": tuple(original.candidates),
             "total_pages_a": original.total_pages_a,
             "output_path": original.output_path,
             "session_id": original.session_id,
@@ -658,7 +658,7 @@ class TestInterruption:
             updated_at=datetime.now(UTC).isoformat(),
             config_snapshot={},
             source_a_path=str(a_pdf),
-            candidates=[],
+            candidates=(),
             a_page_pdf_bytes_dir=str(tmp_path / "pages"),
             output_path=None,
         )
@@ -808,7 +808,7 @@ class TestLockIntegration:
             updated_at=datetime.now(UTC).isoformat(),
             config_snapshot={},
             source_a_path=str(a_pdf),
-            candidates=[],
+            candidates=(),
             a_page_pdf_bytes_dir=str(sessions_dir / f"{sid}-pages"),
             output_path=None,
         )
@@ -899,7 +899,7 @@ def _cand(
         status=status,
         matched_b_path=matched_b,
         matched_c_path=matched_c,
-        similar_candidates=[],
+        similar_candidates=(),
     )
 
 
@@ -932,7 +932,7 @@ class TestRunPhaseBStateGuard:
             tmp_path=tmp_path,
             sessions_dir=sessions_dir,
             status=status,
-            candidates=[_cand(page_index=0, name="u0", status=PairStatus.AUTO_MATCHED)],
+            candidates=(_cand(page_index=0, name="u0", status=PairStatus.AUTO_MATCHED),),
         )
 
         with pytest.raises((InvalidTransitionError, ValueError)):
@@ -959,10 +959,10 @@ class TestRunPhaseBHappyPath:
             tmp_path=tmp_path,
             sessions_dir=sessions_dir,
             status=SessionStatus.READY_TO_MERGE,
-            candidates=[
+            candidates=(
                 _cand(page_index=0, name="u0", status=PairStatus.AUTO_MATCHED),
                 _cand(page_index=1, name="u1", status=PairStatus.AUTO_MATCHED),
-            ],
+            ),
         )
 
         output = tmp_path / "out" / "merged.pdf"
@@ -1000,16 +1000,16 @@ class TestRunPhaseBHappyPath:
             tmp_path=tmp_path,
             sessions_dir=sessions_dir,
             status=SessionStatus.READY_TO_MERGE,
-            candidates=[
+            candidates=(
                 _cand(page_index=0, name="u0", status=PairStatus.AUTO_MATCHED),
-            ],
+            ),
         )
 
         snap = {
             "status": session.status,
             "output_path": session.output_path,
             "updated_at": session.updated_at,
-            "candidates": list(session.candidates),
+            "candidates": tuple(session.candidates),
         }
 
         output = tmp_path / "out" / "merged.pdf"
@@ -1043,11 +1043,11 @@ class TestRunPhaseBExclusion:
             tmp_path=tmp_path,
             sessions_dir=sessions_dir,
             status=SessionStatus.READY_TO_MERGE,
-            candidates=[
+            candidates=(
                 _cand(page_index=0, name="u0", status=PairStatus.AUTO_MATCHED),
                 _cand(page_index=1, name="u_rejected", status=PairStatus.REJECTED),
                 _cand(page_index=2, name="u_skipped", status=PairStatus.SKIPPED),
-            ],
+            ),
         )
 
         output = tmp_path / "merged.pdf"
@@ -1079,14 +1079,14 @@ class TestRunPhaseBManualSelected:
             tmp_path=tmp_path,
             sessions_dir=sessions_dir,
             status=SessionStatus.READY_TO_MERGE,
-            candidates=[
+            candidates=(
                 _cand(
                     page_index=0,
                     name="misread",
                     status=PairStatus.MANUALLY_SELECTED,
                     matched_b=str(custom),
                 ),
-            ],
+            ),
         )
 
         output = tmp_path / "merged.pdf"
@@ -1129,7 +1129,7 @@ class TestRunPhaseBInterrupted:
             tmp_path=tmp_path,
             sessions_dir=sessions_dir,
             status=SessionStatus.READY_TO_MERGE,
-            candidates=[_cand(page_index=0, name="u0", status=PairStatus.AUTO_MATCHED)],
+            candidates=(_cand(page_index=0, name="u0", status=PairStatus.AUTO_MATCHED),),
         )
 
         from wiseman_hub.pdf.merger import PdfMergeError
@@ -1170,7 +1170,7 @@ class TestRunPhaseBInterrupted:
             tmp_path=tmp_path,
             sessions_dir=sessions_dir,
             status=SessionStatus.READY_TO_MERGE,
-            candidates=[_cand(page_index=0, name="u0", status=PairStatus.AUTO_MATCHED)],
+            candidates=(_cand(page_index=0, name="u0", status=PairStatus.AUTO_MATCHED),),
         )
 
         output = tmp_path / "merged.pdf"
@@ -1196,7 +1196,7 @@ class TestRunPhaseBInterrupted:
             tmp_path=tmp_path,
             sessions_dir=sessions_dir,
             status=SessionStatus.INTERRUPTED_PHASE_B,
-            candidates=[_cand(page_index=0, name="u0", status=PairStatus.AUTO_MATCHED)],
+            candidates=(_cand(page_index=0, name="u0", status=PairStatus.AUTO_MATCHED),),
         )
 
         output = tmp_path / "merged.pdf"
@@ -1292,7 +1292,7 @@ class TestPipelineLogPiiDefense:
             tmp_path=tmp_path,
             sessions_dir=sessions_dir,
             status=SessionStatus.READY_TO_MERGE,
-            candidates=[_cand(page_index=0, name="u0", status=PairStatus.AUTO_MATCHED)],
+            candidates=(_cand(page_index=0, name="u0", status=PairStatus.AUTO_MATCHED),),
         )
 
         pii_output = tmp_path / "利用者-鈴木花子" / "merged.pdf"
@@ -1323,13 +1323,13 @@ class TestPipelineLogPiiDefense:
             tmp_path=tmp_path,
             sessions_dir=sessions_dir,
             status=SessionStatus.READY_TO_MERGE,
-            candidates=[
+            candidates=(
                 _cand(
                     page_index=0,
                     name="患者-鈴木花子",  # PII を user_name に含める
                     status=PairStatus.AUTO_MATCHED,
-                )
-            ],
+                ),
+            ),
         )
 
         output = tmp_path / "merged.pdf"
