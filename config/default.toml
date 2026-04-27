@@ -65,6 +65,8 @@ release_bucket = ""
 # source_b_pattern = "B_{name}.pdf"
 # source_c_pattern = "C_{name}.pdf"
 # concat_order = ["A", "B", "C"]
+# facility_root_dir = ""    # 事業所ルートフォルダ（ADR-013、FacilityRootManagerDialog で永続化）
+# ex_source_dir = ""        # .ex_ ファイル取込元フォルダ（ex_extractor 機能、ex_extractor_dialog で永続化）
 #
 # [pdf_merge.user_name_bbox]
 # x0 = 0.0
@@ -72,3 +74,11 @@ release_bucket = ""
 # x1 = 0.0
 # y1 = 0.0
 # dpi = 200
+#
+# 事業所名の別名辞書（facility_resolver で誤配布防止のため最優先一致として参照）。
+# 正式フォルダ名（key）に対する別名・略称・旧名称（value 配列）を保持する。
+# 例: ファイル名が「本田DC_提供実績.ex_」でフォルダ「本田デイケア」と alias 一致 → CONFIRMED。
+# alias 一致 > 正規化完全一致 > 部分一致(候補一意かつ十分差) の優先順序で評価される。
+# [pdf_merge.facility_aliases]
+# "本田デイケア" = ["本田DC", "本田デイ"]
+# "きなり(メール)※持参" = ["きなり"]

@@ -101,6 +101,15 @@ class PdfMergeConfig:
         配下に `{事業所名}/{運動機能向上計画書,経過報告書}/` 構造を持つ親ディレクトリ。
         新ダイアログ FacilityRootManagerDialog（W4）で永続化する。
         既存の input_dir / output_dir 等とは独立（旧 Phase A/B フローは無関係）。
+    ex_source_dir: .ex_ ファイル（WinSFX32 LZH 自己解凍EXE）の取込元フォルダ。
+        ex_extractor 機能（PR1-5）で `.ex_ → PDF 抽出 → facility_root_dir 配下事業所
+        フォルダへ振り分け` の起点として使う。facility_root_dir と同レベルの永続設定で、
+        ダイアログ初回起動時にユーザーが選択 → 次回以降は保存値を表示。
+    facility_aliases: facility_resolver で使う事業所名の別名辞書（PR2 で追加）。
+        正式フォルダ名（key）に対する別名・略称・旧名称（value 配列）を保持し、
+        ファイル名と事業所フォルダの照合で最優先一致として参照される。誤配布防止のため
+        部分一致系より明示 alias 一致を優先する設計（ADR-014 参照予定）。
+        例: {"本田デイケア": ["本田DC", "本田デイ"]}
     """
 
     input_dir: str = ""
@@ -112,6 +121,8 @@ class PdfMergeConfig:
     concat_order: list[str] = field(default_factory=lambda: ["A", "B", "C"])
     user_name_bbox: UserNameBBox = field(default_factory=UserNameBBox)
     facility_root_dir: str = ""
+    ex_source_dir: str = ""
+    facility_aliases: dict[str, list[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -152,7 +163,16 @@ def load_config(path: Path | None = None) -> AppConfig:
         reports.append(ReportTarget(**target))
 
     bbox_data = pdf_merge_data.pop("user_name_bbox", {})
-    pdf_merge = PdfMergeConfig(**pdf_merge_data, user_name_bbox=UserNameBBox(**bbox_data))
+    aliases_data = pdf_merge_data.pop("facility_aliases", {})
+    # TOML の dict[str, list[str]] を素直な Python dict に正規化（tomllib は通常 dict 化済）
+    facility_aliases: dict[str, list[str]] = {
+        str(k): list(v) for k, v in dict(aliases_data).items()
+    }
+    pdf_merge = PdfMergeConfig(
+        **pdf_merge_data,
+        user_name_bbox=UserNameBBox(**bbox_data),
+        facility_aliases=facility_aliases,
+    )
 
     return AppConfig(
         version=app_data.get("version", "0.1.0"),
@@ -187,14 +207,21 @@ def _update_table_from_dataclass(doc: TOMLDocument, section: str, data: dict[str
 
 
 def _update_pdf_merge(doc: TOMLDocument, pdf_merge: PdfMergeConfig) -> None:
-    """[pdf_merge] とネスト [pdf_merge.user_name_bbox] を書き戻す。
+    """[pdf_merge] とネスト [pdf_merge.user_name_bbox] / [pdf_merge.facility_aliases] を書き戻す。
 
-    user_name_bbox はネスト dataclass なので _update_table_from_dataclass では扱えず、
-    親 table の key/value 更新と bbox の 2 段階処理が必要。
+    ネスト table を持つ field（user_name_bbox, facility_aliases）は親 table のスカラ
+    フィールド更新とは独立に書き出す。スカラフィールドの更新でネスト table を上書き
+    しないよう、ネスト系は ``pdf_merge_dict`` から事前に pop する。
+
+    facility_aliases は dict[str, list[str]] の動的キーを持つため、tomlkit.table() を
+    新規作成して全 key を入れ直す（既存 alias を完全置換）。空辞書の場合は alias table
+    自体を削除し、TOML から `[pdf_merge.facility_aliases]` セクションが消えるようにする。
     """
     bbox = asdict(pdf_merge.user_name_bbox)
+    aliases = pdf_merge.facility_aliases
     pdf_merge_dict = asdict(pdf_merge)
     pdf_merge_dict.pop("user_name_bbox", None)
+    pdf_merge_dict.pop("facility_aliases", None)
 
     if "pdf_merge" in doc:
         table = _require_table(doc, "pdf_merge")
@@ -206,12 +233,31 @@ def _update_pdf_merge(doc: TOMLDocument, pdf_merge: PdfMergeConfig) -> None:
                 bbox_table[key] = value
         else:
             table["user_name_bbox"] = bbox
+        _set_facility_aliases(table, aliases)
     else:
         new_table = tomlkit.table()
         for key, value in pdf_merge_dict.items():
             new_table[key] = value
         new_table["user_name_bbox"] = bbox
+        _set_facility_aliases(new_table, aliases)
         doc["pdf_merge"] = new_table
+
+
+def _set_facility_aliases(
+    pdf_merge_table: TableLike, aliases: dict[str, list[str]]
+) -> None:
+    """[pdf_merge.facility_aliases] を完全置換する（既存 alias は全削除）。
+
+    空辞書の場合はセクション自体を TOML から削除し、未設定状態と同じ TOML 表現にする。
+    """
+    if "facility_aliases" in pdf_merge_table:
+        del pdf_merge_table["facility_aliases"]
+    if not aliases:
+        return
+    aliases_table = tomlkit.table()
+    for facility_name, alias_list in aliases.items():
+        aliases_table[facility_name] = list(alias_list)
+    pdf_merge_table["facility_aliases"] = aliases_table
 
 
 def _update_reports(doc: TOMLDocument, reports: list[ReportTarget]) -> None:
