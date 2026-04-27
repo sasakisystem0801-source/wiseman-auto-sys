@@ -480,12 +480,13 @@ class ConfirmDialog:
         永続化・UI 更新・終了検知の orchestration を担当する。
 
         **save_session 失敗時の契約**:
-        - `resolve_candidate` は save 前に session.candidates を in-place 更新するため、
-          save が失敗した場合 **メモリ上は新 status / ディスクは旧 status** の不整合になる。
+        - `resolve_candidate` は save 前に新 Session を構築して ``self._session`` を
+          置換するため、save が失敗した場合 **dialog 内部のメモリは新 status /
+          ディスクは旧 status** の不整合になる。
         - 例外は呼出元に伝播する（UI 握り潰し禁止、PII 孤児化回避）。
         - Tk callback 経由で送出された例外は :meth:`_on_callback_exception` が捕捉し、
           ユーザー通知 + mainloop 停止する。
-        - 呼出側は UI 終了後にセッションを **必ず再ロード** し、メモリ上の session を捨てること。
+        - 呼出側は UI 終了後にセッションを **必ず再ロード** し、dialog 内部の session を捨てること。
           これで on-disk の旧状態から再開できる（未解決扱いで再提示される）。
         """
         self._session = resolve_candidate(

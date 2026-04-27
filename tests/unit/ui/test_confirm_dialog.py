@@ -786,9 +786,10 @@ class TestPersistenceFailFast:
     def test_save_error_leaves_memory_ahead_of_disk(self, tk_root: tk.Tk) -> None:
         """AC-UI-10 補足: save 失敗時のメモリ/ディスク不整合を契約として明示する。
 
-        resolve_candidate が save 前に in-place 更新するため、save 失敗後のメモリは
-        新 status になる（ディスクは旧 status）。呼出側はメモリ上の session を破棄し
-        再ロードする責務がある（confirm_dialog.py の _apply_update docstring で規定）。
+        resolve_candidate が save 前に新 Session を構築して dialog 内部 session を
+        置換するため、save 失敗後の dialog._session は新 status になる（ディスクは旧 status）。
+        呼出側は dialog 内部の session を破棄し再ロードする責務がある
+        （confirm_dialog.py の _apply_update docstring で規定）。
         """
         session = _make_session(candidates=(_needs_confirmation_candidate(page_index=1),))
         failing = _FailingSaveSession(OSError("disk full"))
@@ -799,8 +800,9 @@ class TestPersistenceFailFast:
         with pytest.raises(OSError):
             dialog._on_approve()
 
-        # メモリ上は更新済み（契約上の期待値）
-        assert session.candidates[0].status == PairStatus.CONFIRMED
+        # 元の session は frozen のため不変、dialog 内部の session のみが新 status に置換される
+        assert session.candidates[0].status == PairStatus.NEEDS_CONFIRMATION
+        assert dialog._session.candidates[0].status == PairStatus.CONFIRMED
 
 
 @_skip_if_no_tk
