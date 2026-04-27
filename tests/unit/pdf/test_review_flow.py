@@ -42,19 +42,19 @@ from wiseman_hub.ui.confirm_dialog import ConfirmDialogResult
 
 
 def _promote_needs_confirmation(
-    candidates: list[UserCandidate],
-) -> list[UserCandidate]:
-    """NEEDS_CONFIRMATION の候補のみ CONFIRMED に昇格した新 list を返す。
+    candidates: tuple[UserCandidate, ...],
+) -> tuple[UserCandidate, ...]:
+    """NEEDS_CONFIRMATION の候補のみ CONFIRMED に昇格した新 tuple を返す。
 
     race 系テストと _FakeDialog.resolve_in_run で共通する「全未解決候補の承認」
     パターンを DRY 化するための小 helper。
     """
-    return [
+    return tuple(
         replace(c, status=PairStatus.CONFIRMED)
         if c.status == PairStatus.NEEDS_CONFIRMATION
         else c
         for c in candidates
-    ]
+    )
 
 
 def _resolved_candidate(page_index: int = 0) -> UserCandidate:

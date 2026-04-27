@@ -848,7 +848,7 @@ def _make_phase_b_session(
     tmp_path: Path,
     sessions_dir: Path,
     status: SessionStatus,
-    candidates: list[UserCandidate],
+    candidates: tuple[UserCandidate, ...],
     output_path_field: str | None = None,
 ) -> Session:
     """Phase B のテスト用セッションをディスクに用意する。

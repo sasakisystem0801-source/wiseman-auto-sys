@@ -52,7 +52,7 @@ def _make_session(
     *,
     session_id: str = "20260420T001523Z-deadbeef",
     status: SessionStatus = SessionStatus.NEEDS_REVIEW,
-    candidates: list[UserCandidate] | None = None,
+    candidates: tuple[UserCandidate, ...] | None = None,
 ) -> Session:
     now = datetime.now(UTC).isoformat()
     return Session(
@@ -62,7 +62,7 @@ def _make_session(
         updated_at=now,
         config_snapshot={"concat_order": ["A", "B", "C"]},
         source_a_path="/tmp/A.pdf",
-        candidates=candidates if candidates is not None else [],
+        candidates=candidates if candidates is not None else (),
         a_page_pdf_bytes_dir="/tmp/.pages",
         output_path=None,
         total_pages_a=len(candidates) if candidates else 0,
@@ -76,8 +76,8 @@ def _needs_confirmation_candidate(
     matched_b_path: str | None = None,
     matched_c_path: str | None = None,
 ) -> UserCandidate:
-    similar = (
-        [
+    similar: tuple[CandidateState, ...] = (
+        (
             CandidateState(
                 path=f"/in/B_{page_index}.pdf",
                 kind="B",
@@ -90,9 +90,9 @@ def _needs_confirmation_candidate(
                 distance=1,
                 extracted_name="塩津 美喜子",
             ),
-        ]
+        )
         if with_similar
-        else []
+        else ()
     )
     return UserCandidate(
         page_index=page_index,

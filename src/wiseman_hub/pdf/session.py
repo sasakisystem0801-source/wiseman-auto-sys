@@ -420,6 +420,10 @@ def _to_dict(session: Session) -> dict[str, Any]:
     d = asdict(session)
     d["schema_version"] = SCHEMA_VERSION
     d["status"] = str(session.status)
+    # asdict は ``dict`` のみを再帰展開する（``MappingProxyType`` 等の純粋な ``Mapping``
+    # 実装は対象外）。型は ``Mapping`` に緩和してあるが、シリアライズ時は ``dict`` に
+    # 明示変換して JSON ラウンドトリップを安定させる。
+    d["config_snapshot"] = dict(session.config_snapshot)
     for cand, original in zip(d["candidates"], session.candidates, strict=True):
         cand["status"] = str(original.status)
     return d
