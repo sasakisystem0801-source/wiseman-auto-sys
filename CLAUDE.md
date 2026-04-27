@@ -69,9 +69,9 @@ Development happens on macOS; Wiseman runs only on Windows.
 
 ## Design Decisions
 
-ADRs in `docs/adr/` (001–006). Wiseman technical spec in `docs/wiseman-system-spec.md`. PRD in `docs/prd.md`.
+ADRs in `docs/adr/` (001–014). Wiseman technical spec in `docs/wiseman-system-spec.md`. PRD in `docs/prd.md`.
 
-Key decisions: pywinauto over Playwright (ADR-001), PyInstaller for packaging (ADR-002), GCP tokyo region for APPI compliance (ADR-003), GCS manifest polling for auto-update (ADR-004), TOML config format (ADR-005).
+Key decisions: pywinauto over Playwright (ADR-001), PyInstaller for packaging (ADR-002), GCP tokyo region for APPI compliance (ADR-003), GCS manifest polling for auto-update (ADR-004), TOML config format (ADR-005), USB dongle authentication (ADR-007), OCR backend selection (ADR-008), distribution format (ADR-011), facility_merger output (ADR-012), facility root bulk merge (ADR-013), ex_extractor integration (ADR-014).
 
 ## Wiseman UI Structure (confirmed from real environment)
 
