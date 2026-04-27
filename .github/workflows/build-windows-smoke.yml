@@ -1,0 +1,107 @@
+name: Build Windows Smoke
+
+# PyInstaller で wiseman_hub.exe を Windows runner でビルドし、
+# `--smoke-test` 引数で hidden imports / DLL 解決を検証する（Issue #80）。
+#
+# 既存の test-windows-integration.yml は WinForms mock + pytest 用で責務が異なる。
+# 本ワークフローはビルド検証 + smoke 専用に分離している。
+#
+# セキュリティ方針: issue/PR の title/body/label 等の untrusted メタデータは
+# 一切参照しない（script injection 防止）。PR の HEAD コミット内容自体は
+# checkout してビルド対象として実行されるため、本ワークフローを
+# `pull_request_target` トリガーへ昇格させたり secrets を追加することは禁止。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Build wiseman_hub.exe (PyInstaller)
+        run: uv run pyinstaller wiseman_hub.spec --clean --noconfirm
+
+      - name: Verify exe exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist\wiseman_hub.exe")) {
+            Write-Host "===== dist\ contents ====="
+            Get-ChildItem dist\ -ErrorAction Continue | Format-Table
+            Write-Host "===== PyInstaller warn-files ====="
+            Get-ChildItem build\*\warn-*.txt -ErrorAction Continue | ForEach-Object {
+              Write-Host "--- $($_.FullName) ---"
+              Get-Content $_.FullName
+            }
+            Write-Error "dist\wiseman_hub.exe was not produced by PyInstaller"
+            exit 1
+          }
+          $size = (Get-Item "dist\wiseman_hub.exe").Length
+          Write-Host "wiseman_hub.exe size: $size bytes"
+
+      - name: Run smoke test (hidden imports / DLL resolution)
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath "dist\wiseman_hub.exe" `
+            -ArgumentList "--smoke-test" `
+            -NoNewWindow `
+            -Wait `
+            -PassThru `
+            -RedirectStandardOutput "smoke-stdout.log" `
+            -RedirectStandardError "smoke-stderr.log"
+
+          # smoke 経路は PII 防御のため stderr に型名のみを書き出す。
+          # CI 側ではログ不在 (exe 起動失敗等) を silent に握り潰さず、
+          # Process state / ExitCode を必ず surface してデバッグ可能性を担保する。
+          Write-Host "===== process state ====="
+          Write-Host "ExitCode: $($process.ExitCode)"
+          Write-Host "HasExited: $($process.HasExited)"
+
+          Write-Host "===== smoke stdout ====="
+          if (Test-Path "smoke-stdout.log") {
+            Get-Content "smoke-stdout.log"
+          } else {
+            Write-Warning "smoke-stdout.log was not created (exe likely failed to launch)"
+          }
+
+          Write-Host "===== smoke stderr ====="
+          if (Test-Path "smoke-stderr.log") {
+            Get-Content "smoke-stderr.log"
+          } else {
+            Write-Warning "smoke-stderr.log was not created (exe likely failed to launch)"
+          }
+
+          if ($process.ExitCode -ne 0) {
+            Write-Error "smoke test failed with exit code $($process.ExitCode)"
+            exit $process.ExitCode
+          }
+          Write-Host "smoke test passed (exit 0)"
+
+      - name: Upload exe artifact (success only)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wiseman_hub-exe-${{ github.sha }}
+          path: dist/wiseman_hub.exe
+          retention-days: 7
+          if-no-files-found: error
