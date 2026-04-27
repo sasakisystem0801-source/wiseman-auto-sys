@@ -65,6 +65,8 @@ release_bucket = ""
 # source_b_pattern = "B_{name}.pdf"
 # source_c_pattern = "C_{name}.pdf"
 # concat_order = ["A", "B", "C"]
+# facility_root_dir = ""    # 事業所ルートフォルダ（ADR-013、専用ダイアログで永続化）
+# ex_source_dir = ""        # .ex_ ファイル取込元フォルダ（専用ダイアログで永続化）
 #
 # [pdf_merge.user_name_bbox]
 # x0 = 0.0
@@ -72,3 +74,11 @@ release_bucket = ""
 # x1 = 0.0
 # y1 = 0.0
 # dpi = 200
+#
+# 事業所名の別名辞書。正式フォルダ名（key）に対する別名・略称・旧名称（value 配列）を
+# 保持し、ファイル名と事業所フォルダの照合で最優先一致として参照される。
+# 注意: value は **必ず配列** で記述（文字列を直接書くと load 時に TypeError）。
+#       同じ別名を複数の事業所に書くと load 時に ValueError（誤配布防止）。
+# [pdf_merge.facility_aliases]
+# "本田デイケア" = ["本田DC", "本田デイ"]
+# "きなり(メール)※持参" = ["きなり"]
