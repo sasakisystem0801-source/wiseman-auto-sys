@@ -176,6 +176,20 @@ class TestExtractionItemInvariants:
         )
         assert item.partially_moved == (tmp_path / "p1.pdf",)
 
+    def test_partial_outputs_and_partially_moved_mutually_exclusive(
+        self, tmp_path: Path
+    ) -> None:
+        # status が排他なので通常は同時設定不可だが、二重防御として __post_init__ で拒否
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            ExtractionItem(
+                source_path=tmp_path / "x.ex_",
+                resolve_result=_dummy_resolve_confirmed(),
+                status=ExtractionStatus.MOVE_FAILED,
+                error_code=ExtractionErrorCode.MOVE_CONFLICT,
+                partially_moved=(tmp_path / "p1.pdf",),
+                partial_outputs=(tmp_path / "x.pdf",),
+            )
+
 
 # ---------------------------------------------------------------------------
 # ExtractionResult プロパティ (3 件)
@@ -1336,6 +1350,102 @@ class TestExtractDirectoryIntegration:
         assert bbb_item.error_detail == "RuntimeError"
         # aaa / ccc は SUCCESS
         assert result.success_count == 2
+
+    def test_memory_error_propagates_and_stops_batch(
+        self, source_dir: Path, facility_root: Path
+    ) -> None:
+        """silent-failure-hunter H-2: MemoryError は再 raise してバッチ続行を止める。"""
+        _make_ex_file(source_dir, "aaa_DC_A_提供.ex_")
+        _make_ex_file(source_dir, "bbb_DC_A_提供.ex_")
+
+        class OOMAdapter:
+            def extract_pdf(
+                self, exe_path: Path, watch_dirs: Sequence[Path]
+            ) -> Sequence[Path]:
+                raise MemoryError("simulated OOM")
+
+        with pytest.raises(MemoryError):
+            extract_directory(
+                source_dir,
+                facility_root,
+                {"サービスA": ["DC_A"]},
+                OOMAdapter(),
+            )
+
+    def test_resolver_failure_falls_back_to_unmatched(
+        self,
+        source_dir: Path,
+        facility_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """HIGH-NEW-2: 例外源が resolver の場合、フォールバックで二度目の例外を防ぐ。"""
+        _make_ex_file(source_dir, "aaa_DC_A_提供.ex_")
+
+        from wiseman_hub.pdf import ex_extractor as exmod
+
+        call_count = {"n": 0}
+        original_resolve = exmod.resolve_facility
+
+        def _flaky_resolve(
+            filename: str, names: list[str], aliases: dict[str, list[str]]
+        ) -> ResolveResult:
+            call_count["n"] += 1
+            # 1 回目 (extract_one 内): 例外を投げる → extract_directory が捕捉
+            # 2 回目 (extract_directory フォールバック): ここでも例外を投げる
+            #   → 安全 fallback (UNMATCHED) で吸収されるべき
+            raise ValueError("resolver internal bug")
+
+        monkeypatch.setattr(exmod, "resolve_facility", _flaky_resolve)
+        adapter = FakeSfxAdapter()
+
+        result = extract_directory(
+            source_dir,
+            facility_root,
+            {"サービスA": ["DC_A"]},
+            adapter,
+        )
+
+        # バッチが落ちずに完走、UNEXPECTED で 1 件処理される
+        assert len(result.items) == 1
+        assert result.items[0].status is ExtractionStatus.EXTRACT_FAILED
+        assert result.items[0].error_code is ExtractionErrorCode.UNEXPECTED
+        # フォールバックで UNMATCHED resolve_result が入る
+        assert result.items[0].resolve_result.status is ResolveStatus.UNMATCHED
+
+        # original_resolve は使用済み
+        del original_resolve
+
+    def test_unexpected_logger_uses_type_name_only_pii_safe(
+        self,
+        source_dir: Path,
+        facility_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """HIGH-NEW-1: logger.exception ではなく logger.warning + type(e).__name__ で PII 漏洩防止。"""
+        _make_ex_file(source_dir, "aaa_DC_A_提供.ex_")
+        sentinel_path = "C:\\Users\\sasak\\本田様\\漏れちゃダメ.pdf"
+
+        class LeakyAdapter:
+            def extract_pdf(
+                self, exe_path: Path, watch_dirs: Sequence[Path]
+            ) -> Sequence[Path]:
+                # 例外メッセージに full path 風の文字列を含めて漏洩テスト
+                raise OSError(f"locked: {sentinel_path}")
+
+        with caplog.at_level(logging.WARNING, logger="wiseman_hub.pdf.ex_extractor"):
+            extract_directory(
+                source_dir,
+                facility_root,
+                {"サービスA": ["DC_A"]},
+                LeakyAdapter(),
+            )
+
+        all_log = " ".join(record.getMessage() for record in caplog.records)
+        # full path-like sentinel は含まれない
+        assert sentinel_path not in all_log
+        # 型名は含まれる
+        assert "OSError" in all_log
 
 
 # ---------------------------------------------------------------------------

@@ -27,6 +27,15 @@
   - **PR3-HIGH-I**: `assert matched is not None` を `if matched is None: raise RuntimeError` に変更 (`python -O` 実行時の silent NoneType 伝播防止)
   - **PR3-HIGH-F**: CLI `_print_summary` に pending 件数の専用警告行 + cleanup_warning 別セクション + partially_moved 件数表示を追加 (現場運用での「振り分け止まり」即時検知)
   - **L-1**: `WindowsSfxAdapter._terminate_proc` の `proc.kill()` 後 `wait(timeout=10)` 追加 (driver hang 時の無限待機防止)
+- 2026-04-27: PR #133 review-pr (6 並列再レビュー) で発見された新規 HIGH 6 件を反映:
+  - **PR3-NEW-1 (PII)**: `extract_directory` 例外捕捉で `logger.exception` を使うと traceback 経由で `OSError.args` の full path が漏洩する → `logger.warning` + `type(e).__name__` のみに変更
+  - **PR3-NEW-2 (resolver 二重呼び出し)**: 例外源が resolver の場合、フォールバックで再呼び出しすると同じ例外が二度目に発生しバッチ続行保護が破綻 → `try/except` で safe `UNMATCHED` フォールバック追加
+  - **PR3-NEW-3 (mtime グレース)**: `time.time()` は非単調、SFX 実行中の NTP 後方ステップで本来の PDF が誤って除外される → `_MTIME_GRACE_SEC = 5.0` のマージンで吸収
+  - **PR3-NEW-4 (silent skip 解消)**: `_collect_new_pdfs` の `stat()` 失敗を `logger.warning` + 型名で可視化 (network drive 切断 / 権限変化等の根本原因切り分け)
+  - **PR3-NEW-5 (システム例外)**: `MemoryError` / `RecursionError` を `extract_directory` ループで握り潰すと派生 OOM が連鎖 → 先に re-raise してバッチ即時停止
+  - **PR3-NEW-6 (不変条件)**: `partial_outputs` と `partially_moved` は status が排他なので同時非空にならないが、二重防御として `__post_init__` で排他検証を追加
+  - **PR3-NEW-MEDIUM**: CLI `logging.basicConfig` を `main()` 内に移動 (import 時の root logger 上書きを防ぎ、PR4 UI からの import を阻害しない)
+  - PII 保護方針セクションに `ex_extractor` モジュールおよび CLI レイヤの規定を追加 (orphan_alias_canonicals は alias 設定不整合通知用に canonical 名を例外的に出力する旨を明記、運用ドキュメントでの取り扱い注意を併記)
 
 ## コンテキスト
 
@@ -146,6 +155,24 @@ alias 辞書の canonical が `facility_names` に存在しない場合、当該
 - 例外メッセージには「衝突した alias 文字列」のみ含めて運用者の修正を助けるが、正式事業所名・他別名は出さない
 - 不正入力（空文字列、空白のみ）は例外を投げず `UNMATCHED` を返す（例外メッセージ経由の PII 漏洩防止）
 
+#### `ex_extractor` モジュール (PR3)
+
+- `logger` 出力は filename と enum 値（`ExtractionErrorCode` / `ExtractionStatus` の文字列値）のみ許容
+- 禁止: フルパス / facility_root_dir / matched_facility / candidates / 抽出 PDF 名 / OSError 例外メッセージ生文字列
+- `OSError.str()` 等の生例外メッセージは **必ず** `type(e).__name__` で型名のみ伝搬（Windows 環境では `OSError.args` に full path が含まれるため）
+- caplog で直接検査（テスト 4 件、PR3 で網羅）
+
+#### CLI レイヤ (`scripts/process_ex_files.py`)
+
+`_print_summary` は以下の例外規定で stderr 出力する:
+- 通常項目（成功 / pending / failed）: filename と enum 値のみ
+- `orphan_alias_canonicals`: alias 設定不整合の通知用に **canonical 名を例外的に出力**（運用者が TOML を修正するために必要）
+
+このため CLI ログは「事業所名を含む可能性がある PII データ」として扱う必要がある:
+- ログファイル化禁止 / SaaS log aggregator (Sentry / Datadog 等) 送信禁止
+- 運用者ローカル端末の stderr 出力に留める
+- PR4 UI では本警告を専用ダイアログ（外部送信なし）で表示することで上記制約を構造的に保証する予定
+
 ### Windows 専用機能の検証戦略
 
 `scripts/process_ex_files.py` の SFX ダイアログ自動操作（pywinauto）は Windows 実機でしか動作しない。PR3 で以下の構造に分離（実装確定）:
@@ -179,8 +206,8 @@ def extract_directory(
 
 結果型:
 - `ExtractionStatus`: SUCCESS / SKIPPED_AMBIGUOUS / SKIPPED_UNMATCHED / EXTRACT_FAILED / PARTIAL_OUTPUT / MOVE_FAILED
-- `ExtractionErrorCode`: SFX_LAUNCH_FAILED / SFX_TIMEOUT / NO_PDF_PRODUCED / MOVE_CONFLICT / COPY_FAILED / CLEANUP_FAILED / UNSUPPORTED_PLATFORM
-- `ExtractionItem`: source_path / resolve_result / status / moved_pdfs / partial_outputs / error_code / error_detail / cleanup_warning（不変条件は `__post_init__` で強制）
+- `ExtractionErrorCode`: SFX_LAUNCH_FAILED / SFX_TIMEOUT / NO_PDF_PRODUCED / MOVE_CONFLICT / **MOVE_IO_ERROR** / COPY_FAILED / CLEANUP_FAILED / UNSUPPORTED_PLATFORM / **UNEXPECTED**
+- `ExtractionItem`: source_path / resolve_result / status / moved_pdfs / **partially_moved** / partial_outputs / error_code / error_detail / cleanup_warning（不変条件は `__post_init__` で強制、`partially_moved` は MOVE_FAILED 時のみ非空、`partial_outputs` と `partially_moved` は共存禁止）
 - `ExtractionResult`: items / orphan_alias_canonicals / pending_filenames + プロパティ success_count / pending_manual / failed
 
 ### CLI 終了コード仕様（PR3 新規）

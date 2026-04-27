@@ -48,10 +48,8 @@ from wiseman_hub.pdf.ex_extractor import (
     extract_directory,
 )
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
+# logging.basicConfig は main() 内で呼ぶ (import 時 root logger 上書きを防ぐ、
+# pytest 並列実行 / PR4 UI からの import で他の log capture を破壊しないため)
 logger = logging.getLogger(__name__)
 
 DEFAULT_DIR = Path(r"C:\Users\sasak\OneDrive\デスクトップ\本田様")
@@ -135,6 +133,12 @@ def _exit_code(result: ExtractionResult) -> int:
 
 
 def main() -> int:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        stream=sys.stderr,
+    )
+
     if sys.platform != "win32":
         print("このスクリプトは Windows 専用です。", file=sys.stderr)
         return EXIT_FAILED

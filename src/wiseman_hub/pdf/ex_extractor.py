@@ -55,6 +55,7 @@ from pathlib import Path
 from typing import Protocol
 
 from wiseman_hub.pdf.facility_resolver import (
+    ResolveReason,
     ResolveResult,
     find_orphan_alias_canonicals,
     resolve_facility,
@@ -237,6 +238,12 @@ class WindowsSfxAdapter:
             f"no pdf produced within {timeout_sec}s",
         )
 
+    # NTP 後方ステップ / filesystem mtime 解像度に対するマージン (秒)。
+    # SFX 実行中に Windows Time Service が同期で時計を巻き戻すと、本来 SFX が
+    # 生成した PDF の mtime が sfx_start より小さくなり誤って除外される。
+    # 5 秒のマージンは「SFX 実行中の NTP step は ±数秒以内」を仮定 (PR5 実機検証で要確認)。
+    _MTIME_GRACE_SEC: float = 5.0
+
     @classmethod
     def _collect_new_pdfs(
         cls,
@@ -248,17 +255,31 @@ class WindowsSfxAdapter:
 
         set 差分だけだと、SFX 実行中に別経路 (ユーザーの手動 DL 等) で生成された
         PDF まで拾い、無関係な PDF が事業所フォルダに移動される。``mtime >=
-        sfx_start`` で実時間ベースに絞ることで、watch_dirs に Desktop/Downloads を
-        含めたまま誤配布リスクを構造的に低減する。
+        sfx_start - _MTIME_GRACE_SEC`` で実時間ベースに絞ることで、watch_dirs に
+        Desktop/Downloads を含めたまま誤配布リスクを構造的に低減する。
+
+        残存リスク (PR4/PR5 設定で軽減検討):
+        - SFX 起動瞬間にユーザーが手動 DL した PDF は通過
+        - filesystem mtime 解像度 (NTFS は ~100ns / FAT32 は 2 秒) より小さい時間差
+        - 完全防御には watch_dirs を ex_file.parent のみに絞る将来改修が必要
         """
+        threshold = sfx_start - cls._MTIME_GRACE_SEC
         candidates = cls._snapshot_pdfs(watch_dirs) - before
         new_pdfs: list[Path] = []
         for pdf in candidates:
             try:
-                if pdf.stat().st_mtime >= sfx_start:
-                    new_pdfs.append(pdf)
-            except OSError:
+                mtime = pdf.stat().st_mtime
+            except OSError as e:
+                # silent-failure-hunter H-1: stat 失敗を logger に残す
+                # (network drive 切断 / 権限変化等の根本原因切り分け、PII-safe)
+                logger.warning(
+                    "stat failed for pdf candidate %s: %s",
+                    pdf.name,
+                    type(e).__name__,
+                )
                 continue
+            if mtime >= threshold:
+                new_pdfs.append(pdf)
         return new_pdfs
 
     @staticmethod
@@ -424,6 +445,14 @@ class ExtractionItem:
             raise ValueError(
                 f"{self.status} forbids partially_moved "
                 f"(only MOVE_FAILED retains partial moves)"
+            )
+
+        # partial_outputs と partially_moved は意味が直交し共存不可
+        # (前者は adapter 例外時の検出元パス、後者は MOVE_FAILED 時の移動先パス)
+        if self.partial_outputs and self.partially_moved:
+            raise ValueError(
+                "partial_outputs and partially_moved are mutually exclusive "
+                "(distinct status semantics)"
             )
 
         # PARTIAL_OUTPUT は partial_outputs 非空が必須
@@ -711,13 +740,36 @@ def extract_directory(
             item = extract_one(
                 ex_file, facility_root_dir, facility_names, aliases, adapter
             )
+        except (MemoryError, RecursionError):
+            # silent-failure-hunter H-2: システム例外はバッチ続行不能、即時停止
+            # (続行すると派生 OOM が連鎖する典型的アンチパターン)
+            raise
         except Exception as e:  # noqa: BLE001 (バッチ続行優先、PII 防御で型名のみ)
-            logger.exception("unexpected error processing %s", ex_file.name)
+            # PII 防御 (HIGH-NEW-1): logger.exception は traceback 経由で OSError.args
+            # に含まれる full path を漏洩させるため使わない。型名のみログ
+            logger.warning(
+                "unexpected error processing %s: %s",
+                ex_file.name,
+                type(e).__name__,
+            )
+            # HIGH-NEW-2: 例外源が resolver の場合、再呼び出しで二度目の例外が
+            # 投げられバッチ続行保護が破綻する → safe UNMATCHED にフォールバック
+            # (UNEXPECTED 経路では resolve_result を信頼しない契約、PR4 UI で考慮)
+            try:
+                fallback_resolve = resolve_facility(
+                    ex_file.name, facility_names, aliases
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "resolver also failed for %s; using UNMATCHED fallback",
+                    ex_file.name,
+                )
+                fallback_resolve = ResolveResult.unmatched(
+                    ResolveReason.NO_CANDIDATE
+                )
             item = ExtractionItem(
                 source_path=ex_file,
-                resolve_result=resolve_facility(
-                    ex_file.name, facility_names, aliases
-                ),
+                resolve_result=fallback_resolve,
                 status=ExtractionStatus.EXTRACT_FAILED,
                 error_code=ExtractionErrorCode.UNEXPECTED,
                 error_detail=type(e).__name__,
