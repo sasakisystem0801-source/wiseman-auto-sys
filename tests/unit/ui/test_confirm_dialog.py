@@ -52,7 +52,7 @@ def _make_session(
     *,
     session_id: str = "20260420T001523Z-deadbeef",
     status: SessionStatus = SessionStatus.NEEDS_REVIEW,
-    candidates: list[UserCandidate] | None = None,
+    candidates: tuple[UserCandidate, ...] | None = None,
 ) -> Session:
     now = datetime.now(UTC).isoformat()
     return Session(
@@ -62,7 +62,7 @@ def _make_session(
         updated_at=now,
         config_snapshot={"concat_order": ["A", "B", "C"]},
         source_a_path="/tmp/A.pdf",
-        candidates=candidates if candidates is not None else [],
+        candidates=candidates if candidates is not None else (),
         a_page_pdf_bytes_dir="/tmp/.pages",
         output_path=None,
         total_pages_a=len(candidates) if candidates else 0,
@@ -76,8 +76,8 @@ def _needs_confirmation_candidate(
     matched_b_path: str | None = None,
     matched_c_path: str | None = None,
 ) -> UserCandidate:
-    similar = (
-        [
+    similar: tuple[CandidateState, ...] = (
+        (
             CandidateState(
                 path=f"/in/B_{page_index}.pdf",
                 kind="B",
@@ -90,9 +90,9 @@ def _needs_confirmation_candidate(
                 distance=1,
                 extracted_name="塩津 美喜子",
             ),
-        ]
+        )
         if with_similar
-        else []
+        else ()
     )
     return UserCandidate(
         page_index=page_index,
@@ -113,7 +113,7 @@ def _no_match_candidate(page_index: int = 2, name: str = "佐藤 花子") -> Use
         status=PairStatus.NO_MATCH,
         matched_b_path=None,
         matched_c_path=None,
-        similar_candidates=[],
+        similar_candidates=(),
     )
 
 
@@ -125,7 +125,7 @@ def _auto_matched_candidate(page_index: int = 0, name: str = "山田 太郎") ->
         status=PairStatus.AUTO_MATCHED,
         matched_b_path=f"/in/B_{page_index}.pdf",
         matched_c_path=f"/in/C_{page_index}.pdf",
-        similar_candidates=[],
+        similar_candidates=(),
     )
 
 
@@ -143,7 +143,7 @@ class TestResolveCandidate:
     def test_approve_updates_status_and_matched(self) -> None:
         """AC-UI-2: NEEDS_CONFIRMATION → CONFIRMED, matched_b/c が確定"""
         session = _make_session(
-            candidates=[_needs_confirmation_candidate(page_index=1)]
+            candidates=(_needs_confirmation_candidate(page_index=1),)
         )
         session = resolve_candidate(
             session,
@@ -161,7 +161,7 @@ class TestResolveCandidate:
         """AC-UI-3: 却下 → REJECTED + matched 全 None + similar クリア"""
         # Issue #44: UserCandidate は frozen のため matched_b_path は構築時に渡す。
         cand = _needs_confirmation_candidate(page_index=1, matched_b_path="/in/B.pdf")
-        session = _make_session(candidates=[cand])
+        session = _make_session(candidates=(cand,))
         session = resolve_candidate(
             session,
             1,
@@ -174,11 +174,11 @@ class TestResolveCandidate:
         assert c.status == PairStatus.REJECTED
         assert c.matched_b_path is None
         assert c.matched_c_path is None
-        assert c.similar_candidates == []
+        assert c.similar_candidates == ()
 
     def test_reject_from_no_match(self) -> None:
         """AC-UI-3: NO_MATCH → REJECTED も許容"""
-        session = _make_session(candidates=[_no_match_candidate(page_index=2)])
+        session = _make_session(candidates=(_no_match_candidate(page_index=2),))
         session = resolve_candidate(
             session,
             2,
@@ -190,7 +190,7 @@ class TestResolveCandidate:
 
     def test_manual_select_stores_paths(self) -> None:
         """AC-UI-4: MANUALLY_SELECTED + 指定パス"""
-        session = _make_session(candidates=[_no_match_candidate(page_index=2)])
+        session = _make_session(candidates=(_no_match_candidate(page_index=2),))
         session = resolve_candidate(
             session,
             2,
@@ -205,7 +205,7 @@ class TestResolveCandidate:
 
     def test_manual_select_partial_only_b(self) -> None:
         """AC-UI-4: C だけ None も許容（片方キャンセル）"""
-        session = _make_session(candidates=[_no_match_candidate(page_index=2)])
+        session = _make_session(candidates=(_no_match_candidate(page_index=2),))
         session = resolve_candidate(
             session,
             2,
@@ -221,7 +221,7 @@ class TestResolveCandidate:
         """AC-UI-5: SKIPPED + matched 全 None"""
         # Issue #44: UserCandidate は frozen のため、matched_b_path は構築時に指定する。
         cand = _needs_confirmation_candidate(page_index=1, matched_b_path="/in/B.pdf")
-        session = _make_session(candidates=[cand])
+        session = _make_session(candidates=(cand,))
         session = resolve_candidate(
             session,
             1,
@@ -237,10 +237,10 @@ class TestResolveCandidate:
     def test_non_matching_page_index_is_noop(self) -> None:
         """存在しない page_index を指定しても他 candidate は変化しない"""
         session = _make_session(
-            candidates=[
+            candidates=(
                 _needs_confirmation_candidate(page_index=1),
                 _no_match_candidate(page_index=2),
-            ]
+            )
         )
         session = resolve_candidate(
             session,
@@ -254,11 +254,11 @@ class TestResolveCandidate:
 
     def test_does_not_affect_other_candidates(self) -> None:
         session = _make_session(
-            candidates=[
+            candidates=(
                 _auto_matched_candidate(page_index=0),
                 _needs_confirmation_candidate(page_index=1),
                 _no_match_candidate(page_index=2),
-            ]
+            )
         )
         session = resolve_candidate(
             session, 1, status=PairStatus.CONFIRMED, matched_b="/b", matched_c="/c"
@@ -268,7 +268,7 @@ class TestResolveCandidate:
 
     def test_returns_new_session_preserving_original(self) -> None:
         """Issue #44: resolve_candidate は新 Session を返し、元 session は不変。"""
-        session = _make_session(candidates=[_needs_confirmation_candidate(page_index=1)])
+        session = _make_session(candidates=(_needs_confirmation_candidate(page_index=1),))
         original_status = session.candidates[0].status
         result = resolve_candidate(
             session, 1, status=PairStatus.SKIPPED, matched_b=None, matched_c=None
@@ -280,7 +280,7 @@ class TestResolveCandidate:
 
     def test_preserves_similar_by_default(self) -> None:
         """承認や手動選択時は similar を残す（監査用、却下時のみクリア）"""
-        session = _make_session(candidates=[_needs_confirmation_candidate(page_index=1)])
+        session = _make_session(candidates=(_needs_confirmation_candidate(page_index=1),))
         session = resolve_candidate(
             session,
             1,
@@ -320,9 +320,9 @@ class TestComputeApproveDecision:
             status=PairStatus.NEEDS_CONFIRMATION,
             matched_b_path=None,
             matched_c_path=None,
-            similar_candidates=[
-                CandidateState(path="/b.pdf", kind="B", distance=1, extracted_name="X")
-            ],
+            similar_candidates=(
+                CandidateState(path="/b.pdf", kind="B", distance=1, extracted_name="X"),
+            ),
         )
         assert compute_approve_decision(cand) == ("/b.pdf", None)
 
@@ -334,9 +334,9 @@ class TestComputeApproveDecision:
             status=PairStatus.NEEDS_CONFIRMATION,
             matched_b_path=None,
             matched_c_path=None,
-            similar_candidates=[
-                CandidateState(path="/c.pdf", kind="C", distance=1, extracted_name="X")
-            ],
+            similar_candidates=(
+                CandidateState(path="/c.pdf", kind="C", distance=1, extracted_name="X"),
+            ),
         )
         assert compute_approve_decision(cand) == (None, "/c.pdf")
 
@@ -359,7 +359,7 @@ class TestLogOperation:
             status=PairStatus.NEEDS_CONFIRMATION,
             matched_b_path="/secret/Bファイル.pdf",
             matched_c_path="/secret/Cファイル.pdf",
-            similar_candidates=[],
+            similar_candidates=(),
         )
         with caplog.at_level(logging.INFO, logger="wiseman_hub.ui.confirm_dialog"):
             log_operation("20260420T001523Z-abcd1234", cand, "approved")
@@ -424,12 +424,12 @@ class TestAllResolvedDetection:
     def test_all_resolved_after_sequential_operations(self) -> None:
         """AC-UI-8: 4 操作で全件解決 → all_candidates_resolved == True"""
         session = _make_session(
-            candidates=[
+            candidates=(
                 _needs_confirmation_candidate(page_index=1),
                 _no_match_candidate(page_index=2),
                 _needs_confirmation_candidate(page_index=3),
                 _no_match_candidate(page_index=4),
-            ]
+            )
         )
         assert not session.all_candidates_resolved
 
@@ -455,10 +455,10 @@ class TestAllResolvedDetection:
     def test_partial_resolution_not_all_resolved(self) -> None:
         """AC-UI-7: 一部のみ解決 → all_candidates_resolved == False"""
         session = _make_session(
-            candidates=[
+            candidates=(
                 _needs_confirmation_candidate(page_index=1),
                 _no_match_candidate(page_index=2),
-            ]
+            )
         )
         session = resolve_candidate(
             session, 1, status=PairStatus.CONFIRMED, matched_b="/b", matched_c="/c"
@@ -517,7 +517,7 @@ class TestHelpers:
 class TestResult:
     def test_result_is_frozen(self) -> None:
         """session フィールドは dataclass(frozen=True) で再代入不可"""
-        session = _make_session(candidates=[_needs_confirmation_candidate()])
+        session = _make_session(candidates=(_needs_confirmation_candidate(),))
         r = ConfirmDialogResult(session=session)
         with pytest.raises((AttributeError, TypeError)):  # FrozenInstanceError
             r.session = _make_session()  # type: ignore[misc]
@@ -531,7 +531,7 @@ class TestResult:
         ConfirmDialogResult で検証する。
         """
         session = _make_session(
-            candidates=[_needs_confirmation_candidate(page_index=1)]
+            candidates=(_needs_confirmation_candidate(page_index=1),)
         )
         r_before = ConfirmDialogResult(session=session)
         assert r_before.resolved_all is False
@@ -553,7 +553,7 @@ class TestResult:
         ディスクは旧状態。呼出側が READY_TO_MERGE に遷移するのを防ぐ safety net。
         """
         session = _make_session(
-            candidates=[
+            candidates=(
                 UserCandidate(
                     page_index=1,
                     user_name_ocr="X",
@@ -561,9 +561,9 @@ class TestResult:
                     status=PairStatus.CONFIRMED,  # メモリ上は解決済み
                     matched_b_path="/b",
                     matched_c_path="/c",
-                    similar_candidates=[],
-                )
-            ]
+                    similar_candidates=(),
+                ),
+            )
         )
         assert session.all_candidates_resolved is True
 
@@ -591,7 +591,7 @@ class TestMainThreadEnforcement:
         import threading as _threading
 
         session = _make_session(
-            candidates=[_needs_confirmation_candidate(page_index=1)]
+            candidates=(_needs_confirmation_candidate(page_index=1),)
         )
         error: list[BaseException] = []
 
@@ -714,24 +714,24 @@ class TestConfirmDialogConstruction:
     def test_raises_if_session_not_needs_review(self, tk_root: tk.Tk) -> None:
         session = _make_session(
             status=SessionStatus.RUNNING_PHASE_A,
-            candidates=[_needs_confirmation_candidate()],
+            candidates=(_needs_confirmation_candidate(),),
         )
         with pytest.raises(ValueError, match="NEEDS_REVIEW"):
             ConfirmDialog(session, Path("/tmp/.sessions"), root=tk_root)
 
     def test_raises_if_no_open_candidates(self, tk_root: tk.Tk) -> None:
-        session = _make_session(candidates=[_auto_matched_candidate()])
+        session = _make_session(candidates=(_auto_matched_candidate(),))
         with pytest.raises(ValueError, match="at least one unresolved"):
             ConfirmDialog(session, Path("/tmp/.sessions"), root=tk_root)
 
     def test_treeview_shows_only_open_candidates(self, tk_root: tk.Tk) -> None:
         """AC-UI-1 (UI level)"""
         session = _make_session(
-            candidates=[
+            candidates=(
                 _auto_matched_candidate(page_index=0),
                 _needs_confirmation_candidate(page_index=1),
                 _no_match_candidate(page_index=2),
-            ]
+            )
         )
         dialog, _, _ = _build_dialog(session, tk_root)
         items = dialog._tree.get_children()
@@ -747,11 +747,11 @@ class TestPersistenceFailFast:
         spy を使って別途検証する（filedialog の DI が必要なためテストを分離）。
         """
         session = _make_session(
-            candidates=[
+            candidates=(
                 _needs_confirmation_candidate(page_index=1),
                 _no_match_candidate(page_index=2),
                 _needs_confirmation_candidate(page_index=3),
-            ]
+            )
         )
         dialog, spy, _ = _build_dialog(session, tk_root)
         assert isinstance(spy, _SaveSessionSpy)
@@ -772,7 +772,7 @@ class TestPersistenceFailFast:
 
     def test_save_error_propagates(self, tk_root: tk.Tk) -> None:
         """AC-UI-10 (UI level): save_session 失敗で例外が呼出元に伝播"""
-        session = _make_session(candidates=[_needs_confirmation_candidate(page_index=1)])
+        session = _make_session(candidates=(_needs_confirmation_candidate(page_index=1),))
         failing = _FailingSaveSession(OSError("disk full"))
         dialog, _, _ = _build_dialog(session, tk_root, save_spy=failing)
         dialog._tree.selection_set("1")
@@ -786,11 +786,12 @@ class TestPersistenceFailFast:
     def test_save_error_leaves_memory_ahead_of_disk(self, tk_root: tk.Tk) -> None:
         """AC-UI-10 補足: save 失敗時のメモリ/ディスク不整合を契約として明示する。
 
-        resolve_candidate が save 前に in-place 更新するため、save 失敗後のメモリは
-        新 status になる（ディスクは旧 status）。呼出側はメモリ上の session を破棄し
-        再ロードする責務がある（confirm_dialog.py の _apply_update docstring で規定）。
+        resolve_candidate が save 前に新 Session を構築して dialog 内部 session を
+        置換するため、save 失敗後の dialog._session は新 status になる（ディスクは旧 status）。
+        呼出側は dialog 内部の session を破棄し再ロードする責務がある
+        （confirm_dialog.py の _apply_update docstring で規定）。
         """
-        session = _make_session(candidates=[_needs_confirmation_candidate(page_index=1)])
+        session = _make_session(candidates=(_needs_confirmation_candidate(page_index=1),))
         failing = _FailingSaveSession(OSError("disk full"))
         dialog, _, _ = _build_dialog(session, tk_root, save_spy=failing)
         dialog._tree.selection_set("1")
@@ -799,8 +800,9 @@ class TestPersistenceFailFast:
         with pytest.raises(OSError):
             dialog._on_approve()
 
-        # メモリ上は更新済み（契約上の期待値）
-        assert session.candidates[0].status == PairStatus.CONFIRMED
+        # 元の session は frozen のため不変、dialog 内部の session のみが新 status に置換される
+        assert session.candidates[0].status == PairStatus.NEEDS_CONFIRMATION
+        assert dialog._session.candidates[0].status == PairStatus.CONFIRMED
 
 
 @_skip_if_no_tk
@@ -808,10 +810,10 @@ class TestCloseBehavior:
     def test_close_with_unresolved_asks_confirmation(self, tk_root: tk.Tk) -> None:
         """AC-UI-7 (UI level)"""
         session = _make_session(
-            candidates=[
+            candidates=(
                 _needs_confirmation_candidate(page_index=1),
                 _no_match_candidate(page_index=2),
-            ]
+            )
         )
         mb = _FakeMessageBox(yesno_return=True)
         dialog, _, _ = _build_dialog(session, tk_root, messagebox=mb)
@@ -824,7 +826,7 @@ class TestCloseBehavior:
     def test_close_all_resolved_shows_info(self, tk_root: tk.Tk) -> None:
         """AC-UI-8 (UI level): 全件解決 → showinfo → quit"""
         session = _make_session(
-            candidates=[_needs_confirmation_candidate(page_index=1)]
+            candidates=(_needs_confirmation_candidate(page_index=1),)
         )
         mb = _FakeMessageBox()
         dialog, _, _ = _build_dialog(session, tk_root, messagebox=mb)
@@ -839,7 +841,7 @@ class TestCloseBehavior:
     def test_close_declined_keeps_dialog_open(self, tk_root: tk.Tk) -> None:
         """AC-UI-7 (UI level): 「いいえ」選択でダイアログ継続"""
         session = _make_session(
-            candidates=[_needs_confirmation_candidate(page_index=1)]
+            candidates=(_needs_confirmation_candidate(page_index=1),)
         )
         mb = _FakeMessageBox(yesno_return=False)
         dialog, _, _ = _build_dialog(session, tk_root, messagebox=mb)
@@ -853,7 +855,7 @@ class TestCloseBehavior:
 class TestManualSelectWiring:
     def test_both_b_and_c_selected(self, tk_root: tk.Tk) -> None:
         """AC-UI-4 + AC-UI-6 (UI level): 両方選択 → MANUALLY_SELECTED + save_session 呼出"""
-        session = _make_session(candidates=[_no_match_candidate(page_index=2)])
+        session = _make_session(candidates=(_no_match_candidate(page_index=2),))
         picks = iter(["/manual/B.pdf", "/manual/C.pdf"])
         dialog, spy, _ = _build_dialog(
             session, tk_root, askopenfilename_fn=lambda **_: next(picks)
@@ -872,7 +874,7 @@ class TestManualSelectWiring:
         assert len(spy.calls) == 1
 
     def test_both_cancelled_is_noop(self, tk_root: tk.Tk) -> None:
-        session = _make_session(candidates=[_no_match_candidate(page_index=2)])
+        session = _make_session(candidates=(_no_match_candidate(page_index=2),))
         dialog, spy, _ = _build_dialog(
             session, tk_root, askopenfilename_fn=lambda **_: ""
         )
@@ -887,7 +889,7 @@ class TestManualSelectWiring:
 
     def test_partial_selection_asks_confirm_yes(self, tk_root: tk.Tk) -> None:
         """片側のみ選択 → askyesno → yes → MANUALLY_SELECTED で確定"""
-        session = _make_session(candidates=[_no_match_candidate(page_index=2)])
+        session = _make_session(candidates=(_no_match_candidate(page_index=2),))
         picks = iter(["/manual/B.pdf", ""])  # C はキャンセル
         mb = _FakeMessageBox(yesno_return=True)
         dialog, spy, _ = _build_dialog(
@@ -909,7 +911,7 @@ class TestManualSelectWiring:
 
     def test_partial_selection_asks_confirm_no(self, tk_root: tk.Tk) -> None:
         """片側のみ選択 → askyesno → no → no-op（save 呼出なし）"""
-        session = _make_session(candidates=[_no_match_candidate(page_index=2)])
+        session = _make_session(candidates=(_no_match_candidate(page_index=2),))
         picks = iter(["", "/manual/C.pdf"])  # B はキャンセル
         mb = _FakeMessageBox(yesno_return=False)
         dialog, spy, _ = _build_dialog(
@@ -930,7 +932,7 @@ class TestManualSelectWiring:
 
     def test_filedialog_tclerror_shows_error_and_skips(self, tk_root: tk.Tk) -> None:
         """askopenfilename が TclError 送出 → showerror 表示 + その kind は未選択扱い"""
-        session = _make_session(candidates=[_no_match_candidate(page_index=2)])
+        session = _make_session(candidates=(_no_match_candidate(page_index=2),))
 
         def _raise(**_: object) -> str:
             raise tk.TclError("display connection lost")
@@ -959,7 +961,7 @@ class TestCallbackException:
         self, tk_root: tk.Tk
     ) -> None:
         """save_session 失敗が Tk callback 経由 → showerror + aborted=True + quit"""
-        session = _make_session(candidates=[_needs_confirmation_candidate(page_index=1)])
+        session = _make_session(candidates=(_needs_confirmation_candidate(page_index=1),))
         failing = _FailingSaveSession(OSError("disk full"))
         mb = _FakeMessageBox()
         dialog, _, _ = _build_dialog(
@@ -993,7 +995,7 @@ class TestCallbackException:
         本テストは「`logger.exception` で traceback が出るとファイルパスが漏れる」
         という既知リスク（Codex review で検出）を回帰防止する。
         """
-        session = _make_session(candidates=[_needs_confirmation_candidate(page_index=1)])
+        session = _make_session(candidates=(_needs_confirmation_candidate(page_index=1),))
         dialog, _, _ = _build_dialog(session, tk_root)
 
         pii_path = "/secret/利用者_塩津美貴子.pdf"
@@ -1021,10 +1023,10 @@ class TestRefreshTreeSelection:
     ) -> None:
         """承認後に Treeview から該当行が消え、detail/buttons がクリアされる"""
         session = _make_session(
-            candidates=[
+            candidates=(
                 _needs_confirmation_candidate(page_index=1),
                 _no_match_candidate(page_index=2),
-            ]
+            )
         )
         dialog, _, _ = _build_dialog(session, tk_root)
         dialog._tree.selection_set("1")
@@ -1058,7 +1060,7 @@ class TestConfirmDialogToplevelMode:
     """
 
     def test_both_root_and_parent_raises(self, tk_root: tk.Tk) -> None:
-        session = _make_session(candidates=[_needs_confirmation_candidate()])
+        session = _make_session(candidates=(_needs_confirmation_candidate(),))
         with pytest.raises(ValueError, match="either root or parent"):
             ConfirmDialog(
                 session,
@@ -1069,7 +1071,7 @@ class TestConfirmDialogToplevelMode:
 
     def test_parent_mode_creates_toplevel(self, tk_root: tk.Tk) -> None:
         """parent 指定時: 内部 root は Toplevel、_is_toplevel=True。"""
-        session = _make_session(candidates=[_needs_confirmation_candidate()])
+        session = _make_session(candidates=(_needs_confirmation_candidate(),))
         dialog = ConfirmDialog(
             session,
             Path("/tmp/.sessions"),
@@ -1087,7 +1089,7 @@ class TestConfirmDialogToplevelMode:
 
     def test_root_mode_creates_no_toplevel(self, tk_root: tk.Tk) -> None:
         """従来互換: root 指定時は _is_toplevel=False。"""
-        session = _make_session(candidates=[_needs_confirmation_candidate()])
+        session = _make_session(candidates=(_needs_confirmation_candidate(),))
         dialog = ConfirmDialog(
             session,
             Path("/tmp/.sessions"),
@@ -1102,7 +1104,7 @@ class TestConfirmDialogToplevelMode:
 
         `_close_dialog()` ヘルパーがモード分岐する契約を固定。
         """
-        session = _make_session(candidates=[_needs_confirmation_candidate()])
+        session = _make_session(candidates=(_needs_confirmation_candidate(),))
         dialog = ConfirmDialog(
             session,
             Path("/tmp/.sessions"),

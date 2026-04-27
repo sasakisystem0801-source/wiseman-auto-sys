@@ -42,19 +42,19 @@ from wiseman_hub.ui.confirm_dialog import ConfirmDialogResult
 
 
 def _promote_needs_confirmation(
-    candidates: list[UserCandidate],
-) -> list[UserCandidate]:
-    """NEEDS_CONFIRMATION の候補のみ CONFIRMED に昇格した新 list を返す。
+    candidates: tuple[UserCandidate, ...],
+) -> tuple[UserCandidate, ...]:
+    """NEEDS_CONFIRMATION の候補のみ CONFIRMED に昇格した新 tuple を返す。
 
     race 系テストと _FakeDialog.resolve_in_run で共通する「全未解決候補の承認」
     パターンを DRY 化するための小 helper。
     """
-    return [
+    return tuple(
         replace(c, status=PairStatus.CONFIRMED)
         if c.status == PairStatus.NEEDS_CONFIRMATION
         else c
         for c in candidates
-    ]
+    )
 
 
 def _resolved_candidate(page_index: int = 0) -> UserCandidate:
@@ -65,7 +65,7 @@ def _resolved_candidate(page_index: int = 0) -> UserCandidate:
         status=PairStatus.AUTO_MATCHED,
         matched_b_path=None,
         matched_c_path=None,
-        similar_candidates=[],
+        similar_candidates=(),
     )
 
 
@@ -77,7 +77,7 @@ def _unresolved_candidate(page_index: int = 0) -> UserCandidate:
         status=PairStatus.NEEDS_CONFIRMATION,
         matched_b_path=None,
         matched_c_path=None,
-        similar_candidates=[],
+        similar_candidates=(),
     )
 
 
@@ -96,7 +96,7 @@ def _make_needs_review_session(
         updated_at=datetime.now(UTC).isoformat(),
         config_snapshot={"input_dir": str(tmp_path), "concat_order": ["A", "B", "C"]},
         source_a_path=str(tmp_path / "A.pdf"),
-        candidates=[candidate],
+        candidates=(candidate,),
         a_page_pdf_bytes_dir=str(tmp_path / ".pages"),
         output_path=None,
     )

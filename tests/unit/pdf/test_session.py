@@ -94,7 +94,7 @@ def _make_session(tmp_path: Path, **overrides) -> Session:
         updated_at=datetime.now(UTC).isoformat(),
         config_snapshot={"input_dir": str(tmp_path), "concat_order": ["A", "B", "C"]},
         source_a_path=str(tmp_path / "A.pdf"),
-        candidates=[],
+        candidates=(),
         a_page_pdf_bytes_dir=str(tmp_path / ".pages"),
         output_path=None,
     )
@@ -120,7 +120,8 @@ class TestSaveLoad:
         loaded = load_session(s.session_id, sessions_dir=sessions_dir)
         assert loaded.session_id == s.session_id
         assert loaded.status == s.status
-        assert loaded.candidates == []
+        assert loaded.candidates == ()
+        assert isinstance(loaded.candidates, tuple)
 
     def test_round_trip_with_candidates(self, tmp_path: Path) -> None:
         sessions_dir = tmp_path / ".sessions"
@@ -131,16 +132,16 @@ class TestSaveLoad:
             status=PairStatus.AUTO_MATCHED,
             matched_b_path=str(tmp_path / "B_塩津美喜子.pdf"),
             matched_c_path=str(tmp_path / "C_塩津美喜子.pdf"),
-            similar_candidates=[
+            similar_candidates=(
                 CandidateState(
                     path=str(tmp_path / "B_other.pdf"),
                     kind="B",
                     distance=1,
                     extracted_name="塩津美貴子",
-                )
-            ],
+                ),
+            ),
         )
-        s = _make_session(tmp_path, candidates=[cand])
+        s = _make_session(tmp_path, candidates=(cand,))
 
         save_session(s, sessions_dir=sessions_dir)
         loaded = load_session(s.session_id, sessions_dir=sessions_dir)
@@ -148,6 +149,8 @@ class TestSaveLoad:
         assert len(loaded.candidates) == 1
         assert loaded.candidates[0].user_name_ocr == "塩津 美喜子"
         assert loaded.candidates[0].similar_candidates[0].extracted_name == "塩津美貴子"
+        assert isinstance(loaded.candidates, tuple)
+        assert isinstance(loaded.candidates[0].similar_candidates, tuple)
 
     def test_save_is_atomic_no_temp_file_left(self, tmp_path: Path) -> None:
         sessions_dir = tmp_path / ".sessions"
@@ -876,7 +879,7 @@ class TestSessionHelpers:
             status=PairStatus.AUTO_MATCHED,
             matched_b_path=None,
             matched_c_path=None,
-            similar_candidates=[],
+            similar_candidates=(),
         )
         assert c.is_resolved is True
 
@@ -888,7 +891,7 @@ class TestSessionHelpers:
             status=PairStatus.NEEDS_CONFIRMATION,
             matched_b_path=None,
             matched_c_path=None,
-            similar_candidates=[],
+            similar_candidates=(),
         )
         assert c.is_resolved is False
 
@@ -896,28 +899,28 @@ class TestSessionHelpers:
         c1 = UserCandidate(
             page_index=0, user_name_ocr="x", confidence="high",
             status=PairStatus.AUTO_MATCHED,
-            matched_b_path=None, matched_c_path=None, similar_candidates=[],
+            matched_b_path=None, matched_c_path=None, similar_candidates=(),
         )
         c2 = UserCandidate(
             page_index=1, user_name_ocr="y", confidence="high",
             status=PairStatus.CONFIRMED,
-            matched_b_path=None, matched_c_path=None, similar_candidates=[],
+            matched_b_path=None, matched_c_path=None, similar_candidates=(),
         )
-        s = _make_session(tmp_path, candidates=[c1, c2])
+        s = _make_session(tmp_path, candidates=(c1, c2))
         assert s.all_candidates_resolved is True
 
     def test_session_not_ready_one_pending(self, tmp_path: Path) -> None:
         c1 = UserCandidate(
             page_index=0, user_name_ocr="x", confidence="high",
             status=PairStatus.AUTO_MATCHED,
-            matched_b_path=None, matched_c_path=None, similar_candidates=[],
+            matched_b_path=None, matched_c_path=None, similar_candidates=(),
         )
         c2 = UserCandidate(
             page_index=1, user_name_ocr="y", confidence="medium",
             status=PairStatus.NEEDS_CONFIRMATION,
-            matched_b_path=None, matched_c_path=None, similar_candidates=[],
+            matched_b_path=None, matched_c_path=None, similar_candidates=(),
         )
-        s = _make_session(tmp_path, candidates=[c1, c2])
+        s = _make_session(tmp_path, candidates=(c1, c2))
         assert s.all_candidates_resolved is False
 
 
@@ -927,7 +930,7 @@ class TestFromMatchResult:
             status=MatchStatus.AUTO_MATCHED,
             matched_b_path=tmp_path / "B_x.pdf",
             matched_c_path=tmp_path / "C_x.pdf",
-            similar_candidates=[],
+            similar_candidates=(),
         )
         c = UserCandidate.from_match_result(
             page_index=0,
@@ -943,14 +946,14 @@ class TestFromMatchResult:
             status=MatchStatus.NEEDS_CONFIRMATION,
             matched_b_path=None,
             matched_c_path=None,
-            similar_candidates=[
+            similar_candidates=(
                 CandidateFile(
                     path=tmp_path / "B_similar.pdf",
                     kind="B",
                     distance=1,
                     extracted_name="山田太郎",
                 ),
-            ],
+            ),
         )
         c = UserCandidate.from_match_result(
             page_index=0,
@@ -968,7 +971,7 @@ class TestFromMatchResult:
             status=MatchStatus.NO_MATCH,
             matched_b_path=None,
             matched_c_path=None,
-            similar_candidates=[],
+            similar_candidates=(),
         )
         c = UserCandidate.from_match_result(
             page_index=0,
@@ -992,7 +995,7 @@ def _resolved_candidate(page_index: int = 0) -> UserCandidate:
         status=PairStatus.AUTO_MATCHED,
         matched_b_path=None,
         matched_c_path=None,
-        similar_candidates=[],
+        similar_candidates=(),
     )
 
 
@@ -1004,7 +1007,7 @@ def _unresolved_candidate(page_index: int = 0) -> UserCandidate:
         status=PairStatus.NEEDS_CONFIRMATION,
         matched_b_path=None,
         matched_c_path=None,
-        similar_candidates=[],
+        similar_candidates=(),
     )
 
 
@@ -1015,7 +1018,7 @@ class TestTransitionSessionValid:
         s = _make_session(
             tmp_path,
             status=SessionStatus.RUNNING_PHASE_A,
-            candidates=[_unresolved_candidate()],
+            candidates=(_unresolved_candidate(),),
         )
         s = transition_session(s, SessionStatus.NEEDS_REVIEW)
         assert s.status == SessionStatus.NEEDS_REVIEW
@@ -1024,7 +1027,7 @@ class TestTransitionSessionValid:
         s = _make_session(
             tmp_path,
             status=SessionStatus.RUNNING_PHASE_A,
-            candidates=[_resolved_candidate()],
+            candidates=(_resolved_candidate(),),
         )
         s = transition_session(s, SessionStatus.READY_TO_MERGE)
         assert s.status == SessionStatus.READY_TO_MERGE
@@ -1038,7 +1041,7 @@ class TestTransitionSessionValid:
         s = _make_session(
             tmp_path,
             status=SessionStatus.NEEDS_REVIEW,
-            candidates=[_resolved_candidate(0), _resolved_candidate(1)],
+            candidates=(_resolved_candidate(0), _resolved_candidate(1)),
         )
         s = transition_session(s, SessionStatus.READY_TO_MERGE)
         assert s.status == SessionStatus.READY_TO_MERGE
@@ -1047,7 +1050,7 @@ class TestTransitionSessionValid:
         s = _make_session(
             tmp_path,
             status=SessionStatus.READY_TO_MERGE,
-            candidates=[_resolved_candidate()],
+            candidates=(_resolved_candidate(),),
         )
         s = transition_session(s, SessionStatus.RUNNING_PHASE_B)
         assert s.status == SessionStatus.RUNNING_PHASE_B
@@ -1056,7 +1059,7 @@ class TestTransitionSessionValid:
         s = _make_session(
             tmp_path,
             status=SessionStatus.RUNNING_PHASE_B,
-            candidates=[_resolved_candidate()],
+            candidates=(_resolved_candidate(),),
         )
         s = transition_session(s, SessionStatus.COMPLETED)
         assert s.status == SessionStatus.COMPLETED
@@ -1094,7 +1097,7 @@ class TestTransitionSessionInvalid:
         s = _make_session(
             tmp_path,
             status=SessionStatus.NEEDS_REVIEW,
-            candidates=[_resolved_candidate()],
+            candidates=(_resolved_candidate(),),
         )
         with pytest.raises(InvalidTransitionError):
             transition_session(s, SessionStatus.COMPLETED)
@@ -1140,7 +1143,7 @@ class TestTransitionSessionReadyGuard:
         s = _make_session(
             tmp_path,
             status=SessionStatus.NEEDS_REVIEW,
-            candidates=[_resolved_candidate(0), _unresolved_candidate(1)],
+            candidates=(_resolved_candidate(0), _unresolved_candidate(1)),
         )
         with pytest.raises(InvalidTransitionError, match="unresolved"):
             transition_session(s, SessionStatus.READY_TO_MERGE)
@@ -1151,7 +1154,7 @@ class TestTransitionSessionReadyGuard:
         s = _make_session(
             tmp_path,
             status=SessionStatus.RUNNING_PHASE_A,
-            candidates=[_unresolved_candidate()],
+            candidates=(_unresolved_candidate(),),
         )
         with pytest.raises(InvalidTransitionError, match="unresolved"):
             transition_session(s, SessionStatus.READY_TO_MERGE)
@@ -1159,7 +1162,7 @@ class TestTransitionSessionReadyGuard:
     def test_ready_with_empty_candidates_raises(self, tmp_path: Path) -> None:
         # all_candidates_resolved は空 list で False を返す
         s = _make_session(
-            tmp_path, status=SessionStatus.RUNNING_PHASE_A, candidates=[]
+            tmp_path, status=SessionStatus.RUNNING_PHASE_A, candidates=()
         )
         with pytest.raises(InvalidTransitionError, match="unresolved"):
             transition_session(s, SessionStatus.READY_TO_MERGE)

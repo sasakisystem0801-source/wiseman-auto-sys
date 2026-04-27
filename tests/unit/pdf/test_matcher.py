@@ -393,7 +393,7 @@ class TestMatchResult:
             status=MatchStatus.AUTO_MATCHED,
             matched_b_path=tmp_path / "B.pdf",
             matched_c_path=None,
-            similar_candidates=[],
+            similar_candidates=(),
         )
         assert r.has_any_match is True
 
@@ -402,6 +402,6 @@ class TestMatchResult:
             status=MatchStatus.NO_MATCH,
             matched_b_path=None,
             matched_c_path=None,
-            similar_candidates=[],
+            similar_candidates=(),
         )
         assert r.has_any_match is False

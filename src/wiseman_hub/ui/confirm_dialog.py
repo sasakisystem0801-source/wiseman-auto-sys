@@ -17,7 +17,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import tkinter as tk
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from tkinter import filedialog, ttk
@@ -480,12 +480,13 @@ class ConfirmDialog:
         永続化・UI 更新・終了検知の orchestration を担当する。
 
         **save_session 失敗時の契約**:
-        - `resolve_candidate` は save 前に session.candidates を in-place 更新するため、
-          save が失敗した場合 **メモリ上は新 status / ディスクは旧 status** の不整合になる。
+        - `resolve_candidate` は save 前に新 Session を構築して ``self._session`` を
+          置換するため、save が失敗した場合 **dialog 内部のメモリは新 status /
+          ディスクは旧 status** の不整合になる。
         - 例外は呼出元に伝播する（UI 握り潰し禁止、PII 孤児化回避）。
         - Tk callback 経由で送出された例外は :meth:`_on_callback_exception` が捕捉し、
           ユーザー通知 + mainloop 停止する。
-        - 呼出側は UI 終了後にセッションを **必ず再ロード** し、メモリ上の session を捨てること。
+        - 呼出側は UI 終了後にセッションを **必ず再ロード** し、dialog 内部の session を捨てること。
           これで on-disk の旧状態から再開できる（未解決扱いで再提示される）。
         """
         self._session = resolve_candidate(
@@ -601,9 +602,9 @@ def resolve_candidate(
 ) -> Session:
     """指定 page_index の candidate を新 status と matched パスで更新した新 Session を返す。
 
-    Issue #44 immutable 化: 元の ``session`` は mutation されず、``candidates`` を
+    Issue #44/#117 immutable 化: 元の ``session`` は mutation されず、``candidates`` を
     置換した新 Session を返す。該当 page_index が存在しない場合は同じ内容の新 Session
-    を返す（candidates 自体は新 list として構築される）。
+    を返す（candidates 自体は新 tuple として構築される）。
     ``similar_candidates`` は ``clear_similar=True`` で空にする（却下時に使用）。
     """
     new_candidates: list[UserCandidate] = []
@@ -611,7 +612,7 @@ def resolve_candidate(
         if c.page_index != page_index:
             new_candidates.append(c)
             continue
-        similar = [] if clear_similar else c.similar_candidates
+        similar: tuple[CandidateState, ...] = () if clear_similar else c.similar_candidates
         new_candidates.append(
             UserCandidate(
                 page_index=c.page_index,
@@ -620,10 +621,10 @@ def resolve_candidate(
                 status=status,
                 matched_b_path=matched_b,
                 matched_c_path=matched_c,
-                similar_candidates=list(similar),
+                similar_candidates=similar,
             )
         )
-    return replace(session, candidates=new_candidates)
+    return replace(session, candidates=tuple(new_candidates))
 
 
 def log_operation(session_id: str, cand: UserCandidate, op: str) -> None:
@@ -660,7 +661,7 @@ def compute_approve_decision(
 
 
 def _pick_first_by_kind(
-    similar: list[CandidateState], kind: SourceKind
+    similar: Sequence[CandidateState], kind: SourceKind
 ) -> str | None:
     """similar_candidates の先頭から、指定 kind (B/C) の path を返す（無ければ None）。"""
     return next((c.path for c in similar if c.kind == kind), None)

@@ -177,7 +177,7 @@ def _new_session(
         updated_at=now,
         config_snapshot=snapshot,
         source_a_path=str(source_a_path),
-        candidates=[],
+        candidates=(),
         a_page_pdf_bytes_dir=str(page_dir),
         output_path=None,
         total_pages_a=None,
@@ -203,7 +203,7 @@ def _build_candidate(
             status=PairStatus.NO_MATCH,
             matched_b_path=None,
             matched_c_path=None,
-            similar_candidates=[],
+            similar_candidates=(),
         )
 
     match_result = matcher.match(ocr_result.name)
@@ -355,7 +355,7 @@ def run_phase_a(
                     ocr_result=ocr_result,
                     matcher=matcher,
                 )
-                session = replace(session, candidates=[*session.candidates, candidate])
+                session = replace(session, candidates=(*session.candidates, candidate))
 
                 # 1 ページ処理完了ごとに永続化（中断耐性）
                 session = save_session(session, sessions_dir=sessions_dir)
@@ -387,7 +387,7 @@ def run_phase_a(
         # save 前に実施してディスクと戻り値の順序を揃える。
         session = replace(
             session,
-            candidates=sorted(session.candidates, key=lambda c: c.page_index),
+            candidates=tuple(sorted(session.candidates, key=lambda c: c.page_index)),
         )
         final = _finalize_status(session)
         session = transition_session(session, final)

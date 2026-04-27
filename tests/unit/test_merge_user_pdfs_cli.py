@@ -154,7 +154,7 @@ class TestListSessionsCommand:
                 updated_at=datetime.now(UTC).isoformat(),
                 config_snapshot={},
                 source_a_path="",
-                candidates=[],
+                candidates=(),
                 a_page_pdf_bytes_dir=str(sdir / "pages"),
                 output_path=None,
             )
@@ -196,7 +196,7 @@ class TestListSessionsCommand:
             updated_at=datetime.now(UTC).isoformat(),
             config_snapshot={},
             source_a_path="",
-            candidates=[],
+            candidates=(),
             a_page_pdf_bytes_dir=str(sdir / "pages"),
             output_path=None,
         )
@@ -276,7 +276,7 @@ class TestDiscardCommand:
             updated_at=datetime.now(UTC).isoformat(),
             config_snapshot={},
             source_a_path="",
-            candidates=[],
+            candidates=(),
             a_page_pdf_bytes_dir=str(artifact_dir),
             output_path=None,
         )
@@ -337,7 +337,7 @@ class TestDiscardCommand:
             updated_at=datetime.now(UTC).isoformat(),
             config_snapshot={},
             source_a_path="",
-            candidates=[],
+            candidates=(),
             a_page_pdf_bytes_dir=str(artifact_dir),
             output_path=None,
         )
@@ -429,7 +429,7 @@ class TestResumeCommand:
             updated_at=datetime.now(UTC).isoformat(),
             config_snapshot={},
             source_a_path=str(tmp_path / "A.pdf"),
-            candidates=[
+            candidates=(
                 UserCandidate(
                     page_index=0,
                     user_name_ocr="既処理",
@@ -437,9 +437,9 @@ class TestResumeCommand:
                     status=PairStatus.AUTO_MATCHED,
                     matched_b_path=None,
                     matched_c_path=None,
-                    similar_candidates=[],
-                )
-            ],
+                    similar_candidates=(),
+                ),
+            ),
             a_page_pdf_bytes_dir=str(artifact_dir),
             output_path=None,
         )
@@ -553,10 +553,10 @@ def _resolve_all_auto(session: Session) -> Session:
 
     return replace(
         session,
-        candidates=[
-            replace(c, status=PairStatus.CONFIRMED, similar_candidates=[])
+        candidates=tuple(
+            replace(c, status=PairStatus.CONFIRMED, similar_candidates=())
             for c in session.candidates
-        ],
+        ),
     )
 
 
@@ -571,7 +571,7 @@ class TestReviewCommand:
         sid = _make_session_with_candidates(
             tmp_path=tmp_path,
             status=SessionStatus.NEEDS_REVIEW,
-            candidates=[
+            candidates=(
                 UserCandidate(
                     page_index=0,
                     user_name_ocr="u0",
@@ -579,9 +579,9 @@ class TestReviewCommand:
                     status=PairStatus.NEEDS_CONFIRMATION,
                     matched_b_path=None,
                     matched_c_path=None,
-                    similar_candidates=[],
-                )
-            ],
+                    similar_candidates=(),
+                ),
+            ),
         )
 
         dialog_factory = lambda s, d: FakeDialog(  # noqa: E731
@@ -611,7 +611,7 @@ class TestReviewCommand:
         sid = _make_session_with_candidates(
             tmp_path=tmp_path,
             status=SessionStatus.NEEDS_REVIEW,
-            candidates=[
+            candidates=(
                 UserCandidate(
                     page_index=0,
                     user_name_ocr="u0",
@@ -619,9 +619,9 @@ class TestReviewCommand:
                     status=PairStatus.NEEDS_CONFIRMATION,
                     matched_b_path=None,
                     matched_c_path=None,
-                    similar_candidates=[],
-                )
-            ],
+                    similar_candidates=(),
+                ),
+            ),
         )
 
         dialog_factory = lambda s, d: FakeDialog(s, d, resolver=None, aborted=True)  # noqa: E731
@@ -645,7 +645,7 @@ class TestReviewCommand:
         sid = _make_session_with_candidates(
             tmp_path=tmp_path,
             status=SessionStatus.READY_TO_MERGE,
-            candidates=[
+            candidates=(
                 UserCandidate(
                     page_index=0,
                     user_name_ocr="u0",
@@ -653,9 +653,9 @@ class TestReviewCommand:
                     status=PairStatus.AUTO_MATCHED,
                     matched_b_path=None,
                     matched_c_path=None,
-                    similar_candidates=[],
-                )
-            ],
+                    similar_candidates=(),
+                ),
+            ),
         )
 
         called = {"dialog": 0}
@@ -687,7 +687,7 @@ class TestReviewCommand:
         sid = _make_session_with_candidates(
             tmp_path=tmp_path,
             status=SessionStatus.NEEDS_REVIEW,
-            candidates=[
+            candidates=(
                 UserCandidate(
                     page_index=0,
                     user_name_ocr="u0",
@@ -695,9 +695,9 @@ class TestReviewCommand:
                     status=PairStatus.NEEDS_CONFIRMATION,
                     matched_b_path=None,
                     matched_c_path=None,
-                    similar_candidates=[],
-                )
-            ],
+                    similar_candidates=(),
+                ),
+            ),
         )
 
         # resolver を呼ばないので未解決のまま「閉じる」経路
@@ -723,7 +723,7 @@ class TestReviewCommand:
         return _make_session_with_candidates(
             tmp_path=tmp_path,
             status=SessionStatus.NEEDS_REVIEW,
-            candidates=[
+            candidates=(
                 UserCandidate(
                     page_index=0,
                     user_name_ocr="u0",
@@ -731,9 +731,9 @@ class TestReviewCommand:
                     status=PairStatus.NEEDS_CONFIRMATION,
                     matched_b_path=None,
                     matched_c_path=None,
-                    similar_candidates=[],
-                )
-            ],
+                    similar_candidates=(),
+                ),
+            ),
         )
 
     def _run_review_with_resolve_raising(
@@ -825,7 +825,7 @@ class TestMergeCommand:
         sid = _make_session_with_candidates(
             tmp_path=tmp_path,
             status=SessionStatus.READY_TO_MERGE,
-            candidates=[
+            candidates=(
                 UserCandidate(
                     page_index=0,
                     user_name_ocr="u0",
@@ -833,9 +833,9 @@ class TestMergeCommand:
                     status=PairStatus.AUTO_MATCHED,
                     matched_b_path=None,
                     matched_c_path=None,
-                    similar_candidates=[],
-                )
-            ],
+                    similar_candidates=(),
+                ),
+            ),
         )
 
         exit_code = script.main(
@@ -873,7 +873,7 @@ class TestMergeCommand:
         sid = _make_session_with_candidates(
             tmp_path=tmp_path,
             status=SessionStatus.READY_TO_MERGE,
-            candidates=[
+            candidates=(
                 UserCandidate(
                     page_index=0,
                     user_name_ocr=pii_name,
@@ -881,9 +881,9 @@ class TestMergeCommand:
                     status=PairStatus.AUTO_MATCHED,
                     matched_b_path=None,
                     matched_c_path=None,
-                    similar_candidates=[],
-                )
-            ],
+                    similar_candidates=(),
+                ),
+            ),
         )
 
         def leaky_merge(*args: object, **kwargs: object) -> None:
@@ -939,7 +939,7 @@ class TestMergeCommand:
         sid = _make_session_with_candidates(
             tmp_path=tmp_path,
             status=invalid_status,
-            candidates=[
+            candidates=(
                 UserCandidate(
                     page_index=0,
                     user_name_ocr="u0",
@@ -947,9 +947,9 @@ class TestMergeCommand:
                     status=invalid_pair,
                     matched_b_path=None,
                     matched_c_path=None,
-                    similar_candidates=[],
-                )
-            ],
+                    similar_candidates=(),
+                ),
+            ),
         )
 
         exit_code = script.main(

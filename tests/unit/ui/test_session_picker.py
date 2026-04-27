@@ -56,7 +56,7 @@ def _make_session(
         updated_at=now,
         config_snapshot={"concat_order": ["A", "B", "C"]},
         source_a_path=source_a_path,
-        candidates=[candidate],
+        candidates=(candidate,),
         a_page_pdf_bytes_dir="/tmp/.pages",
         output_path=None,
         total_pages_a=1,
