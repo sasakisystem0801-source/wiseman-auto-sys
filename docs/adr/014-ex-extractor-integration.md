@@ -262,14 +262,6 @@ def extract_directory(
 
 - 既存 `scripts/process_ex_files.py` は PR3 で薄いラッパーに置換し CLI 互換維持
 
-## 関連
-
-- ADR-012: facility_merger 出力仕様（事業所単位 1 ファイル ABCABC 連結）
-- ADR-013: 事業所ルートフォルダ管理 + 一括/選択 PDF 結合（デスクトップアプリ統合）
-- PR #130: PR1 設定スキーマ拡張（`ex_source_dir` + `facility_aliases`）
-- Codex セカンドオピニオン（2026-04-27）: 1 PR 分割推奨 + マッチング戦略の安全設計
-- 4 並列レビュー（PR #130, 2026-04-27）: code-reviewer / pr-test-analyzer / comment-analyzer / type-design-analyzer
-
 ## PR5 Accepted 昇格条件
 
 本 ADR を `Proposed (2026-04-27)` → `Accepted (YYYY-MM-DD)` に昇格させる条件を以下のとおり定義する。実機検証は `docs/handoff/pr5-ex-extractor-runbook.md` の手順で実施し、AC-1〜AC-14 すべて PASS を必須とする。本セクションは ADR-013 / ADR-011 で確立した「Proposed 段階で昇格条件を機械的に判定可能な形で明記し、実機検証完了後に別 PR で Accepted 昇格 + 検証結果セクション追加」の慣習に従う。
@@ -300,9 +292,9 @@ def extract_directory(
 PR5 完走後、別 PR で以下を実施:
 
 1. ADR-014 Status 行を `Proposed (2026-04-27)` → `Accepted (YYYY-MM-DD)` に更新、変更履歴に Session N 実機検証完走を追記
-2. 「### Session N 実機検証結果」セクションを `## 結果` セクションの後（`## 関連` の前）に新設し、runbook Phase 5-1 のサマリテーブル + 観察事項 + PII grep 結果を記録
+2. 「### Session N 実機検証結果」サブセクションを本「## PR5 Accepted 昇格条件」セクション末尾に新設し、runbook Phase 5-1 のサマリテーブル + 観察事項 + PII grep 結果を記録（ADR-013 §Session 26 実機検証結果 の配置慣習踏襲）
 3. `docs/handoff/LATEST.md` を更新（PR5 完走 → 次タスク選定フェーズへ移行、ADR-014 Accepted 反映）
-4. ADR の「## 影響」セクションは原文維持、検証結果は別セクションで保存（ADR-012 / ADR-013 の慣習踏襲）
+4. ADR の「## 結果」セクションは原文維持、検証結果は本「## PR5 Accepted 昇格条件」内サブセクションで保存（ADR-012 / ADR-013 の慣習踏襲）
 
 ### 一部 AC FAIL 時の取り扱い
 
@@ -311,9 +303,17 @@ PR5 完走後、別 PR で以下を実施:
 - **その他 AC の FAIL**: PR5.1 として独立修正 PR を起こし、修正後に再度本 runbook で再検証
 - 修正前に Accepted 昇格を行わない（FAIL 状態の機能を Accepted として記録すると後続の信頼性判断を歪める）
 
+## 関連
+
+- ADR-012: facility_merger 出力仕様（事業所単位 1 ファイル ABCABC 連結）
+- ADR-013: 事業所ルートフォルダ管理 + 一括/選択 PDF 結合（デスクトップアプリ統合）
+- PR #130: PR1 設定スキーマ拡張（`ex_source_dir` + `facility_aliases`）
+- Codex セカンドオピニオン（2026-04-27）: 1 PR 分割推奨 + マッチング戦略の安全設計
+- 4 並列レビュー（PR #130, 2026-04-27）: code-reviewer / pr-test-analyzer / comment-analyzer / type-design-analyzer
+
 ## 未決事項
 
 - AMBIGUOUS 判定の頻度実測（実機投入後にデータ収集、PR5 完走後 1〜2 ヶ月の運用ログから判断）
 - alias 自動学習（手動振り分け結果を alias に昇格する UX）の検討（PR4 で議論、PR5 完走後の運用フィードバックで再評価）
 - `_PARTIAL_MATCH_DOMINANCE_THRESHOLD = 2` の妥当性検証（実例 50+ ファイル投入後）
-- settings.py タブ化（PR5 で持ち越し、PR6 として独立評価。実機検証で要件確定後に設計）
+- settings.py タブ化（PR5 では runbook 主体に絞り、PR6 として独立評価。実機検証で要件確定後に設計）
