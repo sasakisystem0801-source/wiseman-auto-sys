@@ -27,6 +27,14 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
+      # Tk wiring tests は ``tkinter.Tk()`` で root を作れるかで skip 判定する
+      # （tests/unit/ui/conftest.py の ``_tk_available`` fixture 参照）。
+      # Linux runner では DISPLAY 未設定のため通常 skip されるが、xvfb で
+      # 仮想 display を提供することで wiring tests も実機に近い形で実行できる
+      # （Issue #63）。
+      - name: Install system Tk dependencies
+        run: sudo apt-get update && sudo apt-get install -y python3-tk xvfb
+
       - name: Lint
         run: uv run ruff check src/
 
@@ -34,4 +42,4 @@ jobs:
         run: uv run mypy src/
 
       - name: Run unit tests (skip integration)
-        run: uv run pytest tests/unit -v -m "not integration"
+        run: xvfb-run -a uv run pytest tests/unit -v -m "not integration"
