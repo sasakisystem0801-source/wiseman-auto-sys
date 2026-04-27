@@ -1415,6 +1415,73 @@ class TestExtractDirectoryIntegration:
         # original_resolve は使用済み
         del original_resolve
 
+    def test_force_facility_bypasses_resolver_with_manual_override(
+        self, source_dir: Path, facility_root: Path
+    ) -> None:
+        """PR4: force_facility 指定で resolver を bypass、MANUAL_OVERRIDE で CONFIRMED。"""
+        # 通常なら UNMATCHED になるファイル名
+        ex_file = _make_ex_file(source_dir, "2025_未登録施設_提供.ex_")
+        adapter = FakeSfxAdapter(
+            produced_pdfs=(source_dir / "out.pdf",),
+            side_effect=_pdf_creating_side_effect(("out.pdf",)),
+        )
+
+        item = extract_one(
+            ex_file,
+            facility_root,
+            ["サービスA", "サービスB"],
+            {},
+            adapter,
+            force_facility="サービスA",
+        )
+
+        assert item.status is ExtractionStatus.SUCCESS
+        assert item.resolve_result.status is ResolveStatus.CONFIRMED
+        assert item.resolve_result.reason is ResolveReason.MANUAL_OVERRIDE
+        assert item.resolve_result.matched_facility == "サービスA"
+        # 抽出された PDF が「サービスA」フォルダに移動される
+        assert item.moved_pdfs[0].parent == facility_root / "サービスA"
+
+    def test_force_facility_not_in_facility_names_raises(
+        self, source_dir: Path, facility_root: Path
+    ) -> None:
+        """PR4: force_facility が facility_names に存在しないと ValueError (UI 誤値防止)。"""
+        ex_file = _make_ex_file(source_dir, "2025_test.ex_")
+        adapter = FakeSfxAdapter()
+
+        with pytest.raises(ValueError, match="not in facility_names"):
+            extract_one(
+                ex_file,
+                facility_root,
+                ["サービスA"],
+                {},
+                adapter,
+                force_facility="存在しない事業所",
+            )
+
+    def test_force_facility_pii_safe_error_message(
+        self, source_dir: Path, facility_root: Path
+    ) -> None:
+        """PR4: force_facility 不正時の例外メッセージは PII-safe (事業所名を含めない)。"""
+        ex_file = _make_ex_file(source_dir, "2025_test.ex_")
+        adapter = FakeSfxAdapter()
+        sentinel = "PII機密事業所名XYZ"
+
+        with pytest.raises(ValueError) as exc_info:
+            extract_one(
+                ex_file,
+                facility_root,
+                ["サービスA"],
+                {},
+                adapter,
+                force_facility=sentinel,
+            )
+
+        # 例外メッセージに force_facility 値・facility_names 値が含まれない
+        msg = str(exc_info.value)
+        assert sentinel not in msg
+        assert "サービスA" not in msg
+
     def test_unexpected_logger_uses_type_name_only_pii_safe(
         self,
         source_dir: Path,

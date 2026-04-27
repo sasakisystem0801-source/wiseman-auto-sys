@@ -120,6 +120,7 @@ class ResolveReason(StrEnum):
     EXACT_MATCH = "exact_match"
     PARTIAL_UNIQUE = "partial_unique"
     PARTIAL_DOMINANT = "partial_dominant"
+    MANUAL_OVERRIDE = "manual_override"  # PR4: UI 手動振り分けで人が確定（resolver bypass）
     # AMBIGUOUS 系
     AMBIGUOUS_ALIAS = "ambiguous_alias"  # alias 一致で複数 canonical hit
     AMBIGUOUS_EXACT = "ambiguous_exact"  # 正規化完全一致で複数 facility hit
@@ -136,6 +137,7 @@ _REASON_TO_STATUS: dict[ResolveReason, ResolveStatus] = {
     ResolveReason.EXACT_MATCH: ResolveStatus.CONFIRMED,
     ResolveReason.PARTIAL_UNIQUE: ResolveStatus.CONFIRMED,
     ResolveReason.PARTIAL_DOMINANT: ResolveStatus.CONFIRMED,
+    ResolveReason.MANUAL_OVERRIDE: ResolveStatus.CONFIRMED,
     ResolveReason.AMBIGUOUS_ALIAS: ResolveStatus.AMBIGUOUS,
     ResolveReason.AMBIGUOUS_EXACT: ResolveStatus.AMBIGUOUS,
     ResolveReason.AMBIGUOUS_PARTIAL: ResolveStatus.AMBIGUOUS,

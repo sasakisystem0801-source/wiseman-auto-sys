@@ -100,6 +100,58 @@ def _make_facility_merger_callback(
     return open_facility_root_manager
 
 
+def _make_ex_extractor_callback(
+    config_path: Path,
+    get_launcher: Callable[[], _LauncherLike],
+) -> Callable[[], None]:
+    """Launcher に注入する「ex_ ファイル変換 + 振り分け」コールバックを組み立てる（PR4）。
+
+    ``ExExtractorDialog`` を起動。Wiseman ダウンロードの ``.ex_`` ファイルを SFX
+    抽出 + 事業所サブフォルダへ振り分ける。AMBIGUOUS / UNMATCHED は手動振り分け
+    UI で確定 (Codex HIGH-3 対応で確定前確認ステップあり)。
+
+    Windows 専用機能のため、macOS では ``UnsupportedSfxPlatformError`` がモーダル
+    表示される (PR3 ``WindowsSfxAdapter`` constructor で fail-fast)。
+    """
+
+    def open_ex_extractor() -> None:
+        from tkinter import messagebox
+
+        from wiseman_hub.config import load_config
+        from wiseman_hub.pdf.ex_extractor import (
+            UnsupportedSfxPlatformError,
+            WindowsSfxAdapter,
+        )
+        from wiseman_hub.ui.ex_extractor_dialog import ExExtractorDialog
+
+        launcher = get_launcher()
+        config = load_config(config_path)
+
+        # adapter は dialog 起動前に構築 (macOS なら即座にエラーを出す)
+        # MEDIUM-1 (code-reviewer C-2): parent= 指定で Launcher への transient 化
+        try:
+            adapter = WindowsSfxAdapter()
+        except UnsupportedSfxPlatformError:
+            messagebox.showerror(
+                "Windows 専用機能",
+                "ex_ ファイル変換は Windows 専用です (SFX 自己解凍 EXE 実行のため)。",
+                parent=launcher.get_root(),
+            )
+            return
+
+        dialog = ExExtractorDialog(
+            parent=launcher.get_root(),
+            config=config,
+            adapter=adapter,
+        )
+        dialog.get_toplevel().wait_window()
+
+        # ダイアログ内で config 変更はしないため reload_config 不要
+        # (ex_source_dir / facility_aliases の編集は PR5 settings タブ化で対応)
+
+    return open_ex_extractor
+
+
 def _make_settings_callback(
     config_path: Path,
     get_launcher: Callable[[], _LauncherLike],
@@ -451,6 +503,9 @@ def main() -> None:
                     config_path, _get_launcher
                 ),
                 on_open_facility_merger=_make_facility_merger_callback(
+                    config_path, _get_launcher
+                ),
+                on_open_ex_extractor=_make_ex_extractor_callback(
                     config_path, _get_launcher
                 ),
             )
