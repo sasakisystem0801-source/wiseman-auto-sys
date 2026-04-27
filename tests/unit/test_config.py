@@ -487,7 +487,7 @@ dpi = 250
         reloaded = load_config(target)
         assert reloaded.pdf_merge.concat_order == ["C", "A", "B"]
 
-    # --- ex_source_dir (PR1: ex_extractor 機能の .ex_ ソースフォルダ) ---
+    # --- ex_source_dir (.ex_ ファイル取込元フォルダ) ---
 
     def test_ex_source_dir_default_empty(self) -> None:
         """新規 AppConfig() で ex_source_dir はデフォルト空文字列（未設定状態）。"""
@@ -584,7 +584,7 @@ dpi = 250
         # 新フィールドが反映されること
         assert reloaded.pdf_merge.ex_source_dir == "/srv/ex_source"
 
-    # --- facility_aliases (PR1: facility_resolver の alias 辞書) ---
+    # --- facility_aliases (事業所名の別名辞書) ---
 
     def test_facility_aliases_default_empty_dict(self) -> None:
         """新規 AppConfig() で facility_aliases はデフォルト空辞書（dict）。"""
@@ -734,9 +734,12 @@ facility_root_dir = "/srv/facility"
         assert reloaded.pdf_merge.facility_aliases == {"本田デイケア": ["本田DC"]}
 
     def test_save_facility_aliases_empty_value_overwrite(self, tmp_path: Path) -> None:
-        """facility_aliases を空辞書に戻すと既存 alias がクリアされる。
+        """facility_aliases を空辞書に戻すと既存 alias がクリアされ、TOML から
+        ``[pdf_merge.facility_aliases]`` セクション自体が消える。
 
         運用上、設定誤りで alias を一度入れたあと全削除する操作を保証する。
+        TOML 文字列レベルで section header が消失することも確認（roundtrip だけだと
+        空 table が残っても合格してしまう）。
         """
         target = tmp_path / "clear_aliases.toml"
         target.write_text(
@@ -752,8 +755,215 @@ facility_root_dir = "/srv/facility"
         cfg.pdf_merge.facility_aliases = {}
         save_config(cfg, target)
 
+        written = target.read_text(encoding="utf-8")
+        # section header / 別名・正式名すべてが TOML から消えていること
+        assert "[pdf_merge.facility_aliases]" not in written
+        assert "本田デイケア" not in written
+        assert "本田DC" not in written
+
         reloaded = load_config(target)
         assert reloaded.pdf_merge.facility_aliases == {}
+
+    # --- facility_aliases 入力検証（誤配布防止のため load_config が弾く） ---
+
+    def test_facility_aliases_rejects_string_value_not_list(
+        self, tmp_path: Path
+    ) -> None:
+        """alias value が文字列だと ``list("本田DC")`` で文字単位分解されるため、
+        load_config が ``TypeError`` で弾く。
+
+        現場担当者が default.toml のコメント例を見て手書きする際、配列ブラケットを
+        忘れた場合の silent corruption を防ぐ（誤配布事故の温床）。
+        """
+        import pytest
+
+        target = tmp_path / "bad_alias_str.toml"
+        target.write_text(
+            """\
+[pdf_merge.facility_aliases]
+"本田デイケア" = "本田DC"
+""",
+            encoding="utf-8",
+        )
+        with pytest.raises(TypeError, match="facility_aliases"):
+            load_config(target)
+
+    def test_facility_aliases_rejects_non_string_alias_elements(
+        self, tmp_path: Path
+    ) -> None:
+        """alias value 配列の要素が文字列以外なら TypeError。"""
+        import pytest
+
+        target = tmp_path / "bad_alias_int.toml"
+        target.write_text(
+            """\
+[pdf_merge.facility_aliases]
+"本田デイケア" = [123, 456]
+""",
+            encoding="utf-8",
+        )
+        with pytest.raises(TypeError, match="facility_aliases"):
+            load_config(target)
+
+    def test_facility_aliases_rejects_empty_canonical_name(
+        self, tmp_path: Path
+    ) -> None:
+        """正式名（key）が空文字列だと ValueError。
+
+        空 key を許すと facility_resolver で空ファイル名が誤マッチする経路が生まれる。
+        """
+        import pytest
+
+        target = tmp_path / "empty_key.toml"
+        target.write_text(
+            """\
+[pdf_merge.facility_aliases]
+"" = ["本田DC"]
+""",
+            encoding="utf-8",
+        )
+        with pytest.raises(ValueError, match="facility_aliases"):
+            load_config(target)
+
+    def test_facility_aliases_rejects_empty_alias_string(
+        self, tmp_path: Path
+    ) -> None:
+        """alias 配列に空文字列が含まれていたら ValueError。"""
+        import pytest
+
+        target = tmp_path / "empty_alias.toml"
+        target.write_text(
+            """\
+[pdf_merge.facility_aliases]
+"本田デイケア" = ["本田DC", ""]
+""",
+            encoding="utf-8",
+        )
+        with pytest.raises(ValueError, match="facility_aliases"):
+            load_config(target)
+
+    def test_facility_aliases_rejects_duplicate_alias_within_facility(
+        self, tmp_path: Path
+    ) -> None:
+        """同一 alias を同じ事業所の配列内で重複させたら ValueError（無意味なノイズ）。"""
+        import pytest
+
+        target = tmp_path / "dup_within.toml"
+        target.write_text(
+            """\
+[pdf_merge.facility_aliases]
+"本田デイケア" = ["本田DC", "本田DC"]
+""",
+            encoding="utf-8",
+        )
+        with pytest.raises(ValueError, match="facility_aliases"):
+            load_config(target)
+
+    def test_facility_aliases_rejects_duplicate_alias_across_facilities(
+        self, tmp_path: Path
+    ) -> None:
+        """同一 alias を複数事業所が共有していたら ValueError（最重要: 誤配布防止）。
+
+        例: ``"本田"`` が「本田デイケア」と「本田訪問看護」両方に登録されていると、
+        facility_resolver の最優先 alias 一致で先勝ち＝dict 順依存の不定動作になり、
+        介護記録が別事業所に振り分けられる業務事故になる。
+        """
+        import pytest
+
+        target = tmp_path / "dup_across.toml"
+        target.write_text(
+            """\
+[pdf_merge.facility_aliases]
+"本田デイケア" = ["本田"]
+"本田訪問看護" = ["本田"]
+""",
+            encoding="utf-8",
+        )
+        with pytest.raises(ValueError, match="facility_aliases.*本田"):
+            load_config(target)
+
+    def test_facility_aliases_rejects_alias_equal_to_other_canonical_name(
+        self, tmp_path: Path
+    ) -> None:
+        """alias が他事業所の正式名と一致したら ValueError（最優先 alias と完全一致が衝突）。"""
+        import pytest
+
+        target = tmp_path / "alias_eq_canonical.toml"
+        target.write_text(
+            """\
+[pdf_merge.facility_aliases]
+"本田デイケア" = ["きなり"]
+"きなり" = ["きなり訪問"]
+""",
+            encoding="utf-8",
+        )
+        with pytest.raises(ValueError, match="facility_aliases"):
+            load_config(target)
+
+    def test_facility_aliases_accepts_self_reference_silently(
+        self, tmp_path: Path
+    ) -> None:
+        """alias が自分自身の正式名と同じでも load 自体は通す（冗長だが害はない）。
+
+        正規化完全一致と alias 一致のいずれでも同じ正式名にマップされるため、誤配布
+        リスクなし。検証コストを増やすメリットも小さいので明示的に許容する設計。
+        """
+        target = tmp_path / "self_ref.toml"
+        target.write_text(
+            """\
+[pdf_merge.facility_aliases]
+"本田デイケア" = ["本田DC", "本田デイケア"]
+""",
+            encoding="utf-8",
+        )
+        cfg = load_config(target)
+        assert cfg.pdf_merge.facility_aliases == {
+            "本田デイケア": ["本田DC", "本田デイケア"]
+        }
+
+    # --- 同時更新の独立性（bbox + facility_aliases） ---
+
+    def test_save_simultaneous_update_bbox_and_aliases_partial_update(
+        self, tmp_path: Path
+    ) -> None:
+        """bbox と facility_aliases を同時に更新しても互いに上書きしない。
+
+        ``_update_pdf_merge`` は両ネスト table を独立処理する設計だが、pop 順序や
+        書き込み順を間違えると一方が他方を消す回帰が起こる。CLAUDE.md MUST の
+        Partial Update 検証をネスト table 同士の組み合わせでも保証する。
+        """
+        target = tmp_path / "simul.toml"
+        target.write_text(
+            """\
+[pdf_merge.user_name_bbox]
+x0 = 11.0
+y0 = 22.0
+x1 = 333.0
+y1 = 44.0
+dpi = 250
+
+[pdf_merge.facility_aliases]
+"本田デイケア" = ["本田DC"]
+""",
+            encoding="utf-8",
+        )
+        cfg = load_config(target)
+        cfg.pdf_merge.user_name_bbox.x0 = 99.0
+        cfg.pdf_merge.facility_aliases = {
+            "本田デイケア": ["本田DC", "本田デイ"],
+            "きなり": ["きなり訪問"],
+        }
+
+        save_config(cfg, target)
+        reloaded = load_config(target)
+
+        assert reloaded.pdf_merge.user_name_bbox.x0 == 99.0
+        assert reloaded.pdf_merge.user_name_bbox.y0 == 22.0  # 不変
+        assert reloaded.pdf_merge.user_name_bbox.dpi == 250  # 不変
+        assert reloaded.pdf_merge.facility_aliases == {
+            "本田デイケア": ["本田DC", "本田デイ"],
+            "きなり": ["きなり訪問"],
+        }
 
     def test_save_overwrites_existing_file_value_actually_changes(
         self, tmp_path: Path

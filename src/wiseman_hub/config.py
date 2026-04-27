@@ -99,17 +99,23 @@ class PdfMergeConfig:
 
     facility_root_dir: 事業所ルートフォルダ（複数事業所を一括処理する起点）。
         配下に `{事業所名}/{運動機能向上計画書,経過報告書}/` 構造を持つ親ディレクトリ。
-        新ダイアログ FacilityRootManagerDialog（W4）で永続化する。
         既存の input_dir / output_dir 等とは独立（旧 Phase A/B フローは無関係）。
+        ADR-013 で導入。
     ex_source_dir: .ex_ ファイル（WinSFX32 LZH 自己解凍EXE）の取込元フォルダ。
-        ex_extractor 機能（PR1-5）で `.ex_ → PDF 抽出 → facility_root_dir 配下事業所
-        フォルダへ振り分け` の起点として使う。facility_root_dir と同レベルの永続設定で、
-        ダイアログ初回起動時にユーザーが選択 → 次回以降は保存値を表示。
-    facility_aliases: facility_resolver で使う事業所名の別名辞書（PR2 で追加）。
-        正式フォルダ名（key）に対する別名・略称・旧名称（value 配列）を保持し、
-        ファイル名と事業所フォルダの照合で最優先一致として参照される。誤配布防止のため
-        部分一致系より明示 alias 一致を優先する設計（ADR-014 参照予定）。
+        ex_extractor 機能で `.ex_ → PDF 抽出 → facility_root_dir 配下事業所フォルダ
+        へ振り分け` の起点として使う。空文字列 ("") は未設定を意味し、consumer 側で
+        空チェック必須（既存 facility_root_dir / input_dir 等と同じ str 規約）。
+    facility_aliases: 事業所名の別名辞書。正式フォルダ名（key）に対する別名・略称・
+        旧名称（value 配列）を保持し、ファイル名と事業所フォルダの照合で最優先一致
+        として参照される。誤配布防止のため明示 alias 一致を部分一致系より優先する。
         例: {"本田デイケア": ["本田DC", "本田デイ"]}
+        load_config 時に `_validate_facility_aliases` が以下を検証し、違反は raise:
+            - key (正式名) が空文字列でない
+            - value が list 型である（str を直接書くと文字単位分解されるため）
+            - value 要素がすべて非空 str
+            - 同じ list 内で alias 重複がない
+            - 異なる事業所間で同じ alias が共有されていない（global 一意性）
+            - alias が他事業所の正式名と一致しない（alias 一致と完全一致の衝突回避）
     """
 
     input_dir: str = ""
@@ -139,6 +145,83 @@ class AppConfig:
     pdf_merge: PdfMergeConfig = field(default_factory=PdfMergeConfig)
 
 
+def _coerce_facility_aliases(aliases_data: Any) -> dict[str, list[str]]:
+    """TOML の facility_aliases section を ``dict[str, list[str]]`` に強制変換する。
+
+    型違反（value が list でない、要素が str でない）は ``TypeError`` で fail-fast する。
+    PII 防御で例外メッセージには key/value の生値を含めず、構造的な型情報のみ出す
+    （介護現場の事業所名・別名はログ送信先で機密扱いになる場合がある）。
+    """
+    coerced: dict[str, list[str]] = {}
+    for key, value in dict(aliases_data).items():
+        canonical = str(key)
+        if not isinstance(value, list):
+            raise TypeError(
+                "facility_aliases value must be a list of strings; "
+                f"got {type(value).__name__} for one entry"
+            )
+        normalized: list[str] = []
+        for element in value:
+            if not isinstance(element, str):
+                raise TypeError(
+                    "facility_aliases list elements must be strings; "
+                    f"got {type(element).__name__}"
+                )
+            normalized.append(element)
+        coerced[canonical] = normalized
+    return coerced
+
+
+def _validate_facility_aliases(aliases: dict[str, list[str]]) -> None:
+    """事業所別名辞書の不変条件を検証する（介護現場の誤配布防止が最重要 KPI）。
+
+    検証項目:
+        1. 正式名 key が空文字列でない
+        2. alias value 配列に空文字列が含まれない
+        3. 同一事業所の配列内で alias が重複しない（無意味なノイズ）
+        4. 異なる事業所間で同じ alias が共有されていない（global 一意性）
+        5. alias が他事業所の正式名と一致しない（alias 一致と完全一致の衝突回避）
+
+    自己参照（``{"X": [..., "X"]}``）は冗長だが誤配布リスクなしのため許容。
+
+    違反時は ``ValueError`` で fail-fast。例外メッセージには「衝突した alias 文字列」
+    のみ含めて運用者の修正を助けるが、その他の事業所名・別名は出さず PII を最小化する。
+    """
+    canonical_names = set(aliases.keys())
+    seen_aliases: dict[str, str] = {}  # alias -> どの canonical に属しているか
+    for canonical, alias_list in aliases.items():
+        if not canonical:
+            raise ValueError(
+                "facility_aliases canonical name (key) must not be empty"
+            )
+        seen_in_facility: set[str] = set()
+        for alias in alias_list:
+            if not alias:
+                raise ValueError(
+                    "facility_aliases must not contain empty string alias"
+                )
+            if alias in seen_in_facility:
+                raise ValueError(
+                    f"facility_aliases contains duplicate alias '{alias}' "
+                    "within the same facility"
+                )
+            seen_in_facility.add(alias)
+            if alias == canonical:
+                # 自己参照（冗長だが誤配布リスクなし）は許容、global 一意性チェックの対象外
+                continue
+            if alias in canonical_names:
+                raise ValueError(
+                    f"facility_aliases alias '{alias}' conflicts with "
+                    "another facility's canonical name"
+                )
+            if alias in seen_aliases:
+                raise ValueError(
+                    f"facility_aliases alias '{alias}' is shared by multiple "
+                    "facilities; aliases must be globally unique to prevent misrouting"
+                )
+            seen_aliases[alias] = canonical
+
+
 def load_config(path: Path | None = None) -> AppConfig:
     """TOML設定ファイルを読み込んでAppConfigを返す。"""
     if path is None:
@@ -164,10 +247,8 @@ def load_config(path: Path | None = None) -> AppConfig:
 
     bbox_data = pdf_merge_data.pop("user_name_bbox", {})
     aliases_data = pdf_merge_data.pop("facility_aliases", {})
-    # TOML の dict[str, list[str]] を素直な Python dict に正規化（tomllib は通常 dict 化済）
-    facility_aliases: dict[str, list[str]] = {
-        str(k): list(v) for k, v in dict(aliases_data).items()
-    }
+    facility_aliases = _coerce_facility_aliases(aliases_data)
+    _validate_facility_aliases(facility_aliases)
     pdf_merge = PdfMergeConfig(
         **pdf_merge_data,
         user_name_bbox=UserNameBBox(**bbox_data),
@@ -209,13 +290,14 @@ def _update_table_from_dataclass(doc: TOMLDocument, section: str, data: dict[str
 def _update_pdf_merge(doc: TOMLDocument, pdf_merge: PdfMergeConfig) -> None:
     """[pdf_merge] とネスト [pdf_merge.user_name_bbox] / [pdf_merge.facility_aliases] を書き戻す。
 
-    ネスト table を持つ field（user_name_bbox, facility_aliases）は親 table のスカラ
-    フィールド更新とは独立に書き出す。スカラフィールドの更新でネスト table を上書き
-    しないよう、ネスト系は ``pdf_merge_dict`` から事前に pop する。
+    ネスト table はスカラフィールドとは別ロジックで処理する 2 つの理由:
+        1. ``asdict(pdf_merge)`` がネスト dataclass / dict を平坦化してしまい、スカラ
+           更新ループ ``table[key] = value`` で TOML 表現が壊れる
+        2. facility_aliases は動的キーを持つため、固定スキーマの dataclass 更新では
+           扱えない（tomlkit.table() で新規構築する必要がある）
 
-    facility_aliases は dict[str, list[str]] の動的キーを持つため、tomlkit.table() を
-    新規作成して全 key を入れ直す（既存 alias を完全置換）。空辞書の場合は alias table
-    自体を削除し、TOML から `[pdf_merge.facility_aliases]` セクションが消えるようにする。
+    そのため ``pdf_merge_dict`` から両ネスト field を pop してからスカラ更新を行い、
+    ネスト系は専用ロジック（bbox は in-place 更新、aliases は完全置換）で処理する。
     """
     bbox = asdict(pdf_merge.user_name_bbox)
     aliases = pdf_merge.facility_aliases
@@ -249,6 +331,13 @@ def _set_facility_aliases(
     """[pdf_merge.facility_aliases] を完全置換する（既存 alias は全削除）。
 
     空辞書の場合はセクション自体を TOML から削除し、未設定状態と同じ TOML 表現にする。
+
+    先に既存 alias section を ``del`` してから（必要なら）新規 table を入れ直すことで、
+    key 削除や rename を含む全変更パターンに 1 経路で対応する。
+
+    制約: ``del`` した時点で alias section 内のユーザーコメント・空行は失われる
+    （alias は dialog 経由での編集を前提とした設計）。section 外のコメント
+    （[pdf_merge] 直下、bbox 内、ファイル冒頭等）は tomlkit により保持される。
     """
     if "facility_aliases" in pdf_merge_table:
         del pdf_merge_table["facility_aliases"]
