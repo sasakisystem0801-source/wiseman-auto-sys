@@ -6,7 +6,10 @@ name: Build Windows Smoke
 # 既存の test-windows-integration.yml は WinForms mock + pytest 用で責務が異なる。
 # 本ワークフローはビルド検証 + smoke 専用に分離している。
 #
-# untrusted input（issue/PR title/body 等）は使わない。github.sha のみ参照。
+# セキュリティ方針: issue/PR の title/body/label 等の untrusted メタデータは
+# 一切参照しない（script injection 防止）。PR の HEAD コミット内容自体は
+# checkout してビルド対象として実行されるため、本ワークフローを
+# `pull_request_target` トリガーへ昇格させたり secrets を追加することは禁止。
 
 on:
   push:
@@ -43,6 +46,13 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path "dist\wiseman_hub.exe")) {
+            Write-Host "===== dist\ contents ====="
+            Get-ChildItem dist\ -ErrorAction Continue | Format-Table
+            Write-Host "===== PyInstaller warn-files ====="
+            Get-ChildItem build\*\warn-*.txt -ErrorAction Continue | ForEach-Object {
+              Write-Host "--- $($_.FullName) ---"
+              Get-Content $_.FullName
+            }
             Write-Error "dist\wiseman_hub.exe was not produced by PyInstaller"
             exit 1
           }
@@ -60,10 +70,26 @@ jobs:
             -RedirectStandardOutput "smoke-stdout.log" `
             -RedirectStandardError "smoke-stderr.log"
 
+          # smoke 経路は PII 防御のため stderr に型名のみを書き出す。
+          # CI 側ではログ不在 (exe 起動失敗等) を silent に握り潰さず、
+          # Process state / ExitCode を必ず surface してデバッグ可能性を担保する。
+          Write-Host "===== process state ====="
+          Write-Host "ExitCode: $($process.ExitCode)"
+          Write-Host "HasExited: $($process.HasExited)"
+
           Write-Host "===== smoke stdout ====="
-          Get-Content "smoke-stdout.log" -ErrorAction SilentlyContinue
+          if (Test-Path "smoke-stdout.log") {
+            Get-Content "smoke-stdout.log"
+          } else {
+            Write-Warning "smoke-stdout.log was not created (exe likely failed to launch)"
+          }
+
           Write-Host "===== smoke stderr ====="
-          Get-Content "smoke-stderr.log" -ErrorAction SilentlyContinue
+          if (Test-Path "smoke-stderr.log") {
+            Get-Content "smoke-stderr.log"
+          } else {
+            Write-Warning "smoke-stderr.log was not created (exe likely failed to launch)"
+          }
 
           if ($process.ExitCode -ne 0) {
             Write-Error "smoke test failed with exit code $($process.ExitCode)"

@@ -446,10 +446,14 @@ def _run_smoke_test() -> None:
     - ``fitz`` (pymupdf) のダミー PDF 生成・読込（Phase A/B の split/merge 基盤）
     - ``pdf.splitter.split_pdf_with_bbox`` （Phase A の入口、ダミー PDF + bbox）
     - ``pdf.ocr_client.OcrClient.__init__`` （HTTP リクエストは投げない、init 経路のみ）
-    - ``pdf.merger`` 経由の ``fitz.open`` （Phase B の入口、ダミー PDF を読む）
+    - ``fitz.open(path)`` のファイルパス経路 round-trip （splitter は in-memory 経路、
+      こちらはファイルパス経路で別の C 拡張パスを踏むため、PyInstaller の DLL 解決を
+      重複検証する目的で残す）
 
     PII 防御: 例外発生時は ``type(e).__name__`` のみを stderr に出力する。本番経路の
-    規律と一致させる（CLAUDE.md Definition of Done + ADR-014 PII 方針）。
+    規律と一致させる（CLAUDE.md Definition of Done + ADR-014 PII 方針）。CI 側の
+    デバッグ性は workflow の Process state / dist listing / PyInstaller warn-files
+    出力で担保する（``build-windows-smoke.yml`` 参照）。
 
     GUI 副作用回避のため、``tkinter`` および UI モジュールは本関数では import しない
     （AC-2 の検証対象。関数内 import は意図的）。
@@ -462,7 +466,9 @@ def _run_smoke_test() -> None:
     from wiseman_hub.pdf.ocr_client import OcrClient
     from wiseman_hub.pdf.splitter import split_pdf_with_bbox
 
-    logger.info("smoke test start: fitz / splitter / ocr_client / merger 経路を検証")
+    logger.info(
+        "smoke test start: fitz / splitter / ocr_client / fitz.open round-trip 経路を検証"
+    )
 
     try:
         with tempfile.TemporaryDirectory() as tmp_str:
@@ -484,16 +490,20 @@ def _run_smoke_test() -> None:
                     f"split_pdf_with_bbox: expected 1 page, got {len(pages)}"
                 )
 
-            client = OcrClient(
+            # _make_phase_a_callback の ExitStack パターンと整合する形で
+            # OcrClient を context manager 化し、将来の拡張時にもリークを防ぐ。
+            with OcrClient(
                 OcrBackendConfig(
                     endpoint_url=_SMOKE_OCR_ENDPOINT,
                     api_key=_SMOKE_OCR_API_KEY,
                 )
-            )
-            client.close()
+            ):
+                pass
 
-            # pdf.merger 経由の fitz.open を独立検証（splitter とは別の hidden imports
-            # 経路を踏むため、PyInstaller での DLL 解決の重複検証として残す）。
+            # fitz.open(str(path)) のファイルパス経路を独立検証
+            # （splitter は内部で fitz.open(Path) を踏む in-memory 経路。
+            # こちらはファイルパス経由で異なる C 拡張入口を踏み、
+            # PyInstaller の DLL 解決の網羅性を上げる）。
             doc2 = fitz.open(str(dummy_pdf))
             try:
                 if doc2.page_count != 1:
