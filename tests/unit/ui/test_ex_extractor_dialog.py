@@ -161,6 +161,36 @@ class TestViewModelStateTransitions:
         assert vm.state is UiState.IDLE
         assert vm.error_message == "OSError"
 
+    def test_transition_to_idle_from_invalid_state_raises(
+        self, tmp_path: Path
+    ) -> None:
+        """HIGH-D: SHOWING_RESULT 等の想定外 state からの IDLE 復帰を拒否。"""
+        vm = ExExtractorViewModel(
+            source_dir=tmp_path, facility_root_dir=tmp_path
+        )
+        vm.transition_to_busy()
+        vm.transition_to_showing_result(ExtractionResult(items=()))
+        with pytest.raises(RuntimeError, match="cannot transition to IDLE"):
+            vm.transition_to_idle_with_error("OSError")
+
+    def test_transition_to_idle_from_manual_distributing_ok(
+        self, tmp_path: Path
+    ) -> None:
+        """HIGH-D: MANUAL_DISTRIBUTING からの IDLE 復帰は許容。"""
+        vm = ExExtractorViewModel(
+            source_dir=tmp_path, facility_root_dir=tmp_path
+        )
+        vm.transition_to_busy()
+        vm.transition_to_showing_result(
+            ExtractionResult(
+                items=(_unmatched_item("a.ex_"),),
+                pending_filenames=("a.ex_",),
+            )
+        )
+        vm.transition_to_manual_distributing()
+        vm.transition_to_idle_with_error("RuntimeError")
+        assert vm.state is UiState.IDLE
+
     def test_can_open_manual_requires_pending(self, tmp_path: Path) -> None:
         vm = ExExtractorViewModel(
             source_dir=tmp_path, facility_root_dir=tmp_path

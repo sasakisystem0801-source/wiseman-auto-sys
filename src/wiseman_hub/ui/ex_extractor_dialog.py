@@ -65,8 +65,10 @@ class UiState(StrEnum):
 
     遷移:
         IDLE → BUSY (「実行」押下)
+        SHOWING_RESULT → BUSY (再実行: 「実行」再押下)
         BUSY → SHOWING_RESULT (extract_directory 完了)
         BUSY → IDLE (例外時、エラーモーダル表示)
+        MANUAL_DISTRIBUTING → IDLE (手動振り分け中の例外で復帰)
         SHOWING_RESULT → MANUAL_DISTRIBUTING (「手動振り分けへ」押下)
         MANUAL_DISTRIBUTING → SHOWING_RESULT (手動振り分け完了で結果統合)
 
@@ -144,7 +146,15 @@ class ExExtractorViewModel:
         self.result = result
 
     def transition_to_idle_with_error(self, error_message: str) -> None:
-        """BUSY → IDLE (例外時、PII-safe メッセージのみ)。"""
+        """BUSY / MANUAL_DISTRIBUTING → IDLE (例外時、PII-safe メッセージのみ)。
+
+        HIGH-D (type-analyzer C1): 遷移元チェックを追加。SHOWING_RESULT から
+        誤って呼ばれて result が宙に浮く事故を構造的に防ぐ。
+        """
+        if self.state not in (UiState.BUSY, UiState.MANUAL_DISTRIBUTING):
+            raise RuntimeError(
+                f"cannot transition to IDLE with error from {self.state}"
+            )
         self.state = UiState.IDLE
         self.error_message = error_message
 
@@ -369,6 +379,18 @@ class ExExtractorDialog:
         self._lbl_status = ttk.Label(action_frame, text="", foreground="#888")
         self._lbl_status.pack(side="left", padx=(12, 0))
 
+        # orphan 警告バナー (MEDIUM-5: silent-failure-hunter MEDIUM-8 対応)
+        # alias 設定不整合は次回以降も自動振り分け失敗を生む構造的問題のため、
+        # サマリ末尾ではなく専用 frame を上部に常時表示で見落とし防止
+        self._orphan_banner_frame = ttk.Frame(outer)
+        self._lbl_orphan_banner = ttk.Label(
+            self._orphan_banner_frame,
+            text="",
+            foreground="#c00",
+            font=("TkDefaultFont", 10, "bold"),
+        )
+        self._lbl_orphan_banner.pack(anchor="w")
+
         # 結果サマリ
         self._summary_frame = ttk.LabelFrame(outer, text="結果", padding=8)
         self._summary_frame.pack(fill="both", expand=True, pady=(8, 0))
@@ -415,6 +437,26 @@ class ExExtractorDialog:
             )
         else:
             self._lbl_status.configure(text="", foreground="#888")
+
+        # orphan banner (常時表示、SHOWING_RESULT 時のみ pack)
+        if (
+            self._vm.state is UiState.SHOWING_RESULT
+            and self._vm.result is not None
+            and self._vm.result.orphan_alias_canonicals
+        ):
+            count = len(self._vm.result.orphan_alias_canonicals)
+            self._lbl_orphan_banner.configure(
+                text=(
+                    f"⚠ alias 設定不整合: {count} 件 — "
+                    "実フォルダが存在しない canonical があります。"
+                    "TOML を修正してください。"
+                )
+            )
+            self._orphan_banner_frame.pack(
+                fill="x", pady=(4, 0), before=self._summary_frame
+            )
+        else:
+            self._orphan_banner_frame.pack_forget()
 
         # サマリテキスト
         self._summary_text.configure(state="normal")
@@ -492,6 +534,15 @@ class ExExtractorDialog:
         )
 
     def _on_extract_done(self, future: Future[ExtractionResult]) -> None:
+        # HIGH-A / HIGH-B: dialog destroy 後の after callback 到達ガード
+        # (close 後に extract_directory が完遂したケースの TclError 回避)
+        if not self._top.winfo_exists():
+            logger.warning(
+                "extract result arrived after dialog destroy "
+                "(possible orphaned worker thread)"
+            )
+            return
+
         try:
             result = future.result()
         except UnsupportedSfxPlatformError:
@@ -523,39 +574,59 @@ class ExExtractorDialog:
         if self._vm.result is None:
             return
 
+        # HIGH-C: 例外時に MANUAL_DISTRIBUTING 固着を防ぐため、saved_result を保持
+        # して例外発生時に SHOWING_RESULT に復帰可能にする
+        saved_result = self._vm.result
         self._vm.transition_to_manual_distributing()
         self._redraw()
 
-        # ManualDistributionDialog を遅延 import (循環 import 回避)
-        factory: Callable[..., _ManualDialogProtocol]
-        if self._manual_dialog_factory is None:
-            from wiseman_hub.ui.manual_distribution_dialog import (
-                ManualDistributionDialog,
+        try:
+            # ManualDistributionDialog を遅延 import (循環 import 回避)
+            factory: Callable[..., _ManualDialogProtocol]
+            if self._manual_dialog_factory is None:
+                from wiseman_hub.ui.manual_distribution_dialog import (
+                    ManualDistributionDialog,
+                )
+
+                factory = ManualDistributionDialog
+            else:
+                factory = self._manual_dialog_factory
+
+            # facility_root_dir 配下の facility_names を再計算
+            # iterdir() の OSError も外側 except で捕捉される
+            facility_names = sorted(
+                d.name
+                for d in self._vm.facility_root_dir.iterdir()
+                if d.is_dir() and not d.name.startswith("_")
             )
 
-            factory = ManualDistributionDialog
-        else:
-            factory = self._manual_dialog_factory
+            dialog = factory(
+                self._top,
+                pending_items=saved_result.pending_manual,
+                facility_names=facility_names,
+                facility_root_dir=self._vm.facility_root_dir,
+                adapter=self._adapter,
+                messagebox_fn=self._messagebox,
+            )
+            manual_results = dialog.get_results()
 
-        # facility_root_dir 配下の facility_names を再計算
-        facility_names = sorted(
-            d.name
-            for d in self._vm.facility_root_dir.iterdir()
-            if d.is_dir() and not d.name.startswith("_")
-        )
+            self._vm.merge_manual_results(manual_results)
+        except Exception as e:  # noqa: BLE001
+            # 例外時は SHOWING_RESULT に復帰 (永久 BUSY 固着の防止)
+            logger.warning(
+                "manual distribution dialog failed: %s", type(e).__name__
+            )
+            # state を直接戻す (transition_to_showing_result は BUSY/MANUAL からのみ可、
+            # ここでは MANUAL_DISTRIBUTING からの想定外復帰)
+            self._vm.transition_to_showing_result(saved_result)
+            self._messagebox.showerror(
+                _TITLE_RUN_ERROR,
+                f"手動振り分けダイアログを開けません: {type(e).__name__}",
+            )
 
-        dialog = factory(
-            self._top,
-            pending_items=self._vm.result.pending_manual,
-            facility_names=facility_names,
-            facility_root_dir=self._vm.facility_root_dir,
-            adapter=self._adapter,
-            messagebox_fn=self._messagebox,
-        )
-        manual_results = dialog.get_results()
-
-        self._vm.merge_manual_results(manual_results)
-        self._redraw()
+        # winfo_exists ガードで close 後の TclError を suppress
+        if self._top.winfo_exists():
+            self._redraw()
 
     def _show_config_missing_modal(self) -> None:
         if not self._vm.source_dir.exists():

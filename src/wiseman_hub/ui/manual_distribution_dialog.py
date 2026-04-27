@@ -29,12 +29,14 @@ import tkinter as tk
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
+from dataclasses import replace as dataclass_replace
 from enum import StrEnum
 from pathlib import Path
 from tkinter import ttk
 from typing import Final
 
 from wiseman_hub.pdf.ex_extractor import (
+    ExtractionErrorCode,
     ExtractionItem,
     ExtractionStatus,
     SfxAdapter,
@@ -163,7 +165,12 @@ class ManualDistributionViewModel:
             self.selected_facility = None
             return
         # 候補リストに含まれない値は受け付けない (UI 不整合の防御)
+        # MEDIUM-4 (silent-failure-hunter MEDIUM-5): silent reject で運用者が
+        # 「ボタン押したのに動かない」と混乱するのを防ぐため warning 出力
         if facility not in self.candidate_options:
+            logger.warning(
+                "rejected facility selection (not in candidates)"
+            )
             return
         self.selected_facility = facility
 
@@ -218,6 +225,17 @@ class ManualDistributionViewModel:
             self.state = ManualUiState.DONE
         else:
             self.state = ManualUiState.SELECTING
+
+    def abort_remaining(self) -> None:
+        """中断時に未処理 item を元 status のまま completed_results へ積み DONE 化。
+
+        簡素化 H2 (code-simplifier): _on_close の while ループを ViewModel に移動し、
+        Tk 非依存でテスト可能にする。
+        """
+        while self.current_index < len(self.pending_items):
+            self.completed_results.append(self.pending_items[self.current_index])
+            self.current_index += 1
+        self.state = ManualUiState.DONE
 
 
 # ---------------------------------------------------------------------------
@@ -515,6 +533,13 @@ class ManualDistributionDialog:
         future: Future[ExtractionItem],
         original_item: ExtractionItem,
     ) -> None:
+        # HIGH-A / HIGH-B: dialog destroy 後の after callback ガード
+        if not self._top.winfo_exists():
+            logger.warning(
+                "manual extract result arrived after dialog destroy"
+            )
+            return
+
         try:
             new_item = future.result()
         except Exception as e:  # noqa: BLE001
@@ -525,7 +550,15 @@ class ManualDistributionDialog:
                 original_item.source_path.name,
                 error_type,
             )
-            self._vm.fail_current_and_advance(original_item, error_type)
+            # HIGH-E (silent-failure-hunter HIGH-1): extract_one 部分実行 PDF を
+            # 隠蔽せず MOVE_FAILED として記録 (原 status SKIPPED_* は実態と乖離するため)
+            failed_item = dataclass_replace(
+                original_item,
+                status=ExtractionStatus.EXTRACT_FAILED,
+                error_code=ExtractionErrorCode.UNEXPECTED,
+                error_detail=error_type,
+            )
+            self._vm.fail_current_and_advance(failed_item, error_type)
             self._redraw()
             self._messagebox.showerror(
                 _TITLE_RUN_ERROR,
@@ -545,12 +578,8 @@ class ManualDistributionDialog:
     def _on_close(self) -> None:
         if self._vm.state is ManualUiState.EXTRACTING:
             return  # 抽出中は閉じない
-        # 未処理 item は元の SKIPPED_* status のまま結果に積む
-        while self._vm.current_index < len(self._vm.pending_items):
-            item = self._vm.pending_items[self._vm.current_index]
-            self._vm.completed_results.append(item)
-            self._vm.current_index += 1
-        self._vm.state = ManualUiState.DONE
+        # 未処理 item は元の SKIPPED_* status のまま結果に積む (ViewModel 側へ責務移動)
+        self._vm.abort_remaining()
         self._shutdown()
         with contextlib.suppress(tk.TclError):
             self._top.destroy()
@@ -572,6 +601,13 @@ class ManualDistributionDialog:
         # まだ DONE でなければ wait_window で待つ (テストでは fake で即返却)
         if self._vm.state is not ManualUiState.DONE:
             self._top.wait_window()
+        # HIGH-G (silent-failure-hunter HIGH-2): wait_window 異常復帰で DONE に
+        # 達していない場合 (親 _top destroy 等)、abort_remaining で穴埋めする
+        if self._vm.state is not ManualUiState.DONE:
+            logger.warning(
+                "wait_window exited without DONE; aborting remaining items"
+            )
+            self._vm.abort_remaining()
         return tuple(self._vm.completed_results)
 
     @property

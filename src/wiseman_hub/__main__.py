@@ -128,12 +128,14 @@ def _make_ex_extractor_callback(
         config = load_config(config_path)
 
         # adapter は dialog 起動前に構築 (macOS なら即座にエラーを出す)
+        # MEDIUM-1 (code-reviewer C-2): parent= 指定で Launcher への transient 化
         try:
             adapter = WindowsSfxAdapter()
         except UnsupportedSfxPlatformError:
             messagebox.showerror(
                 "Windows 専用機能",
                 "ex_ ファイル変換は Windows 専用です (SFX 自己解凍 EXE 実行のため)。",
+                parent=launcher.get_root(),
             )
             return
 

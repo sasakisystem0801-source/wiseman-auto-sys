@@ -563,10 +563,11 @@ def extract_one(
     # PR4: force_facility 指定時は resolver bypass + MANUAL_OVERRIDE で CONFIRMED 構築
     if force_facility is not None:
         if force_facility not in facility_names:
+            # PII 防御: 値そのものは出さず、文字数 (chars) と候補数 (size) で
+            # 単位を明示。HIGH-F (comment-analyzer): len() の意味曖昧を解消
             raise ValueError(
-                f"force_facility must exist in facility_names "
-                f"(got len={len(force_facility)}, "
-                f"facility_names size={len(facility_names)})"
+                f"force_facility (chars={len(force_facility)}) "
+                f"not in facility_names (size={len(facility_names)})"
             )
         result = ResolveResult.confirmed(
             force_facility, ResolveReason.MANUAL_OVERRIDE

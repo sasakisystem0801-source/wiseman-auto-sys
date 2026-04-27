@@ -35,6 +35,18 @@
   - **PR4-MEDIUM-5 (進捗)**: `_LBL_RUNNING = "処理中... (最大 数分かかる場合があります)"` で本田様 (IT 非専門) が「固まった」と誤認しないようにする。完全な per-file progress は PR5 で `extract_directory` に callback 追加検討
   - **PR4-MEDIUM-6 (モーダル制御)**: `Toplevel(parent)` + `transient` + `grab_set` + `protocol("WM_DELETE_WINDOW", _on_close)` + 実行中 close 抑止の facility_root_dialog パターン踏襲
   - **PR4-MEDIUM-7 (手動 SFX worker thread)**: ManualDistributionDialog 内で extract_one を独自 ThreadPoolExecutor で worker thread 化、UI 凍結防止
+- 2026-04-27: PR #135 review-pr (6 並列再レビュー) で発見された新規 HIGH 7 件 + MEDIUM 3 件を反映:
+  - **PR4-NEW-A (運用情報消失)**: 抽出中の close で SFX 完了 + PDF 移動済なのに UI 反映なし → `_on_extract_done` 冒頭で `_top.winfo_exists()` ガード + 親ダイアログ destroy 後の after callback 到達を logger.warning で可視化
+  - **PR4-NEW-B (executor shutdown と worker thread)**: `shutdown(wait=False, cancel_futures=True)` は実行中 future を中断しないため、close 後の after callback で `_top.winfo_exists()` で safe ガード (HIGH-A と統合対応)
+  - **PR4-NEW-C (永久 BUSY 固着)**: `_on_open_manual_click` の例外で MANUAL_DISTRIBUTING 固着 → try/except で `saved_result` 経由 SHOWING_RESULT 復帰 + messagebox 通知
+  - **PR4-NEW-D (state 遷移チェック)**: `transition_to_idle_with_error` に遷移元チェック (`BUSY` または `MANUAL_DISTRIBUTING` のみ) を追加。docstring の状態遷移図にも `SHOWING_RESULT → BUSY (再実行)` / `MANUAL_DISTRIBUTING → IDLE` を明記
+  - **PR4-NEW-E (部分実行 PDF 隠蔽)**: ManualDistributionDialog の `_on_extract_done` 例外パスで `dataclasses.replace` を使い `EXTRACT_FAILED + UNEXPECTED` で記録、original SKIPPED_* 状態のまま隠蔽されない
+  - **PR4-NEW-F (ValueError メッセージ単位明示)**: `extract_one` の `force_facility not in facility_names` で `chars=` (文字数) と `size=` (要素数) を明示し誤誘導を解消
+  - **PR4-NEW-G (統合テスト追加)**: 状態遷移の遷移元チェック失敗 / `MANUAL_DISTRIBUTING → IDLE` 復帰 / `abort_remaining` の DONE idempotent / 中断時の未処理 item 穴埋めを ViewModel テストでカバー (4 件追加、計 810 passed)
+  - **PR4-NEW-MEDIUM-1**: `__main__._make_ex_extractor_callback` の `messagebox.showerror(parent=launcher.get_root())` で transient 化
+  - **PR4-NEW-MEDIUM-4**: `select_facility` の候補外値 silent reject で `logger.warning` 出力 (運用者の「ボタン押したのに動かない」混乱を防ぐ)
+  - **PR4-NEW-MEDIUM-5 (orphan banner 専用 frame)**: alias 設定不整合は次回以降も自動振り分け失敗を生む構造的問題のため、サマリ末尾ではなく専用 frame を上部に常時表示で見落とし防止
+  - **簡素化 H2**: `_on_close` の while ループを `ManualDistributionViewModel.abort_remaining()` に責務移動、Tk 非依存テストで検証可能に
 - 2026-04-27: PR #133 review-pr (6 並列再レビュー) で発見された新規 HIGH 6 件を反映:
   - **PR3-NEW-1 (PII)**: `extract_directory` 例外捕捉で `logger.exception` を使うと traceback 経由で `OSError.args` の full path が漏洩する → `logger.warning` + `type(e).__name__` のみに変更
   - **PR3-NEW-2 (resolver 二重呼び出し)**: 例外源が resolver の場合、フォールバックで再呼び出しすると同じ例外が二度目に発生しバッチ続行保護が破綻 → `try/except` で safe `UNMATCHED` フォールバック追加

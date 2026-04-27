@@ -194,6 +194,34 @@ class TestStateTransitions:
         assert vm.state is ManualUiState.DONE
         assert vm.is_done is True
 
+    def test_abort_remaining_pads_unprocessed_items(self, tmp_path: Path) -> None:
+        """HIGH-G: close 中断時に未処理 item が DONE 状態で穴埋めされる。"""
+        vm = self._make_vm(tmp_path)
+        # 1 件目を skip
+        vm.skip_current()
+        # 2 件目は処理せず abort
+        vm.abort_remaining()
+
+        assert vm.state is ManualUiState.DONE
+        assert len(vm.completed_results) == 2
+        # 2 件目は元の SKIPPED_UNMATCHED status のまま保持される
+        assert (
+            vm.completed_results[1].status
+            is ExtractionStatus.SKIPPED_UNMATCHED
+        )
+
+    def test_abort_remaining_when_already_done(self, tmp_path: Path) -> None:
+        """abort_remaining は DONE 状態でも安全に呼べる (idempotent)。"""
+        vm = ManualDistributionViewModel(
+            pending_items=(),
+            facility_names=[],
+            facility_root_dir=tmp_path,
+        )
+        vm.state = ManualUiState.DONE
+        vm.abort_remaining()  # 何も追加しない
+        assert vm.state is ManualUiState.DONE
+        assert vm.completed_results == []
+
     def test_fail_current_advances_with_error_message(
         self, tmp_path: Path
     ) -> None:

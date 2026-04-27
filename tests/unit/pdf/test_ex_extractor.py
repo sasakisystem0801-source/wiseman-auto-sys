@@ -1449,7 +1449,7 @@ class TestExtractDirectoryIntegration:
         ex_file = _make_ex_file(source_dir, "2025_test.ex_")
         adapter = FakeSfxAdapter()
 
-        with pytest.raises(ValueError, match="force_facility must exist"):
+        with pytest.raises(ValueError, match="not in facility_names"):
             extract_one(
                 ex_file,
                 facility_root,
