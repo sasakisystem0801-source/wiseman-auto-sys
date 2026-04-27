@@ -1,55 +1,68 @@
-# Handoff: Issue #80 Windows smoke build CI 完了（Session 30 終了時点）
+# Handoff: Session 31 完了（PR #141 merged + PR #142 close 保留）
 
-**更新日**: 2026-04-27（Session 30 / PR #139 マージ後）
+**更新日**: 2026-04-27（Session 31 / PR #141 マージ後）
 **ブランチ**: main
-**main HEAD**: `c63b65e` feat(ci): Windows smoke build for wiseman_hub.exe (Closes #80) (#139)
+**main HEAD**: `7614635` refactor(session): tuple/Mapping 化で deep immutability 型保証 (Closes #117) (#141)
 
-## セッション 30 の成果（Issue #80 Windows smoke build CI 化）
+## セッション 31 の成果
 
 ### マージ済 ✅
 
-#### PR #139 (Issue #80 - Windows runner で wiseman_hub.exe smoke build)
+#### PR #141 (Issue #117 — Session/UserCandidate を tuple/Mapping 化)
 
-- squash merge `c63b65e`、+338 LOC、3 ファイル（src/wiseman_hub/__main__.py / tests/unit/test_smoke_mode.py / .github/workflows/build-windows-smoke.yml）
-- スコープ: PR #79 Codex MEDIUM 指摘「Windows smoke は GUI 起動だけでなく PDF split/merge と OCR client import まで実行すべき」への対応。macOS smoke + 実機 E2E では未検証だった Windows 固有の DLL 解決（runw bootloader、python311.dll、fitz/httpx）を CI 自動検証
-- 成果物:
-  - `_run_smoke_test()` 新設（fitz / splitter / ocr_client / fitz.open round-trip の最小経路）
-    - GUI 副作用ゼロ: tkinter / UI モジュールは関数内 import を回避（AC-2 検証済）
-    - PII 防御: 例外時 `type(e).__name__` のみ stderr 出力（本番経路と統一）
-    - smoke 用 dummy credential は RFC 6761 .invalid TLD で外部到達ガード（二重防御）
-    - OcrClient は `with` 構文で `_make_phase_a_callback` ExitStack パターンと整合
-  - `tests/unit/test_smoke_mode.py` 新設（5 テスト、AC-1〜AC-6 機械的検証）
-  - `.github/workflows/build-windows-smoke.yml` 新設
-    - windows-latest で PyInstaller `--onefile` ビルド → exe 起動 → smoke
-    - uv cache 有効化（CI 時間 30-90 秒短縮）
-    - 成功時のみ exe artifact upload (retention 7 日)
-    - exe 起動失敗時は dist/ listing + PyInstaller warn-files を必ず surface（CI デバッグ可能性）
-- **多重 Quality Gate**: /impl-plan AC-1〜10 + /simplify 3 並列（4 件修正） + /safe-refactor（未使用引数 2 件） + /review-pr 6 並列（Critical 3 + Important 4 を反映）
+- squash merge `7614635`、+217 / -210 LOC、10 ファイル（src 3 + tests 7）
+- スコープ: PR #116（Issue #44 完全 immutable 化）の続編。`frozen=True` 単体では防げない `.append()` 等の要素 mutation を**型レベルで禁止**する。
+- 変更点:
+  - `Session.candidates: list[UserCandidate]` → `tuple[UserCandidate, ...]`
+  - `UserCandidate.similar_candidates: list[CandidateState]` → `tuple[...]`
+  - `Session.config_snapshot: dict[str, Any]` → `Mapping[str, Any]`
+  - `_to_dict` で `dict(session.config_snapshot)` 明示変換（asdict は MappingProxyType 等を再帰展開しないため）
+  - `_from_dict` / `_candidate_from_dict` / `from_match_result` で `tuple(...)` 構築
+  - `pipeline.py` 生成側（`(*session.candidates, candidate)`, `tuple(sorted(...))`）
+  - `confirm_dialog.resolve_candidate` を tuple-based に、`_pick_first_by_kind` の引数型を `Sequence[CandidateState]` に緩和
+  - tests/ 7 ファイルの fixture を `[...]` → `(...)` に置換、helper 戻り値型を tuple に統一
+- JSON 後方互換性 100%（schema_version 不変、`_to_dict` で dict 化、tuple は json.dumps で array に正しく serialize）
+- **多重 Quality Gate**: `/impl-plan` AC-1〜6 + evaluator (rules/quality-gate.md, MEDIUM/LOW 指摘 → 修正済) + `/simplify`（quality 軽微 2 件 → 修正済）+ `/safe-refactor`（0 件） + `/review-pr` 5 並列 + `/codex review` セカンドオピニオン（Critical 0 / Important 1 stale comment → 修正済）
 
-### Issue Net 変化（Session 30）
+### Close 保留 ⚠️
 
-- **Close**: 1 件（**#80**）
+#### PR #142 (Issue #63 — Linux runner Tk wiring tests 全 skip 問題)
+
+- 案 A（xvfb + python3-tk を test-unit.yml に追加）を試行
+- Linux + xvfb 環境で `mainloop` を呼ぶ Tk async テスト（合計 11 件）が hang
+- test-unit (3.11/3.12) ジョブが `Run unit tests` step で 16+ 分 in_progress 後、cancel 後 fail
+- build-smoke / test-integration: PASS（影響なし）
+- main は無影響（PR #142 未マージで close）
+- **保留判断**: ローカル開発環境（macOS）で Linux 上の Tk 挙動を再現できず hang テストの個別特定にコスト大。本プロジェクトの配布先は Windows 実機のみで Windows runner の wiring tests でカバー範囲は MVP 許容。
+- Issue #63 にコメントで保留理由・再開条件を追記、open のまま保留。
+
+### Issue Net 変化（Session 31）
+
+- **Close**: 1 件（**#117**）
 - **起票**: 0 件
 - **Net: -1 件** ✅（KPI 進捗）
 
-### CI 全ジョブ結果（PR #139、4 jobs / 3 workflows）
+### 次セッション (Session 32) の作業候補
 
-| ジョブ | 結果 |
-|--------|------|
-| build-smoke (新設、windows-latest) | ✅ pass |
-| test-unit (3.11) | ✅ pass |
-| test-unit (3.12) | ✅ pass |
-| test-integration (既存、WinForms mock) | ✅ pass（挙動不変確認、AC-10 達成） |
+#### 並行可能なタスク（PR5 実機検証と独立）
 
-### Acceptance Criteria 達成（AC-1〜AC-10）
+- **#45**: SourceKind StrEnum 統一（#117 と同系統の型 refactor、独立性高）
+- **#27**: config dataclass 型設計強化（Literal + `__post_init__` 検証、#117 と関連）
+- **#40**: B/C 異名距離 0 マッチのエッジケース
+- **#39**: フリガナベース matching
+- **#29**: OCR proxy nice-to-have 改善
 
-| # | 基準 | 検証 |
-|---|------|------|
-| AC-1〜6 | macOS smoke + unit test 5 件 | ✅ pytest 815 passed |
-| AC-7 | Windows ワークフロー起動 | ✅ build-smoke pass |
-| AC-8 | Windows exe で smoke exit 0 | ✅ |
-| AC-9 | exe artifact upload | ✅ `wiseman_hub-exe-{sha}` |
-| AC-10 | 既存 workflow 挙動不変 | ✅ test-unit / test-integration pass |
+#### 最優先（前セッションから継続）: Windows 11 実機検証
+
+- runbook: `docs/handoff/pr5-ex-extractor-runbook.md`
+- 所要時間: 30-45 分
+- TeamViewer 経由で Windows 11 PC に接続
+- AC-1〜AC-14 の PASS/FAIL を Phase 5-1 サマリテーブルに記録、PII 墨塗り済スクショ + AC-12 grep 結果取得
+
+#### 能動作業不要（monitor）
+
+- **#134**: Gemini 2.5 Flash retire 2026-10-16 — 再開条件 `asia-northeast1` GA 公式記載 OR 2026-09-16 retire 30 日前
+- **#63**: Linux Tk wiring tests — 再開条件は Issue #63 の最新コメント参照（ローカル Linux 環境 OR pytest-timeout 知見確立 OR Windows runner 故障）
 
 ---
 
@@ -66,110 +79,71 @@
 
 ---
 
-## 次セッション (Session 31) の作業
+## 重要な設計判断
 
-### 最優先: 本田様の Windows 11 実機検証（Session 30 から継続）
+### Issue #117（Session 31）— deep immutability tuple/Mapping 化の設計原則
 
-- runbook: `docs/handoff/pr5-ex-extractor-runbook.md`
-- 所要時間: 30-45 分
-- TeamViewer 経由で Windows 11 PC に接続
-- AC-1〜AC-14 の PASS/FAIL を Phase 5-1 サマリテーブルに記録、PII 墨塗り済スクショ + AC-12 grep 結果取得
-- Session 30 で本田様作業の機会がなければ Session 31 以降に持ち越し
+- **frozen=True 単体では深い immutable にならない**: 属性代入は防げるが `list.append()` 等の要素 mutation は型レベルで防げない。tuple/Mapping 化で型レベル禁止に格上げ。
+- **JSON シリアライズの後方互換性**: `_to_dict` で `dict(session.config_snapshot)` 明示変換（asdict は MappingProxyType を再帰展開しない）、tuple は json.dumps で array に変換 → 旧形式 (list で保存) JSON も `_from_dict` 内で `tuple(...)` で復元される。
+- **テストフィクスチャも tuple 一貫性**: 個々のテストで list を渡しても Python ランタイム的には動くが、Issue #117 の「list 変更を型で防ぐ」設計意図がテスト層まで貫徹されない。evaluator 指摘で全 fixture を tuple 化。
+- **mypy の `exclude = ["^tests/"]` 制約**: tests/ は型チェック対象外のため、テストの list→tuple 一貫性は機械的検証されない。round-trip テストの `isinstance(loaded.candidates, tuple)` assert で実行時保証を追加。
 
-### 実機検証完走後（同セッション or 翌セッション）
+### Issue #63（Session 31）— Linux + xvfb で Tk async テスト hang の知見
 
-1. ADR-014 Status `Proposed` → `Accepted` 昇格 PR
-2. 「### Session N 実機検証結果」サブセクションを §PR5 Accepted 昇格条件 内に新設（runbook Phase 5-1 サマリ + 観察事項 + PII grep 結果）
-3. handoff/LATEST.md を Session N 化
-
-### 一部 AC FAIL 時
-
-- 誤配布リスク AC（AC-6/8/10）の FAIL → PR5.1 として最優先修正、Phase 4 rollback で旧 exe へ即時戻し
-- PII 退化（AC-12）の FAIL → PR5.2 として最優先修正、墨塗り済 run.log 添付
-- その他 AC FAIL → PR5.X として独立修正、修正後に再度本 runbook で再検証
-
-### 並行可能なタスク（PR5 実機検証と独立）
-
-- **#117**: Session.candidates / UserCandidate.similar_candidates の tuple 化（`/impact-analysis` で影響範囲確認後に着手可能）
-- **#63**: Linux CI Tk wiring skip
-- **#45**: SourceKind StrEnum 統一
-- **#27**: config dataclass 型設計強化
-
-### 能動作業不要（monitor）
-
-- **#134**: Gemini 2.5 Flash retire 2026-10-16 — 再開条件 `asia-northeast1` GA 公式記載 OR 2026-09-16 retire 30 日前
-
----
-
-## 重要な設計判断（PR3-5 で確立、Session 30 の Issue #80 で追加）
+- xvfb-run + python3-tk セットアップで Linux runner でも `tkinter.Tk()` は成功するが、`mainloop` を呼ぶ async / phase-A/B integration テスト（合計 11 件）が hang する。
+- Windows runner では動作するが、Linux 環境では mainloop が escape できない可能性。
+- 対応案 A は構造的に挫折。再着手時は `pytest-timeout` + 個別 `tk_mainloop` marker で hang テストを skip する戦略が候補。
 
 ### Issue #80（Session 30）— Windows smoke build の設計原則
-
-- **smoke モードと本番経路の分離**: `_run_smoke_test()` は CLI 引数 `--smoke-test` で分岐、main() 後段の Tk 経路には到達しない
-- **GUI 副作用ゼロ要件**: tkinter / UI モジュールは関数内 import を回避（AC-2 で subprocess 検証）
-- **PII 防御の規律統一**: smoke モードでも `type(e).__name__` のみ stderr 出力（CI 側で Process state / dist listing / PyInstaller warn-files を出してデバッグ可能性を担保）
-- **dummy credential の二重防御**: RFC 6761 .invalid TLD + dummy api_key（万が一 HTTP 発火しても外部到達ガード）
-- **OcrClient リソース管理の規律統一**: `with OcrClient(...) as client:` で `_make_phase_a_callback` の ExitStack パターンと整合
-- **責務分離**: 既存 `test-windows-integration.yml`（WinForms mock + pytest）と新設 `build-windows-smoke.yml`（PyInstaller + smoke）を別ワークフロー化
+（前セッションの記録、変更なし）
 
 ### 誤配布回避が最重要 KPI（PR3-4、runbook 直撃 AC）
-- false positive > false negative（介護現場で誤配布は業務事故）
-- AMBIGUOUS / UNMATCHED は **抽出も skip** し手動確定経路へ（PR3）
-- UNMATCHED の手動確定は確定前確認ステップ + 既定選択空（`(未選択)`）で誤選択防御（PR4 / AC-6）
-- mtime フィルタ（`_MTIME_GRACE_SEC = 5.0`）で SFX 起動前の無関係 PDF 誤配布防止（PR3-HIGH-D / AC-8）
-- MOVE_FAILED の `partially_moved` 件数は UI/CLI で可視化（運用情報消失防止、PR3-HIGH-A / AC-10）
+（前セッションの記録、変更なし）
 
 ### PII 防御方針（ADR-014 §PII 保護方針）
-- `ex_extractor` モジュール logger は **filename + enum 値 + 例外型名のみ**
-- フルパス / 事業所名 / matched_facility / candidates / 抽出 PDF 名 / OSError 生メッセージ → 禁止
-- CLI レイヤの `orphan_alias_canonicals` 通知のみ canonical 名が例外的に出る（運用ローカル端末限定、SaaS log aggregator 送信禁止）
-- AC-12 grep 検証で実機 run.log の漏洩有無を確認
+（前セッションの記録、変更なし）
 
 ### Windows 専用機能の隔離
-- `pywinauto` import は `WindowsSfxAdapter._click_sfx_dialog` 内で **遅延 import**
-- `WindowsSfxAdapter()` constructor で `sys.platform != "win32"` なら `UnsupportedSfxPlatformError`
-- macOS の dry-run / `--help` 動作保証
+（前セッションの記録、変更なし）
 
 ### 手動 override の監査性
-- `ResolveReason.MANUAL_OVERRIDE` で自動と手動を結果上区別、UI サマリで「自動振り分け成功 N / 手動確定成功 M」を分離表示
-- `extract_one(force_facility=...)` は後方互換、`force_facility not in facility_names` は ValueError fail-fast
+（前セッションの記録、変更なし）
 
 ### 状態遷移の構造化
-- `UiState` (IDLE / BUSY / SHOWING_RESULT / MANUAL_DISTRIBUTING) — `transition_to_*` で遷移元チェック
-- `ManualUiState` (SELECTING / CONFIRMING / EXTRACTING / DONE) — `abort_remaining()` で中断時の穴埋め
-- `ExtractionStatus` (SUCCESS / SKIPPED_AMBIGUOUS / SKIPPED_UNMATCHED / EXTRACT_FAILED / PARTIAL_OUTPUT / MOVE_FAILED) — `__post_init__` で不変条件強制
+（前セッションの記録、変更なし）
 
 ---
 
-## ADR-014 状態
-- **Proposed のまま**（実機検証完走後に Accepted 昇格予定）
-- §PR5 Accepted 昇格条件 で機械的判定可能な昇格条件を明記（PR1-5 すべての変更履歴記録済）
-- 公開 API 仕様（`extract_one` / `extract_directory` / 結果型 / CLI 終了コード 0/2/1）明記
-- PII 保護方針セクションに `ex_extractor` モジュール + CLI レイヤ規定を含む
+## ADR 状態
+- 14 件すべて Status 確定（最新 ADR-014 は Proposed のまま、実機検証完走後に Accepted 昇格予定）
+- §PR5 Accepted 昇格条件 で機械的判定可能な昇格条件を明記
+- Session 31 で新規 ADR 追加なし（refactor のみ）
 
 ---
 
 ## 積み残し Issue
 
-### Session 30 で起票
+### Session 31 で起票
 - なし
 
-### Session 30 で CLOSED
-- **#80**: Windows 実機 smoke build for Phase B / OCR import 検証 ✅（PR #139）
+### Session 31 で CLOSED
+- **#117**: Session.candidates / UserCandidate.similar_candidates を tuple 化 ✅（PR #141）
+
+### Session 31 で保留判断（追加コメントのみ、open 維持）
+- **#63**: Linux CI Tk wiring skip — PR #142 試行で hang 問題判明、保留
 
 ### P1（open、継続）
 - **#6**: PoC E2E テスト
 
 ### P2（open、優先順）
-- **#117**: Session.candidates / UserCandidate.similar_candidates を tuple 化（PR5 と独立、並行可）
-- **#63**: Linux CI Tk wiring skip
+- **#63**: Linux CI Tk wiring skip（保留）
 - **#45**: SourceKind StrEnum 統一
 - **#27**: config dataclass 型設計強化
 - **#40**, **#39**, **#29**, **#17**, **#16**, **#14**, **#11**, **#134**
 
 ---
 
-## impl-plan 進捗（Session 30 終了時点）
+## impl-plan 進捗（Session 31 終了時点）
 
 | タスク | 状態 | PR |
 |--------|------|-----|
@@ -182,24 +156,26 @@
 | ex_extractor PR3 core 移植 + SFX adapter | ✅ Session 28 | #133 |
 | ex_extractor PR4 UI 統合 | ✅ Session 28 | #135 |
 | ex_extractor PR5 Windows 実機検証準備（A 選択） | ✅ Session 29 | #137 |
-| **Issue #80 Windows smoke build CI** | ✅ **Session 30** | **#139** |
-| ex_extractor PR5 実機検証実行 | ⏳ Session 31+（本田様作業） | - |
+| Issue #80 Windows smoke build CI | ✅ Session 30 | #139 |
+| **Issue #117 Session/UserCandidate tuple/Mapping 化** | ✅ **Session 31** | **#141** |
+| ex_extractor PR5 実機検証実行 | ⏳ Session 32+（本田様作業） | - |
 | ADR-014 Accepted 昇格 | ⏳ 実機検証後 | - |
 | ex_extractor PR6 settings.py タブ化 | ⏳ 実機検証で要件確定後 | - |
 | Gemini 2.5 Flash retire 対応 (monitor) | ⏳ 2026-09-16 retire 30 日前 / `asia-northeast1` GA 確認 | #134 |
+| Linux CI Tk wiring tests 有効化 (保留) | ⏳ ローカル Linux 環境確保後 | #63 |
 | 15 GitHub Actions + WIF | ⏳ GUI 安定後 | - |
 
 ---
 
 ## セッション再開手順（コピペ可）
 
-### Session 31 開始時
+### Session 32 開始時
 
 ```bash
 cd /Users/yyyhhh/Projects/wiseman_auto_sys
 git checkout main
 git pull --ff-only
-# main HEAD が c63b65e（PR #139）であることを確認
+# main HEAD が 7614635（PR #141）であることを確認
 gh issue list --state open
 ```
 
@@ -221,7 +197,13 @@ git pull --ff-only
 
 ## 参照ファイル
 
-### Session 30 成果物（最新）
+### Session 31 成果物（最新）
+- `src/wiseman_hub/pdf/session.py`: Session/UserCandidate を frozen=True + tuple/Mapping 化
+- `src/wiseman_hub/pdf/pipeline.py`: 生成側を tuple 化
+- `src/wiseman_hub/ui/confirm_dialog.py`: resolve_candidate を tuple-based に、`_pick_first_by_kind` を Sequence 引数化
+- `tests/unit/pdf/test_session.py`, `tests/unit/test_merge_user_pdfs_cli.py`, `tests/unit/ui/test_confirm_dialog.py` 他: fixture を tuple 化、round-trip に isinstance(tuple) assert 追加
+
+### Session 30 成果物
 - `src/wiseman_hub/__main__.py`: `_run_smoke_test()` 新設 + `--smoke-test` argparse
 - `tests/unit/test_smoke_mode.py`: AC-1〜AC-6 検証 5 テスト
 - `.github/workflows/build-windows-smoke.yml`: Windows runner で PyInstaller + smoke
@@ -245,11 +227,11 @@ git pull --ff-only
 ### 履歴
 - `docs/handoff/archive/2026-04-history.md`: Session 11-21 詳細
 - Session 22-26 は git log + ADR-011/012/013 + session26-pr126 runbook 参照
-- Session 27-29 は git log + PR #130/#131/#133/#135/#136/#137/#138 参照（前バージョンの LATEST.md）
+- Session 27-30 は git log + PR #130/#131/#133/#135/#136/#137/#138/#139/#140 参照（前バージョンの LATEST.md）
 
 ---
 
-## 多重 Quality Gate の累積効果（5 PR シリーズ + Issue #80）
+## 多重 Quality Gate の累積効果（5 PR シリーズ + Issue #80 + Issue #117）
 
 | PR | Codex 計画 | Evaluator | 6 並列実装後 | review-pr 再 | 簡素化 |
 |----|----------|-----------|-------------|--------------|--------|
@@ -258,6 +240,7 @@ git pull --ff-only
 | PR3 (#133) | HIGH 4 + MED 3 | ✅ | 6 並列 (HIGH 6) | 6 並列 (HIGH 6 + MED 2) | - |
 | PR4 (#135) | HIGH 4 + MED 3 | ✅ | - | 6 並列 (HIGH 7 + MED 3) | 1 件 |
 | PR5 (#137) | impl-plan AC-PR5-1〜8 | - | - | 2 並列 (Crit 2 + Imp 5 + Sug 5) | 5 件 |
-| **#80 (#139)** | **impl-plan AC-1〜10** | - | - | **6 並列 (Crit 3 + Imp 4)** | **/simplify 4 件 + /safe-refactor 2 件** |
+| #80 (#139) | impl-plan AC-1〜10 | - | - | 6 並列 (Crit 3 + Imp 4) | /simplify 4 件 + /safe-refactor 2 件 |
+| **#117 (#141)** | **impl-plan AC-1〜6** | **MED/LOW 修正** | **-** | **5 並列 + codex (Crit 0 + Imp 1)** | **/simplify 2 件 + /safe-refactor 0 件** |
 
-合計: HIGH 38+ / Critical 5 / 多数の Suggestions を発見・反映、production の誤配布リスクを構造的に低減。
+合計: HIGH 38+ / Critical 5 / 多数の Suggestions を発見・反映、production の誤配布リスクを構造的に低減し、deep immutability 型保証で誤実装リスクを構造的に低減。
