@@ -47,6 +47,7 @@
   - **PR4-NEW-MEDIUM-4**: `select_facility` の候補外値 silent reject で `logger.warning` 出力 (運用者の「ボタン押したのに動かない」混乱を防ぐ)
   - **PR4-NEW-MEDIUM-5 (orphan banner 専用 frame)**: alias 設定不整合は次回以降も自動振り分け失敗を生む構造的問題のため、サマリ末尾ではなく専用 frame を上部に常時表示で見落とし防止
   - **簡素化 H2**: `_on_close` の while ループを `ManualDistributionViewModel.abort_remaining()` に責務移動、Tk 非依存テストで検証可能に
+- 2026-04-27: PR5 着手 — Windows 実機検証 runbook を `docs/handoff/pr5-ex-extractor-runbook.md` に新設（A 選択: settings タブ化は PR6 へ後回し、TTM 最短で実機検証に投入）。本 ADR §PR5 Accepted 昇格条件 に AC-1〜AC-14 + 誤配布防止 KPI 直撃 AC + PII ログ防御 grep + regression 不在の昇格条件を明記
 - 2026-04-27: PR #133 review-pr (6 並列再レビュー) で発見された新規 HIGH 6 件を反映:
   - **PR3-NEW-1 (PII)**: `extract_directory` 例外捕捉で `logger.exception` を使うと traceback 経由で `OSError.args` の full path が漏洩する → `logger.warning` + `type(e).__name__` のみに変更
   - **PR3-NEW-2 (resolver 二重呼び出し)**: 例外源が resolver の場合、フォールバックで再呼び出しすると同じ例外が二度目に発生しバッチ続行保護が破綻 → `try/except` で safe `UNMATCHED` フォールバック追加
@@ -269,8 +270,50 @@ def extract_directory(
 - Codex セカンドオピニオン（2026-04-27）: 1 PR 分割推奨 + マッチング戦略の安全設計
 - 4 並列レビュー（PR #130, 2026-04-27）: code-reviewer / pr-test-analyzer / comment-analyzer / type-design-analyzer
 
+## PR5 Accepted 昇格条件
+
+本 ADR を `Proposed (2026-04-27)` → `Accepted (YYYY-MM-DD)` に昇格させる条件を以下のとおり定義する。実機検証は `docs/handoff/pr5-ex-extractor-runbook.md` の手順で実施し、AC-1〜AC-14 すべて PASS を必須とする。本セクションは ADR-013 / ADR-011 で確立した「Proposed 段階で昇格条件を機械的に判定可能な形で明記し、実機検証完了後に別 PR で Accepted 昇格 + 検証結果セクション追加」の慣習に従う。
+
+### 必須条件
+
+1. **AC-1〜AC-14 すべて PASS**: runbook §Phase 3 の 14 項目すべてで期待結果を観測（FAIL が 1 件でもある場合は Accepted 昇格不可、PR5.1 として独立修正 PR を起こし再検証）
+
+2. **誤配布防止 KPI 直撃 AC**（業務事故直結のため特に厳格に検証）:
+   - **AC-6**: SKIPPED_UNMATCHED の手動振り分け全 facility プルダウン既定が `(未選択)` であること（先頭 facility 誤選択を構造的に遮断、PR4-HIGH-3）
+   - **AC-8**: mtime フィルタ（`_MTIME_GRACE_SEC = 5.0`）が SFX 実行中の Desktop 無関係 PDF を除外すること（PR3-HIGH-D / PR3-NEW-3）
+   - **AC-10**: MOVE_FAILED 時の `partially_moved` 件数が UI / CLI サマリで表示されること（運用情報消失防止、PR3-HIGH-A）
+
+3. **AC-12 PII ログ防御**: `Select-String` による grep 結果で以下が確認されること:
+   - ex_extractor モジュール logger 出力に事業所名 / フルパス / 抽出 PDF 名が一切含まれない
+   - CLI レイヤの `orphan_alias_canonicals` 通知のみ canonical 名が例外的に出る（運用ローカル端末限定、SaaS log aggregator 送信禁止の制約付き）
+   - フルパスや抽出 PDF 名が grep でヒットした場合は退化バグとして即報告（PR3-NEW-1 / PR3-HIGH-C 退化）
+
+4. **AC-14 既存機能 regression なし**: PR #126（事業所フォルダ一括結合）/ PR #124（単一事業所結合）/ PR #128（ADR-011 配布パッケージ）の動作が破壊されていない
+
+5. **添付エビデンス**:
+   - 実機環境スクショ（事業所名・利用者氏名は墨塗り済）
+   - AC-12 grep 結果ログ（Select-String の出力 0 件 or orphan セクションのみ）
+   - runbook Phase 5-1 のサマリテーブル（AC-1〜AC-14 の ✅/❌ + 観察事項）
+
+### 昇格時の作業（別 PR で実施、PR5 完走後の Session 30 想定）
+
+PR5 完走後、別 PR で以下を実施:
+
+1. ADR-014 Status 行を `Proposed (2026-04-27)` → `Accepted (YYYY-MM-DD)` に更新、変更履歴に Session N 実機検証完走を追記
+2. 「### Session N 実機検証結果」セクションを `## 結果` セクションの後（`## 関連` の前）に新設し、runbook Phase 5-1 のサマリテーブル + 観察事項 + PII grep 結果を記録
+3. `docs/handoff/LATEST.md` を更新（PR5 完走 → 次タスク選定フェーズへ移行、ADR-014 Accepted 反映）
+4. ADR の「## 影響」セクションは原文維持、検証結果は別セクションで保存（ADR-012 / ADR-013 の慣習踏襲）
+
+### 一部 AC FAIL 時の取り扱い
+
+- **誤配布リスク AC（AC-6 / AC-8 / AC-10）の FAIL**: 業務事故直結のため最優先修正。Phase 4 rollback で旧 exe に即時戻し、修正 PR（PR5.1）を最優先で起票
+- **PII 退化（AC-12）の FAIL**: 介護現場の信頼失墜直結のため最優先。墨塗り済 run.log を添えて報告、修正 PR（PR5.2）を最優先で起票
+- **その他 AC の FAIL**: PR5.1 として独立修正 PR を起こし、修正後に再度本 runbook で再検証
+- 修正前に Accepted 昇格を行わない（FAIL 状態の機能を Accepted として記録すると後続の信頼性判断を歪める）
+
 ## 未決事項
 
-- AMBIGUOUS 判定の頻度実測（実機投入後にデータ収集）
-- alias 自動学習（手動振り分け結果を alias に昇格する UX）の検討（PR4 で議論）
+- AMBIGUOUS 判定の頻度実測（実機投入後にデータ収集、PR5 完走後 1〜2 ヶ月の運用ログから判断）
+- alias 自動学習（手動振り分け結果を alias に昇格する UX）の検討（PR4 で議論、PR5 完走後の運用フィードバックで再評価）
 - `_PARTIAL_MATCH_DOMINANCE_THRESHOLD = 2` の妥当性検証（実例 50+ ファイル投入後）
+- settings.py タブ化（PR5 で持ち越し、PR6 として独立評価。実機検証で要件確定後に設計）
