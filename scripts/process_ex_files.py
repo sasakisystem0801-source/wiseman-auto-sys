@@ -1,31 +1,52 @@
-"""提供実績 .ex_ ファイル → PDF 変換 & サブフォルダ振り分けスクリプト。
+"""提供実績 .ex_ ファイル → PDF 変換 & 事業所サブフォルダ振り分け CLI (薄ラッパー)。
 
-Wiseman からダウンロードされた .ex_ ファイル（WinSFX32 LZH 自己解凍EXE）を処理し、
-PDF を抽出してファイル名に含まれる事業所名のサブフォルダに移動する。
+PR3 で本体実装は ``src/wiseman_hub/pdf/ex_extractor.py`` に移動し、本スクリプトは
+**CLI インターフェース互換** (argv パターン / デフォルトパス / stderr フォーマット)
+を維持しつつ extract_directory を呼び出すだけの薄ラッパーとなった。
 
-使い方:
-    # デフォルトパス（C:\\Users\\sasak\\OneDrive\\デスクトップ\\本田様）
-    uv run python scripts/process_ex_files.py
+## 旧版との挙動差分 (重要)
 
-    # パス指定
-    uv run python scripts/process_ex_files.py "D:\\path\\to\\folder"
+旧版は ``find_subfolder_match`` (filename 単純包含のみ) で振り分けていたが、本版は
+**PR2 ``resolve_facility``** (alias 優先 + 語境界要求 + AMBIGUOUS 細分) に統一。
+これにより誤配布リスクは構造的に低減するが、旧版で当たっていた一部のファイルが
+AMBIGUOUS / UNMATCHED に落ち、自動振り分けされず stderr に列挙される可能性がある。
 
-処理フロー:
-    1. .ex_ ファイルを列挙
-    2. ファイル名から振り分け先サブフォルダを特定
-    3. .ex_ → .exe にコピー（元の .ex_ ファイルと同じディレクトリ）
-    4. EXE を実行し、WinSFX32 ダイアログの OK を自動クリック
-    5. 生成された PDF をサブフォルダに移動
+## CLI 終了コード
+
+| code | 意味 | 旧版 |
+|------|------|------|
+| 0 | 全件 SUCCESS | 同 (失敗 0 件) |
+| 2 | 一部 pending (AMBIGUOUS / UNMATCHED が存在) | **新規** |
+| 1 | 失敗あり (EXTRACT_FAILED / MOVE_FAILED / PARTIAL_OUTPUT) または致命的エラー | 同 |
+
+旧版は 0/1 のみだったが、PR3 で「pending あり」は失敗とは別の状態として
+exit code 2 で明示する (現場運用で「振り分け止まり」を検知しやすくするため)。
+
+## 使い方
+
+```sh
+# デフォルトパス (C:\\Users\\sasak\\OneDrive\\デスクトップ\\本田様)
+uv run python scripts/process_ex_files.py
+
+# パス指定
+uv run python scripts/process_ex_files.py "D:\\path\\to\\folder"
+```
+
+ADR-014 参照。
 """
 
 from __future__ import annotations
 
 import logging
-import shutil
-import subprocess
 import sys
-import time
 from pathlib import Path
+
+from wiseman_hub.pdf.ex_extractor import (
+    ExtractionResult,
+    UnsupportedSfxPlatformError,
+    WindowsSfxAdapter,
+    extract_directory,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,226 +57,112 @@ logger = logging.getLogger(__name__)
 DEFAULT_DIR = Path(r"C:\Users\sasak\OneDrive\デスクトップ\本田様")
 
 
-def find_subfolder_match(filename: str, subfolders: list[str]) -> str | None:
-    """ファイル名に含まれる事業所名からマッチするサブフォルダを探す。"""
-    for folder in subfolders:
-        if folder in filename:
-            return folder
-    return None
+EXIT_OK = 0
+EXIT_FAILED = 1
+EXIT_PENDING = 2
 
 
-def _snapshot_pdfs(*directories: Path) -> set[Path]:
-    """複数ディレクトリの PDF ファイル一覧を取得。"""
-    pdfs: set[Path] = set()
-    for d in directories:
-        if d.exists():
-            pdfs |= set(d.glob("*.pdf")) | set(d.glob("*.PDF"))
-    return pdfs
+def _print_summary(result: ExtractionResult) -> None:
+    """集計サマリを logger 経由 (stderr) で出力 (現場運用の視認性維持)。
 
-
-def _terminate_proc(proc: subprocess.Popen[bytes]) -> None:
-    """プロセスを確実に終了させる。"""
-    proc.terminate()
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-
-
-def _click_sfx_dialog(proc_pid: int) -> bool:
-    """WinSFX32 ダイアログの OK ボタンを自動クリックする。
-
-    2つの方法を試す:
-    1. pywinauto.Application().connect(process=pid) でプロセスに直接接続
-    2. Desktop スキャンでウィンドウタイトルを検索
+    PII 防御: filename のみ出力、事業所名 / 移動先パス / candidates は出さない
+    (PR4 UI で表示)。orphan_alias_canonicals は alias 設定不整合の通知用に
+    canonical 名を出力する必要があるため例外的に出すが、運用ドキュメントで
+    ログ取り扱いを明記すること (Codex / evaluator 指摘 MEDIUM)。
     """
-    try:
-        from pywinauto import Application  # type: ignore[import-untyped]
+    total = len(result.items)
+    success = result.success_count
+    pending = len(result.pending_manual)
+    failed = len(result.failed)
 
-        # 方法1: プロセスPIDで直接接続
-        try:
-            app = Application(backend="uia").connect(process=proc_pid, timeout=3)
-            dlg = app.top_window()
-            title = dlg.window_text()
-            logger.info("  → ダイアログ検出 (PID %d): %s", proc_pid, title)
-
-            # OK ボタンを探してクリック
-            for btn_title in ["OK", "OK(O)", "&OK"]:
-                try:
-                    btn = dlg.child_window(title=btn_title, control_type="Button")
-                    if btn.exists(timeout=1):
-                        btn.click_input()
-                        logger.info("  → OK クリック完了")
-                        return True
-                except Exception:
-                    continue
-
-            # title_re でも試す
-            try:
-                btn = dlg.child_window(title_re=r".*OK.*", control_type="Button")
-                if btn.exists(timeout=1):
-                    btn.click_input()
-                    logger.info("  → OK クリック完了 (regex)")
-                    return True
-            except Exception:
-                pass
-
-            # ボタンが見つからない場合、Enter キーを送信
-            try:
-                dlg.type_keys("{ENTER}")
-                logger.info("  → Enter 送信で代替")
-                return True
-            except Exception as e:
-                logger.debug("  Enter 送信失敗: %s", e)
-
-        except Exception as e:
-            logger.debug("  PID接続失敗: %s", e)
-
-    except ImportError:
-        logger.warning("pywinauto 未インストール — ダイアログ自動操作不可")
-    except Exception as e:
-        logger.debug("SFX ダイアログ操作失敗: %s", e)
-    return False
-
-
-def _extract_with_exe(
-    exe_path: Path,
-    watch_dirs: list[Path],
-) -> list[Path]:
-    """自己解凍 EXE を実行し、WinSFX32 ダイアログを自動操作して PDF を取得する。"""
-    before = _snapshot_pdfs(*watch_dirs)
-
-    try:
-        proc = subprocess.Popen(
-            [str(exe_path)],
-            cwd=str(exe_path.parent),
-        )
-    except OSError as e:
-        logger.warning("  EXE 実行失敗: %s", e)
-        return []
-
-    dialog_clicked = False
-
-    try:
-        for i in range(60):  # 最大 30 秒
-            time.sleep(0.5)
-
-            # 1-3秒後にダイアログを操作
-            if not dialog_clicked and 2 <= i <= 20:
-                dialog_clicked = _click_sfx_dialog(proc.pid)
-
-            # プロセスが終了していたら完了 → PDF を探す
-            if proc.poll() is not None:
-                logger.info("  → SFX プロセス終了 (exit=%d)", proc.returncode)
-                time.sleep(1)  # 書き込み完了を待つ
-                new_pdfs = _snapshot_pdfs(*watch_dirs) - before
-                if new_pdfs:
-                    logger.info("  → PDF 検出: %s", [p.name for p in new_pdfs])
-                return list(new_pdfs)
-    finally:
-        if proc.poll() is None:
-            _terminate_proc(proc)
-
-    # タイムアウト後の最終チェック
-    time.sleep(1)
-    return list(_snapshot_pdfs(*watch_dirs) - before)
-
-
-def process_single_file(
-    ex_file: Path,
-    base_dir: Path,
-    target_folder: str,
-) -> bool:
-    """1つの .ex_ ファイルを処理する。"""
-    # .exe コピーを元ファイルと同じ場所に作成
-    exe_path = ex_file.with_suffix(".exe")
-    logger.info("  → .exe 作成: %s", exe_path.name)
-    shutil.copy2(ex_file, exe_path)
-
-    try:
-        # PDF を監視するディレクトリ（元ファイルの場所 + サブフォルダ + temp 等）
-        watch_dirs = [
-            base_dir,  # .ex_ ファイルのある場所
-            exe_path.parent,  # .exe のある場所（通常同じ）
-            Path.home() / "Desktop",  # デスクトップ
-            Path.home() / "Downloads",  # ダウンロード
-        ]
-
-        logger.info("  → EXE 実行 + SFX ダイアログ自動操作...")
-        pdfs = _extract_with_exe(exe_path, watch_dirs)
-
-        if not pdfs:
-            logger.warning("  → PDF 抽出失敗")
-            return False
-
-        # PDF をサブフォルダに移動
-        dest_dir = base_dir / target_folder
-        for pdf in pdfs:
-            dest = dest_dir / pdf.name
-            if dest.exists():
-                logger.warning("  上書き: %s", dest.name)
-            shutil.move(str(pdf), str(dest))
-            logger.info("  → 移動完了: %s/%s", target_folder, pdf.name)
-
-        return True
-    finally:
-        exe_path.unlink(missing_ok=True)
-
-
-def process_directory(base_dir: Path) -> int:
-    """ベースディレクトリの .ex_ ファイルを処理する。"""
-    if not base_dir.exists():
-        logger.error("ディレクトリが見つかりません: %s", base_dir)
-        return 1
-
-    subfolders = [d.name for d in base_dir.iterdir() if d.is_dir() and not d.name.startswith("_")]
-    logger.info("サブフォルダ: %s", subfolders)
-
-    ex_files = sorted(base_dir.glob("*.ex_"))
-    if not ex_files:
-        logger.info("処理対象の .ex_ ファイルがありません")
-        return 0
-
-    logger.info("処理対象: %d ファイル", len(ex_files))
-
-    success: list[str] = []
-    failed: list[str] = []
-
-    for ex_file in ex_files:
-        logger.info("")
-        logger.info("--- %s ---", ex_file.name)
-
-        target_folder = find_subfolder_match(ex_file.name, subfolders)
-        if not target_folder:
-            logger.warning("  マッチするサブフォルダなし → スキップ")
-            failed.append(ex_file.name)
-            continue
-        logger.info("  振り分け先: %s", target_folder)
-
-        if process_single_file(ex_file, base_dir, target_folder):
-            success.append(ex_file.name)
-        else:
-            failed.append(ex_file.name)
-
-    logger.info("")
     logger.info("=" * 50)
-    logger.info("成功: %d / 失敗: %d / 合計: %d", len(success), len(failed), len(ex_files))
-    for name in failed:
-        logger.info("  ✗ %s", name)
-    if not failed:
-        logger.info("=== ALL GREEN ===")
+    logger.info(
+        "成功: %d / 手動振り分け待ち: %d / 失敗: %d / 合計: %d",
+        success,
+        pending,
+        failed,
+        total,
+    )
 
-    return 1 if failed else 0
+    # AC-3 / Codex HIGH-F: pending 件数を専用行で明示し
+    # 現場運用で「振り分け止まり」を即座に検知可能にする
+    if pending > 0:
+        logger.warning("⚠️  手動振り分け待ち: %d 件 (自動振り分けされていません)", pending)
+
+    if result.pending_filenames:
+        logger.warning("--- 手動振り分け待ち ---")
+        for name in result.pending_filenames:
+            logger.warning("  ? %s", name)
+        logger.warning(
+            "上記ファイルは PR4 UI 完成までの暫定として、"
+            "手動で各事業所サブフォルダへ移動してください。"
+        )
+
+    if result.failed:
+        logger.error("--- 失敗 ---")
+        for item in result.failed:
+            code_str = item.error_code.value if item.error_code else "unknown"
+            logger.error("  x %s [%s]", item.source_path.name, code_str)
+            # HIGH-A: 部分移動済 PDF を運用者へ可視化 (件数のみ、移動先は出さない)
+            if item.partially_moved:
+                logger.error(
+                    "    (一部 PDF は移動済み: %d 件、移動先フォルダを確認してください)",
+                    len(item.partially_moved),
+                )
+
+    # HIGH-G / M-1: cleanup_warning は failed と独立に表示 (primary が SUCCESS でも残る)
+    cleanup_warned = [
+        item for item in result.items if item.cleanup_warning is not None
+    ]
+    if cleanup_warned:
+        logger.warning("--- .exe ファイル削除失敗 (次回実行で衝突する可能性) ---")
+        for item in cleanup_warned:
+            logger.warning("  ! %s", item.source_path.name)
+
+    if result.orphan_alias_canonicals:
+        logger.warning("--- 設定不整合 (alias 設定だけ残り実フォルダ未存在) ---")
+        for canonical in result.orphan_alias_canonicals:
+            logger.warning("  ! %s", canonical)
+
+
+def _exit_code(result: ExtractionResult) -> int:
+    """結果から終了コードを決定 (1 > 2 > 0 の優先順)。"""
+    if result.failed:
+        return EXIT_FAILED
+    if result.pending_manual:
+        return EXIT_PENDING
+    return EXIT_OK
 
 
 def main() -> int:
     if sys.platform != "win32":
         print("このスクリプトは Windows 専用です。", file=sys.stderr)
-        return 1
+        return EXIT_FAILED
+
     target = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_DIR
     logger.info("対象ディレクトリ: %s", target)
-    return process_directory(target)
+
+    try:
+        adapter = WindowsSfxAdapter()
+    except UnsupportedSfxPlatformError as e:
+        print(str(e), file=sys.stderr)
+        return EXIT_FAILED
+
+    try:
+        # 旧版互換: source_dir == facility_root_dir (同一ディレクトリ運用)
+        # PR4/5 で TOML 経由で別パス指定をサポート予定
+        result = extract_directory(
+            source_dir=target,
+            facility_root_dir=target,
+            aliases={},  # CLI では alias 未対応 (PR4 UI で TOML から渡す)
+            adapter=adapter,
+        )
+    except FileNotFoundError as e:
+        logger.error("%s", e)
+        return EXIT_FAILED
+
+    _print_summary(result)
+    return _exit_code(result)
 
 
 if __name__ == "__main__":
