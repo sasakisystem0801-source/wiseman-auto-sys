@@ -8,6 +8,7 @@
 
 - 2026-04-27: 本 ADR 作成（PR2 で初版を追加）
 - 2026-04-27: Evaluator 指摘 HIGH-1/HIGH-2 を反映（alias canonical 実在検証 + 語境界要求の追加）。テストデータを仮名化（PII 保護徹底、AC2-9 PARTIAL → PASS）
+- 2026-04-27: 5 agents + Codex 並列レビュー指摘を反映（alias 複数 hit → AMBIGUOUS_ALIAS、正規化完全一致複数 → AMBIGUOUS_EXACT、ResolveResult `__post_init__` 不変条件強制、空白除去廃止で境界文字化、UNMATCHED reason 細分化、`is_auto_distributable` プロパティ、`find_orphan_alias_canonicals` ヘルパー追加、ADR 自身の実名残置を仮名化）
 
 ## コンテキスト
 
@@ -94,10 +95,12 @@ alias 辞書の canonical が `facility_names` に存在しない場合、当該
 
 #### 「十分差」閾値（2 文字）の根拠
 
-- 1 文字差: 「本田デイケア」と「本田デイケア東」のような僅差は人為的命名ミスとの区別が困難 → AMBIGUOUS
-- 2 文字差以上: 「本田デイケア」と「本田デイケア（メール）」(差 5 文字、半角化後) のような明確な追加修飾は別事業所と判定可能 → CONFIRMED
+- 1 文字差: 「サービスA」と「サービスA東」のような僅差は人為的命名ミスとの区別が困難 → AMBIGUOUS
+- 2 文字差以上: 「サービスA」と「サービスA（拡張）」(差 5 文字、半角化後) のような明確な追加修飾は別事業所と判定可能 → CONFIRMED
 
 将来この閾値の調整が必要な場合は、設定ファイル化または ADR 改訂で対応。
+
+（注: ADR 内で実在事業所名を使うと PR diff 経由の PII 漏洩経路を ADR 自身が破壊するため、テストデータと同じ仮名で記述する。レビュー H-F 対応）
 
 ### 正規化規則
 
