@@ -189,11 +189,12 @@ class TestLauncherUI:
                 root=root,
             )
             labels = launcher.button_labels()
-            assert len(labels) == 4
+            assert len(labels) == 5
             assert any("PDF" in lb for lb in labels)
             assert any("確認" in lb for lb in labels)
             assert any("設定" in lb for lb in labels)
             assert any("事業所" in lb for lb in labels)
+            assert any("ex_" in lb for lb in labels)  # PR4: ex_ ファイル変換
         finally:
             root.destroy()
 

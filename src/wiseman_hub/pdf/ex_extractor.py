@@ -534,6 +534,8 @@ def extract_one(
     facility_names: list[str],
     aliases: dict[str, list[str]],
     adapter: SfxAdapter,
+    *,
+    force_facility: str | None = None,
 ) -> ExtractionItem:
     """1 つの ``.ex_`` を resolver で振り分け先を決定し、CONFIRMED なら抽出 + 移動。
 
@@ -546,6 +548,10 @@ def extract_one(
         facility_names: 振り分け先候補 (facility_root_dir 配下のディレクトリ名群)
         aliases: PR1 検証済 alias 辞書
         adapter: SfxAdapter 実装 (Windows 実機 / Fake)
+        force_facility: PR4 で追加。指定時は resolver を bypass し、
+            ``ResolveReason.MANUAL_OVERRIDE`` で擬似 CONFIRMED を構築 + 抽出 + 移動。
+            UI の手動振り分けダイアログから呼ばれる経路。``facility_names`` に
+            存在しない値を渡した場合は ``ValueError`` (UI が誤った値を渡す事故防止)。
 
     Returns:
         ``ExtractionItem`` (PII-safe な構造化結果)
@@ -554,7 +560,19 @@ def extract_one(
     logger.info("processing %s", ex_file.name)
 
     # Step 1: resolver で振り分け先決定 (Path.name 必須、resolver docstring で警告)
-    result = resolve_facility(ex_file.name, facility_names, aliases)
+    # PR4: force_facility 指定時は resolver bypass + MANUAL_OVERRIDE で CONFIRMED 構築
+    if force_facility is not None:
+        if force_facility not in facility_names:
+            raise ValueError(
+                f"force_facility must exist in facility_names "
+                f"(got len={len(force_facility)}, "
+                f"facility_names size={len(facility_names)})"
+            )
+        result = ResolveResult.confirmed(
+            force_facility, ResolveReason.MANUAL_OVERRIDE
+        )
+    else:
+        result = resolve_facility(ex_file.name, facility_names, aliases)
 
     if result.needs_manual_selection:
         return ExtractionItem(

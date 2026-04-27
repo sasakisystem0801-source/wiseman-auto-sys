@@ -27,6 +27,14 @@
   - **PR3-HIGH-I**: `assert matched is not None` を `if matched is None: raise RuntimeError` に変更 (`python -O` 実行時の silent NoneType 伝播防止)
   - **PR3-HIGH-F**: CLI `_print_summary` に pending 件数の専用警告行 + cleanup_warning 別セクション + partially_moved 件数表示を追加 (現場運用での「振り分け止まり」即時検知)
   - **L-1**: `WindowsSfxAdapter._terminate_proc` の `proc.kill()` 後 `wait(timeout=10)` 追加 (driver hang 時の無限待機防止)
+- 2026-04-27: **PR4 着手**（ex_extractor デスクトップ UI 統合）。Codex セカンドオピニオン HIGH 4 件 + MEDIUM 3 件を反映:
+  - **PR4-HIGH-1 (force_facility 経路)**: PR3 `extract_one` は内部で `resolve_facility` を呼ぶため、UI で擬似 CONFIRMED を作っても再呼び出しで UNMATCHED に戻ってしまう設計欠陥を Codex 指摘。`extract_one(force_facility: str | None = None)` パラメータを追加（後方互換）し、指定時は resolver を bypass して `ResolveResult.confirmed(force_facility, ResolveReason.MANUAL_OVERRIDE)` を構築 + 抽出 + 移動。`force_facility not in facility_names` は ValueError で fail-fast（UI 誤値防止）
+  - **PR4-HIGH-2 (監査性)**: `ResolveReason.MANUAL_OVERRIDE` を新設、`_REASON_TO_STATUS` で CONFIRMED にマップ。UI サマリで「自動振り分け成功」「手動確定成功」を分離表示（運用監査でどちらの経路で振り分けられたか識別可能）
+  - **PR4-HIGH-3 (UNMATCHED 確認ステップ)**: 全 facility プルダウンの誤選択を構造的に防ぐため、確定前に「ファイル名 / 振り分け先事業所 / 出力先パス」を表示する確認ステップを追加。プルダウン既定選択は空（`(未選択)`）にして先頭 facility 誤選択を遮断
+  - **PR4-HIGH-4 (PARTIAL_OUTPUT / partially_moved 可視化)**: PR5 持ち越しは事故温床のため PR4 で「要確認」セクションに件数 + filename を表示、partially_moved は「一部 PDF 移動済 N 件」と注記
+  - **PR4-MEDIUM-5 (進捗)**: `_LBL_RUNNING = "処理中... (最大 数分かかる場合があります)"` で本田様 (IT 非専門) が「固まった」と誤認しないようにする。完全な per-file progress は PR5 で `extract_directory` に callback 追加検討
+  - **PR4-MEDIUM-6 (モーダル制御)**: `Toplevel(parent)` + `transient` + `grab_set` + `protocol("WM_DELETE_WINDOW", _on_close)` + 実行中 close 抑止の facility_root_dialog パターン踏襲
+  - **PR4-MEDIUM-7 (手動 SFX worker thread)**: ManualDistributionDialog 内で extract_one を独自 ThreadPoolExecutor で worker thread 化、UI 凍結防止
 - 2026-04-27: PR #133 review-pr (6 並列再レビュー) で発見された新規 HIGH 6 件を反映:
   - **PR3-NEW-1 (PII)**: `extract_directory` 例外捕捉で `logger.exception` を使うと traceback 経由で `OSError.args` の full path が漏洩する → `logger.warning` + `type(e).__name__` のみに変更
   - **PR3-NEW-2 (resolver 二重呼び出し)**: 例外源が resolver の場合、フォールバックで再呼び出しすると同じ例外が二度目に発生しバッチ続行保護が破綻 → `try/except` で safe `UNMATCHED` フォールバック追加
@@ -75,8 +83,8 @@ Codex セカンドオピニオンによる「1 PR で 1,200+ LOC は事故率高
 |---|---------|-----|
 | PR1 | 設定スキーマ拡張（`ex_source_dir` + `facility_aliases`） | Merged (#130) |
 | PR2 | `pdf/facility_resolver` 単体（alias 優先 + 安全マッチング） | Merged (#131) |
-| PR3 | `pdf/ex_extractor` core 移植 + SFX adapter 化 + macOS fake runner + scripts ラッパー | 本 PR |
-| PR4 | UI 統合（dialog + launcher 5 ボタン化 + 手動振り分け UI） | 計画段階 |
+| PR3 | `pdf/ex_extractor` core 移植 + SFX adapter 化 + macOS fake runner + scripts ラッパー | Merged (#133) |
+| PR4 | UI 統合（dialog + launcher 5 ボタン化 + 手動振り分け UI） | 本 PR |
 | PR5 | Windows 実機検証 + 修正 + settings.py タブ化（独立評価） | 計画段階 |
 
 ### マッチング戦略（安全設計）

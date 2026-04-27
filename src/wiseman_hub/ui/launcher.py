@@ -44,6 +44,7 @@ class LauncherAction(enum.Enum):
     OPEN_REVIEW = "open_review"
     OPEN_SETTINGS = "open_settings"
     OPEN_FACILITY_MERGER = "open_facility_merger"
+    OPEN_EX_EXTRACTOR = "open_ex_extractor"  # PR4: ex_ ファイル抽出 + 振り分け
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,7 @@ _BTN_RUN_PDF_MERGE = "PDF マージ処理を実行"
 _BTN_OPEN_REVIEW = "確認待ちセッション"
 _BTN_OPEN_SETTINGS = "設定"
 _BTN_OPEN_FACILITY_MERGER = "事業所フォルダ一括結合"
+_BTN_OPEN_EX_EXTRACTOR = "ex_ ファイル変換 + 振り分け"
 
 _TITLE_CONFIG_MISSING = "設定が未完了"
 _MSG_CONFIG_MISSING = (
@@ -86,6 +88,11 @@ _TITLE_SETTINGS_PLACEHOLDER = "設定画面（未実装）"
 _MSG_SETTINGS_PLACEHOLDER = (
     "設定画面は後続タスクで実装予定です。\n"
     "現状は config/default.toml を直接編集してください。"
+)
+
+_TITLE_EX_EXTRACTOR_PLACEHOLDER = "ex_ ファイル変換（未統合）"
+_MSG_EX_EXTRACTOR_PLACEHOLDER = (
+    "ex_ ファイル変換 + 振り分けは PR4 で統合予定です。"
 )
 
 _TITLE_PHASE_A_DONE = "Phase A 完了"
@@ -142,6 +149,7 @@ class Launcher:
         on_run_phase_b: Callable[[str], None] | None = None,
         on_open_settings: Callable[[], None] | None = None,
         on_open_facility_merger: Callable[[], None] | None = None,
+        on_open_ex_extractor: Callable[[], None] | None = None,
         on_config_missing: Callable[[], None] | None = None,
         messagebox_fn: MessageBoxLike | None = None,
     ) -> None:
@@ -163,6 +171,7 @@ class Launcher:
         self._on_run_phase_b = on_run_phase_b
         self._on_open_settings = on_open_settings
         self._on_open_facility_merger = on_open_facility_merger
+        self._on_open_ex_extractor = on_open_ex_extractor
         self._on_config_missing = on_config_missing
 
         self._owns_root = root is None
@@ -213,6 +222,13 @@ class Launcher:
                 LauncherAction.OPEN_FACILITY_MERGER
             ),
         )
+        self._btn_ex_extractor = ttk.Button(
+            btn_frame,
+            text=_BTN_OPEN_EX_EXTRACTOR,
+            command=lambda: self.invoke_action(
+                LauncherAction.OPEN_EX_EXTRACTOR
+            ),
+        )
         self._btn_settings = ttk.Button(
             btn_frame,
             text=_BTN_OPEN_SETTINGS,
@@ -223,16 +239,21 @@ class Launcher:
             self._btn_run,
             self._btn_review,
             self._btn_facility_merger,
+            self._btn_ex_extractor,
             self._btn_settings,
         ):
             btn.pack(fill="x", pady=6, ipady=6)
 
-    def button_labels(self) -> tuple[str, str, str, str]:
-        """各ボタンのラベル（テスト用）。順序: PDFマージ / 確認 / 事業所結合 / 設定。"""
+    def button_labels(self) -> tuple[str, str, str, str, str]:
+        """各ボタンのラベル（テスト用）。
+
+        順序: PDFマージ / 確認 / 事業所結合 / **ex_ 変換** / 設定。
+        """
         return (
             _BTN_RUN_PDF_MERGE,
             _BTN_OPEN_REVIEW,
             _BTN_OPEN_FACILITY_MERGER,
+            _BTN_OPEN_EX_EXTRACTOR,
             _BTN_OPEN_SETTINGS,
         )
 
@@ -263,6 +284,12 @@ class Launcher:
                     self._on_open_facility_merger,
                     _TITLE_UNIMPL,
                     "事業所フォルダ結合ダイアログ（未統合）",
+                )
+            case LauncherAction.OPEN_EX_EXTRACTOR:
+                self._invoke_or_show(
+                    self._on_open_ex_extractor,
+                    _TITLE_EX_EXTRACTOR_PLACEHOLDER,
+                    _MSG_EX_EXTRACTOR_PLACEHOLDER,
                 )
             case _:
                 raise ValueError(f"Unhandled LauncherAction: {action}")

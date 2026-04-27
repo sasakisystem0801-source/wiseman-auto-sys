@@ -443,6 +443,24 @@ class TestResolveResultInvariants:
                 reason=ResolveReason.ALIAS_MATCH,
             )
 
+    def test_pr4_manual_override_maps_to_confirmed(self) -> None:
+        """PR4: MANUAL_OVERRIDE は CONFIRMED 系 reason として扱われる。"""
+        result = ResolveResult.confirmed("サービスA", ResolveReason.MANUAL_OVERRIDE)
+        assert result.status is ResolveStatus.CONFIRMED
+        assert result.reason is ResolveReason.MANUAL_OVERRIDE
+        assert result.matched_facility == "サービスA"
+        assert result.is_auto_distributable is True
+
+    def test_pr4_manual_override_with_unmatched_status_raises(self) -> None:
+        """PR4: MANUAL_OVERRIDE を UNMATCHED と組み合わせると不変条件違反。"""
+        with pytest.raises(ValueError, match="requires status"):
+            ResolveResult(
+                status=ResolveStatus.UNMATCHED,
+                matched_facility=None,
+                candidates=(),
+                reason=ResolveReason.MANUAL_OVERRIDE,
+            )
+
 
 # ---------------------------------------------------------------------------
 # is_auto_distributable / needs_manual_* プロパティ（PR4 UI 統合用）
