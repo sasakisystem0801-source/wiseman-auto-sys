@@ -54,7 +54,7 @@ class MockEngine(RPAEngine):
         logger.info("[MOCK] メニュー遷移: %s", path_str)
         self._current_screen = menu_path[-1] if menu_path else ""
 
-    def export_csv(self, output_dir: Path) -> Path | None:
+    def export_csv(self, output_dir: Path) -> Path:
         self._call_log.append(f"export_csv({output_dir})")
         logger.info("[MOCK] CSVエクスポート: %s", output_dir)
 
