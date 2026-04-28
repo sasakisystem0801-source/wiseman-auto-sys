@@ -265,8 +265,10 @@ def _validate_facility_aliases(aliases: dict[str, list[str]]) -> None:
 
     自己参照（``{"X": [..., "X"]}``）は冗長だが誤配布リスクなしのため許容。
 
-    違反時は ``ValueError`` で fail-fast。例外メッセージには「衝突した alias 文字列」
-    のみ含めて運用者の修正を助けるが、その他の事業所名・別名は出さず PII を最小化する。
+    違反時は ``ValueError`` で fail-fast。例外メッセージは構造的なエラー種別のみ
+    含み、alias / 事業所名等の文字列は含めない（ADR-014 PII 防御 + Issue #150 の
+    actionable error 経路を介した logger.error への漏洩防止）。具体的にどの alias が
+    違反かは config TOML を直接確認する運用とする。
     """
     canonical_names = set(aliases.keys())
     seen_aliases: dict[str, str] = {}  # alias -> どの canonical に属しているか
@@ -283,8 +285,8 @@ def _validate_facility_aliases(aliases: dict[str, list[str]]) -> None:
                 )
             if alias in seen_in_facility:
                 raise ValueError(
-                    f"facility_aliases contains duplicate alias '{alias}' "
-                    "within the same facility"
+                    "facility_aliases contains a duplicate alias within "
+                    "the same facility"
                 )
             seen_in_facility.add(alias)
             if alias == canonical:
@@ -292,12 +294,12 @@ def _validate_facility_aliases(aliases: dict[str, list[str]]) -> None:
                 continue
             if alias in canonical_names:
                 raise ValueError(
-                    f"facility_aliases alias '{alias}' conflicts with "
+                    "facility_aliases contains an alias that conflicts with "
                     "another facility's canonical name"
                 )
             if alias in seen_aliases:
                 raise ValueError(
-                    f"facility_aliases alias '{alias}' is shared by multiple "
+                    "facility_aliases contains an alias shared by multiple "
                     "facilities; aliases must be globally unique to prevent misrouting"
                 )
             seen_aliases[alias] = canonical
@@ -322,8 +324,29 @@ def load_config(path: Path | None = None) -> AppConfig:
     ocr_backend_data = data.get("ocr_backend", {})
     pdf_merge_data = dict(data.get("pdf_merge", {}))
 
+    # Issue #150 (PR #157 codex セカンドオピニオン High): TOML として合法な
+    # `reports = "bad"` 等の型違反は元実装で AttributeError を raise していたため
+    # __main__.main() の (OSError, ValueError, TypeError) 捕捉から漏れて exit code 1
+    # に落ちていた。設定形状エラーは exit code 2 (config error) 扱いに寄せるべく、
+    # `_coerce_facility_aliases` と同じく TypeError で fail-fast する。
+    reports_section = data.get("reports", {})
+    if not isinstance(reports_section, dict):
+        raise TypeError(
+            f"[reports] section must be a table; "
+            f"got {type(reports_section).__name__}"
+        )
+    targets = reports_section.get("targets", [])
+    if not isinstance(targets, list):
+        raise TypeError(
+            f"[reports].targets must be a list; got {type(targets).__name__}"
+        )
     reports: list[ReportTarget] = []
-    for target in data.get("reports", {}).get("targets", []):
+    for target in targets:
+        if not isinstance(target, dict):
+            raise TypeError(
+                f"[reports].targets entries must be tables; "
+                f"got {type(target).__name__}"
+            )
         reports.append(ReportTarget(**target))
 
     bbox_data = pdf_merge_data.pop("user_name_bbox", {})
