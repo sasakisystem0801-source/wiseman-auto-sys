@@ -37,7 +37,18 @@ class WisemanHub:
     """ワイズマン自動化ハブ。RPA操作・クラウド同期・スケジューラを統括する。"""
 
     def __init__(self, config_path: Path | None = None, rpa_engine: RPAEngine | None = None) -> None:
-        self.config: AppConfig = load_config(config_path)
+        # Issue #150: load_config は不正 TOML / __post_init__ 検証 / facility_aliases
+        # 検証で (OSError, ValueError, TypeError) を raise する可能性があるが、
+        # 元実装は無捕捉で生 traceback を露出していた。__post_init__ 検証メッセージは
+        # フィールド名と値域の actionable info を含むため、ここで logger.error に
+        # 1 行で出してから caller (CLI) の exit code 制御へ委譲する。
+        try:
+            self.config: AppConfig = load_config(config_path)
+        except (OSError, ValueError, TypeError) as exc:
+            logger.error(
+                "設定ファイル読込エラー: %s: %s", type(exc).__name__, exc
+            )
+            raise
         self.output_dir = Path("data/exports")
         self.rpa = rpa_engine if rpa_engine is not None else create_rpa_engine(self.config)
         logger.info("Wiseman Hub v%s 初期化 (RPA: %s)", self.config.version, type(self.rpa).__name__)

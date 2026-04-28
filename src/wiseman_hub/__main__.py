@@ -569,7 +569,14 @@ def main() -> None:
         if args.rpa:
             from wiseman_hub.app import WisemanHub
 
-            WisemanHub(config_path=args.config).run()
+            try:
+                hub = WisemanHub(config_path=args.config)
+            except (OSError, ValueError, TypeError):
+                # Issue #150: WisemanHub.__init__ 内で actionable な logger.error を
+                # 出力済み。CLI として config error は exit code 2 で識別可能にする
+                # （runtime エラーの 1 と区別、setup-time の問題であることを示す）。
+                sys.exit(2)
+            hub.run()
         else:
             from wiseman_hub.config import load_config
             from wiseman_hub.ui.launcher import Launcher
@@ -577,7 +584,17 @@ def main() -> None:
             config_path = (
                 args.config if args.config is not None else _default_config_path()
             )
-            config = load_config(config_path)
+            try:
+                config = load_config(config_path)
+            except (OSError, ValueError, TypeError) as exc:
+                # Issue #150: launcher 経路でも RPA 経路と同様に actionable な
+                # exit を行う。ここでは WisemanHub.__init__ を経由しないため
+                # logger.error も合わせて発火する（型名のみではなく、__post_init__
+                # メッセージのフィールド情報を 1 行で残す）。
+                logger.error(
+                    "設定ファイル読込エラー: %s: %s", type(exc).__name__, exc
+                )
+                sys.exit(2)
             # 設定コールバックで後から Launcher を参照する必要があるため、
             # クロージャで双方向バインディングする（Launcher インスタンス生成前に
             # コールバックを作る必要がある一方、コールバックは Launcher のメソッドを呼ぶ）。

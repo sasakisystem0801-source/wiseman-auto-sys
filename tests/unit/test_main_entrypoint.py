@@ -191,6 +191,74 @@ def test_nonexistent_config_path_emits_warning_on_rpa_path(
     assert str(nonexistent) in caplog.text
 
 
+def test_rpa_with_invalid_config_exits_two(
+    tmp_path: Path,
+    monkeypatch: Any,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Issue #150: --rpa + 不正 TOML で exit code 2 (config error) 終了する。
+
+    WisemanHub.__init__ 内で actionable な logger.error を出した後、
+    CLI が runtime error (1) と区別可能な setup-time error (2) で exit する。
+    """
+    import logging
+
+    config_file = tmp_path / "bad.toml"
+    config_file.write_text("[ocr_backend]\ntimeout_sec = -1\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        sys, "argv", ["wiseman-hub", "--rpa", "--config", str(config_file)]
+    )
+
+    from wiseman_hub.__main__ import main
+
+    with (
+        caplog.at_level(logging.ERROR, logger="wiseman_hub.app"),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 2
+    assert "設定ファイル読込エラー" in caplog.text
+    assert "OcrBackendConfig.timeout_sec must be positive" in caplog.text
+
+
+def test_default_with_invalid_config_exits_two(
+    tmp_path: Path,
+    monkeypatch: Any,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Issue #150: launcher 経路 + 不正 TOML で exit code 2 (config error) 終了する。
+
+    Launcher は構築されず、actionable な logger.error が __main__ から発火する。
+    """
+    import logging
+
+    config_file = tmp_path / "bad.toml"
+    config_file.write_text(
+        '[pdf_merge]\nconcat_order = ["X"]\n', encoding="utf-8"
+    )
+
+    launcher_class = MagicMock()
+    monkeypatch.setattr("wiseman_hub.ui.launcher.Launcher", launcher_class)
+    monkeypatch.setattr(
+        sys, "argv", ["wiseman-hub", "--config", str(config_file)]
+    )
+
+    from wiseman_hub.__main__ import main
+
+    with (
+        caplog.at_level(logging.ERROR, logger="wiseman_hub.__main__"),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 2
+    assert "設定ファイル読込エラー" in caplog.text
+    assert "unknown source" in caplog.text
+    launcher_class.assert_not_called()
+
+
 def test_unexpected_exception_exits_one(monkeypatch: Any) -> None:
     """予期しない例外で exit code 1 終了する。"""
     launcher_class = MagicMock()

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from wiseman_hub.app import WisemanHub
 from wiseman_hub.rpa.base import MdiChildNotFoundError
@@ -139,3 +142,76 @@ class TestWisemanHubWithMock:
         # (AC-6: MDI 状態不定時の不正なウィンドウ操作を防ぐ)
         close_calls = [c for c in engine.call_log if "close_current_window" in c]
         assert len(close_calls) == 1
+
+
+class TestWisemanHubLoadConfigErrors:
+    """Issue #150: 不正設定で生 traceback を露出せず actionable error を出す。
+
+    PR #149 (Issue #27 PR-A) で OcrBackendConfig / UserNameBBox / PdfMergeConfig に
+    ``__post_init__`` 検証を追加したことで ValueError が伝播するようになった。
+    元実装は無捕捉で、ユーザーがどのフィールドを直すべきか判別不能だった。
+    """
+
+    @pytest.mark.parametrize(
+        "bad_toml,expected_in_log",
+        [
+            pytest.param(
+                "[ocr_backend]\ntimeout_sec = -1\n",
+                "OcrBackendConfig.timeout_sec must be positive",
+                id="negative_timeout_sec",
+            ),
+            pytest.param(
+                "[pdf_merge.user_name_bbox]\nx0 = 100.0\ny0 = 10.0\nx1 = 50.0\ny1 = 80.0\n",
+                "x0",
+                id="inverted_bbox",
+            ),
+            pytest.param(
+                '[pdf_merge]\nconcat_order = ["X"]\n',
+                "unknown source",
+                id="unknown_concat_letter",
+            ),
+            pytest.param(
+                # facility_aliases value が list でなく str → _coerce_facility_aliases TypeError
+                '[pdf_merge.facility_aliases]\nfacility = "not_a_list"\n',
+                "facility_aliases value must be a list",
+                id="aliases_value_not_list",
+            ),
+            pytest.param(
+                # malformed TOML 構文 → tomllib.TOMLDecodeError (ValueError サブクラス)
+                "this is = = invalid\n",
+                "TOMLDecodeError",
+                id="malformed_toml_syntax",
+            ),
+        ],
+    )
+    def test_init_raises_with_actionable_log(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+        bad_toml: str,
+        expected_in_log: str,
+    ) -> None:
+        """不正な設定で例外を raise し、logger.error に actionable 情報が残る。"""
+        config_path = tmp_path / "bad.toml"
+        config_path.write_text(bad_toml, encoding="utf-8")
+
+        with (
+            caplog.at_level(logging.ERROR, logger="wiseman_hub.app"),
+            pytest.raises((ValueError, TypeError)),
+        ):
+            WisemanHub(config_path=config_path)
+
+        assert "設定ファイル読込エラー" in caplog.text
+        assert expected_in_log in caplog.text
+
+    def test_init_re_raises_original_exception(self, tmp_path: Path) -> None:
+        """例外は wrap されず元の型のまま再 raise される（caller が型で分岐できる）。"""
+        config_path = tmp_path / "bad.toml"
+        config_path.write_text(
+            "[ocr_backend]\nmax_retries = -5\n", encoding="utf-8"
+        )
+
+        with pytest.raises(ValueError) as exc_info:
+            WisemanHub(config_path=config_path)
+
+        assert "max_retries" in str(exc_info.value)
