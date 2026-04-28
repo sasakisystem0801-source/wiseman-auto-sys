@@ -1,7 +1,7 @@
 """確認 UI → READY_TO_MERGE 遷移の共通フロー（Issue #72）。
 
-CLI (``scripts/merge_user_pdfs.py::_cmd_review``) と GUI
-(``__main__._make_review_callback``) で二重実装されていた以下の処理を 1 箇所に集約する:
+CLI (``scripts/merge_user_pdfs.py::_cmd_review``) と GUI 経路で二重実装されて
+いた以下の処理を 1 箇所に集約する:
 
 1. 1 回目のロック取得 → 最新セッション読込 → NEEDS_REVIEW 検証
 2. ``ConfirmDialog`` を起動（dialog_factory で注入）
@@ -9,8 +9,11 @@ CLI (``scripts/merge_user_pdfs.py::_cmd_review``) と GUI
 4. 2 回目のロック取得 → fresh reload → race 検出 → READY_TO_MERGE へ遷移
 
 通知（print stderr / messagebox）は本モジュールでは行わず、``ReviewOutcome.reason``
-で呼出側（adapter）へ結果を返す。`_cmd_review` は exit code、
-`_make_review_callback` は ``ReviewCallbackResult`` に変換する。
+で呼出側 adapter へ結果を返す。CLI ``_cmd_review`` は exit code に変換する。
+GUI adapter は Issue #154 で除去（Launcher 旧ワークフロー UI 経路除去）。
+session_picker / confirm_dialog 等は ADR-013 方針でコード資産として残置。
+GUI 再統合時は ``ReviewReason`` Literal 全 9 値の messagebox マッピングを再構築
+すること（Issue #154 Follow-up）。
 
 設計メモ:
 - 2 段階ロック + fresh reload は GUI 側が以前から持っていた race 対策

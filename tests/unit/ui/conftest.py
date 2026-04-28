@@ -17,8 +17,6 @@ from __future__ import annotations
 
 import pytest
 
-from wiseman_hub.config import AppConfig
-
 
 def pytest_configure(config: pytest.Config) -> None:
     """``@pytest.mark.tk_required`` マーカーを登録（`--strict-markers` 対応）。"""
@@ -77,12 +75,3 @@ class FakeMessageBox:
         self.calls.append(("error", title, message))
 
 
-def make_configured_appconfig() -> AppConfig:
-    """Launcher の ``validate_config_ready`` を通過する最小構成の AppConfig。"""
-    cfg = AppConfig()
-    cfg.pdf_merge.input_dir = "/in"
-    cfg.pdf_merge.output_dir = "/out"
-    cfg.pdf_merge.source_a_filename = "A.pdf"
-    cfg.ocr_backend.endpoint_url = "https://example.com"
-    cfg.ocr_backend.api_key = "key"
-    return cfg

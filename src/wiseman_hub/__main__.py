@@ -155,8 +155,8 @@ def _make_settings_callback(
 ) -> Callable[[], None]:
     """Launcher に注入する「設定」コールバックを組み立てる。
 
-    設定保存成功時は ``Launcher.reload_config`` を呼び、以降の
-    ``validate_config_ready`` 判定が新値で行われるようにする（再起動不要）。
+    設定保存成功時は ``Launcher.reload_config`` を呼び、以降の dialog (settings /
+    facility_root / ex_extractor) が新値で動作するようにする（再起動不要）。
     """
 
     def open_settings() -> None:
