@@ -2,9 +2,19 @@
 
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from wiseman_hub.config import AppConfig, load_config, save_config
+import pytest
+
+from wiseman_hub.config import (
+    AppConfig,
+    ConcatSourceLetter,
+    OcrBackendConfig,
+    PdfMergeConfig,
+    UserNameBBox,
+    load_config,
+    save_config,
+)
 
 
 def test_load_config_default() -> None:
@@ -1031,3 +1041,167 @@ dpi = 250
         assert "施設A" not in logged
         assert str(tmp_path) not in logged
         assert ".tmp" not in logged
+
+
+class TestUserNameBBoxValidation:
+    """UserNameBBox の不変条件検証 + is_configured。"""
+
+    def test_default_is_unconfigured(self) -> None:
+        bbox = UserNameBBox()
+        assert bbox.is_configured is False
+
+    def test_configured_when_any_coord_nonzero(self) -> None:
+        bbox = UserNameBBox(x0=10.0, y0=20.0, x1=100.0, y1=80.0, dpi=200)
+        assert bbox.is_configured is True
+
+    @pytest.mark.parametrize(
+        ("x0", "y0", "x1", "y1", "match"),
+        [
+            (100.0, 10.0, 50.0, 80.0, "x0 .* must be less than x1"),
+            (50.0, 10.0, 50.0, 80.0, "x0 .* must be less than x1"),
+            (10.0, 100.0, 50.0, 80.0, "y0 .* must be less than y1"),
+            # 部分非ゼロ（x1=0）でも is_configured=True 経路に入るので順序逆転は raise する
+            (10.0, 0.0, 0.0, 0.0, "x0 .* must be less than x1"),
+        ],
+    )
+    def test_invalid_coord_order_raises(
+        self, x0: float, y0: float, x1: float, y1: float, match: str
+    ) -> None:
+        with pytest.raises(ValueError, match=match):
+            UserNameBBox(x0=x0, y0=y0, x1=x1, y1=y1)
+
+    @pytest.mark.parametrize("dpi", [0, -1])
+    def test_invalid_dpi_raises_regardless_of_configured(self, dpi: int) -> None:
+        """dpi <= 0 は座標が未設定でも常時エラー（OCR 解像度の本質的な不正値）。"""
+        with pytest.raises(ValueError, match="dpi must be positive"):
+            UserNameBBox(dpi=dpi)
+
+
+class TestOcrBackendConfigValidation:
+    """OcrBackendConfig の不変条件検証 + is_configured。"""
+
+    def test_default_is_unconfigured(self) -> None:
+        cfg = OcrBackendConfig()
+        assert cfg.is_configured is False
+
+    def test_url_only_is_unconfigured(self) -> None:
+        """endpoint_url 単独では呼び出し不可（api_key 必須）。"""
+        cfg = OcrBackendConfig(endpoint_url="https://example.run.app")
+        assert cfg.is_configured is False
+
+    def test_key_only_is_unconfigured(self) -> None:
+        cfg = OcrBackendConfig(api_key="abc")
+        assert cfg.is_configured is False
+
+    def test_both_url_and_key_is_configured(self) -> None:
+        cfg = OcrBackendConfig(endpoint_url="https://example.run.app", api_key="abc")
+        assert cfg.is_configured is True
+
+    @pytest.mark.parametrize("timeout_sec", [0, -1])
+    def test_invalid_timeout_raises(self, timeout_sec: int) -> None:
+        with pytest.raises(ValueError, match="timeout_sec must be positive"):
+            OcrBackendConfig(timeout_sec=timeout_sec)
+
+    def test_max_retries_negative_raises(self) -> None:
+        with pytest.raises(ValueError, match="max_retries must be non-negative"):
+            OcrBackendConfig(max_retries=-1)
+
+    def test_max_retries_zero_allowed(self) -> None:
+        """再試行なし運用（max_retries=0）は妥当な設定。"""
+        cfg = OcrBackendConfig(max_retries=0)
+        assert cfg.max_retries == 0
+
+
+class TestPdfMergeConfigValidation:
+    """PdfMergeConfig.concat_order の Literal + 検証。"""
+
+    def test_default_concat_order_valid(self) -> None:
+        cfg = PdfMergeConfig()
+        assert cfg.concat_order == ["A", "B", "C"]
+
+    def test_concat_order_subset_valid(self) -> None:
+        """部分集合（例: A,C のみ）も許容。"""
+        cfg = PdfMergeConfig(concat_order=["A", "C"])
+        assert cfg.concat_order == ["A", "C"]
+
+    def test_concat_order_empty_raises(self) -> None:
+        with pytest.raises(ValueError, match="must not be empty"):
+            PdfMergeConfig(concat_order=[])
+
+    @pytest.mark.parametrize(
+        ("invalid_order", "reason"),
+        [
+            (["A", "B", "C", "D"], "D は source_d_filename 経由で末尾追加される別系統"),
+            (["A", "X"], "未知の letter"),
+            (["a", "b"], "大文字小文字違い（'a' != 'A'）"),
+        ],
+        ids=["d-rejected", "unknown-letter", "lowercase"],
+    )
+    def test_concat_order_unknown_value_raises(
+        self, invalid_order: list[str], reason: str
+    ) -> None:
+        # Literal 不一致は runtime ではブロックされないため cast でテスト
+        with pytest.raises(ValueError, match="unknown source"):
+            PdfMergeConfig(concat_order=cast(list[ConcatSourceLetter], invalid_order))
+
+    def test_concat_order_duplicate_raises(self) -> None:
+        with pytest.raises(ValueError, match="duplicates"):
+            PdfMergeConfig(concat_order=["A", "B", "A"])
+
+    def test_post_construction_mutation_reaches_defensive_layer(self) -> None:
+        """``__post_init__`` は構築時のみ走るため、構築後に list を mutate すると
+        値域チェックを bypass できる。merger.py の ``_validate_concat_order``
+        defensive layer がこの bypass 経路を catch することを保証する（regression guard）。"""
+        from wiseman_hub.pdf.merger import _validate_concat_order
+
+        cfg = PdfMergeConfig()
+        cfg.concat_order.append(cast(ConcatSourceLetter, "X"))  # 構築後 mutation
+        with pytest.raises(ValueError, match="unknown kinds"):
+            _validate_concat_order(cfg.concat_order)
+
+
+class TestLoadConfigWithValidation:
+    """load_config が検証エラーを伝播することを確認。"""
+
+    def test_invalid_bbox_in_toml_propagates(self, tmp_path: Path) -> None:
+        """TOML に反転 bbox を書くと load_config が ValueError を伝播する。"""
+        toml_content = """\
+[pdf_merge.user_name_bbox]
+x0 = 100.0
+y0 = 10.0
+x1 = 50.0
+y1 = 80.0
+dpi = 200
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(ValueError, match="x0 .* must be less than x1"):
+            load_config(config_file)
+
+    def test_invalid_concat_order_in_toml_propagates(self, tmp_path: Path) -> None:
+        toml_content = """\
+[pdf_merge]
+concat_order = ["A", "X"]
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(ValueError, match="unknown source"):
+            load_config(config_file)
+
+    def test_invalid_ocr_timeout_in_toml_propagates(self, tmp_path: Path) -> None:
+        toml_content = """\
+[ocr_backend]
+timeout_sec = 0
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(ValueError, match="timeout_sec must be positive"):
+            load_config(config_file)
+
+    def test_default_toml_loads_successfully(self) -> None:
+        """既存 config/default.toml が新検証下でも回帰なく読める（regression guard）。"""
+        config = load_config(Path("config/default.toml"))
+        assert isinstance(config, AppConfig)

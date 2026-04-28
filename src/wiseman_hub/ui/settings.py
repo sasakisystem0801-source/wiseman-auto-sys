@@ -18,12 +18,12 @@ import enum
 import logging
 import tkinter as tk
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from tkinter import filedialog, ttk
-from typing import Any, assert_never
+from typing import Any, assert_never, cast
 
-from wiseman_hub.config import AppConfig, save_config
+from wiseman_hub.config import AppConfig, ConcatSourceLetter, UserNameBBox, save_config
 from wiseman_hub.ui.common import (
     MessageBoxLike,
     assert_main_thread,
@@ -149,19 +149,31 @@ def form_to_config(form: SettingsForm, base: AppConfig) -> AppConfig:
     ``validate_form`` が空を返すことを前提とする（呼出側で保証）。
     """
     new_config = copy.deepcopy(base)
-    new_config.pdf_merge.input_dir = form.input_dir.strip()
-    new_config.pdf_merge.output_dir = form.output_dir.strip()
-    new_config.pdf_merge.source_a_filename = form.source_a_filename.strip()
-    new_config.pdf_merge.source_b_pattern = form.source_b_pattern.strip()
-    new_config.pdf_merge.source_c_pattern = form.source_c_pattern.strip()
-    new_config.pdf_merge.concat_order = [
-        s.strip() for s in form.concat_order.split(",") if s.strip()
-    ]
-    new_config.pdf_merge.user_name_bbox.x0 = float(form.bbox_x0)
-    new_config.pdf_merge.user_name_bbox.y0 = float(form.bbox_y0)
-    new_config.pdf_merge.user_name_bbox.x1 = float(form.bbox_x1)
-    new_config.pdf_merge.user_name_bbox.y1 = float(form.bbox_y1)
-    new_config.pdf_merge.user_name_bbox.dpi = int(form.bbox_dpi)
+    # bbox / concat_order は dataclass を再構築して __post_init__ で即時検証する
+    # （個別属性代入では bypass されるため、不正値が次回起動まで silent になる問題を回避）。
+    # 不正値（順序逆転 bbox / 未知 letter 等）は ValueError として呼出側に伝播し、
+    # 既存の messagebox.showerror で UI 表示される。
+    new_bbox = UserNameBBox(
+        x0=float(form.bbox_x0),
+        y0=float(form.bbox_y0),
+        x1=float(form.bbox_x1),
+        y1=float(form.bbox_y1),
+        dpi=int(form.bbox_dpi),
+    )
+    parsed_concat = cast(
+        list[ConcatSourceLetter],
+        [s.strip() for s in form.concat_order.split(",") if s.strip()],
+    )
+    new_config.pdf_merge = replace(
+        new_config.pdf_merge,
+        input_dir=form.input_dir.strip(),
+        output_dir=form.output_dir.strip(),
+        source_a_filename=form.source_a_filename.strip(),
+        source_b_pattern=form.source_b_pattern.strip(),
+        source_c_pattern=form.source_c_pattern.strip(),
+        concat_order=parsed_concat,
+        user_name_bbox=new_bbox,
+    )
     new_config.ocr_backend.endpoint_url = form.ocr_endpoint_url.strip()
     new_config.ocr_backend.api_key = form.ocr_api_key  # API Key は前後空白も有効値として尊重
     new_config.wiseman.exe_path = form.wiseman_exe_path.strip()

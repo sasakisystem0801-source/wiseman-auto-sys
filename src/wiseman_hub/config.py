@@ -11,7 +11,7 @@ import os
 from dataclasses import asdict, dataclass, field
 from glob import glob
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, get_args
 
 import tomlkit
 from tomlkit import TOMLDocument
@@ -23,6 +23,15 @@ logger = logging.getLogger(__name__)
 
 TableLike = Table | InlineTable
 _TABLE_LIKE_TYPES: tuple[type, ...] = (Table, InlineTable)
+
+ConcatSourceLetter = Literal["A", "B", "C"]
+# concat_order の語彙は ``ConcatSourceLetter`` を single source of truth として導出する。
+# D は ``source_d_filename`` 経由で末尾に追加される別系統のため、concat_order には含めない。
+VALID_CONCAT_LETTERS: frozenset[ConcatSourceLetter] = frozenset(get_args(ConcatSourceLetter))
+
+
+def _default_concat_order() -> list[ConcatSourceLetter]:
+    return ["A", "B", "C"]
 
 
 def _require_table(container: Any, key: str) -> TableLike:
@@ -74,23 +83,73 @@ class UpdaterConfig:
 
 @dataclass
 class OcrBackendConfig:
-    """OCRバックエンド（Cloud Runプロキシ）設定。詳細はADR-008参照。"""
+    """OCRバックエンド（Cloud Runプロキシ）設定。詳細はADR-008参照。
+
+    不変条件:
+        - timeout_sec > 0（HTTP リクエストタイムアウトは正の整数のみ）
+        - max_retries >= 0（再試行回数は非負）
+    endpoint_url / api_key は「未設定」状態を許容（``is_configured`` で判定）。
+    """
 
     endpoint_url: str = ""
     api_key: str = ""
     timeout_sec: int = 30
     max_retries: int = 3
 
+    def __post_init__(self) -> None:
+        if self.timeout_sec <= 0:
+            raise ValueError(
+                f"OcrBackendConfig.timeout_sec must be positive: {self.timeout_sec}"
+            )
+        if self.max_retries < 0:
+            raise ValueError(
+                f"OcrBackendConfig.max_retries must be non-negative: {self.max_retries}"
+            )
+
+    @property
+    def is_configured(self) -> bool:
+        """endpoint_url と api_key の両方が設定済みなら True（OCR 呼び出し可能）。"""
+        return bool(self.endpoint_url and self.api_key)
+
 
 @dataclass
 class UserNameBBox:
-    """利用者名が印字される固定矩形（PDFページ座標、ポイント単位）。"""
+    """利用者名が印字される固定矩形（PDFページ座標、ポイント単位）。
+
+    不変条件:
+        - dpi > 0（OCR 解像度は正の整数のみ、常時必須）
+        - configured 時のみ x0 < x1 かつ y0 < y1（反転 bbox は OCR 切り出しで空画像になる）
+
+    「未設定」状態（4 座標がすべて 0.0）は許容する。``AppConfig`` のデフォルト
+    インスタンス化で例外が出ないようにするため、座標未入力時は不変条件チェックを skip。
+    ``is_configured`` で運用側から判定する。
+    """
 
     x0: float = 0.0
     y0: float = 0.0
     x1: float = 0.0
     y1: float = 0.0
     dpi: int = 200
+
+    def __post_init__(self) -> None:
+        if self.dpi <= 0:
+            raise ValueError(f"UserNameBBox.dpi must be positive: {self.dpi}")
+        # 「未設定」判定は座標 4 値が全 0 で固定（is_configured の定義変更に依存しない）。
+        if self.x0 == 0.0 and self.y0 == 0.0 and self.x1 == 0.0 and self.y1 == 0.0:
+            return
+        if self.x0 >= self.x1:
+            raise ValueError(
+                f"UserNameBBox: x0 ({self.x0}) must be less than x1 ({self.x1})"
+            )
+        if self.y0 >= self.y1:
+            raise ValueError(
+                f"UserNameBBox: y0 ({self.y0}) must be less than y1 ({self.y1})"
+            )
+
+    @property
+    def is_configured(self) -> bool:
+        """4 座標いずれかが非ゼロなら configured（bbox が定義済み）。"""
+        return any(v != 0.0 for v in (self.x0, self.y0, self.x1, self.y1))
 
 
 @dataclass
@@ -124,11 +183,33 @@ class PdfMergeConfig:
     source_d_filename: str = ""
     source_b_pattern: str = "B_{name}.pdf"
     source_c_pattern: str = "C_{name}.pdf"
-    concat_order: list[str] = field(default_factory=lambda: ["A", "B", "C"])
+    concat_order: list[ConcatSourceLetter] = field(default_factory=_default_concat_order)
     user_name_bbox: UserNameBBox = field(default_factory=UserNameBBox)
     facility_root_dir: str = ""
     ex_source_dir: str = ""
     facility_aliases: dict[str, list[str]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """concat_order の不変条件を検証する。
+
+        TOML 由来の値は ``list[str]`` で渡るため runtime 検証で値域を担保する。
+        Literal 型注釈は静的検査（mypy）で API 直接呼び出し時のタイポを catch する用途。
+
+        ``facility_aliases`` の検証は ``load_config`` 側の ``_validate_facility_aliases`` が
+        担うため、ここでは触らない（dataclass 単体生成では検証されない既存設計を維持）。
+        """
+        if not self.concat_order:
+            raise ValueError("PdfMergeConfig.concat_order must not be empty")
+        unknown = [s for s in self.concat_order if s not in VALID_CONCAT_LETTERS]
+        if unknown:
+            raise ValueError(
+                f"PdfMergeConfig.concat_order contains unknown source(s): {unknown}; "
+                f"valid letters are {sorted(VALID_CONCAT_LETTERS)}"
+            )
+        if len(self.concat_order) != len(set(self.concat_order)):
+            raise ValueError(
+                f"PdfMergeConfig.concat_order contains duplicates: {self.concat_order}"
+            )
 
 
 @dataclass
