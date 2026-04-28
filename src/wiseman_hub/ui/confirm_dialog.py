@@ -109,8 +109,8 @@ _MSG_FILEDIALOG_ERROR_FMT = (
     "手動選択をキャンセル扱いとします。\n\n{type}"
 )
 
-_SOURCE_KIND_B: SourceKind = "B"
-_SOURCE_KIND_C: SourceKind = "C"
+_SOURCE_KIND_B = SourceKind.B
+_SOURCE_KIND_C = SourceKind.C
 
 
 # ---------------------------------------------------------------------------

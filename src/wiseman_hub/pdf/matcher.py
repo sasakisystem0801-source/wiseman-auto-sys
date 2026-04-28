@@ -21,7 +21,7 @@ import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Protocol
 
 _SIMILAR_DISTANCE_THRESHOLD = 2
 _MAX_SIMILAR_CANDIDATES = 3
@@ -33,7 +33,9 @@ class MatchStatus(StrEnum):
     NO_MATCH = "no_match"
 
 
-SourceKind = Literal["B", "C"]
+class SourceKind(StrEnum):
+    B = "B"
+    C = "C"
 
 
 @dataclass(frozen=True)
@@ -162,8 +164,8 @@ class KanjiMatcher:
 
         target = normalize_name(user_name)
 
-        b_files = self._collect_candidates(self._b_regex, "B", target)
-        c_files = self._collect_candidates(self._c_regex, "C", target)
+        b_files = self._collect_candidates(self._b_regex, SourceKind.B, target)
+        c_files = self._collect_candidates(self._c_regex, SourceKind.C, target)
 
         exact_b = next((c for c in b_files if c.distance == 0), None)
         exact_c = next((c for c in c_files if c.distance == 0), None)

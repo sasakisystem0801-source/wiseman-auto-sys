@@ -426,6 +426,10 @@ def _to_dict(session: Session) -> dict[str, Any]:
     d["config_snapshot"] = dict(session.config_snapshot)
     for cand, original in zip(d["candidates"], session.candidates, strict=True):
         cand["status"] = str(original.status)
+        for sim, sim_original in zip(
+            cand["similar_candidates"], original.similar_candidates, strict=True
+        ):
+            sim["kind"] = str(sim_original.kind)
     return d
 
 
@@ -692,14 +696,16 @@ def _candidate_from_dict(data: dict[str, Any], session_id: str) -> UserCandidate
             raise SessionCorruptedError(
                 f"similar_candidate in {session_id} missing required fields: {sim_missing}"
             )
-        if c["kind"] not in ("B", "C"):
+        try:
+            kind = SourceKind(c["kind"])
+        except ValueError as e:
             raise SessionCorruptedError(
                 f"invalid similar_candidate kind in {session_id}: {c['kind']!r}"
-            )
+            ) from e
         similar.append(
             CandidateState(
                 path=c["path"],
-                kind=c["kind"],
+                kind=kind,
                 distance=c["distance"],
                 extracted_name=c["extracted_name"],
             )

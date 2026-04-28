@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from wiseman_hub.pdf.matcher import CandidateFile, MatchResult, MatchStatus
+from wiseman_hub.pdf.matcher import CandidateFile, MatchResult, MatchStatus, SourceKind
 from wiseman_hub.pdf.session import (
     CandidateState,
     InvalidTransitionError,
@@ -151,6 +151,9 @@ class TestSaveLoad:
         assert loaded.candidates[0].similar_candidates[0].extracted_name == "塩津美貴子"
         assert isinstance(loaded.candidates, tuple)
         assert isinstance(loaded.candidates[0].similar_candidates, tuple)
+        loaded_kind = loaded.candidates[0].similar_candidates[0].kind
+        assert isinstance(loaded_kind, SourceKind)
+        assert loaded_kind == SourceKind.B
 
     def test_save_is_atomic_no_temp_file_left(self, tmp_path: Path) -> None:
         sessions_dir = tmp_path / ".sessions"
@@ -260,8 +263,18 @@ class TestLoadErrors:
             "output_path": None,
         }
 
-    def test_invalid_candidate_kind_raises(self, tmp_path: Path) -> None:
-        """similar_candidates 内の kind が B/C 以外の場合、破損扱いで拒否する。"""
+    @pytest.mark.parametrize(
+        "invalid_kind",
+        ["X", "", "a", "b", "c", "D", "BB"],
+    )
+    def test_invalid_candidate_kind_raises(
+        self, tmp_path: Path, invalid_kind: str
+    ) -> None:
+        """similar_candidates 内の kind が B/C 以外の場合、破損扱いで拒否する。
+
+        SourceKind StrEnum 化 (Issue #45) により、未知値/空文字/小文字/別記号などは
+        ``SourceKind(...)`` の ValueError 経由で SessionCorruptedError に翻訳される。
+        """
         sessions_dir = tmp_path / ".sessions"
         sessions_dir.mkdir()
         payload = self._candidate_payload(
@@ -274,7 +287,12 @@ class TestLoadErrors:
                 "matched_b_path": None,
                 "matched_c_path": None,
                 "similar_candidates": [
-                    {"path": "/tmp/a.pdf", "kind": "X", "distance": 1, "extracted_name": "a"}
+                    {
+                        "path": "/tmp/a.pdf",
+                        "kind": invalid_kind,
+                        "distance": 1,
+                        "extracted_name": "a",
+                    }
                 ],
             },
         )
