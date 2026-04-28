@@ -573,8 +573,13 @@ def main() -> None:
                 hub = WisemanHub(config_path=args.config)
             except (OSError, ValueError, TypeError):
                 # Issue #150: WisemanHub.__init__ 内で actionable な logger.error を
-                # 出力済み。CLI として config error は exit code 2 で識別可能にする
-                # （runtime エラーの 1 と区別、setup-time の問題であることを示す）。
+                # 出力済み。CLI 経路 (--rpa) で setup 失敗したことを別 logger
+                # (`__main__`) でも残し、launcher 経路と非対称にならないようにする
+                # (どちらの経路で失敗したかを log だけで識別可能にする)。
+                # exit code 2 = config error (runtime error 1 と区別、setup-time 問題)。
+                logger.error(
+                    "RPA 起動失敗: 設定エラーで中止 (config=%s)", args.config
+                )
                 sys.exit(2)
             hub.run()
         else:
@@ -588,11 +593,15 @@ def main() -> None:
                 config = load_config(config_path)
             except (OSError, ValueError, TypeError) as exc:
                 # Issue #150: launcher 経路でも RPA 経路と同様に actionable な
-                # exit を行う。ここでは WisemanHub.__init__ を経由しないため
-                # logger.error も合わせて発火する（型名のみではなく、__post_init__
-                # メッセージのフィールド情報を 1 行で残す）。
+                # exit を行う。WisemanHub.__init__ を経由しないため logger.error
+                # を直接発火する（フィールド情報 + config_path を 1 行で残し、
+                # `_validate_facility_aliases` の PII フリーメッセージは exc str 化
+                # で安全に出せる）。
                 logger.error(
-                    "設定ファイル読込エラー: %s: %s", type(exc).__name__, exc
+                    "設定ファイル読込エラー (config=%s): %s: %s",
+                    config_path,
+                    type(exc).__name__,
+                    exc,
                 )
                 sys.exit(2)
             # 設定コールバックで後から Launcher を参照する必要があるため、

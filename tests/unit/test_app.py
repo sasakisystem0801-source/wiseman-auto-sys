@@ -215,3 +215,54 @@ class TestWisemanHubLoadConfigErrors:
             WisemanHub(config_path=config_path)
 
         assert "max_retries" in str(exc_info.value)
+
+    def test_init_raises_oserror_when_config_path_is_directory(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Issue #150 HIGH-1: ディレクトリを config_path に指定 → IsADirectoryError (OSError)
+        でも actionable error が出る。`config_path` も log に含まれ setup 失敗の
+        診断材料となる（ファイル存在ではなく権限/ディレクトリ等の I/O 経路問題を区別可能）。
+        """
+        config_dir = tmp_path / "config_dir"
+        config_dir.mkdir()
+
+        with (
+            caplog.at_level(logging.ERROR, logger="wiseman_hub.app"),
+            pytest.raises(OSError),
+        ):
+            WisemanHub(config_path=config_dir)
+
+        assert "設定ファイル読込エラー" in caplog.text
+        assert str(config_dir) in caplog.text
+
+    def test_init_log_does_not_leak_alias_pii(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Issue #150 C1 (PII 防御): alias 衝突メッセージに alias / 事業所名が含まれない。
+
+        ADR-014 に準拠して `_validate_facility_aliases` の例外メッセージは構造的な
+        エラー種別のみ含み、事業所名・別名は含まない契約。logger.error は同じ exc を
+        str 化するため、alias 文字列が log に漏洩しないことを回帰テストで固定する
+        （将来 raise メッセージに alias を埋め戻す変更が入った場合に検出）。
+        """
+        config_path = tmp_path / "alias_conflict.toml"
+        config_path.write_text(
+            "[pdf_merge.facility_aliases]\n"
+            '"本田デイケア" = ["本田"]\n'
+            '"本田訪問看護" = ["本田"]\n',
+            encoding="utf-8",
+        )
+
+        with (
+            caplog.at_level(logging.ERROR, logger="wiseman_hub.app"),
+            pytest.raises(ValueError),
+        ):
+            WisemanHub(config_path=config_path)
+
+        # 構造的メッセージは含まれる（actionable category）
+        assert "facility_aliases" in caplog.text
+        assert "shared by multiple facilities" in caplog.text
+        # PII（alias 文字列・事業所名）は含まれない
+        assert "本田" not in caplog.text
+        assert "デイケア" not in caplog.text
+        assert "訪問看護" not in caplog.text

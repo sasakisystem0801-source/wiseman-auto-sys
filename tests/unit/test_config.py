@@ -889,7 +889,11 @@ facility_root_dir = "/srv/facility"
 """,
             encoding="utf-8",
         )
-        with pytest.raises(ValueError, match="facility_aliases.*本田"):
+        # PII 防御 (ADR-014 / Issue #150 C1 対応): エラーメッセージに alias 文字列
+        # ("本田" 等) を含めない設計に変更したため、構造的なメッセージのみ assert する。
+        with pytest.raises(
+            ValueError, match="facility_aliases.*shared by multiple facilities"
+        ):
             load_config(target)
 
     def test_facility_aliases_rejects_alias_equal_to_other_canonical_name(

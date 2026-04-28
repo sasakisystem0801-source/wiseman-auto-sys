@@ -259,6 +259,124 @@ def test_default_with_invalid_config_exits_two(
     launcher_class.assert_not_called()
 
 
+def test_default_with_aliases_typeerror_exits_two(
+    tmp_path: Path,
+    monkeypatch: Any,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Issue #150: launcher 経路でも TypeError (facility_aliases value not list) で
+    exit code 2。except 句の TypeError 部分が launcher 経路でも実機検証される。
+    """
+    import logging
+
+    config_file = tmp_path / "alias_typeerror.toml"
+    config_file.write_text(
+        "[pdf_merge.facility_aliases]\n"
+        'facility = "not_a_list"\n',
+        encoding="utf-8",
+    )
+
+    launcher_class = MagicMock()
+    monkeypatch.setattr("wiseman_hub.ui.launcher.Launcher", launcher_class)
+    monkeypatch.setattr(
+        sys, "argv", ["wiseman-hub", "--config", str(config_file)]
+    )
+
+    from wiseman_hub.__main__ import main
+
+    with (
+        caplog.at_level(logging.ERROR, logger="wiseman_hub.__main__"),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 2
+    assert "TypeError" in caplog.text
+    assert "facility_aliases value must be a list" in caplog.text
+    launcher_class.assert_not_called()
+
+
+def test_default_with_alias_conflict_does_not_leak_pii(
+    tmp_path: Path,
+    monkeypatch: Any,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Issue #150 C1 (PII 防御): launcher 経路でも alias 文字列が log に漏れない。
+
+    rpa 経路の test_init_log_does_not_leak_alias_pii と対をなすテスト。
+    `__main__` logger 経由でも構造的メッセージのみ表出することを契約として固定する。
+    """
+    import logging
+
+    config_file = tmp_path / "alias_conflict.toml"
+    config_file.write_text(
+        "[pdf_merge.facility_aliases]\n"
+        '"本田デイケア" = ["本田"]\n'
+        '"本田訪問看護" = ["本田"]\n',
+        encoding="utf-8",
+    )
+
+    launcher_class = MagicMock()
+    monkeypatch.setattr("wiseman_hub.ui.launcher.Launcher", launcher_class)
+    monkeypatch.setattr(
+        sys, "argv", ["wiseman-hub", "--config", str(config_file)]
+    )
+
+    from wiseman_hub.__main__ import main
+
+    with (
+        caplog.at_level(logging.ERROR, logger="wiseman_hub.__main__"),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 2
+    assert "facility_aliases" in caplog.text
+    assert "shared by multiple facilities" in caplog.text
+    # PII (alias 文字列・事業所名) が log に漏洩しないこと
+    assert "本田" not in caplog.text
+    assert "デイケア" not in caplog.text
+
+
+def test_rpa_failure_emits_main_logger_for_cli_context(
+    tmp_path: Path,
+    monkeypatch: Any,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Issue #150 HIGH-2: --rpa 経路の setup 失敗時に __main__ logger でも
+    CLI context (`RPA 起動失敗`) が記録される。
+
+    WisemanHub.__init__ の `wiseman_hub.app` logger と二重で `__main__` 側にも
+    残ることで、launcher 経路と非対称にならず、どちらの経路で setup が落ちたかを
+    grep で識別可能にする。
+    """
+    import logging
+
+    config_file = tmp_path / "bad.toml"
+    config_file.write_text(
+        "[ocr_backend]\ntimeout_sec = -1\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(
+        sys, "argv", ["wiseman-hub", "--rpa", "--config", str(config_file)]
+    )
+
+    from wiseman_hub.__main__ import main
+
+    with (
+        caplog.at_level(logging.ERROR),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 2
+    logger_names = {r.name for r in caplog.records}
+    assert "wiseman_hub.app" in logger_names
+    assert "wiseman_hub.__main__" in logger_names
+    assert "RPA 起動失敗" in caplog.text
+    assert str(config_file) in caplog.text
+
+
 def test_unexpected_exception_exits_one(monkeypatch: Any) -> None:
     """予期しない例外で exit code 1 終了する。"""
     launcher_class = MagicMock()

@@ -40,13 +40,18 @@ class WisemanHub:
         # Issue #150: load_config は不正 TOML / __post_init__ 検証 / facility_aliases
         # 検証で (OSError, ValueError, TypeError) を raise する可能性があるが、
         # 元実装は無捕捉で生 traceback を露出していた。__post_init__ 検証メッセージは
-        # フィールド名と値域の actionable info を含むため、ここで logger.error に
-        # 1 行で出してから caller (CLI) の exit code 制御へ委譲する。
+        # フィールド名と値域の actionable info を含み、`_validate_facility_aliases` も
+        # PII を含まない構造的メッセージに統一済み（C1 対応）のため、`exc` を str 化
+        # しても安全。`config_path` を併記して setup-time エラーの診断材料を提供し、
+        # caller (CLI) の exit code 制御へ委譲する。
         try:
             self.config: AppConfig = load_config(config_path)
         except (OSError, ValueError, TypeError) as exc:
             logger.error(
-                "設定ファイル読込エラー: %s: %s", type(exc).__name__, exc
+                "設定ファイル読込エラー (config=%s): %s: %s",
+                config_path,
+                type(exc).__name__,
+                exc,
             )
             raise
         self.output_dir = Path("data/exports")
