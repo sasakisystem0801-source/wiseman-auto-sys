@@ -10,7 +10,7 @@
 - 所要時間: **30-45 分**
   - Phase 0 事前確認 + main 同期 + 依存同期: 5-10 分
   - Phase 1 exe 再ビルド: 5 分
-  - Phase 2 配布 + config.toml 設定: 3-5 分
+  - Phase 2 配布 + config 編集 (`default.toml` または検証用 `test.toml`): 3-5 分
   - Phase 3 動作確認 (AC-1〜AC-14): 15-25 分
   - Phase 5 完走処理: 5 分
   - Phase 4 rollback は問題発生時のみ
@@ -115,7 +115,7 @@ Get-Item dist\wiseman_hub.exe | Format-List Name, Length, LastWriteTime
 
 ---
 
-## 📦 Phase 2: 配布 + config.toml 設定（3-5 分）
+## 📦 Phase 2: 配布 + config 編集（3-5 分）
 
 ### 2-1. exe 上書き
 
@@ -126,24 +126,41 @@ Get-Item "$HOME\wiseman-hub\wiseman_hub.exe" | Format-List LastWriteTime, Length
 
 **期待**: LastWriteTime が今、Length がビルド直後のサイズと一致。
 
-### 2-2. config.toml 編集（**PR1 で導入された ex_source_dir + facility_aliases**）
+### 2-2. config を編集して検証パスを設定（**重要: 本番 config 汚染防止**）
 
-`%USERPROFILE%\wiseman-hub\config.toml` を notepad で開き、`[pdf_merge]` セクション内に以下を追記:
+> ℹ️ **config パスについて**: frozen exe (PyInstaller) は `Path(sys.executable).parent / "config" / "default.toml"` を参照する（`__main__._default_config_path`）。本番 config の正しいパスは **`%USERPROFILE%\wiseman-hub\config\default.toml`**（旧記載 `%USERPROFILE%\wiseman-hub\config.toml` は誤り）。
+
+#### 推奨: 検証専用 config (`test.toml`) + `WISEMAN_HUB_CONFIG` 切替
+
+本番 config (`default.toml`) を直接編集すると、`facility_root_dir` が本番 NAS (`\\Tera-station\share\03.FAX(...)`) を指したまま検証用 alias が混ざる、または検証用パスを戻し忘れるリスクがある。**検証では `test.toml` を別途用意し、`WISEMAN_HUB_CONFIG` で参照を切り替える** 方式を推奨する（`__main__._default_config_path` 優先順位 1 位、未編集本番 config はそのまま残る）。
+
+```powershell
+# 1. リポジトリの test.toml.example を Windows 機にコピー
+Copy-Item "$HOME\Projects\wiseman-auto-sys\config\test.toml.example" `
+  "$HOME\wiseman-hub\config\test.toml"
+
+# 2. 検証用ローカルパスを作成（本番 NAS は絶対に使わない）
+New-Item -ItemType Directory -Force -Path "$HOME\wiseman-test\ex_source"
+New-Item -ItemType Directory -Force -Path "$HOME\wiseman-test\facilities\本田デイサービス"
+New-Item -ItemType Directory -Force -Path "$HOME\wiseman-test\facilities\本田訪問サービス"
+
+# 3. test.toml を notepad で開き、検証用 ex_source_dir / facility_root_dir / facility_aliases を編集
+notepad "$HOME\wiseman-hub\config\test.toml"
+```
+
+`test.toml` の主要編集ポイント:
 
 ```toml
 [pdf_merge]
-ex_source_dir = "C:\\Users\\sasak\\OneDrive\\デスクトップ\\本田様\\ex_source"  # ← Phase 0-5 でサンプル配置したフォルダ
-facility_root_dir = "<既存の事業所ルートパス>"
-input_dir = ""
-output_dir = ""
+ex_source_dir = "C:\\Users\\sasak\\wiseman-test\\ex_source"
+facility_root_dir = "C:\\Users\\sasak\\wiseman-test\\facilities"
 
 [pdf_merge.facility_aliases]
-# 例: alias を 1-2 件登録して AC-3 / AC-11 を検証
-# canonical（key）は facility_root_dir 配下に実在するフォルダ名と完全一致が必要
-# alias（value）は ex_ ファイル名に含まれる短縮名・別表記を列挙
-# 値は必ず list 型で書く（"abc" 単独は禁止 — 文字単位分解されるため）
-"<本田様の事業所正式名>" = ["<短縮名 1>", "<別表記 1>"]
+"本田デイサービス" = ["HD"]
+"本田訪問サービス" = ["HV"]
 ```
+
+検証用 `.ex_` fixture (3 種: SUCCESS / AMBIGUOUS / UNMATCHED) の調達・命名・配置構造は [`ex-test-fixtures.md`](./ex-test-fixtures.md) 参照。
 
 **重要な検証ルール**（ADR-014 §facility_aliases 入力検証）:
 1. canonical（key）は空文字列でない
@@ -153,7 +170,52 @@ output_dir = ""
 5. 異なる canonical 間で同じ alias を共有しない（global 一意性）
 6. alias が他 canonical と一致しない
 
-違反時は起動時に ValueError / TypeError で fail-fast。
+違反時は起動時に `ValueError` / `TypeError` で fail-fast。
+
+#### `WISEMAN_HUB_CONFIG` 注入での起動方法（**ショートカット起動の落とし穴に注意**）
+
+PowerShell で `$env:WISEMAN_HUB_CONFIG = "..."` を設定しても、**デスクトップショートカットをエクスプローラーからダブルクリック起動した exe はその環境変数を継承しない**（ショートカット起動は explorer.exe からの spawn で、PowerShell セッションのプロセス環境とは別ツリーになるため）。検証時は **PowerShell 経由で起動** する以下の 2 方式のいずれかを使う:
+
+**方式 A（簡易、その場で投入）**:
+
+```powershell
+$env:WISEMAN_HUB_CONFIG = "$HOME\wiseman-hub\config\test.toml"
+Start-Process "$HOME\wiseman-hub\wiseman_hub.exe"
+```
+
+**方式 B（推奨、検証セッション毎に再現可能）**: 検証専用 `.ps1` ラッパーを作成
+
+```powershell
+@'
+$env:WISEMAN_HUB_CONFIG = "$HOME\wiseman-hub\config\test.toml"
+& "$HOME\wiseman-hub\wiseman_hub.exe"
+'@ | Out-File -FilePath "$HOME\wiseman-test\wiseman-test.ps1" -Encoding utf8
+
+# 以後の起動:
+& "$HOME\wiseman-test\wiseman-test.ps1"
+```
+
+> ⚠️ **方式 C（ユーザー環境変数として永続設定）は非推奨**: `[Environment]::SetEnvironmentVariable("WISEMAN_HUB_CONFIG", ...)` で永続化すると、検証完了後の解除を忘れると本番起動も `test.toml` を読み続ける致命的事故になる。検証セッション毎にスコープ限定する方式 A / B を使う。
+
+#### `test.toml` が読み込まれたことを確認
+
+Launcher 起動後、ExExtractorDialog を開いて `ex_source_dir` 表示欄を確認:
+
+- ✅ `C:\Users\...\wiseman-test\ex_source` が表示されている → 成功
+- ❌ 本番 NAS パス（`\\Tera-station\share\...`）が表示された → `WISEMAN_HUB_CONFIG` が継承されていない。**即終了して起動方法を見直す**（ショートカット起動を疑う）
+
+#### 代替: 本番 `default.toml` を直接編集（非推奨、Phase 5-2 で戻し作業必須）
+
+何らかの理由で `WISEMAN_HUB_CONFIG` 経路を使えない場合のみ、`%USERPROFILE%\wiseman-hub\config\default.toml` を notepad で開き、`[pdf_merge]` セクション内に以下を追記する（Phase 5-2 で必ず元に戻す）:
+
+```toml
+[pdf_merge]
+ex_source_dir = "C:\\Users\\sasak\\OneDrive\\デスクトップ\\本田様\\ex_source"  # 検証用に一時設定
+# facility_root_dir は本番 NAS のまま使う場合は本番 NAS 上に検証用フォルダを作らない／検証用 .ex_ も投入しない こと
+
+[pdf_merge.facility_aliases]
+"<本田様の事業所正式名>" = ["<短縮名 1>", "<別表記 1>"]
+```
 
 ### 2-3. orphan alias を意図的に作成（AC-11 検証用、任意）
 
@@ -194,7 +256,7 @@ Start-Process "$HOME\wiseman-hub\wiseman_hub.exe"
 
 | 手順 | 期待 |
 |------|------|
-| 1. config.toml の `ex_source_dir` が ExExtractorDialog の表示欄に反映 | ✅ Phase 2-2 で設定したパスが表示 |
+| 1. 使用中の config（`default.toml` または `test.toml`）の `ex_source_dir` が ExExtractorDialog の表示欄に反映 | ✅ Phase 2-2 で設定したパスが表示 |
 | 2. 「実行」ボタンが活性化（disabled でない） | ✅ |
 | 3. ex_source_dir に有効な `.ex_` ファイルが配置されている状態で「実行」が成功する | ✅ |
 
@@ -452,7 +514,7 @@ UI とは独立した CLI 経路の動作確認。各シナリオ実行前に **
 
 ```powershell
 cd $HOME\Projects\wiseman-auto-sys
-$exSrc = "<config.toml の ex_source_dir パス>"
+$exSrc = "<使用中の config (default.toml または test.toml) の ex_source_dir パス>"
 
 # シナリオ 1: 全件 SUCCESS
 Remove-Item "$exSrc\*.ex_" -ErrorAction SilentlyContinue
@@ -516,7 +578,9 @@ Start-Process "$dist\wiseman_hub.exe"
 ```
 
 **rollback 完了後**:
-1. **最優先**: config.toml の検証用 alias（`"消えた施設"` 等）と `ex_source_dir` 検証用パスを削除し、元の運用設定に戻す（旧 exe は本 PR で導入された TOML スキーマを期待しないため、検証用設定を残すと旧 exe の動作に影響する可能性）
+1. **最優先**:
+   - 検証で `test.toml` 経路を使った場合: `WISEMAN_HUB_CONFIG` 環境変数を解除（`Remove-Item Env:\WISEMAN_HUB_CONFIG -ErrorAction SilentlyContinue`）。本番 `default.toml` は未編集のはずなので追加クリーンアップ不要。
+   - 万一 `default.toml` を直接編集していた場合: 検証用 alias（`"消えた施設"` 等）と `ex_source_dir` 検証用パスを削除し、元の運用設定に戻す（旧 exe は本 PR で導入された TOML スキーマを期待しないため、検証用設定を残すと旧 exe の動作に影響する可能性）
 2. 旧 exe で動作することを確認
 3. 失敗 Phase のスクショ + `build.log` + `run.log`（PII 墨塗り済）を共有
 4. 次セッションで原因調査
@@ -546,9 +610,24 @@ Start-Process "$dist\wiseman_hub.exe"
 | AC-13 CLI 終了コード 0/1/2 | ✅ / ❌ | |
 | AC-14 既存機能 regression smoke | ✅ / ❌ | |
 
-### 5-2. config.toml の検証用設定をクリーンアップ
+### 5-2. 検証用 config / 環境変数のクリーンアップ
 
-検証で追加した orphan alias（`"消えた施設"` 等）を削除し、本番運用の facility_aliases 設定に戻す。
+**検証で `test.toml` 経路を使った場合（推奨方式）**:
+
+```powershell
+# 1. WISEMAN_HUB_CONFIG 環境変数を解除（本番起動で本番 config が読まれるよう戻す）
+Remove-Item Env:\WISEMAN_HUB_CONFIG -ErrorAction SilentlyContinue
+
+# 2. 検証用 .ex_ + 振り分け済 PDF + 事業所フォルダを完全削除（PII 含むため確実に削除）
+Remove-Item -Recurse -Force "$HOME\wiseman-test"
+
+# 3. test.toml そのものの削除（次回検証時に test.toml.example から作り直す）
+Remove-Item "$HOME\wiseman-hub\config\test.toml" -ErrorAction SilentlyContinue
+```
+
+**`default.toml` を直接編集していた場合（非推奨方式）**:
+
+検証で追加した orphan alias（`"消えた施設"` 等）と検証用 `ex_source_dir` を削除し、本番運用の `facility_aliases` 設定に戻す。本番 `facility_root_dir` も検証パスに書き換えていた場合は元の本番 NAS パスに戻す。
 
 ### 5-3. バックアップ exe の整理
 
