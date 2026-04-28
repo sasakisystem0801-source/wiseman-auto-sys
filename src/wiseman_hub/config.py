@@ -324,8 +324,29 @@ def load_config(path: Path | None = None) -> AppConfig:
     ocr_backend_data = data.get("ocr_backend", {})
     pdf_merge_data = dict(data.get("pdf_merge", {}))
 
+    # Issue #150 (PR #157 codex セカンドオピニオン High): TOML として合法な
+    # `reports = "bad"` 等の型違反は元実装で AttributeError を raise していたため
+    # __main__.main() の (OSError, ValueError, TypeError) 捕捉から漏れて exit code 1
+    # に落ちていた。設定形状エラーは exit code 2 (config error) 扱いに寄せるべく、
+    # `_coerce_facility_aliases` と同じく TypeError で fail-fast する。
+    reports_section = data.get("reports", {})
+    if not isinstance(reports_section, dict):
+        raise TypeError(
+            f"[reports] section must be a table; "
+            f"got {type(reports_section).__name__}"
+        )
+    targets = reports_section.get("targets", [])
+    if not isinstance(targets, list):
+        raise TypeError(
+            f"[reports].targets must be a list; got {type(targets).__name__}"
+        )
     reports: list[ReportTarget] = []
-    for target in data.get("reports", {}).get("targets", []):
+    for target in targets:
+        if not isinstance(target, dict):
+            raise TypeError(
+                f"[reports].targets entries must be tables; "
+                f"got {type(target).__name__}"
+            )
         reports.append(ReportTarget(**target))
 
     bbox_data = pdf_merge_data.pop("user_name_bbox", {})

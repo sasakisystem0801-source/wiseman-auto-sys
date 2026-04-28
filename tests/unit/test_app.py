@@ -182,6 +182,22 @@ class TestWisemanHubLoadConfigErrors:
                 "TOMLDecodeError",
                 id="malformed_toml_syntax",
             ),
+            # Issue #150 (PR #157 codex 指摘 High): reports 形状エラーを exit code 2 側に寄せる
+            pytest.param(
+                'reports = "not_a_table"\n',
+                "[reports] section must be a table",
+                id="reports_section_not_table",
+            ),
+            pytest.param(
+                '[reports]\ntargets = "bad"\n',
+                "[reports].targets must be a list",
+                id="reports_targets_not_list",
+            ),
+            pytest.param(
+                '[reports]\ntargets = ["not_a_dict"]\n',
+                "[reports].targets entries must be tables",
+                id="reports_targets_entry_not_dict",
+            ),
         ],
     )
     def test_init_raises_with_actionable_log(
@@ -235,23 +251,58 @@ class TestWisemanHubLoadConfigErrors:
         assert "設定ファイル読込エラー" in caplog.text
         assert str(config_dir) in caplog.text
 
+    @pytest.mark.parametrize(
+        "alias_toml,expected_struct_msg,forbidden_pii",
+        [
+            # duplicate alias across facilities
+            pytest.param(
+                '[pdf_merge.facility_aliases]\n'
+                '"本田デイケア" = ["本田"]\n'
+                '"本田訪問看護" = ["本田"]\n',
+                "shared by multiple facilities",
+                ("本田", "デイケア", "訪問看護"),
+                id="duplicate_across_facilities",
+            ),
+            # duplicate alias within same facility
+            pytest.param(
+                '[pdf_merge.facility_aliases]\n'
+                '"本田デイケア" = ["本田DC", "本田DC"]\n',
+                "duplicate alias within",
+                ("本田", "デイケア", "本田DC"),
+                id="duplicate_within_same_facility",
+            ),
+            # alias conflicts with another facility's canonical name
+            pytest.param(
+                '[pdf_merge.facility_aliases]\n'
+                '"本田デイケア" = ["きなり"]\n'
+                '"きなり" = ["きなり訪問"]\n',
+                "conflicts with another facility",
+                ("本田", "デイケア", "きなり", "訪問"),
+                id="alias_conflicts_with_canonical",
+            ),
+        ],
+    )
     def test_init_log_does_not_leak_alias_pii(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+        alias_toml: str,
+        expected_struct_msg: str,
+        forbidden_pii: tuple[str, ...],
     ) -> None:
-        """Issue #150 C1 (PII 防御): alias 衝突メッセージに alias / 事業所名が含まれない。
+        """Issue #150 C1 (PII 防御): alias 検証エラーメッセージに alias / 事業所名が含まれない。
 
         ADR-014 に準拠して `_validate_facility_aliases` の例外メッセージは構造的な
         エラー種別のみ含み、事業所名・別名は含まない契約。logger.error は同じ exc を
         str 化するため、alias 文字列が log に漏洩しないことを回帰テストで固定する
         （将来 raise メッセージに alias を埋め戻す変更が入った場合に検出）。
+
+        codex セカンドオピニオン Low #1 対応: duplicate-across だけでなく
+        duplicate-within / canonical-conflict も明示テストし、3 経路すべてで PII
+        漏洩しないことを契約として固定する。
         """
-        config_path = tmp_path / "alias_conflict.toml"
-        config_path.write_text(
-            "[pdf_merge.facility_aliases]\n"
-            '"本田デイケア" = ["本田"]\n'
-            '"本田訪問看護" = ["本田"]\n',
-            encoding="utf-8",
-        )
+        config_path = tmp_path / "alias_invalid.toml"
+        config_path.write_text(alias_toml, encoding="utf-8")
 
         with (
             caplog.at_level(logging.ERROR, logger="wiseman_hub.app"),
@@ -261,8 +312,9 @@ class TestWisemanHubLoadConfigErrors:
 
         # 構造的メッセージは含まれる（actionable category）
         assert "facility_aliases" in caplog.text
-        assert "shared by multiple facilities" in caplog.text
+        assert expected_struct_msg in caplog.text
         # PII（alias 文字列・事業所名）は含まれない
-        assert "本田" not in caplog.text
-        assert "デイケア" not in caplog.text
-        assert "訪問看護" not in caplog.text
+        for pii_token in forbidden_pii:
+            assert pii_token not in caplog.text, (
+                f"PII token {pii_token!r} leaked to log: {caplog.text!r}"
+            )
