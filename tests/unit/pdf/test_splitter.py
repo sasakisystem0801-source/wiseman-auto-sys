@@ -121,29 +121,17 @@ def test_missing_file_raises_file_not_found(
         split_pdf_with_bbox(tmp_path / "nonexistent.pdf", default_bbox)
 
 
-def test_invalid_bbox_x_order_raises(single_page_pdf: Path) -> None:
-    invalid = UserNameBBox(x0=200.0, y0=40.0, x1=100.0, y1=80.0, dpi=150)
-    with pytest.raises(ValueError, match="bbox"):
-        split_pdf_with_bbox(single_page_pdf, invalid)
-
-
-def test_invalid_bbox_y_order_raises(single_page_pdf: Path) -> None:
-    invalid = UserNameBBox(x0=40.0, y0=100.0, x1=200.0, y1=40.0, dpi=150)
-    with pytest.raises(ValueError, match="bbox"):
-        split_pdf_with_bbox(single_page_pdf, invalid)
+# bbox の順序・dpi 検証は UserNameBBox.__post_init__ に移動（Issue #27）。
+# 該当テストは tests/unit/test_config.py::TestUserNameBBoxValidation に集約済み。
+# splitter 側の defensive layer は残しているが、今は dataclass 構築時に先行 raise されるため
+# 単体テストからは到達できない。
 
 
 def test_bbox_outside_page_raises(single_page_pdf: Path) -> None:
-    # A4幅595ptを超える
+    # A4幅595ptを超える（splitter 固有のページコンテキスト検証）
     out_of_page = UserNameBBox(x0=40.0, y0=40.0, x1=9999.0, y1=80.0, dpi=150)
     with pytest.raises(ValueError, match="bbox"):
         split_pdf_with_bbox(single_page_pdf, out_of_page)
-
-
-def test_invalid_dpi_raises(single_page_pdf: Path) -> None:
-    zero_dpi = UserNameBBox(x0=40.0, y0=40.0, x1=200.0, y1=80.0, dpi=0)
-    with pytest.raises(ValueError, match="dpi"):
-        split_pdf_with_bbox(single_page_pdf, zero_dpi)
 
 
 # --- fitz エラー翻訳 ---------------------------------------------------

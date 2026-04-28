@@ -206,26 +206,10 @@ def test_missing_d_file_raises_when_configured(
 # --- 設定エラー ---------------------------------------------------
 
 
-def test_unknown_concat_order_kind_raises(
-    input_dir: Path, output_path: Path
-) -> None:
-    cfg = PdfMergeConfig(
-        input_dir=str(input_dir),
-        concat_order=["A", "X"],  # "X" は未知
-        source_d_filename="",
-    )
-    with pytest.raises(ValueError, match="concat_order"):
-        merge_user_pdfs([_user("u1")], cfg, output_path)
-
-
-def test_empty_concat_order_raises(input_dir: Path, output_path: Path) -> None:
-    cfg = PdfMergeConfig(
-        input_dir=str(input_dir),
-        concat_order=[],
-        source_d_filename="",
-    )
-    with pytest.raises(ValueError, match="concat_order"):
-        merge_user_pdfs([_user("u1")], cfg, output_path)
+# concat_order の値域・空チェックは PdfMergeConfig.__post_init__ に移動（Issue #27）。
+# 該当テストは tests/unit/test_config.py::TestPdfMergeConfigValidation に集約済み。
+# merger 側の _validate_concat_order は defensive layer として残しているが、
+# dataclass 構築時に先行 raise されるため単体テストからは到達できない。
 
 
 def test_empty_users_with_only_d(

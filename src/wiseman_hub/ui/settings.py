@@ -21,9 +21,9 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from tkinter import filedialog, ttk
-from typing import Any, assert_never
+from typing import Any, assert_never, cast
 
-from wiseman_hub.config import AppConfig, save_config
+from wiseman_hub.config import AppConfig, ConcatSourceLetter, save_config
 from wiseman_hub.ui.common import (
     MessageBoxLike,
     assert_main_thread,
@@ -154,9 +154,12 @@ def form_to_config(form: SettingsForm, base: AppConfig) -> AppConfig:
     new_config.pdf_merge.source_a_filename = form.source_a_filename.strip()
     new_config.pdf_merge.source_b_pattern = form.source_b_pattern.strip()
     new_config.pdf_merge.source_c_pattern = form.source_c_pattern.strip()
-    new_config.pdf_merge.concat_order = [
-        s.strip() for s in form.concat_order.split(",") if s.strip()
-    ]
+    # フォーム由来 str → Literal cast（再代入のため __post_init__ は走らない；
+    # 不正値は次回 load_config 時の __post_init__ で fail-fast）。
+    new_config.pdf_merge.concat_order = cast(
+        list[ConcatSourceLetter],
+        [s.strip() for s in form.concat_order.split(",") if s.strip()],
+    )
     new_config.pdf_merge.user_name_bbox.x0 = float(form.bbox_x0)
     new_config.pdf_merge.user_name_bbox.y0 = float(form.bbox_y0)
     new_config.pdf_merge.user_name_bbox.x1 = float(form.bbox_x1)

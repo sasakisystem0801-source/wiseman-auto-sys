@@ -25,17 +25,17 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 import fitz
 
-from wiseman_hub.config import PdfMergeConfig
+from wiseman_hub.config import VALID_CONCAT_LETTERS, PdfMergeConfig
 from wiseman_hub.utils.atomic_io import save_atomically
 
 logger = logging.getLogger(__name__)
 
-_KNOWN_KINDS = frozenset({"A", "B", "C"})
 # user_name に含まれてはいけない文字（パス操作・ヌルバイト）
 _FORBIDDEN_NAME_CHARS = frozenset("/\\\x00")
 
@@ -78,13 +78,16 @@ class MergeReport:
         return bool(self.missing_sources)
 
 
-def _validate_concat_order(concat_order: list[str]) -> None:
+def _validate_concat_order(concat_order: Sequence[str]) -> None:
+    """defensive layer: 値域は PdfMergeConfig.__post_init__ で先行検証済みだが、
+    直接 merger を呼ぶ経路（テスト・デバッグ等）からの不正入力に備える。"""
     if not concat_order:
         raise ValueError("concat_order is empty; must contain at least one of A/B/C")
-    unknown = [k for k in concat_order if k not in _KNOWN_KINDS]
+    unknown = [k for k in concat_order if k not in VALID_CONCAT_LETTERS]
     if unknown:
         raise ValueError(
-            f"concat_order contains unknown kinds {unknown}; allowed: {sorted(_KNOWN_KINDS)}"
+            f"concat_order contains unknown kinds {unknown}; "
+            f"allowed: {sorted(VALID_CONCAT_LETTERS)}"
         )
 
 
