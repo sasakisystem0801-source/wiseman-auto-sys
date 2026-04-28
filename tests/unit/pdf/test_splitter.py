@@ -121,7 +121,7 @@ def test_missing_file_raises_file_not_found(
         split_pdf_with_bbox(tmp_path / "nonexistent.pdf", default_bbox)
 
 
-# bbox の順序・dpi 検証は UserNameBBox.__post_init__ に移動（Issue #27）。
+# bbox の順序・dpi 検証は UserNameBBox.__post_init__ に移動。
 # 該当テストは tests/unit/test_config.py::TestUserNameBBoxValidation に集約済み。
 # splitter 側の defensive layer は残しているが、今は dataclass 構築時に先行 raise されるため
 # 単体テストからは到達できない。

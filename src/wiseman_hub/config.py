@@ -27,7 +27,7 @@ _TABLE_LIKE_TYPES: tuple[type, ...] = (Table, InlineTable)
 ConcatSourceLetter = Literal["A", "B", "C"]
 # concat_order の語彙は ``ConcatSourceLetter`` を single source of truth として導出する。
 # D は ``source_d_filename`` 経由で末尾に追加される別系統のため、concat_order には含めない。
-VALID_CONCAT_LETTERS: frozenset[str] = frozenset(get_args(ConcatSourceLetter))
+VALID_CONCAT_LETTERS: frozenset[ConcatSourceLetter] = frozenset(get_args(ConcatSourceLetter))
 
 
 def _default_concat_order() -> list[ConcatSourceLetter]:
@@ -85,7 +85,7 @@ class UpdaterConfig:
 class OcrBackendConfig:
     """OCRバックエンド（Cloud Runプロキシ）設定。詳細はADR-008参照。
 
-    不変条件（Issue #27）:
+    不変条件:
         - timeout_sec > 0（HTTP リクエストタイムアウトは正の整数のみ）
         - max_retries >= 0（再試行回数は非負）
     endpoint_url / api_key は「未設定」状態を許容（``is_configured`` で判定）。
@@ -116,7 +116,7 @@ class OcrBackendConfig:
 class UserNameBBox:
     """利用者名が印字される固定矩形（PDFページ座標、ポイント単位）。
 
-    不変条件（Issue #27）:
+    不変条件:
         - dpi > 0（OCR 解像度は正の整数のみ、常時必須）
         - configured 時のみ x0 < x1 かつ y0 < y1（反転 bbox は OCR 切り出しで空画像になる）
 
@@ -190,7 +190,7 @@ class PdfMergeConfig:
     facility_aliases: dict[str, list[str]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        """concat_order の不変条件を検証する（Issue #27）。
+        """concat_order の不変条件を検証する。
 
         TOML 由来の値は ``list[str]`` で渡るため runtime 検証で値域を担保する。
         Literal 型注釈は静的検査（mypy）で API 直接呼び出し時のタイポを catch する用途。

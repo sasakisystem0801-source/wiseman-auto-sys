@@ -206,7 +206,7 @@ def test_missing_d_file_raises_when_configured(
 # --- 設定エラー ---------------------------------------------------
 
 
-# concat_order の値域・空チェックは PdfMergeConfig.__post_init__ に移動（Issue #27）。
+# concat_order の値域・空チェックは PdfMergeConfig.__post_init__ に移動。
 # 該当テストは tests/unit/test_config.py::TestPdfMergeConfigValidation に集約済み。
 # merger 側の _validate_concat_order は defensive layer として残しているが、
 # dataclass 構築時に先行 raise されるため単体テストからは到達できない。
