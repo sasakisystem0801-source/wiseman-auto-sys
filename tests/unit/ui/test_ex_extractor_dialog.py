@@ -397,6 +397,186 @@ class TestExExtractorDialogSmoke:
         finally:
             root.destroy()
 
+    def test_browse_source_updates_view_model_and_label(
+        self, tmp_path: Path
+    ) -> None:
+        """Issue #155: 取込元選択ボタン → askdirectory 経由で source_dir 更新。
+
+        - mock filedialog で folder browser をシミュレート
+        - 選択結果が ``vm.source_dir`` に反映される
+        - Label 表示も新パスに更新される (TOML 編集なしで都度変更可能)
+        """
+        import tkinter as tk
+
+        from wiseman_hub.config import PdfMergeConfig
+
+        original_source = tmp_path / "original_source"
+        original_source.mkdir()
+        new_source = tmp_path / "new_source"
+        new_source.mkdir()
+        root_dir = tmp_path / "facility_root"
+        root_dir.mkdir()
+
+        config = AppConfig(
+            pdf_merge=PdfMergeConfig(
+                ex_source_dir=str(original_source),
+                facility_root_dir=str(root_dir),
+            )
+        )
+
+        # mock askdirectory: 新フォルダを返す
+        fake_askdirectory = MagicMock(return_value=str(new_source))
+
+        root = tk.Tk()
+        try:
+            dialog = ExExtractorDialog(
+                parent=root,
+                config=config,
+                adapter=FakeSfxAdapter(),
+                filedialog_askdirectory=fake_askdirectory,
+            )
+            assert dialog.view_model.source_dir == original_source
+            dialog._on_browse_source()
+
+            # askdirectory が呼ばれたことを確認 (parent + title 引数)
+            fake_askdirectory.assert_called_once()
+            _, kwargs = fake_askdirectory.call_args
+            assert "parent" in kwargs
+            assert "取込元" in kwargs.get("title", "")
+
+            # vm.source_dir が新フォルダに更新されている
+            assert dialog.view_model.source_dir == new_source
+            # Label 表示も新フォルダ (existing なので _LBL_NOT_SET ではない)
+            assert dialog._lbl_source.cget("text") == str(new_source)
+            dialog._on_close()
+        finally:
+            root.destroy()
+
+    def test_browse_source_cancel_keeps_current_value(
+        self, tmp_path: Path
+    ) -> None:
+        """Issue #155: askdirectory がキャンセル (空文字 return) → current value 保持。"""
+        import tkinter as tk
+
+        from wiseman_hub.config import PdfMergeConfig
+
+        original_source = tmp_path / "original_source"
+        original_source.mkdir()
+        root_dir = tmp_path / "facility_root"
+        root_dir.mkdir()
+
+        config = AppConfig(
+            pdf_merge=PdfMergeConfig(
+                ex_source_dir=str(original_source),
+                facility_root_dir=str(root_dir),
+            )
+        )
+
+        # mock askdirectory: 空文字 (キャンセル)
+        fake_askdirectory = MagicMock(return_value="")
+
+        root = tk.Tk()
+        try:
+            dialog = ExExtractorDialog(
+                parent=root,
+                config=config,
+                adapter=FakeSfxAdapter(),
+                filedialog_askdirectory=fake_askdirectory,
+            )
+            dialog._on_browse_source()
+
+            # キャンセルなので source_dir は変わらない
+            assert dialog.view_model.source_dir == original_source
+            dialog._on_close()
+        finally:
+            root.destroy()
+
+    def test_browse_source_invalid_path_shows_error_and_keeps_value(
+        self, tmp_path: Path
+    ) -> None:
+        """Issue #155: askdirectory が存在しないパスを返した場合、messagebox で
+        通知し source_dir は更新しない (defensive: シンボリックリンク切れ等)。
+        """
+        import tkinter as tk
+
+        from wiseman_hub.config import PdfMergeConfig
+
+        original_source = tmp_path / "original_source"
+        original_source.mkdir()
+        root_dir = tmp_path / "facility_root"
+        root_dir.mkdir()
+        nonexistent = tmp_path / "does_not_exist"
+
+        config = AppConfig(
+            pdf_merge=PdfMergeConfig(
+                ex_source_dir=str(original_source),
+                facility_root_dir=str(root_dir),
+            )
+        )
+
+        fake_askdirectory = MagicMock(return_value=str(nonexistent))
+        messagebox = MagicMock()
+
+        root = tk.Tk()
+        try:
+            dialog = ExExtractorDialog(
+                parent=root,
+                config=config,
+                adapter=FakeSfxAdapter(),
+                filedialog_askdirectory=fake_askdirectory,
+                messagebox_fn=messagebox,
+            )
+            dialog._on_browse_source()
+
+            # source_dir は更新されない
+            assert dialog.view_model.source_dir == original_source
+            # messagebox.showerror が 1 回呼ばれている
+            messagebox.showerror.assert_called_once()
+            args, _ = messagebox.showerror.call_args
+            assert "無効" in args[0] or "取込元" in args[0]
+            dialog._on_close()
+        finally:
+            root.destroy()
+
+    def test_browse_source_disabled_during_busy(
+        self, tmp_path: Path
+    ) -> None:
+        """Issue #155: 実行中 (BUSY) は browse ボタンが disable されている。
+
+        race / 実行中に source_dir が変更されることを防ぐ (UI レベルの予防)。
+        """
+        import tkinter as tk
+
+        from wiseman_hub.config import PdfMergeConfig
+
+        source = tmp_path / "ex_source"
+        source.mkdir()
+        root_dir = tmp_path / "facility_root"
+        root_dir.mkdir()
+
+        config = AppConfig(
+            pdf_merge=PdfMergeConfig(
+                ex_source_dir=str(source),
+                facility_root_dir=str(root_dir),
+            )
+        )
+
+        root = tk.Tk()
+        try:
+            dialog = ExExtractorDialog(
+                parent=root, config=config, adapter=FakeSfxAdapter()
+            )
+            # 初期状態: IDLE → browse は normal
+            assert str(dialog._btn_browse_source.cget("state")) == "normal"
+
+            # BUSY に遷移
+            dialog.view_model.transition_to_busy()
+            dialog._redraw()
+            assert str(dialog._btn_browse_source.cget("state")) == "disabled"
+            dialog._on_close()
+        finally:
+            root.destroy()
+
     def test_run_button_invokes_extract_fn_and_shows_result(
         self, tmp_path: Path
     ) -> None:
