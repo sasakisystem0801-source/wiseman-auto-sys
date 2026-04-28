@@ -60,7 +60,7 @@ output_format = "csv"
     # 新セクション未指定時はデフォルト値を保持（OcrBackendConfig / PdfMergeConfig）
     assert config.ocr_backend.endpoint_url == ""
     assert config.ocr_backend.timeout_sec == 30
-    assert config.pdf_merge.concat_order == ["A", "B", "C"]
+    assert config.pdf_merge.concat_order == ("A", "B", "C")
     assert config.pdf_merge.user_name_bbox.dpi == 200
 
 
@@ -111,7 +111,7 @@ dpi = 300
     assert config.pdf_merge.source_d_filename == "common_footer.pdf"
     assert config.pdf_merge.source_b_pattern == "invoice_{name}.pdf"
     assert config.pdf_merge.source_c_pattern == "receipt_{name}.pdf"
-    assert config.pdf_merge.concat_order == ["A", "C", "B"]
+    assert config.pdf_merge.concat_order == ("A", "C", "B")
 
     # UserNameBBox（ネスト、pop 特殊処理の検証ポイント）
     assert config.pdf_merge.user_name_bbox.x0 == 50.0
@@ -467,7 +467,7 @@ dpi = 250
         assert reloaded.pdf_merge.source_d_filename == "D.pdf"
         assert reloaded.pdf_merge.source_b_pattern == "B_{name}.pdf"
         assert reloaded.pdf_merge.source_c_pattern == "C_{name}.pdf"
-        assert reloaded.pdf_merge.concat_order == ["A", "C", "B"]
+        assert reloaded.pdf_merge.concat_order == ("A", "C", "B")
         assert reloaded.pdf_merge.user_name_bbox.x0 == 11.0
         assert reloaded.pdf_merge.user_name_bbox.dpi == 250
         # 新フィールドが反映されること
@@ -490,12 +490,12 @@ dpi = 250
             "[pdf_merge]\nconcat_order = [\"A\", \"B\", \"C\"]\n", encoding="utf-8"
         )
         cfg = load_config(target)
-        cfg.pdf_merge.concat_order = ["C", "A", "B"]
+        cfg.pdf_merge.concat_order = ("C", "A", "B")
 
         save_config(cfg, target)
 
         reloaded = load_config(target)
-        assert reloaded.pdf_merge.concat_order == ["C", "A", "B"]
+        assert reloaded.pdf_merge.concat_order == ("C", "A", "B")
 
     # --- ex_source_dir (.ex_ ファイル取込元フォルダ) ---
 
@@ -587,7 +587,7 @@ dpi = 250
         assert reloaded.pdf_merge.source_d_filename == "D.pdf"
         assert reloaded.pdf_merge.source_b_pattern == "B_{name}.pdf"
         assert reloaded.pdf_merge.source_c_pattern == "C_{name}.pdf"
-        assert reloaded.pdf_merge.concat_order == ["A", "C", "B"]
+        assert reloaded.pdf_merge.concat_order == ("A", "C", "B")
         assert reloaded.pdf_merge.facility_root_dir == "/srv/facility"
         assert reloaded.pdf_merge.user_name_bbox.x0 == 11.0
         assert reloaded.pdf_merge.user_name_bbox.dpi == 250
@@ -697,7 +697,7 @@ dpi = 250
         assert reloaded.pdf_merge.source_d_filename == "D.pdf"
         assert reloaded.pdf_merge.source_b_pattern == "B_{name}.pdf"
         assert reloaded.pdf_merge.source_c_pattern == "C_{name}.pdf"
-        assert reloaded.pdf_merge.concat_order == ["A", "C", "B"]
+        assert reloaded.pdf_merge.concat_order == ("A", "C", "B")
         assert reloaded.pdf_merge.facility_root_dir == "/srv/facility"
         assert reloaded.pdf_merge.ex_source_dir == "/srv/ex"
         assert reloaded.pdf_merge.user_name_bbox.x0 == 11.0
@@ -1121,12 +1121,12 @@ class TestPdfMergeConfigValidation:
 
     def test_default_concat_order_valid(self) -> None:
         cfg = PdfMergeConfig()
-        assert cfg.concat_order == ["A", "B", "C"]
+        assert cfg.concat_order == ("A", "B", "C")
 
     def test_concat_order_subset_valid(self) -> None:
         """部分集合（例: A,C のみ）も許容。"""
         cfg = PdfMergeConfig(concat_order=["A", "C"])
-        assert cfg.concat_order == ["A", "C"]
+        assert cfg.concat_order == ("A", "C")
 
     def test_concat_order_empty_raises(self) -> None:
         with pytest.raises(ValueError, match="must not be empty"):
@@ -1152,16 +1152,80 @@ class TestPdfMergeConfigValidation:
         with pytest.raises(ValueError, match="duplicates"):
             PdfMergeConfig(concat_order=["A", "B", "A"])
 
-    def test_post_construction_mutation_reaches_defensive_layer(self) -> None:
-        """``__post_init__`` は構築時のみ走るため、構築後に list を mutate すると
-        値域チェックを bypass できる。merger.py の ``_validate_concat_order``
-        defensive layer がこの bypass 経路を catch することを保証する（regression guard）。"""
-        from wiseman_hub.pdf.merger import _validate_concat_order
+    def test_post_construction_mutation_blocked_at_type_level(self) -> None:
+        """Issue #151: ``concat_order`` を tuple 化したため、構築後の in-place
+        mutation (``cfg.concat_order.append(...)`` / ``[i] = ...`` 等) は
+        AttributeError / TypeError で型レベル阻止される。
 
+        元実装では ``list`` だったため ``__post_init__`` の値域チェックを bypass
+        できる経路が残っていた (merger.py の ``_validate_concat_order`` defensive
+        layer 頼み)。Issue #151 で tuple 化したことで mutation 経路自体が構造的に
+        阻止される設計に昇格した。defensive layer は依然として merger 直接呼出時の
+        外部入力検証 (``Sequence[str]`` 引数) で有効。
+        """
         cfg = PdfMergeConfig()
-        cfg.concat_order.append(cast(ConcatSourceLetter, "X"))  # 構築後 mutation
-        with pytest.raises(ValueError, match="unknown kinds"):
-            _validate_concat_order(cfg.concat_order)
+        # tuple は append / insert / __setitem__ いずれも持たない → mutation 不可
+        assert isinstance(cfg.concat_order, tuple)
+        assert not hasattr(cfg.concat_order, "append")
+        assert not hasattr(cfg.concat_order, "insert")
+        # __setitem__ は in-place 代入を試みると TypeError ('tuple' object does not support item assignment)
+        with pytest.raises(TypeError, match="does not support item assignment"):
+            cfg.concat_order[0] = cast(ConcatSourceLetter, "X")  # type: ignore[index]
+
+    def test_post_init_normalizes_list_input_to_tuple(self) -> None:
+        """Issue #151: __post_init__ で list 入力を tuple 化する fail-safe を検証。
+
+        TOML / settings.py / 既存テストから ``concat_order=[...]`` で渡されても、
+        最終的に tuple として保持され、構築後 mutation を防ぐ契約を保証する
+        (呼出側の漏れを防ぐ DRY な設計)。
+        """
+        # cast は意図的な型嘘（runtime 正規化を検証する目的）
+        cfg = PdfMergeConfig(concat_order=cast(
+            "tuple[ConcatSourceLetter, ...]", ["A", "B", "C"]
+        ))
+        assert cfg.concat_order == ("A", "B", "C")
+        assert isinstance(cfg.concat_order, tuple)
+
+    def test_load_config_normalizes_toml_list_to_tuple(
+        self, tmp_path: Path
+    ) -> None:
+        """Issue #151 (pr-test-analyzer Critical Gap #1): TOML 由来の
+        ``list`` が ``__post_init__`` 経由で tuple に正規化されることを契約化。
+
+        既存 assertion (`== ("C", "A", "B")`) は値の比較のみで型を検証しないため、
+        TOML→list→tuple 経路が将来 bypass される regression を直接 catch する
+        ``isinstance`` チェックを別軸で追加する。
+        """
+        target = tmp_path / "concat_tuple.toml"
+        target.write_text(
+            '[pdf_merge]\nconcat_order = ["C", "A", "B"]\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(target)
+        assert isinstance(cfg.pdf_merge.concat_order, tuple)
+        assert cfg.pdf_merge.concat_order == ("C", "A", "B")
+
+    def test_iadd_does_not_bypass_post_init_validation_in_place(self) -> None:
+        """Issue #151 (pr-test-analyzer Important #3): tuple は ``+=`` で
+        in-place mutation できないが、Python 仕様上 **新規 tuple への再代入** に
+        fall back する。再代入は ``__post_init__`` を経由しないため値域検証を
+        bypass できる。本テストは「型レベルでは阻止できない」契約を明示し、
+        将来 ``frozen=True`` 化で全置換も阻止する選択肢を検討する根拠とする。
+
+        実害: ``cfg.concat_order += ("X",)`` で未知 letter を入れた状態で
+        merger.py に渡すと、defensive layer (``_validate_concat_order``) が
+        ``ValueError`` で catch する設計のため運用上は安全。
+        """
+        cfg = PdfMergeConfig()
+        original_id = id(cfg.concat_order)
+        # `cfg.concat_order = cfg.concat_order + (...,)` と等価 (tuple は __iadd__ なし)
+        cfg.concat_order += (cast(ConcatSourceLetter, "X"),)
+        # 同オブジェクトでなく新規 tuple に置き換わっている (in-place ではない)
+        assert id(cfg.concat_order) != original_id
+        assert isinstance(cfg.concat_order, tuple)
+        # 値域違反は __post_init__ を経由しないため bypass されている (defensive
+        # layer で守る前提): tuple 内に "X" が入っているが ValueError は raise されない
+        assert "X" in cfg.concat_order
 
 
 class TestLoadConfigWithValidation:

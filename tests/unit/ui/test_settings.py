@@ -230,7 +230,7 @@ class TestFormFromConfig:
         base.pdf_merge.source_a_filename = "A.pdf"
         base.pdf_merge.user_name_bbox.x0 = 1.5
         base.pdf_merge.user_name_bbox.dpi = 300
-        base.pdf_merge.concat_order = ["B", "A", "C"]
+        base.pdf_merge.concat_order = ("B", "A", "C")
         base.ocr_backend.endpoint_url = "https://api"
         base.ocr_backend.api_key = "key"
         base.wiseman.exe_path = "C:/Wiseman/app.exe"
@@ -281,7 +281,7 @@ class TestFormToConfig:
         assert new_cfg.ocr_backend.api_key == "secret"
         assert new_cfg.pdf_merge.user_name_bbox.x0 == 10.0
         assert new_cfg.pdf_merge.user_name_bbox.dpi == 200
-        assert new_cfg.pdf_merge.concat_order == ["A", "B", "C"]
+        assert new_cfg.pdf_merge.concat_order == ("A", "B", "C")
 
 
 # ---------------------------------------------------------------------------
