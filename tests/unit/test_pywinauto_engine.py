@@ -54,6 +54,20 @@ _MOD_KEY = "wiseman_hub.rpa.pywinauto_engine"
 _saved_modules: dict[str, object] = {}
 _mock_user32 = MagicMock()
 
+# Issue #14: 例外階層を patch.dict(sys.modules) の with ブロック「前」に import する。
+# patch.dict は with 終了時に「with 内で追加された sys.modules キー」を削除する仕様の
+# ため、with 内で base が初回 load されると、with 終了後にテスト本体が base を再
+# import する際に別クラスが生成され、pywinauto_engine.py が保持する例外クラスと
+# 不一致 (pytest.raises がマッチしない) になる。
+from wiseman_hub.rpa.base import (  # noqa: E402
+    CsvFileNotFoundError,
+    ExportCsvError,
+    FileNameFieldNotFoundError,
+    MdiChildNotFoundError,
+    SaveButtonNotFoundError,
+    SaveDialogNotShownError,
+)
+
 for _k in list(sys.modules):
     if _k.startswith(_MOD_KEY):
         _saved_modules[_k] = sys.modules.pop(_k)
@@ -287,7 +301,7 @@ class TestExportCsv:
             engine.export_csv(Path("/tmp"))
 
     def test_btnprint_uses_bm_click_postmessage(self, engine_with_main: PywinautoEngine) -> None:
-        """btnPrint は BM_CLICK (PostMessage) でクリックされる"""
+        """btnPrint は BM_CLICK (PostMessage) でクリックされる (Issue #14 後も維持)"""
         mock_child = MagicMock()
         mock_child.exists.return_value = True
         engine_with_main._main_window.child_window.return_value = mock_child
@@ -296,15 +310,120 @@ class TestExportCsv:
         mock_btn_wrapper.handle = 0xBBBB
         mock_child.child_window.return_value.wrapper_object.return_value = mock_btn_wrapper
 
-        # auto_export.csv が見つからず、ダイアログも見つからないケース
+        # auto_export.csv が見つからず、ダイアログも見つからない → SaveDialogNotShownError
         engine_with_main._find_auto_export_csv = MagicMock(return_value=None)
         engine_with_main._app.window.side_effect = _ElementNotFoundError("no dialog")
 
-        with patch("time.sleep"):
-            result = engine_with_main.export_csv(Path("/tmp/test_out"))
+        with patch("time.sleep"), pytest.raises(SaveDialogNotShownError):
+            engine_with_main.export_csv(Path("/tmp/test_out"))
 
-        assert result is None
         _mock_user32.PostMessageW.assert_called_with(0xBBBB, 0x00F5, 0, 0)
+
+
+# ── Issue #14: export_csv 失敗モード区別化 ─────────────────────────
+
+
+class TestExportCsvFailureModes:
+    """5 つの失敗モードがそれぞれ対応する ExportCsvError サブクラスを raise すること。"""
+
+    def test_exception_hierarchy(self) -> None:
+        """すべての失敗モード例外が ExportCsvError を継承する。"""
+        for cls in (
+            MdiChildNotFoundError,
+            SaveDialogNotShownError,
+            FileNameFieldNotFoundError,
+            SaveButtonNotFoundError,
+            CsvFileNotFoundError,
+        ):
+            assert issubclass(cls, ExportCsvError)
+            assert issubclass(cls, RuntimeError)
+
+    def test_raises_mdi_child_not_found(
+        self, engine_with_main: PywinautoEngine, tmp_path: Path
+    ) -> None:
+        """active MDI 子ウィンドウが取れない場合は MdiChildNotFoundError"""
+        engine_with_main._get_active_mdi_child = MagicMock(return_value=None)
+
+        with pytest.raises(MdiChildNotFoundError, match="MDI 子ウィンドウ"):
+            engine_with_main.export_csv(tmp_path)
+
+    def test_raises_save_dialog_not_shown(
+        self, engine_with_main: PywinautoEngine, tmp_path: Path
+    ) -> None:
+        """auto_export.csv なし + ダイアログ未出現 → SaveDialogNotShownError、context に title_re 含む"""
+        mock_child = MagicMock()
+        mock_child.exists.return_value = True
+        engine_with_main._main_window.child_window.return_value = mock_child
+        engine_with_main._find_auto_export_csv = MagicMock(return_value=None)
+        engine_with_main._app.window.side_effect = _PywinautoTimeoutError("timeout")
+
+        with patch("time.sleep"), pytest.raises(SaveDialogNotShownError) as exc_info:
+            engine_with_main.export_csv(tmp_path)
+
+        assert "title_re" in str(exc_info.value)
+
+    def test_raises_filename_field_not_found(
+        self, engine_with_main: PywinautoEngine, tmp_path: Path
+    ) -> None:
+        """ダイアログ表示済だが全 selector で入力欄不在 → FileNameFieldNotFoundError、selector list 含む"""
+        mock_child = MagicMock()
+        mock_child.exists.return_value = True
+        engine_with_main._main_window.child_window.return_value = mock_child
+        engine_with_main._find_auto_export_csv = MagicMock(return_value=None)
+
+        mock_dialog = MagicMock()
+        # ダイアログ表示は成功 (wait OK)
+        engine_with_main._app.window.return_value = mock_dialog
+        # 全 selector で ElementNotFoundError
+        mock_dialog.child_window.return_value.set_edit_text.side_effect = (
+            _ElementNotFoundError("no field")
+        )
+
+        with patch("time.sleep"), pytest.raises(
+            FileNameFieldNotFoundError, match="FileNameControlHost"
+        ):
+            engine_with_main.export_csv(tmp_path)
+
+    def test_raises_save_button_not_found(
+        self, engine_with_main: PywinautoEngine, tmp_path: Path
+    ) -> None:
+        """ファイル名入力成功後、保存ボタン全 selector 失敗 → SaveButtonNotFoundError"""
+        mock_child = MagicMock()
+        mock_child.exists.return_value = True
+        engine_with_main._main_window.child_window.return_value = mock_child
+        engine_with_main._find_auto_export_csv = MagicMock(return_value=None)
+
+        mock_dialog = MagicMock()
+        engine_with_main._app.window.return_value = mock_dialog
+
+        # ファイル名 selector の最初 (FileNameControlHost) は成功、保存ボタンは全失敗。
+        # set_edit_text は成功する (default MagicMock の挙動) ため side_effect 設定なし。
+        # click_input を ElementNotFoundError にして保存ボタン全 selector を失敗させる。
+        mock_dialog.child_window.return_value.click_input.side_effect = (
+            _ElementNotFoundError("no save button")
+        )
+
+        with patch("time.sleep"), pytest.raises(SaveButtonNotFoundError, match="btnSave"):
+            engine_with_main.export_csv(tmp_path)
+
+    def test_raises_csv_file_not_found(
+        self, engine_with_main: PywinautoEngine, tmp_path: Path
+    ) -> None:
+        """全操作成功だが csv_path に出力されない → CsvFileNotFoundError、期待パス含む"""
+        mock_child = MagicMock()
+        mock_child.exists.return_value = True
+        engine_with_main._main_window.child_window.return_value = mock_child
+        engine_with_main._find_auto_export_csv = MagicMock(return_value=None)
+
+        mock_dialog = MagicMock()
+        engine_with_main._app.window.return_value = mock_dialog
+        # set_edit_text / click_input は default MagicMock で成功扱い (side_effect なし)。
+        # csv_path.exists() は False のまま (ファイル未作成)。
+
+        with patch("time.sleep"), pytest.raises(CsvFileNotFoundError) as exc_info:
+            engine_with_main.export_csv(tmp_path)
+
+        assert str(tmp_path) in str(exc_info.value)
 
 
 # ── B5/B6: close_wiseman ─────────────────────────────────────────

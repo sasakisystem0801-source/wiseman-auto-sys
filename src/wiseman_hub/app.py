@@ -8,7 +8,7 @@ from pathlib import Path
 
 from wiseman_hub.cloud.storage import upload_files
 from wiseman_hub.config import AppConfig, load_config
-from wiseman_hub.rpa.base import RPAEngine
+from wiseman_hub.rpa.base import ExportCsvError, RPAEngine
 
 logger = logging.getLogger(__name__)
 
@@ -70,11 +70,20 @@ class WisemanHub:
         csv_files: list[Path] = []
         for report in self.config.reports:
             logger.info("  帳票: %s (メニュー: %s)", report.name, " → ".join(report.menu_path))
-            self.rpa.navigate_menu(report.menu_path)
-            path = self.rpa.export_csv(self.output_dir)
-            if path:
+            try:
+                self.rpa.navigate_menu(report.menu_path)
+                path = self.rpa.export_csv(self.output_dir)
                 csv_files.append(path)
-            self.rpa.close_current_window()
+                self.rpa.close_current_window()
+            except ExportCsvError as e:
+                # 1 帳票の export_csv 失敗は他の帳票処理を停止させない (Issue #14)。
+                # 失敗時は MDI 状態が不定 (例: MdiChildNotFoundError では active 子
+                # ウィンドウが存在しない) のため close_current_window はスキップし、
+                # 次の report の navigate_menu で再遷移を試みる。
+                # 失敗原因は ExportCsvError サブクラスの型で判別可能。
+                logger.error(
+                    "CSV抽出失敗: %s (%s: %s)", report.name, type(e).__name__, e
+                )
 
         if not csv_files:
             logger.warning("CSVファイルが抽出されませんでした")

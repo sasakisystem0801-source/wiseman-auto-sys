@@ -6,6 +6,35 @@ import abc
 from pathlib import Path
 
 
+class ExportCsvError(RuntimeError):
+    """``export_csv`` 失敗の基底例外 (Issue #14)。
+
+    呼び出し元はこの基底を catch することで全 export_csv 失敗を一括処理できる。
+    具体的な失敗モードを区別したい場合はサブクラスで catch する。
+    """
+
+
+class MdiChildNotFoundError(ExportCsvError):
+    """アクティブ MDI 子ウィンドウが見つからない。"""
+
+
+class SaveDialogNotShownError(ExportCsvError):
+    """保存ダイアログが期待時間内に表示されない。"""
+
+
+class FileNameFieldNotFoundError(ExportCsvError):
+    """保存ダイアログ内のファイル名入力欄を全 selector で発見できない。"""
+
+
+class SaveButtonNotFoundError(ExportCsvError):
+    """保存ダイアログ内の保存ボタンを全 selector で発見できない。"""
+
+
+class CsvFileNotFoundError(ExportCsvError):
+    """保存処理後に CSV ファイルが期待パスに作成されていない (待機タイムアウト
+    または保存自体の失敗の両方を含む)。"""
+
+
 class RPAEngine(abc.ABC):
     """ワイズマンGUI操作の抽象インターフェース。
 
@@ -55,7 +84,7 @@ class RPAEngine(abc.ABC):
         """
 
     @abc.abstractmethod
-    def export_csv(self, output_dir: Path) -> Path | None:
+    def export_csv(self, output_dir: Path) -> Path:
         """現在の画面からCSVエクスポートを実行する。
 
         操作フロー:
@@ -65,7 +94,16 @@ class RPAEngine(abc.ABC):
         4. [保存] クリック
 
         Returns:
-            保存されたCSVファイルのパス。失敗時はNone。
+            保存されたCSVファイルのパス。
+
+        Raises:
+            ExportCsvError: 失敗時は本基底例外のサブクラスを raise する (Issue #14):
+
+                - ``MdiChildNotFoundError``: アクティブ MDI 子ウィンドウ未取得
+                - ``SaveDialogNotShownError``: 保存ダイアログ未出現
+                - ``FileNameFieldNotFoundError``: ファイル名入力欄未発見
+                - ``SaveButtonNotFoundError``: 保存ボタン未発見
+                - ``CsvFileNotFoundError``: 保存後 CSV ファイル未存在
         """
 
     @abc.abstractmethod

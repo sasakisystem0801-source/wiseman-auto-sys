@@ -10,7 +10,14 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from wiseman_hub.rpa.base import RPAEngine
+from wiseman_hub.rpa.base import (
+    CsvFileNotFoundError,
+    FileNameFieldNotFoundError,
+    MdiChildNotFoundError,
+    RPAEngine,
+    SaveButtonNotFoundError,
+    SaveDialogNotShownError,
+)
 
 if TYPE_CHECKING:
     from pywinauto.application import WindowSpecification
@@ -316,12 +323,15 @@ class PywinautoEngine(RPAEngine):
         time.sleep(1)
         logger.info("メニュー遷移完了: %s", menu_string)
 
-    def export_csv(self, output_dir: Path) -> Path | None:
+    def export_csv(self, output_dir: Path) -> Path:
         """現在の画面からCSVエクスポートを実行する。
 
         Mock app の印刷ボタンは exe ディレクトリに auto_export.csv を直接出力する。
         本番では SaveFileDialog が表示されるが、CI 環境では Windows 共通ダイアログの
         検出・操作が不安定なため、ダイアログレスのアプローチを採用。
+
+        Raises:
+            ExportCsvError: 失敗モード別のサブクラス例外を raise する (Issue #14)。
         """
         if self._main_window is None:
             raise RuntimeError("メインウィンドウが未接続です")
@@ -333,7 +343,9 @@ class PywinautoEngine(RPAEngine):
         active_child = self._get_active_mdi_child()
         if active_child is None:
             logger.error("MDI子ウィンドウが見つかりません")
-            return None
+            raise MdiChildNotFoundError(
+                "アクティブな MDI 子ウィンドウが見つかりません"
+            )
 
         # BM_CLICK (PostMessage) で印刷ボタンをクリック。
         # click_input() は CI の active desktop 制約で不安定なため、
@@ -362,42 +374,53 @@ class PywinautoEngine(RPAEngine):
             return csv_path
 
         # フォールバック: 保存ダイアログ経由（本番 Wiseman 向け）
+        save_dialog_title_re = ".*保存.*|.*名前.*|.*Save.*"
         try:
-            save_dlg = self._app.window(title_re=".*保存.*|.*名前.*|.*Save.*")
+            save_dlg = self._app.window(title_re=save_dialog_title_re)
             save_dlg.wait("visible", timeout=10)
-        except (ElementNotFoundError, PywinautoTimeoutError):
+        except (ElementNotFoundError, PywinautoTimeoutError) as e:
             logger.error("保存ダイアログが表示されません")
-            return None
+            raise SaveDialogNotShownError(
+                f"保存ダイアログが表示されません (title_re={save_dialog_title_re!r}, timeout=10s)"
+            ) from e
 
-        for selector in [
-            lambda d: d.child_window(auto_id="FileNameControlHost"),
-            lambda d: d.child_window(auto_id="txtFileName"),
-            lambda d: d.child_window(control_type="Edit"),
-        ]:
+        filename_selectors: list[dict[str, str]] = [
+            {"auto_id": "FileNameControlHost"},
+            {"auto_id": "txtFileName"},
+            {"control_type": "Edit"},
+        ]
+        for spec in filename_selectors:
             try:
-                selector(save_dlg).set_edit_text(str(csv_path))
+                save_dlg.child_window(**spec).set_edit_text(str(csv_path))
                 break
             except (ElementNotFoundError, PywinautoTimeoutError, AttributeError):
                 continue
         else:
             logger.warning("ファイル名入力欄が見つかりません")
-            return None
+            raise FileNameFieldNotFoundError(
+                "保存ダイアログ内のファイル名入力欄が全 selector で発見できません: "
+                + ", ".join(repr(s) for s in filename_selectors)
+            )
 
         time.sleep(0.5)
 
-        for selector in [
-            lambda d: d.child_window(auto_id="btnSave"),
-            lambda d: d.child_window(title_re=".*保存.*", control_type="Button"),
-            lambda d: d.child_window(title="Save", control_type="Button"),
-        ]:
+        save_button_selectors: list[dict[str, str]] = [
+            {"auto_id": "btnSave"},
+            {"title_re": ".*保存.*", "control_type": "Button"},
+            {"title": "Save", "control_type": "Button"},
+        ]
+        for spec in save_button_selectors:
             try:
-                selector(save_dlg).click_input()
+                save_dlg.child_window(**spec).click_input()
                 break
             except (ElementNotFoundError, PywinautoTimeoutError):
                 continue
         else:
             logger.warning("保存ボタンが見つかりません")
-            return None
+            raise SaveButtonNotFoundError(
+                "保存ダイアログ内の保存ボタンが全 selector で発見できません: "
+                + ", ".join(repr(s) for s in save_button_selectors)
+            )
 
         time.sleep(1)
 
@@ -406,7 +429,9 @@ class PywinautoEngine(RPAEngine):
             return csv_path
 
         logger.warning("CSVファイルが見つかりません: %s", csv_path)
-        return None
+        raise CsvFileNotFoundError(
+            f"保存処理後 1 秒待機しても CSV ファイルが期待パスに作成されていません: {csv_path}"
+        )
 
     def _find_auto_export_csv(self) -> Path | None:
         """Mock app が直接出力した auto_export.csv を探す。"""

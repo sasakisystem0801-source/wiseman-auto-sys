@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from wiseman_hub.app import WisemanHub
+from wiseman_hub.rpa.base import MdiChildNotFoundError
 from wiseman_hub.rpa.mock_engine import MockEngine
 
 
@@ -85,3 +86,56 @@ class TestWisemanHubWithMock:
         config_path = self._create_config_toml(tmp_path)
         hub = WisemanHub(config_path=config_path)
         assert type(hub.rpa).__name__ == "MockEngine"
+
+    @patch("wiseman_hub.app.upload_files", return_value=["gs://test-bucket/r2.csv"])
+    def test_pipeline_continues_on_export_csv_error(
+        self, mock_upload: object, tmp_path: Path
+    ) -> None:
+        """1 帳票が ExportCsvError でも他の帳票処理が継続される (Issue #14)。
+
+        ExportCsvError サブクラスの try/except 互換実装の検証:
+        - 1 回目の export_csv で例外 → 該当 report をスキップして次へ
+        - 2 回目の export_csv は成功 → csv_files に追加され upload される
+        """
+        config_path = tmp_path / "two_reports.toml"
+        config_path.write_text(
+            '[wiseman]\n'
+            'exe_path = "C:\\\\wiseman.exe"\n'
+            '\n'
+            '[reports]\n'
+            'targets = [\n'
+            '  { name = "失敗帳票", menu_path = ["A"], output_format = "csv" },\n'
+            '  { name = "成功帳票", menu_path = ["B"], output_format = "csv" },\n'
+            ']\n'
+            '\n'
+            '[gcp]\n'
+            'project_id = "test-project"\n'
+            'bucket_name = "test-bucket"\n',
+            encoding="utf-8",
+        )
+        engine = MockEngine()
+        hub = WisemanHub(config_path=config_path, rpa_engine=engine)
+        hub.output_dir = tmp_path / "exports"
+
+        real_export = engine.export_csv
+        call_count = [0]
+
+        def export_csv_side_effect(output_dir: Path) -> Path:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise MdiChildNotFoundError("test failure")
+            return real_export(output_dir)
+
+        with patch.object(engine, "export_csv", side_effect=export_csv_side_effect):
+            hub.run()
+
+        # 両 report 分 export_csv が試行されたこと
+        assert call_count[0] == 2
+        # 成功した 1 ファイルだけが upload される
+        mock_upload.assert_called_once()
+        uploaded_files = mock_upload.call_args.args[1]
+        assert len(uploaded_files) == 1
+        # 失敗 report では close_current_window がスキップ、成功 report のみ呼ばれる
+        # (AC-6: MDI 状態不定時の不正なウィンドウ操作を防ぐ)
+        close_calls = [c for c in engine.call_log if "close_current_window" in c]
+        assert len(close_calls) == 1
