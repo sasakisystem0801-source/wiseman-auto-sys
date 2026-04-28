@@ -160,9 +160,12 @@ def form_to_config(form: SettingsForm, base: AppConfig) -> AppConfig:
         y1=float(form.bbox_y1),
         dpi=int(form.bbox_dpi),
     )
+    # Issue #151: concat_order は tuple 化して mutation bypass を構造的に防ぐ。
+    # __post_init__ 側にも fail-safe 変換があるが、settings 経由でも明示 tuple
+    # で渡すことで呼出側の型契約と一致させる。
     parsed_concat = cast(
-        list[ConcatSourceLetter],
-        [s.strip() for s in form.concat_order.split(",") if s.strip()],
+        tuple[ConcatSourceLetter, ...],
+        tuple(s.strip() for s in form.concat_order.split(",") if s.strip()),
     )
     new_config.pdf_merge = replace(
         new_config.pdf_merge,

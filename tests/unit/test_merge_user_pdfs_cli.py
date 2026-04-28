@@ -94,7 +94,7 @@ def _make_config(tmp_path: Path) -> AppConfig:
         source_d_filename="",
         source_b_pattern="B_{name}.pdf",
         source_c_pattern="C_{name}.pdf",
-        concat_order=["A", "B", "C"],
+        concat_order=("A", "B", "C"),
         user_name_bbox=UserNameBBox(x0=40.0, y0=40.0, x1=200.0, y1=80.0, dpi=100),
     )
     cfg.ocr_backend = OcrBackendConfig(

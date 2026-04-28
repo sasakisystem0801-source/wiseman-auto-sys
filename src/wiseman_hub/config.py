@@ -30,8 +30,8 @@ ConcatSourceLetter = Literal["A", "B", "C"]
 VALID_CONCAT_LETTERS: frozenset[ConcatSourceLetter] = frozenset(get_args(ConcatSourceLetter))
 
 
-def _default_concat_order() -> list[ConcatSourceLetter]:
-    return ["A", "B", "C"]
+def _default_concat_order() -> tuple[ConcatSourceLetter, ...]:
+    return ("A", "B", "C")
 
 
 def _require_table(container: Any, key: str) -> TableLike:
@@ -183,7 +183,7 @@ class PdfMergeConfig:
     source_d_filename: str = ""
     source_b_pattern: str = "B_{name}.pdf"
     source_c_pattern: str = "C_{name}.pdf"
-    concat_order: list[ConcatSourceLetter] = field(default_factory=_default_concat_order)
+    concat_order: tuple[ConcatSourceLetter, ...] = field(default_factory=_default_concat_order)
     user_name_bbox: UserNameBBox = field(default_factory=UserNameBBox)
     facility_root_dir: str = ""
     ex_source_dir: str = ""
@@ -195,9 +195,17 @@ class PdfMergeConfig:
         TOML 由来の値は ``list[str]`` で渡るため runtime 検証で値域を担保する。
         Literal 型注釈は静的検査（mypy）で API 直接呼び出し時のタイポを catch する用途。
 
+        Issue #151: 型注釈を tuple に変更したが、TOML / settings.py / 既存テスト
+        経由で list が渡る経路が残るため、ここで tuple 化して mutation bypass
+        (``cfg.concat_order.append("X")`` 等で __post_init__ 検証を迂回する経路)
+        を構造的に防ぐ。dataclass は型強制しないため、呼出側の漏れを fail-safe に
+        吸収する責務を __post_init__ に集約する。
+
         ``facility_aliases`` の検証は ``load_config`` 側の ``_validate_facility_aliases`` が
         担うため、ここでは触らない（dataclass 単体生成では検証されない既存設計を維持）。
         """
+        if not isinstance(self.concat_order, tuple):
+            self.concat_order = tuple(self.concat_order)
         if not self.concat_order:
             raise ValueError("PdfMergeConfig.concat_order must not be empty")
         unknown = [s for s in self.concat_order if s not in VALID_CONCAT_LETTERS]
