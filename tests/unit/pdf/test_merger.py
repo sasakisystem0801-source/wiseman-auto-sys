@@ -53,12 +53,16 @@ def output_path(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def config(input_dir: Path) -> PdfMergeConfig:
+    # Issue #151: 共通 fixture を tuple で渡し、merger 経路の end-to-end で
+    # tuple が Sequence[str] subtype として `_validate_concat_order` を通り、
+    # 全帳票生成テスト (test_concat_order_respected / test_d_appended_at_end /
+    # missing/extra source 系) で tuple 入力動作が検証される。
     return PdfMergeConfig(
         input_dir=str(input_dir),
         source_b_pattern="B_{name}.pdf",
         source_c_pattern="C_{name}.pdf",
         source_d_filename="D_common.pdf",
-        concat_order=["A", "B", "C"],
+        concat_order=("A", "B", "C"),
     )
 
 

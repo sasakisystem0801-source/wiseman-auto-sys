@@ -1179,11 +1179,53 @@ class TestPdfMergeConfigValidation:
         最終的に tuple として保持され、構築後 mutation を防ぐ契約を保証する
         (呼出側の漏れを防ぐ DRY な設計)。
         """
+        # cast は意図的な型嘘（runtime 正規化を検証する目的）
         cfg = PdfMergeConfig(concat_order=cast(
             "tuple[ConcatSourceLetter, ...]", ["A", "B", "C"]
         ))
         assert cfg.concat_order == ("A", "B", "C")
         assert isinstance(cfg.concat_order, tuple)
+
+    def test_load_config_normalizes_toml_list_to_tuple(
+        self, tmp_path: Path
+    ) -> None:
+        """Issue #151 (pr-test-analyzer Critical Gap #1): TOML 由来の
+        ``list`` が ``__post_init__`` 経由で tuple に正規化されることを契約化。
+
+        既存 assertion (`== ("C", "A", "B")`) は値の比較のみで型を検証しないため、
+        TOML→list→tuple 経路が将来 bypass される regression を直接 catch する
+        ``isinstance`` チェックを別軸で追加する。
+        """
+        target = tmp_path / "concat_tuple.toml"
+        target.write_text(
+            '[pdf_merge]\nconcat_order = ["C", "A", "B"]\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(target)
+        assert isinstance(cfg.pdf_merge.concat_order, tuple)
+        assert cfg.pdf_merge.concat_order == ("C", "A", "B")
+
+    def test_iadd_does_not_bypass_post_init_validation_in_place(self) -> None:
+        """Issue #151 (pr-test-analyzer Important #3): tuple は ``+=`` で
+        in-place mutation できないが、Python 仕様上 **新規 tuple への再代入** に
+        fall back する。再代入は ``__post_init__`` を経由しないため値域検証を
+        bypass できる。本テストは「型レベルでは阻止できない」契約を明示し、
+        将来 ``frozen=True`` 化で全置換も阻止する選択肢を検討する根拠とする。
+
+        実害: ``cfg.concat_order += ("X",)`` で未知 letter を入れた状態で
+        merger.py に渡すと、defensive layer (``_validate_concat_order``) が
+        ``ValueError`` で catch する設計のため運用上は安全。
+        """
+        cfg = PdfMergeConfig()
+        original_id = id(cfg.concat_order)
+        # `cfg.concat_order = cfg.concat_order + (...,)` と等価 (tuple は __iadd__ なし)
+        cfg.concat_order += (cast(ConcatSourceLetter, "X"),)
+        # 同オブジェクトでなく新規 tuple に置き換わっている (in-place ではない)
+        assert id(cfg.concat_order) != original_id
+        assert isinstance(cfg.concat_order, tuple)
+        # 値域違反は __post_init__ を経由しないため bypass されている (defensive
+        # layer で守る前提): tuple 内に "X" が入っているが ValueError は raise されない
+        assert "X" in cfg.concat_order
 
 
 class TestLoadConfigWithValidation:
