@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
 import logging
 import os
 import sys
@@ -19,8 +18,6 @@ if TYPE_CHECKING:
     import tkinter as tk
 
     from wiseman_hub.config import AppConfig
-    from wiseman_hub.pdf.review_flow import ReviewOutcome
-    from wiseman_hub.ui.launcher import ReviewCallbackResult
 
 logger = logging.getLogger(__name__)
 
@@ -158,8 +155,8 @@ def _make_settings_callback(
 ) -> Callable[[], None]:
     """Launcher に注入する「設定」コールバックを組み立てる。
 
-    設定保存成功時は ``Launcher.reload_config`` を呼び、以降の
-    ``validate_config_ready`` 判定が新値で行われるようにする（再起動不要）。
+    設定保存成功時は ``Launcher.reload_config`` を呼び、以降の dialog (settings /
+    facility_root / ex_extractor) が新値で動作するようにする（再起動不要）。
     """
 
     def open_settings() -> None:
@@ -196,239 +193,6 @@ def _make_settings_callback(
             launcher.reload_config(result.config)
 
     return open_settings
-
-
-def _make_review_callback(
-    config_path: Path,
-    get_launcher: Callable[[], _LauncherLike],
-) -> Callable[[], ReviewCallbackResult]:
-    """Launcher に注入する「確認待ちセッション」コールバックを組み立てる。
-
-    main thread で以下を実行して ``ReviewCallbackResult`` を返す:
-      1. ``SessionPicker`` で NEEDS_REVIEW / READY_TO_MERGE セッションを選択
-      2. NEEDS_REVIEW なら ``resolve_review_session`` に dialog + transition を委譲
-      3. READY_TO_MERGE ならそのまま session_id を返す
-      4. cancel / 未解決 / エラーは ``CANCEL_RESULT``（should_phase_b False）
-
-    Phase B の実体は Launcher が worker thread で呼ぶ ``on_run_phase_b`` に委譲する。
-    flow 本体は Issue #72 で CLI と共通化（``pdf/review_flow.py``）。
-    """
-    from wiseman_hub.ui.launcher import CANCEL_RESULT, ReviewCallbackResult
-
-    def open_review() -> ReviewCallbackResult:
-        from tkinter import messagebox
-
-        from wiseman_hub.config import load_config
-        from wiseman_hub.pdf.review_flow import resolve_review_session
-        from wiseman_hub.pdf.session import (
-            Session,
-            SessionCorruptedError,
-            SessionNotFoundError,
-            SessionStatus,
-        )
-        from wiseman_hub.ui.confirm_dialog import ConfirmDialog
-        from wiseman_hub.ui.session_picker import SessionPicker
-
-        launcher = get_launcher()
-
-        try:
-            config = load_config(config_path)
-        except (OSError, ValueError, TypeError) as exc:
-            logger.error(
-                "load_config failed before review: %s", type(exc).__name__
-            )
-            messagebox.showerror(
-                "設定ファイル読込エラー",
-                "設定ファイルを読み込めませんでした。詳細はログを確認してください。"
-                f"\n\n{type(exc).__name__}",
-            )
-            return CANCEL_RESULT
-
-        sessions_dir = Path(config.pdf_merge.output_dir) / ".sessions"
-        parent = launcher.get_root()
-
-        picker = SessionPicker(sessions_dir=sessions_dir, parent=parent)
-        pick = picker.run()
-        if not pick.selected:
-            return CANCEL_RESULT
-        assert pick.session_id is not None  # Protocol 契約
-        session_id = pick.session_id
-
-        if pick.status == SessionStatus.READY_TO_MERGE:
-            return ReviewCallbackResult(session_id=session_id)
-
-        # NEEDS_REVIEW: ConfirmDialog + 2 段階ロックによる race safe な遷移を
-        # resolve_review_session に委譲する。parent は closure で捕捉（Toplevel modal 化）。
-        def dialog_factory(
-            session: Session, _sessions_dir: Path
-        ) -> ConfirmDialog:
-            return ConfirmDialog(session, _sessions_dir, parent=parent)
-
-        # picker 選択後〜1st lock 取得前の race（他プロセスが --discard した等）で
-        # resolve 内の load_session が SessionNotFoundError/Corrupted を raise する
-        # 可能性がある（review_flow の「呼出側契約」）。messagebox 通知 + CANCEL に
-        # マッピングしてアプリ全体終了を防ぐ。
-        try:
-            outcome = resolve_review_session(
-                session_id,
-                sessions_dir,
-                dialog_factory=dialog_factory,
-            )
-        except (SessionNotFoundError, SessionCorruptedError) as exc:
-            logger.error(
-                "session %s load failed before review: %s",
-                session_id,
-                type(exc).__name__,
-            )
-            messagebox.showerror(
-                "セッション読込エラー",
-                "選択したセッションが読み込めませんでした。"
-                "他のプロセスが削除した可能性があります。"
-                f"\n\n{type(exc).__name__}",
-            )
-            return CANCEL_RESULT
-        return _review_outcome_to_callback_result(outcome)
-
-    return open_review
-
-
-def _review_outcome_to_callback_result(
-    outcome: ReviewOutcome,
-) -> ReviewCallbackResult:
-    """``ReviewOutcome`` を ``ReviewCallbackResult`` + messagebox 通知へマッピング。
-
-    adapter 境界を分離することで、各 reason を直接ユニットテストできる
-    （Issue #97、pr-test-analyzer rating 8 対応）。
-
-    ``assert_never`` により ``ReviewReason`` Literal に新値が追加されて本関数で
-    未処理になった場合、mypy が compile-time エラーで検出する。
-    """
-    from tkinter import messagebox
-    from typing import assert_never
-
-    from wiseman_hub.ui.launcher import CANCEL_RESULT, ReviewCallbackResult
-
-    reason = outcome.reason
-    detail = outcome.detail or ""
-
-    if reason == "ready_to_merge" or reason == "resolved":
-        return ReviewCallbackResult(session_id=outcome.session_id)
-
-    # aborted / unresolved: ConfirmDialog 側で既にユーザーに通知済み、または
-    # 未解決残りはユーザーが自覚している状態。追加の messagebox は不要。
-    # NOTE: mypy は `reason in (...)` の Literal narrowing を行わないため `or` chain で記述。
-    if reason == "aborted" or reason == "unresolved":
-        return CANCEL_RESULT
-
-    if reason == "lock_error":
-        messagebox.showerror(
-            "セッション操作エラー",
-            "別の処理がセッションを使用中です。しばらく待って再試行してください。"
-            f"\n\n{detail}",
-        )
-        return CANCEL_RESULT
-
-    if reason == "concurrent_modification":
-        messagebox.showerror(
-            "セッション競合",
-            "別のプロセスがセッションを変更したため遷移を中止しました。"
-            "「確認待ちセッション」から再度開いてください。",
-        )
-        return CANCEL_RESULT
-
-    if reason == "transition_lock_error":
-        messagebox.showerror(
-            "セッション遷移エラー",
-            "解決は保存済みですが ready_to_merge への遷移に失敗しました。"
-            "再度「確認待ちセッション」を開いて続行してください。"
-            f"\n\n{detail}",
-        )
-        return CANCEL_RESULT
-
-    if reason == "invalid_transition" or reason == "invalid_status":
-        messagebox.showerror(
-            "セッション状態エラー",
-            "セッションの状態が予期しないものです。ログを確認してください。"
-            f"\n\n{detail}",
-        )
-        return CANCEL_RESULT
-
-    assert_never(reason)
-
-
-def _make_phase_b_callback(
-    config_path: Path,
-) -> Callable[[str], None]:
-    """Launcher に注入する Phase B コールバックを組み立てる（13C、worker thread 呼出）。
-
-    13B の Phase A と同様に TOML を再ロードしてから ``run_phase_b`` を呼ぶ（設定 GUI で
-    output_dir を変えた直後にも対応）。worker thread で呼ばれるため Tk API には触れない。
-    """
-
-    def run_phase_b_callback(session_id: str) -> None:
-        from wiseman_hub.config import load_config
-        from wiseman_hub.pdf.pipeline import run_phase_b
-        from wiseman_hub.pdf.session import load_session
-
-        config = load_config(config_path)
-        sessions_dir = Path(config.pdf_merge.output_dir) / ".sessions"
-        output_path = (
-            Path(config.pdf_merge.output_dir) / f"{session_id}_merged.pdf"
-        )
-        session = load_session(session_id, sessions_dir=sessions_dir)
-        run_phase_b(
-            session=session,
-            config=config.pdf_merge,
-            sessions_dir=sessions_dir,
-            output_path=output_path,
-        )
-
-    return run_phase_b_callback
-
-
-def _make_phase_a_callback(
-    config_path: Path,
-) -> Callable[[], None]:
-    """Launcher に注入する「PDF マージ処理」コールバックを組み立てる。
-
-    Phase A 実行時点の TOML を再ロードすることで、設定 GUI（12B）での変更を
-    再起動なしに反映する。Launcher 側で worker thread で呼ばれるため、
-    ここでは Tk API には触れない（スレッド非安全）。
-    """
-
-    def run_phase_a_callback() -> None:
-        from wiseman_hub.config import load_config
-        from wiseman_hub.pdf.matcher import KanjiMatcher
-        from wiseman_hub.pdf.ocr_client import OcrClient
-        from wiseman_hub.pdf.pipeline import run_phase_a
-
-        config = load_config(config_path)
-        source_a_path = (
-            Path(config.pdf_merge.input_dir) / config.pdf_merge.source_a_filename
-        )
-        sessions_dir = Path(config.pdf_merge.output_dir) / ".sessions"
-
-        matcher = KanjiMatcher(
-            input_dir=Path(config.pdf_merge.input_dir),
-            source_b_pattern=config.pdf_merge.source_b_pattern,
-            source_c_pattern=config.pdf_merge.source_c_pattern,
-        )
-        ocr_client = OcrClient(config.ocr_backend)
-
-        # OcrClient は __enter__/__exit__ を実装する（HTTP セッションクリーンアップ）。
-        # Protocol 上は任意のため、hasattr で確認してから stack に入れる。
-        with contextlib.ExitStack() as stack:
-            if hasattr(ocr_client, "__exit__"):
-                stack.enter_context(ocr_client)
-            run_phase_a(
-                source_a_path=source_a_path,
-                config=config.pdf_merge,
-                ocr_client=ocr_client,
-                matcher=matcher,
-                sessions_dir=sessions_dir,
-            )
-
-    return run_phase_a_callback
 
 
 # RFC 6761 .invalid TLD: 名前解決が必ず失敗することが保証されている。
@@ -618,14 +382,12 @@ def main() -> None:
                     raise RuntimeError("launcher accessed before initialization")
                 return instance
 
+            # Issue #154: 旧ワークフロー UI 経路 (PDF マージ処理 / 確認待ちセッション)
+            # の callback 注入を除去。pdf/pipeline.run_phase_a / run_phase_b と
+            # ui/session_picker / confirm_dialog は ADR-013 方針でコード資産として残置。
             launcher = Launcher(
                 config=config,
                 config_path=config_path,
-                on_run_pdf_merge=_make_phase_a_callback(config_path),
-                on_open_review=_make_review_callback(
-                    config_path, _get_launcher
-                ),
-                on_run_phase_b=_make_phase_b_callback(config_path),
                 on_open_settings=_make_settings_callback(
                     config_path, _get_launcher
                 ),

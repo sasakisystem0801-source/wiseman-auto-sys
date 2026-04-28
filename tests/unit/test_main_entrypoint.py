@@ -33,8 +33,15 @@ def test_default_starts_launcher(tmp_path: Path, monkeypatch: Any) -> None:
     launcher_instance.run.assert_called_once()
 
 
-def test_default_injects_phase_a_callback(tmp_path: Path, monkeypatch: Any) -> None:
-    """既定起動時に Launcher へ ``on_run_pdf_merge`` コールバックが注入される（AC-L-2）。"""
+def test_default_does_not_inject_legacy_phase_a_callback(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """Issue #154: 旧ワークフロー (PDF マージ処理) の callback 注入が除去されたことを契約化。
+
+    元実装の test_default_injects_phase_a_callback は AC-L-2 として
+    ``on_run_pdf_merge`` 注入を保証していたが、Issue #154 で UI 経路除去に伴い
+    callback 自体を main() から削除。再追加 regression を catch する negative test。
+    """
     config_file = tmp_path / "config.toml"
     config_file.write_text("", encoding="utf-8")
 
@@ -47,10 +54,14 @@ def test_default_injects_phase_a_callback(tmp_path: Path, monkeypatch: Any) -> N
     main()
 
     _, kwargs = launcher_class.call_args
-    assert kwargs.get("on_run_pdf_merge") is not None, (
-        "Phase A コールバックが Launcher に注入されていない"
-    )
-    assert callable(kwargs["on_run_pdf_merge"])
+    # 旧ワークフロー callback は注入されない
+    assert "on_run_pdf_merge" not in kwargs
+    assert "on_open_review" not in kwargs
+    assert "on_run_phase_b" not in kwargs
+    # 残存 callback は注入される (業務フロー: ex_extractor + facility_merger + settings)
+    assert callable(kwargs.get("on_open_ex_extractor"))
+    assert callable(kwargs.get("on_open_facility_merger"))
+    assert callable(kwargs.get("on_open_settings"))
 
 
 def test_rpa_flag_starts_wiseman_hub(tmp_path: Path, monkeypatch: Any) -> None:
@@ -484,48 +495,10 @@ def test_settings_callback_does_not_reload_on_cancel(
     assert reload_calls == []
 
 
-def test_phase_a_callback_reloads_config_and_runs_phase_a(
-    tmp_path: Path, monkeypatch: Any
-) -> None:
-    """``_make_phase_a_callback`` の返すコールバックは TOML を再ロードし run_phase_a を呼ぶ。
-
-    設定 GUI（12B）で TOML を書き換えた直後、GUI 再起動なしに新設定で実行できることを保証する。
-    """
-    config_file = tmp_path / "config.toml"
-    config_file.write_text("", encoding="utf-8")
-
-    from wiseman_hub.config import AppConfig
-
-    def fake_load_config(path: Path) -> AppConfig:
-        assert path == config_file
-        cfg = AppConfig()
-        cfg.pdf_merge.input_dir = str(tmp_path / "in")
-        cfg.pdf_merge.output_dir = str(tmp_path / "out")
-        cfg.pdf_merge.source_a_filename = "A.pdf"
-        cfg.ocr_backend.endpoint_url = "https://example.com"
-        cfg.ocr_backend.api_key = "k"
-        return cfg
-
-    monkeypatch.setattr("wiseman_hub.config.load_config", fake_load_config)
-
-    run_phase_a_mock = MagicMock(return_value=MagicMock())
-    monkeypatch.setattr("wiseman_hub.pdf.pipeline.run_phase_a", run_phase_a_mock)
-    monkeypatch.setattr("wiseman_hub.pdf.matcher.KanjiMatcher", MagicMock())
-    # OcrClient は context manager 呼出を回避するため、__exit__ 非搭載の MagicMock で代替
-    ocr_client_stub = MagicMock(spec=[])
-    monkeypatch.setattr(
-        "wiseman_hub.pdf.ocr_client.OcrClient", MagicMock(return_value=ocr_client_stub)
-    )
-
-    from wiseman_hub.__main__ import _make_phase_a_callback
-
-    callback = _make_phase_a_callback(config_file)
-    callback()
-
-    run_phase_a_mock.assert_called_once()
-    _, kwargs = run_phase_a_mock.call_args
-    assert kwargs["source_a_path"] == tmp_path / "in" / "A.pdf"
-    assert kwargs["sessions_dir"] == tmp_path / "out" / ".sessions"
+# Issue #154: test_phase_a_callback_reloads_config_and_runs_phase_a を削除。
+# _make_phase_a_callback 関数自体が __main__.py から除去されたため。
+# pdf/pipeline.run_phase_a は ADR-013 方針でコード資産として残置されており、
+# 直接呼出のテスト (tests/unit/pdf/test_pipeline.py) で動作検証は継続。
 
 
 # ===========================================================================
