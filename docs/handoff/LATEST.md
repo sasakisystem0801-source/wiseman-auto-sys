@@ -1,39 +1,57 @@
-# Handoff: Session 32 中断（PR5 ex_extractor Windows 実機検証 AC-1 途中）
+# Handoff: Session 32 中断 + macOS 側 A1-A5 検証準備整備完了
 
-**更新日**: 2026-04-28（Session 32 / TeamViewer タイムリミットで中断）
+**更新日**: 2026-04-28（Session 32 / Windows 実機中断後、macOS 側で A1-A5 マージ済）
 **ブランチ**: main
-**main HEAD（中断時点）**: `f4a242e` docs(handoff): Session 31 cleanup - PR #141 マージ反映 + PR #142 close 保留 (#143)
+**main HEAD**: `cf9f8b1` docs(handoff): Session 32 中断記録 + PR5 検証準備整備 (A1-A5) (#144)
 
-## Session 32 進捗（中断）
+## Session 32 進捗
 
-### 達成したこと（Windows 11 実機 + TeamViewer 経由）
+### 午前: Windows 11 実機（TeamViewer 経由）
 
-- **Phase 0 完了**: exe バックアップ（`wiseman_hub.exe.bak-20260428-075301`）+ `git pull --ff-only`（`f4a242e` 同期）+ `uv sync --extra dev`（差分なし）
-- **Phase 1 完了**: PyInstaller ビルド成功（78,632,876 bytes / 2026-04-28 8:00:08、warning 既知の `pycparser` / `jinja2` 3 件のみ、`wiseman_hub.*` 由来 0 件）
+- **Phase 0 完了**: exe バックアップ（`wiseman_hub.exe.bak-20260428-075301`）+ `git pull --ff-only`（`f4a242e` 同期）+ `uv sync --extra dev`
+- **Phase 1 完了**: PyInstaller ビルド成功（78,632,876 bytes / 2026-04-28 8:00:08、warning 既知の `pycparser` / `jinja2` のみ、`wiseman_hub.*` 由来 0 件）
 - **Phase 2-1 完了**: 新 exe を `~/wiseman-hub/wiseman_hub.exe` に配備（旧版 78,570,672 → 新版 78,632,876、+62 KB は PR4 UI 統合分）
 - **AC-1 (1)(2) PASS**: Launcher 起動（コンソール非表示）+ 5 ボタン目「ex_ ファイル変換 + 振り分け」表示確認（スクショ取得済）
+- **中断**: TeamViewer タイムリミットで AC-1 (3) 未実施
 
-### 中断時点の未完作業
+### 午後: macOS 側 A1-A5 検証準備整備（PR #144 マージ済）
 
-- **AC-1 (3) 未実施**: 5 ボタン目クリック → `ExExtractorDialog` 起動確認（**次回最優先**）
-- **デスクトップショートカット経由起動確認**: 新 exe（78,632,876 bytes）が起動することを確認（次回）
-- **AC-2〜AC-14**: 今回スコープ外（実 .ex_ 投入 + config 編集 + SFX 起動検証は次々回以降）
+Codex セカンドオピニオン + /review-pr 3 並列レビュー（comment-analyzer / code-reviewer / code-simplifier）を経て:
 
-詳細・再開コマンド: [`session32-pr5-ex-extractor-ac1-resume.md`](./session32-pr5-ex-extractor-ac1-resume.md)
+- **A1**: runbook §2-2 config パス誤記修正（`config.toml` → `config\default.toml`、frozen exe の実解決パス）
+- **A2**: `config/test.toml.example` 新規 + `WISEMAN_HUB_CONFIG` 経路で本番 NAS 非汚染（`__main__._default_config_path` 既実装を活かす）
+- **A3**: `session32-...md` AC-1 (3) 実機チェックリスト精緻化（exe LastWriteTime 事前確認、「実行ボタン押下禁止」の理由明記、rollback コマンド）
+- **A4**: `docs/handoff/ex-test-fixtures.md` 新規（SUCCESS / AMBIGUOUS / UNMATCHED の 3 種 fixture 発火条件・命名・調達手順）
+- **A5**: ショートカット起動の env var 非継承落とし穴を runbook §2-2 に明文化、PowerShell `Start-Process` / `.ps1` ラッパー（方式 A/B）推奨化、ユーザー環境変数永続化（方式 C）を非推奨と明記
 
-### Issue Net 変化（Session 32 中断時点）
+review-pr 指摘で発見した Critical（ADR-014 §PII 保護方針違反: 実顧客名「本田」直書き）と Important（`sasak` ハードコード、行番号ズレ、AMBIGUOUS 例の文字数説明矛盾、ショートカット起動説明 3 重複）も同 PR で修正反映済（commit `573da44`、+406 → +313 net）。
+
+### 残未完作業（次回 Windows 実機セッション）
+
+- **AC-1 (3)**: 5 ボタン目クリック → `ExExtractorDialog` 起動確認（[`session32-pr5-ex-extractor-ac1-resume.md`](./session32-pr5-ex-extractor-ac1-resume.md) §1 のチェックリストに沿う）
+- **デスクトップショートカット経由起動確認**: 新 exe（78,632,876 bytes）が起動することを確認（resume note §2）
+- **AC-2〜AC-14**: A1-A5 で整備した `test.toml` + `WISEMAN_HUB_CONFIG` 方式 B（`.ps1` ラッパー）+ 3 種 fixture を使って実施（[`pr5-ex-extractor-runbook.md`](./pr5-ex-extractor-runbook.md) §2-2 + [`ex-test-fixtures.md`](./ex-test-fixtures.md)）
+
+### Issue Net 変化（Session 32 全体）
 
 - **Close**: 0 件
 - **起票**: 0 件
 - **Net: 0 件**
 
-中断のため Net ≤ 0 だが、これは「進捗ゼロ扱い」基準の対象外（実機検証フェーズ途中で、コード変更や Issue 起票判断は AC-1 完走後にまとめて発生する設計）。AC-1 完走 + ADR-014 Accepted 昇格時に Issue Net 進捗を再計上する。
+中断中の準備フェーズで Net ≤ 0 だが、「進捗ゼロ扱い」基準の対象外（実機検証フェーズ途中で、コード変更や Issue 起票判断は AC-1 完走後にまとめて発生する設計）。AC-1 完走 + ADR-014 Accepted 昇格時に Issue Net 進捗を再計上する。
 
-### 発見事項（次回以降の課題）
+### 発見事項の対策状況
 
-1. **runbook §2-2 config パス誤記**: 記載 `%USERPROFILE%\wiseman-hub\config.toml` → 実際は `%USERPROFILE%\wiseman-hub\config\default.toml`（`src/wiseman_hub/__main__.py:43-44` の `_default_config_path()` で frozen 時は `Path(sys.executable).parent / "config" / "default.toml"`）。Phase 5 完走時に修正 PR をまとめて起こす
-2. **Launcher 未使用ボタン削除提案（ユーザー明示指示）**: AC-1 完了後にユーザーと削除候補を確定 → 別 Issue 起票（CLAUDE.md triage 基準 #5 該当）→ 別 PR で UI 変更 + テスト変更を一体実施。今回 PR と混ぜない方針
-3. **AC-2〜14 検証時の本番 NAS 汚染防止**: `facility_root_dir = "\\Tera-station\share\03.FAX(...)"` が本番 NAS を指しているため、検証用 config（例: `~/wiseman-hub/config/test.toml` を `WISEMAN_HUB_CONFIG` で参照切替）を別途用意する必要あり。検証用 .ex_ ファイル（SUCCESS / SKIPPED_AMBIGUOUS / SKIPPED_UNMATCHED の 3 種）も本田様運用環境からコピー必要
+| # | 中断時の発見事項 | 状態 |
+|---|----------------|------|
+| 1 | runbook §2-2 config パス誤記 | ✅ A1 で修正、PR #144 マージ済 |
+| 2 | Launcher 未使用ボタン削除提案 | ⏳ AC-1 完了後にユーザー確認 + 別 Issue + 別 PR |
+| 3 | 本番 NAS 汚染防止 + 検証用 .ex_ fixture | ✅ A2 (test.toml.example) + A4 (ex-test-fixtures.md) + A5 (起動方式) で対策実装済、PR #144 マージ済 |
+
+### 学び（次セッション以降の自衛策）
+
+- **ADR-014 §PII 保護方針（実顧客名は仮名 `サービスA`/`サービスB` 等で記述）の確認漏れ**: 新規ドキュメント追加時は関連 ADR の命名規約を作業前に再確認する（review-pr で発見、過去 H-F の仮名化規約を再導入してしまった）
+- **Codex セカンドオピニオンの「Released date」誤読**: 公式ドキュメント上の日付ラベルを必ず WebFetch で再検証（今回 Codex は 2026-06-17 を retire と誤読、実際は Released で retire は 2026-10-16）
 
 ### 次回再開コマンド
 
@@ -41,13 +59,16 @@
 # Mac 側
 cd /Users/yyyhhh/Projects/wiseman_auto_sys
 git checkout main && git pull --ff-only
-cat docs/handoff/session32-pr5-ex-extractor-ac1-resume.md  # 詳細
+# main HEAD が cf9f8b1（PR #144）であることを確認
+cat docs/handoff/session32-pr5-ex-extractor-ac1-resume.md  # AC-1 (3) 実機チェックリスト
+cat docs/handoff/pr5-ex-extractor-runbook.md               # §2-2 推奨方式（test.toml + WISEMAN_HUB_CONFIG）
+cat docs/handoff/ex-test-fixtures.md                       # 3 種 fixture 仕様
 
 # Windows 機側（TeamViewer 経由、PowerShell）
-# resume note の §「次回再開時の最初のアクション」を実施
-# 1. Launcher 起動: Start-Process "$HOME\wiseman-hub\wiseman_hub.exe"
-# 2. 5 ボタン目クリック → ExExtractorDialog 起動確認（実行ボタンは押さない）
-# 3. デスクトップショートカット経由起動でも新 exe（78,632,876 bytes）起動を確認
+# 1. AC-1 (3) 残作業: resume note §1 のチェックリスト
+#    - exe LastWriteTime 確認 → 5 ボタン目クリック → Dialog 起動確認（実行ボタン押さない）
+# 2. デスクトップショートカット経由起動確認: resume note §2
+# 3. （AC-2〜14 へ進む場合）runbook §2-2 推奨方式 B で test.toml + WISEMAN_HUB_CONFIG 起動
 ```
 
 ---
