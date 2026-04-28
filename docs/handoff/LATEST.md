@@ -1,4 +1,106 @@
-# Handoff: Session 33 完了 - PR #146/#147 マージ + Issue Net -3 件
+# Handoff: Session 34 完了 - PR #149 (Issue #27 PR-A) マージ + Mac 側打ち止め、次回 Windows 機
+
+**更新日**: 2026-04-28（Session 34 / Mac で進められる範囲で打ち止め）
+**ブランチ**: main
+**main HEAD**: `1e1fbe8` refactor(config): 新規 3 型に Literal + __post_init__ 検証を追加 (Refs #27 PR-A) (#149)
+
+## 次セッション主軸（重要）
+
+**メイン = デスクトップアプリ実装**。ユーザー明示で「リファクタ系 Issue は今しない」と確定（Session 34）。
+
+### Windows 機での最優先タスク
+
+- **#6 (P1, PoC)**: PoC E2E テスト — ログイン → CSV 抽出 → GCS アップロード自動パイプライン
+  - Windows + USB ドングル必須（macOS では絶対進められない）
+  - プロジェクトのコア価値検証、最重要 KPI
+- **AC-1 (3) 〜 AC-14 残作業**（Session 32 から繰越） — `pr5-ex-extractor-runbook.md` / `session32-pr5-ex-extractor-ac1-resume.md` 参照
+
+### Mac 側のバックログ（今は触らない）
+
+ユーザー明示で「メインじゃないので今はしない」:
+- Issue #27 PR-B（既存 6 型横展開）
+- Issue #150 (P1, app.py:40 load_config 例外ハンドル)
+- Issue #151 (P2, concat_order tuple 化、PR-B 内対応想定)
+- Issue #152 (P2, NaN/inf 検証強化)
+- Issue #11 / #29 / #39 / #63 / #16 / #17 / #134 (monitor)
+
+## Session 34 の成果
+
+### マージ済 PR
+
+| PR | Issue | 内容 | 規模 |
+|----|-------|------|------|
+| #149 (1e1fbe8) | #27 PR-A | 新規 3 型 (`OcrBackendConfig`, `UserNameBBox`, `PdfMergeConfig`) に Literal + `__post_init__` 検証 + `is_configured` + `merger._KNOWN_KINDS` を `VALID_CONCAT_LETTERS` に統合 (DRY) | 6 ファイル / +306 / -64 |
+
+### Issue #27 段階実装の方針更新
+
+- PR-A ✅ (この PR): 新規 3 型
+- PR-B: 既存 6 型横展開 — 次セッションでは見送り、別途タイミングで
+- PR-C: Path 型移行 → ROI 低い、Issue #151 (tuple 化) で型強化に振り替え
+
+### Issue Net 変化（Session 34）
+
+- **Close: 0 件**
+- **起票: 3 件** (#150 P1 / #151 P2 / #152 P2、すべて PR #149 レビュー由来)
+- **Net: -3 件** ❌ KPI マイナス
+
+#### Net マイナスの分析と反省
+
+レビュー指摘 → triage 基準合致と判断して起票したが、後から見ると:
+- **#150 (P1, bug)**: 妥当 — silent-failure-hunter HIGH 評定、新検証導入で startup crash リスク顕在化
+- **#151 (P2, enhancement)**: 微妙 — type-design-analyzer Enforcement 6/10、**PR-B のスコープ追加で対処可能だった**。独立 Issue 化は KPI 圧迫
+- **#152 (P2, enhancement)**: 微妙 — pr-test-analyzer rating 6-7、エッジケース系
+
+**学び**: rating 6-7 borderline は PR コメント / 既存 Issue 追記 / TODO で扱う。複数 review エージェント一致でも「既存 Issue スコープ追加で済むか」を先に確認する。
+
+### Quality Gate 適用実績
+
+- `/impl-plan` AC 9 件定義
+- `/simplify` 3 並列: コメント簡潔化 + `_KNOWN_KINDS` 重複統合
+- `evaluator`: HIGH (循環依存) + MEDIUM (private import) を修正
+- `/review-pr` 6 エージェント並列: CRITICAL silent failure (settings.py) + HIGH 部分非ゼロ + MEDIUM 5 件を修正
+- Codex review: スキップ判断（6 並列で十分カバー、PR 規模 300 行で borderline）
+
+### 学び（次セッション以降の自衛策）
+
+1. **CRITICAL silent failure を即「スコープ外」と判定しない**: PR #149 の初判定で UI 層 cast を「別 Issue」としたが、`UserNameBBox(...)` + `replace(...)` の最小修正で対応可と判明。**スコープ判断時は最小修正規模を見積もってから決める**。
+
+2. **`Issue #27` 等のタスク参照を docstring に書かない**: CLAUDE.md「Don't reference the current task」原則を 8 箇所違反、レビュー指摘で発覚。**新規 docstring/コメントを書く時、CLAUDE.md 原則を毎回確認**。
+
+3. **rating 6-7 borderline の Issue 起票判断**: 上記 Net 分析参照。
+
+### 次回再開コマンド
+
+```bash
+# Mac 側（状況確認のみ、コード変更は Windows へ移行）
+cd /Users/yyyhhh/Projects/wiseman_auto_sys
+git checkout main && git pull --ff-only
+# main HEAD が 1e1fbe8（PR #149）であることを確認
+gh issue list --state open
+
+# Windows 機側（次セッションの主戦場）
+# 1. Session 32 から繰越の AC-1 (3) 残作業
+cat docs/handoff/session32-pr5-ex-extractor-ac1-resume.md
+# 2. #6 P1 PoC E2E テスト着手
+gh issue view 6
+```
+
+### Open Issue 推移
+
+- Session 34 開始時: 9 件
+- Session 34 終了時: 12 件 (+3: #150/#151/#152)
+
+### Git 状態 (Session 34 終了時点)
+
+- main HEAD: `1e1fbe8`
+- ローカル clean / origin 同期済
+- ブランチ: main
+- 削除済: `feature/issue-27a-new-types-validation`
+- CI: success (Windows Integration Tests / build-smoke / test-unit 3.11/3.12 / test-integration 全 PASS)
+
+---
+
+# 旧サマリ: Session 33 完了 - PR #146/#147 マージ + Issue Net -3 件
 
 **更新日**: 2026-04-28（Session 33 / Issue #45 + #14 完了 + #40 検討 close）
 **ブランチ**: main
