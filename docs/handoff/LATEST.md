@@ -1,8 +1,88 @@
-# Handoff: Session 32 中断 + macOS 側 A1-A5 検証準備整備完了
+# Handoff: Session 33 完了 - PR #146/#147 マージ + Issue Net -3 件
+
+**更新日**: 2026-04-28（Session 33 / Issue #45 + #14 完了 + #40 検討 close）
+**ブランチ**: main
+**main HEAD**: `7de14ee` refactor(rpa): export_csv 失敗モードを ExportCsvError 階層で区別化 (Closes #14) (#147)
+
+## Session 33 進捗
+
+### マージ済 PR (Issue Net -3 件)
+
+| PR | Issue | 内容 | 規模 |
+|----|-------|------|------|
+| #146 (607ad29) | #45 完了 ✅ | SourceKind を Literal から StrEnum に統一 (JSON 検証一元化) | 4 ファイル / +101 / -22 |
+| #147 (7de14ee) | #14 完了 ✅ | export_csv 失敗モードを ExportCsvError 階層 (5 サブクラス) で区別化 | 6 ファイル / +280 / -35 |
+
+### 検討して close した Issue
+- **#40** (CLOSED not planned): B/C 異名 distance 0 マッチエッジケース
+  - impl-plan 起動 → 数学的に「両方 distance 0 + 異名」は matcher の評価関数の対称性により発生不可能と判明
+    - distance = `_levenshtein(target_normalized, normalize_name(extracted))` なので、両方 distance 0 ⇒ `normalize_name(B_extracted) == normalize_name(C_extracted)` が必ず成立
+  - revert + Issue コメントに検討プロセス記録 (実装前に dead code 発見できた Generator-Evaluator 分離の成功例)
+
+### Issue Net 変化（Session 33 全体）
+- **Close: 3 件** (#45 / #40 / #14)
+- **起票: 0 件**
+- **Net: -3 件** ✅ (KPI 大幅進捗)
+
+### Quality Gate 適用実績
+- impl-plan 全 PR で AC 定義 (PR #146: AC-1〜8、PR #147: AC-1〜11)
+- safe-refactor: PR #146 (HIGH 0 / LOW 1 修正不要)、PR #147 (HIGH 1 selector DRY → 修正済)
+- evaluator: PR #147 で REQUEST_CHANGES → AC-6 close_current_window スキップで対応
+- review-pr 6 エージェント並列: 両 PR で実施
+- Codex review (セカンドオピニオン): 両 PR で GO 判定。PR #147 で印刷ボタン取得失敗 (rating 7、6 エージェント見落とし) を発見、ユーザー判断で本 PR スコープ外
+
+### 学び（次セッション以降の自衛策）
+
+1. **`patch.dict(sys.modules)` の落とし穴**: `with patch.dict(sys.modules, _fake_mods):` は with 終了時に「with 内で追加された全キー」を削除する。新規例外クラスの `from wiseman_hub.rpa.base import (...)` を with **後**に置くと、with 内で base が初回 load → with 終了で削除 → テストの再 import で別クラス → `pytest.raises(...)` が isinstance チェックでマッチしない事象が発生。**新規 import は patch.dict ブロックの前に置く**こと。tests/unit/test_pywinauto_engine.py:57-69 にコメント記録済。
+
+2. **Issue 起票時の前提が誤りの場合の対応 (#40 教訓)**: impl-plan 段階で「実装すべきガードが数学的に dead code になる」ことが判明したら、即座に revert + Issue close (not planned) + 検討プロセスを Issue コメントに記録。「コードを書いてから dead code merge」を防ぐ Generator-Evaluator 分離の価値が顕在化した事例。
+
+3. **Codex review が 6 エージェントレビューで見落とした観点を発見**: PR #147 で 6 エージェント (code-reviewer / pr-test-analyzer / silent-failure-hunter / type-design-analyzer / comment-analyzer / code-simplifier) 全員が見落とした「印刷ボタン取得失敗が ExportCsvError 階層外で pipeline 全停止」を Codex が発見。**大規模 PR (3+ ファイル / 200+ 行) では `/codex review` セカンドオピニオンが価値あり** の根拠データ。
+
+### Session 33 で発見した follow-up 候補 (本 PR では起票見送り)
+- **印刷ボタン取得失敗の ExportCsvError 階層編入**: Codex 指摘 (PR #147)、Windows 実機で観測時に起票判断
+- **メインウィンドウ未接続例外の階層編入**: type-design 指摘 (PR #147)、設計判断 ADR 化推奨
+- **その他 rating 5-6 の review 指摘**: PR #146/#147 のレビューサマリコメント参照
+
+### 次セッション候補
+
+#### macOS 完結可能 (Codex Top 3 推奨順)
+- **#27**: config dataclass 全体の型設計強化 (Literal + `__post_init__` 検証)
+  - Codex 評価: 範囲を絞れば中-高。**AppConfig 全体に触ると PR5 検証範囲拡大リスク** あり
+  - 推奨: 「Literal 追加のみ」にスコープ限定、path 必須化や空文字禁止は避ける
+- **#29**: OCR proxy nice-to-have 改善 (非root/例外絞込/429テスト等)
+- **#39**: フリガナベース matching (#40 は本セッションで close)
+
+#### Windows 復帰時の最優先 (Session 32 から継続)
+- PR5 ex_extractor 統合の AC-1 (3) 〜 AC-14 実機検証 (詳細は下記「Session 32 残未完作業」参照)
+
+### 次回再開コマンド
+
+```bash
+cd /Users/yyyhhh/Projects/wiseman_auto_sys
+git checkout main && git pull --ff-only
+# main HEAD が 7de14ee（PR #147）であることを確認
+gh issue list --state open
+```
+
+### Open Issue 推移
+- Session 33 開始時: 10 件 (P2 enhancement のみ)
+- Session 33 終了時: 7 件 (#45/#40/#14 close)
+- 残り P2: #134 (monitor), #63 (monitor), #27, #39, #29, #17, #16
+
+### Git 状態 (Session 33 終了時点)
+- main HEAD: `7de14ee`
+- ローカル clean / origin 同期済
+- ブランチ: main
+- CI: success (Windows Integration Tests / build-smoke / test-unit 3.11/3.12 / test-integration 全 PASS)
+
+---
+
+# 旧サマリ: Session 32 中断 + macOS 側 A1-A5 検証準備整備完了
 
 **更新日**: 2026-04-28（Session 32 / Windows 実機中断後、macOS 側で A1-A5 マージ済）
 **ブランチ**: main
-**main HEAD**: `cf9f8b1` docs(handoff): Session 32 中断記録 + PR5 検証準備整備 (A1-A5) (#144)
+**main HEAD (当時)**: `cf9f8b1` docs(handoff): Session 32 中断記録 + PR5 検証準備整備 (A1-A5) (#144)
 
 ## Session 32 進捗
 
