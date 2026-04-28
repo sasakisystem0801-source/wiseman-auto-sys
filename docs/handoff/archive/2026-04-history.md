@@ -261,3 +261,68 @@ Codex 回答の核心:
 ### 総変更量（Session 21）
 - 2 PRs, 10 files changed, +687 / -143 行
 - テスト件数: 538 passed → **551 passed**（+13: AC-IM テスト 9 + Codex HIGH regression 1 + mutation 検証 3）
+
+---
+
+# Session 31 完了 (2026-04-27): PR #141 merged + PR #142 close 保留
+
+**main HEAD**: `7614635` refactor(session): tuple/Mapping 化で deep immutability 型保証 (Closes #117) (#141)
+
+## マージ済 ✅
+
+### PR #141 (Issue #117 — Session/UserCandidate を tuple/Mapping 化)
+
+- squash merge `7614635`、+217 / -210 LOC、10 ファイル（src 3 + tests 7）
+- スコープ: PR #116（Issue #44 完全 immutable 化）の続編。`frozen=True` 単体では防げない `.append()` 等の要素 mutation を**型レベルで禁止**する。
+- 変更点:
+  - `Session.candidates: list[UserCandidate]` → `tuple[UserCandidate, ...]`
+  - `UserCandidate.similar_candidates: list[CandidateState]` → `tuple[...]`
+  - `Session.config_snapshot: dict[str, Any]` → `Mapping[str, Any]`
+  - `_to_dict` で `dict(session.config_snapshot)` 明示変換（asdict は MappingProxyType 等を再帰展開しないため）
+  - `_from_dict` / `_candidate_from_dict` / `from_match_result` で `tuple(...)` 構築
+  - `pipeline.py` 生成側（`(*session.candidates, candidate)`, `tuple(sorted(...))`）
+  - `confirm_dialog.resolve_candidate` を tuple-based に、`_pick_first_by_kind` の引数型を `Sequence[CandidateState]` に緩和
+  - tests/ 7 ファイルの fixture を `[...]` → `(...)` に置換、helper 戻り値型を tuple に統一
+- JSON 後方互換性 100%（schema_version 不変、`_to_dict` で dict 化、tuple は json.dumps で array に正しく serialize）
+- **多重 Quality Gate**: `/impl-plan` AC-1〜6 + evaluator (rules/quality-gate.md, MEDIUM/LOW 指摘 → 修正済) + `/simplify`（quality 軽微 2 件 → 修正済）+ `/safe-refactor`（0 件） + `/review-pr` 5 並列 + `/codex review` セカンドオピニオン（Critical 0 / Important 1 stale comment → 修正済）
+
+## Close 保留 ⚠️
+
+### PR #142 (Issue #63 — Linux runner Tk wiring tests 全 skip 問題)
+
+- 案 A（xvfb + python3-tk を test-unit.yml に追加）を試行
+- Linux + xvfb 環境で `mainloop` を呼ぶ Tk async テスト（合計 11 件）が hang
+- test-unit (3.11/3.12) ジョブが `Run unit tests` step で 16+ 分 in_progress 後、cancel 後 fail
+- build-smoke / test-integration: PASS（影響なし）
+- main は無影響（PR #142 未マージで close）
+- **保留判断**: ローカル開発環境（macOS）で Linux 上の Tk 挙動を再現できず hang テストの個別特定にコスト大。本プロジェクトの配布先は Windows 実機のみで Windows runner の wiring tests でカバー範囲は MVP 許容。
+- Issue #63 にコメントで保留理由・再開条件を追記、open のまま保留。
+
+## Issue Net 変化（Session 31）
+
+- **Close**: 1 件（**#117**）
+- **起票**: 0 件
+- **Net: -1 件** ✅（KPI 進捗）
+
+## 重要な設計判断
+
+### Issue #117 — deep immutability tuple/Mapping 化の設計原則
+
+- **frozen=True 単体では深い immutable にならない**: 属性代入は防げるが `list.append()` 等の要素 mutation は型レベルで防げない。tuple/Mapping 化で型レベル禁止に格上げ。
+- **JSON シリアライズの後方互換性**: `_to_dict` で `dict(session.config_snapshot)` 明示変換（asdict は MappingProxyType を再帰展開しない）、tuple は json.dumps で array に変換 → 旧形式 (list で保存) JSON も `_from_dict` 内で `tuple(...)` で復元される。
+- **テストフィクスチャも tuple 一貫性**: 個々のテストで list を渡しても Python ランタイム的には動くが、Issue #117 の「list 変更を型で防ぐ」設計意図がテスト層まで貫徹されない。evaluator 指摘で全 fixture を tuple 化。
+- **mypy の `exclude = ["^tests/"]` 制約**: tests/ は型チェック対象外のため、テストの list→tuple 一貫性は機械的検証されない。round-trip テストの `isinstance(loaded.candidates, tuple)` assert で実行時保証を追加。
+
+### Issue #63 — Linux + xvfb で Tk async テスト hang の知見
+
+- xvfb-run + python3-tk セットアップで Linux runner でも `tkinter.Tk()` は成功するが、`mainloop` を呼ぶ async / phase-A/B integration テスト（合計 11 件）が hang する。
+- Windows runner では動作するが、Linux 環境では mainloop が escape できない可能性。
+- 対応案 A は構造的に挫折。再着手時は `pytest-timeout` + 個別 `tk_mainloop` marker で hang テストを skip する戦略が候補。
+
+## Session 31 終了時点の状態
+
+- main HEAD: `7614635`
+- ローカル clean / origin 同期済
+- CI: success (Windows Integration Tests / build-smoke / test-unit 3.11/3.12 / test-integration 全 PASS)
+- ADR 14 件すべて Status 確定（最新 ADR-014 は Proposed のまま、実機検証完走後に Accepted 昇格予定）
+
