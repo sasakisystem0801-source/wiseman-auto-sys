@@ -1,28 +1,25 @@
-"""ランチャー GUI（3 ボタン骨格 + Phase A 非同期実行）。
+"""ランチャー GUI（3 ボタン構成、業務フロー順）。
 
-アプリ起動時にユーザーが最初に見る画面。3 ボタンを提供する:
-1. PDF マージ処理を実行（コールバック DI、worker thread で非同期実行）
-2. 確認待ちセッション（コールバック DI）
-3. 設定（コールバック DI、未注入時はプレースホルダメッセージ）
+アプリ起動時にユーザーが最初に見る画面。業務フロー順に 3 ボタンを提供する:
+1. ex_ ファイル変換 + 振り分け（① 業務フロー起点、ADR-014）
+2. 事業所フォルダ一括結合（③ 一括再結合、ADR-013）
+3. 設定
 
 設計方針:
 - 全コールバックを DI で差替え可能（テスト容易性）
-- 設定未完了時は ``on_config_missing`` を呼ぶ（PDF マージ処理押下時のみ）
 - PII（氏名・パス）は logger に出さない
-- Phase A 実行中は全ボタン disable + 2 回目クリック無視（Issue #62 / AC-L-2-Async, NoDouble）
-- worker thread → main thread 遷移は ``root.after(0, ...)`` で安全に（Tk は main thread only）
+- 旧ワークフロー UI 経路（PDF マージ処理 / 確認待ちセッション）は Issue #154 で
+  除去。コード本体は ``pdf/pipeline.py`` / ``ui/session_picker.py`` 等に資産として
+  残置（ADR-013 §既存単一事業所ダイアログの扱い 方針）。
 """
 
 from __future__ import annotations
 
-import concurrent.futures
 import contextlib
 import enum
 import logging
-import time
 import tkinter as tk
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from tkinter import ttk
 
@@ -40,49 +37,16 @@ logger = logging.getLogger(__name__)
 class LauncherAction(enum.Enum):
     """ランチャーの主要操作。"""
 
-    RUN_PDF_MERGE = "run_pdf_merge"
-    OPEN_REVIEW = "open_review"
     OPEN_SETTINGS = "open_settings"
     OPEN_FACILITY_MERGER = "open_facility_merger"
-    OPEN_EX_EXTRACTOR = "open_ex_extractor"  # PR4: ex_ ファイル抽出 + 振り分け
+    OPEN_EX_EXTRACTOR = "open_ex_extractor"
 
 
-@dataclass(frozen=True)
-class ReviewCallbackResult:
-    """``on_open_review`` callback の戻り値。
-
-    cancel / 通常完了 / 「確認完了したが Phase B スキップ」（ドライラン等）の 3 状態を
-    表現する。既定値は cancel 相当（``should_phase_b == False``）。
-    """
-
-    session_id: str | None = None
-    should_run_phase_b: bool = True
-
-    @property
-    def should_phase_b(self) -> bool:
-        return self.session_id is not None and self.should_run_phase_b
-
-
-# cancel/error 共通 sentinel。frozen dataclass のため共有安全。
-# 呼び出し側は値比較（``==``）を使い ``is CANCEL_RESULT`` には依存しないこと。
-CANCEL_RESULT = ReviewCallbackResult()
-
-
-_BTN_RUN_PDF_MERGE = "PDF マージ処理を実行"
-_BTN_OPEN_REVIEW = "確認待ちセッション"
 _BTN_OPEN_SETTINGS = "設定"
 _BTN_OPEN_FACILITY_MERGER = "事業所フォルダ一括結合"
 _BTN_OPEN_EX_EXTRACTOR = "ex_ ファイル変換 + 振り分け"
 
-_TITLE_CONFIG_MISSING = "設定が未完了"
-_MSG_CONFIG_MISSING = (
-    "必要な設定が未入力です。\n\n"
-    "入力フォルダ / 出力フォルダ / A.pdf ファイル名 / OCR エンドポイント / OCR API キー "
-    "のすべてを「設定」画面から入力してください。"
-)
-
 _TITLE_UNIMPL = "未実装"
-_MSG_REVIEW_UNIMPL = "確認待ちセッション機能は後続タスクで実装予定です。"
 
 _TITLE_SETTINGS_PLACEHOLDER = "設定画面（未実装）"
 _MSG_SETTINGS_PLACEHOLDER = (
@@ -95,47 +59,15 @@ _MSG_EX_EXTRACTOR_PLACEHOLDER = (
     "ex_ ファイル変換 + 振り分けは PR4 で統合予定です。"
 )
 
-_TITLE_PHASE_A_DONE = "Phase A 完了"
-_MSG_PHASE_A_DONE = (
-    "PDF マージ処理（Phase A）が完了しました。\n"
-    "確認待ちセッションがある場合は「確認待ちセッション」ボタンから処理してください。"
-)
-_TITLE_PHASE_A_ERROR = "Phase A 実行エラー"
-_MSG_PHASE_A_ERROR_FMT = (
-    "PDF マージ処理中にエラーが発生しました。\n"
-    "詳細はログを確認してください。\n\n{type}"
-)
-
-_TITLE_PHASE_B_DONE = "Phase B 完了"
-_MSG_PHASE_B_DONE = "結合 PDF の生成が完了しました。"
-_TITLE_PHASE_B_ERROR = "Phase B 実行エラー"
-_MSG_PHASE_B_ERROR_FMT = (
-    "PDF 結合処理中にエラーが発生しました。\n"
-    "詳細はログを確認してください。\n\n{type}"
-)
-
-
-def validate_config_ready(config: AppConfig) -> bool:
-    """必須設定がすべて入力済みかチェック。
-
-    必須: input_dir / output_dir / source_a_filename / ocr_backend.endpoint_url / api_key
-    空白のみの入力は未設定扱い（TOML 編集ミス・コピペ事故を早期検出）。
-    """
-    required = (
-        config.pdf_merge.input_dir,
-        config.pdf_merge.output_dir,
-        config.pdf_merge.source_a_filename,
-        config.ocr_backend.endpoint_url,
-        config.ocr_backend.api_key,
-    )
-    return all(bool(v.strip()) for v in required)
+_MSG_FACILITY_MERGER_UNIMPL = "事業所フォルダ結合ダイアログ（未統合）"
 
 
 class Launcher:
     """3 ボタン構成のメインランチャー GUI。
 
     コールバック省略時は既定のプレースホルダメッセージを表示する。
-    Phase A は worker thread で実行し、busy 中は全ボタン disable + 2 回目クリック無視。
+    Issue #154 で旧ワークフロー (Phase A / Phase B / 確認待ちセッション) の UI
+    経路を除去。同期 callback のみで構成され、busy 状態管理 / executor は不要。
     """
 
     def __init__(
@@ -144,35 +76,20 @@ class Launcher:
         config_path: Path,
         *,
         root: tk.Tk | None = None,
-        on_run_pdf_merge: Callable[[], None] | None = None,
-        on_open_review: Callable[[], ReviewCallbackResult] | None = None,
-        on_run_phase_b: Callable[[str], None] | None = None,
         on_open_settings: Callable[[], None] | None = None,
         on_open_facility_merger: Callable[[], None] | None = None,
         on_open_ex_extractor: Callable[[], None] | None = None,
-        on_config_missing: Callable[[], None] | None = None,
         messagebox_fn: MessageBoxLike | None = None,
     ) -> None:
-        """Args:
-            on_open_review: main thread で呼ぶ確認 UI オープンコールバック。
-                戻り値の ``should_phase_b`` が True なら Phase B に進む、False ならスキップ
-                （cancel / 未解決 / Phase B 明示スキップ等を統一表現）。
-            on_run_phase_b: worker thread で実行する Phase B コールバック。
-                ``on_open_review`` が ``should_phase_b == True`` の結果を返した後に submit される。
-        """
         assert_main_thread("Launcher")
 
         self._config = config
         self._config_path = config_path
         self._messagebox = messagebox_fn or default_messagebox()
 
-        self._on_run_pdf_merge = on_run_pdf_merge
-        self._on_open_review = on_open_review
-        self._on_run_phase_b = on_run_phase_b
         self._on_open_settings = on_open_settings
         self._on_open_facility_merger = on_open_facility_merger
         self._on_open_ex_extractor = on_open_ex_extractor
-        self._on_config_missing = on_config_missing
 
         self._owns_root = root is None
         self._root = root if root is not None else tk.Tk()
@@ -180,20 +97,12 @@ class Launcher:
             self._root, component="launcher", messagebox=self._messagebox
         )
 
-        # Phase A/B 非同期実行用。max_workers=1 で同時実行なしを保証
-        # （session lock で他プロセスとは競合しないが、同プロセス内の二重起動を防ぐ）。
-        self._executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="phase-worker"
-        )
-        self._busy = False
-        self._current_future: concurrent.futures.Future[None] | None = None
-
         self._build_ui()
 
     def _build_ui(self) -> None:
         root = self._root
         root.title("Wiseman PDF ツール")
-        root.geometry("420x340")
+        root.geometry("420x260")
 
         ttk.Label(
             root,
@@ -205,28 +114,17 @@ class Launcher:
         btn_frame = ttk.Frame(root, padding=12)
         btn_frame.pack(fill="both", expand=True)
 
-        self._btn_run = ttk.Button(
+        # 業務フロー順: ex_ 変換 (①) → 事業所結合 (③) → 設定
+        self._btn_ex_extractor = ttk.Button(
             btn_frame,
-            text=_BTN_RUN_PDF_MERGE,
-            command=lambda: self.invoke_action(LauncherAction.RUN_PDF_MERGE),
-        )
-        self._btn_review = ttk.Button(
-            btn_frame,
-            text=_BTN_OPEN_REVIEW,
-            command=lambda: self.invoke_action(LauncherAction.OPEN_REVIEW),
+            text=_BTN_OPEN_EX_EXTRACTOR,
+            command=lambda: self.invoke_action(LauncherAction.OPEN_EX_EXTRACTOR),
         )
         self._btn_facility_merger = ttk.Button(
             btn_frame,
             text=_BTN_OPEN_FACILITY_MERGER,
             command=lambda: self.invoke_action(
                 LauncherAction.OPEN_FACILITY_MERGER
-            ),
-        )
-        self._btn_ex_extractor = ttk.Button(
-            btn_frame,
-            text=_BTN_OPEN_EX_EXTRACTOR,
-            command=lambda: self.invoke_action(
-                LauncherAction.OPEN_EX_EXTRACTOR
             ),
         )
         self._btn_settings = ttk.Button(
@@ -236,29 +134,25 @@ class Launcher:
         )
 
         for btn in (
-            self._btn_run,
-            self._btn_review,
-            self._btn_facility_merger,
             self._btn_ex_extractor,
+            self._btn_facility_merger,
             self._btn_settings,
         ):
             btn.pack(fill="x", pady=6, ipady=6)
 
-    def button_labels(self) -> tuple[str, str, str, str, str]:
+    def button_labels(self) -> tuple[str, str, str]:
         """各ボタンのラベル（テスト用）。
 
-        順序: PDFマージ / 確認 / 事業所結合 / **ex_ 変換** / 設定。
+        順序: ex_ 変換 / 事業所結合 / 設定（業務フロー順、Issue #154 で旧 UI 除去後）。
         """
         return (
-            _BTN_RUN_PDF_MERGE,
-            _BTN_OPEN_REVIEW,
-            _BTN_OPEN_FACILITY_MERGER,
             _BTN_OPEN_EX_EXTRACTOR,
+            _BTN_OPEN_FACILITY_MERGER,
             _BTN_OPEN_SETTINGS,
         )
 
     def reload_config(self, config: AppConfig) -> None:
-        """設定 GUI で保存された直後に呼ぶ。以降の ``validate_config_ready`` 判定が新値で行われる。"""
+        """設定 GUI で保存された直後に呼ぶ。Settings dialog 等が新値を反映するため。"""
         self._config = config
 
     def get_root(self) -> tk.Tk:
@@ -269,10 +163,6 @@ class Launcher:
     def invoke_action(self, action: LauncherAction) -> None:
         """指定アクションのハンドラを実行する（ボタン押下と同等）。"""
         match action:
-            case LauncherAction.RUN_PDF_MERGE:
-                self._handle_run_pdf_merge()
-            case LauncherAction.OPEN_REVIEW:
-                self._handle_open_review()
             case LauncherAction.OPEN_SETTINGS:
                 self._invoke_or_show(
                     self._on_open_settings,
@@ -283,7 +173,7 @@ class Launcher:
                 self._invoke_or_show(
                     self._on_open_facility_merger,
                     _TITLE_UNIMPL,
-                    "事業所フォルダ結合ダイアログ（未統合）",
+                    _MSG_FACILITY_MERGER_UNIMPL,
                 )
             case LauncherAction.OPEN_EX_EXTRACTOR:
                 self._invoke_or_show(
@@ -299,237 +189,9 @@ class Launcher:
         try:
             self._root.mainloop()
         finally:
-            self._shutdown_executor()
             if self._owns_root:
                 with contextlib.suppress(tk.TclError):
                     self._root.destroy()
-
-    def __del__(self) -> None:
-        # ``run()`` を呼ばずに Launcher インスタンスが破棄されるパス（テストで
-        # __init__ 後に root.destroy() で抜ける等）向けのベストエフォート cleanup。
-        # CPython の __del__ はインタプリタ終了時や循環参照検出時に呼ばれない
-        # ことがあるため、本番経路では ``run()`` の finally で shutdown を行うこと。
-        self._shutdown_executor()
-
-    def _shutdown_executor(self) -> None:
-        executor = getattr(self, "_executor", None)
-        if executor is None:
-            return
-        try:
-            executor.shutdown(wait=False, cancel_futures=True)
-        except Exception as e:  # noqa: BLE001 — GC / double-shutdown パスでも落とさない
-            # PII 防御で型名のみ。二重 shutdown で ``RuntimeError`` が出ても続行可能。
-            logger.warning("executor shutdown failed: %s", type(e).__name__)
-
-    def wait_until_idle(self, timeout: float) -> None:
-        """実行中の Phase A が完了し、完了処理が main thread で pump されるまで待機する（テスト用）。
-
-        順序保証（CPython の concurrent.futures 実装に基づく）::
-
-            1. worker thread: callback 完了 → ``future.set_result()``
-            2. worker thread: ``set_result`` 直後に同一 worker thread で ``_invoke_callbacks``
-               が走り、``add_done_callback`` で登録した ``_schedule_phase_a_done`` を呼ぶ
-               → ``root.after(0, _on_phase_a_done, future)`` で Tk queue に enqueue
-            3. main thread: ``future.result(timeout)`` から return
-            4. main thread: ``while self._busy: root.update()`` で enqueue された
-               ``_on_phase_a_done`` を pump → ``_set_busy(False)``
-
-        ``_busy`` フラグが ``_on_phase_a_done`` 内で False に落ちるまで pump を継続する
-        ため、enqueue と pump の race は ``deadline`` まで吸収される。
-        """
-        future = self._current_future
-        if future is None:
-            return
-        deadline = time.monotonic() + timeout
-        with contextlib.suppress(concurrent.futures.TimeoutError):
-            future.result(timeout=timeout)
-        while self._busy and time.monotonic() < deadline:
-            with contextlib.suppress(tk.TclError):
-                self._root.update()
-            time.sleep(0.01)
-
-    def _handle_run_pdf_merge(self) -> None:
-        if self._busy:
-            logger.info("PDF merge requested but launcher is busy; ignored")
-            return
-
-        if not validate_config_ready(self._config):
-            logger.info("PDF merge requested but config is incomplete")
-            if self._on_config_missing is not None:
-                self._on_config_missing()
-                return
-            self._messagebox.showerror(_TITLE_CONFIG_MISSING, _MSG_CONFIG_MISSING)
-            # AC-L-4「設定 GUI へ誘導」: エラーダイアログ確認後、設定アクションを続けて起動する。
-            self.invoke_action(LauncherAction.OPEN_SETTINGS)
-            return
-
-        if self._on_run_pdf_merge is None:
-            # コールバック未注入時のプレースホルダ（テスト環境や未統合状態のみ発生）。
-            self._messagebox.showinfo(
-                _TITLE_UNIMPL,
-                "PDF マージ処理の統合は後続タスクで実装予定です。",
-            )
-            return
-
-        self._set_busy(True)
-        callback = self._on_run_pdf_merge
-        future = self._executor.submit(callback)
-        self._current_future = future
-        future.add_done_callback(self._schedule_phase_a_done)
-
-    def _schedule_phase_a_done(
-        self, future: concurrent.futures.Future[None]
-    ) -> None:
-        """worker thread → main thread 遷移（Tk は main thread 以外から触れない）。"""
-        try:
-            self._root.after(0, self._on_phase_a_done, future)
-        except (RuntimeError, tk.TclError) as e:
-            # root が既に destroy 済みなら after は RuntimeError / TclError。
-            # 通知先の UI は消失しているが、future の結果/例外をロスせず型名だけでも
-            # ログに残して silent failure を防ぐ（PII 防御で exception message は除外）。
-            logger.warning(
-                "launcher after() failed after root destroy: %s", type(e).__name__
-            )
-            exc = future.exception()
-            if exc is not None:
-                logger.error(
-                    "phase A callback failed (root destroyed): %s",
-                    type(exc).__name__,
-                )
-
-    def _on_phase_a_done(
-        self, future: concurrent.futures.Future[None]
-    ) -> None:
-        """Phase A 完了後処理（main thread で実行）。成功/失敗を通知しボタンを再有効化。
-
-        ``_set_busy(False)`` は ``future.result()`` より先に呼ぶ。例外が raise される
-        ケースでも必ずボタンを再有効化するための意図的な順序（変更禁止）。
-        """
-        self._set_busy(False)
-        self._current_future = None
-        try:
-            future.result()
-        except Exception as exc:
-            # PII 防御: logger には型名のみ（exc の message はパス/氏名を含みうる）。
-            logger.error("phase A callback failed: %s", type(exc).__name__)
-            self._messagebox.showerror(
-                _TITLE_PHASE_A_ERROR,
-                _MSG_PHASE_A_ERROR_FMT.format(type=type(exc).__name__),
-            )
-            return
-        self._messagebox.showinfo(_TITLE_PHASE_A_DONE, _MSG_PHASE_A_DONE)
-
-    def _handle_open_review(self) -> None:
-        """「確認待ちセッション」ボタン押下。SessionPicker→ConfirmDialog を main thread で
-        実行し、得た session_id で Phase B を worker thread に submit。
-
-        ``on_open_review`` は main thread 同期 callback（Tk を触るため）。戻り値の
-        ``ReviewCallbackResult.should_phase_b`` が True なら Phase B へ、False なら busy
-        解除のみ（cancel / 未解決 / Phase B 明示スキップを統一表現）。
-        """
-        if self._busy:
-            logger.info("open review requested but launcher is busy; ignored")
-            return
-
-        if self._on_open_review is None:
-            # コールバック未注入時のプレースホルダ（未統合状態のみ発生）。
-            self._messagebox.showinfo(_TITLE_UNIMPL, _MSG_REVIEW_UNIMPL)
-            return
-
-        self._set_busy(True)
-        try:
-            result = self._on_open_review()
-        except Exception as exc:
-            # callback 本体（load_config / list_sessions / load_session 等）で
-            # 発生する同期例外を捕捉する。SessionPicker / ConfirmDialog 内部の
-            # Tk callback 例外は install_tk_exception_guard が吸収するが、
-            # dialog の外側で raise される例外はここでしか捕まえられない。
-            # PII 防御で型名のみログ、UI には sanitized メッセージで通知。
-            self._set_busy(False)
-            logger.error("open_review callback failed: %s", type(exc).__name__)
-            self._messagebox.showerror(
-                _TITLE_PHASE_B_ERROR,
-                _MSG_PHASE_B_ERROR_FMT.format(type=type(exc).__name__),
-            )
-            return
-
-        if not result.should_phase_b:
-            # cancel / 未解決 / 第三状態（Phase B スキップ） → ボタン再有効化のみ
-            self._set_busy(False)
-            return
-
-        session_id = result.session_id
-        if session_id is None:
-            # should_phase_b True 時は session_id が必ず非 None（プロパティ定義より）。
-            # ここに到達したら ReviewCallbackResult のプロパティ実装が破綻しており、
-            # python -O で assert が剥離されても安全に停止させる必要がある。
-            self._set_busy(False)
-            logger.error(
-                "ReviewCallbackResult invariant broken: should_phase_b=True but session_id is None"
-            )
-            self._messagebox.showerror(
-                _TITLE_PHASE_B_ERROR,
-                "内部状態エラーが発生しました。詳細はログを確認してください。",
-            )
-            return
-
-        if self._on_run_phase_b is None:
-            # Phase B コールバック未注入でも session_id は返ってきた時（テスト / 部分統合）。
-            self._set_busy(False)
-            self._messagebox.showinfo(
-                _TITLE_UNIMPL, "Phase B コールバック未注入のためスキップしました。"
-            )
-            return
-
-        callback = self._on_run_phase_b
-        future = self._executor.submit(callback, session_id)
-        self._current_future = future
-        future.add_done_callback(self._schedule_phase_b_done)
-
-    def _schedule_phase_b_done(
-        self, future: concurrent.futures.Future[None]
-    ) -> None:
-        """worker thread → main thread 遷移（Phase A と同パターン）。"""
-        try:
-            self._root.after(0, self._on_phase_b_done, future)
-        except (RuntimeError, tk.TclError) as e:
-            logger.warning(
-                "launcher after() failed after root destroy: %s", type(e).__name__
-            )
-            exc = future.exception()
-            if exc is not None:
-                logger.error(
-                    "phase B callback failed (root destroyed): %s",
-                    type(exc).__name__,
-                )
-
-    def _on_phase_b_done(
-        self, future: concurrent.futures.Future[None]
-    ) -> None:
-        """Phase B 完了処理（main thread）。_set_busy(False) を先に呼ぶ順序は Phase A と共通。"""
-        self._set_busy(False)
-        self._current_future = None
-        try:
-            future.result()
-        except Exception as exc:
-            logger.error("phase B callback failed: %s", type(exc).__name__)
-            self._messagebox.showerror(
-                _TITLE_PHASE_B_ERROR,
-                _MSG_PHASE_B_ERROR_FMT.format(type=type(exc).__name__),
-            )
-            return
-        self._messagebox.showinfo(_TITLE_PHASE_B_DONE, _MSG_PHASE_B_DONE)
-
-    def _set_busy(self, busy: bool) -> None:
-        self._busy = busy
-        state = ["disabled"] if busy else ["!disabled"]
-        for btn in (
-            self._btn_run,
-            self._btn_review,
-            self._btn_facility_merger,
-            self._btn_settings,
-        ):
-            btn.state(state)  # type: ignore[no-untyped-call]
 
     def _invoke_or_show(
         self, callback: Callable[[], None] | None, title: str, message: str
@@ -539,4 +201,3 @@ class Launcher:
             callback()
         else:
             self._messagebox.showinfo(title, message)
-
