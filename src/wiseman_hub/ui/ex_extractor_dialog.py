@@ -32,7 +32,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from tkinter import ttk
+from tkinter import filedialog, ttk
 from typing import Final, Protocol
 
 from wiseman_hub.config import AppConfig
@@ -248,6 +248,7 @@ _TITLE: Final[str] = "ex_ ファイル変換 + 振り分け"
 _BTN_RUN: Final[str] = "実行"
 _BTN_OPEN_MANUAL: Final[str] = "手動振り分けへ..."
 _BTN_CLOSE: Final[str] = "閉じる"
+_BTN_BROWSE_SOURCE: Final[str] = "取込元選択..."
 
 _LBL_SOURCE: Final[str] = "取込元 (.ex_):"
 _LBL_FACILITY_ROOT: Final[str] = "事業所ルート:"
@@ -268,6 +269,15 @@ _TITLE_PLATFORM_ERROR: Final[str] = "Windows 専用機能"
 _MSG_PLATFORM_ERROR: Final[str] = (
     "ex_ ファイルの抽出は Windows 専用です (SFX 自己解凍 EXE 実行のため)。\n"
     "macOS では動作しません。"
+)
+_TITLE_INVALID_SOURCE: Final[str] = "取込元フォルダが無効"
+_MSG_INVALID_SOURCE_FMT: Final[str] = (
+    "選択されたフォルダが存在しないかディレクトリではありません:\n{path}"
+)
+_TITLE_BROWSE_SOURCE: Final[str] = "取込元 (.ex_) フォルダを選択"
+_MSG_SOURCE_VALIDATION_ERROR_FMT: Final[str] = (
+    "取込元フォルダの状態を確認できませんでした (型: {type})。\n"
+    "ネットワーク切断 / 権限不足 / UNC パス到達不能の可能性があります。"
 )
 
 
@@ -298,6 +308,7 @@ class ExExtractorDialog:
         extract_fn: ExtractFn | None = None,
         manual_dialog_factory: Callable[..., _ManualDialogProtocol] | None = None,
         messagebox_fn: MessageBoxLike | None = None,
+        filedialog_askdirectory: Callable[..., str] | None = None,
     ) -> None:
         assert_main_thread("ExExtractorDialog")
 
@@ -307,6 +318,9 @@ class ExExtractorDialog:
         self._extract_fn: ExtractFn = extract_fn or extract_directory
         self._manual_dialog_factory = manual_dialog_factory  # None なら遅延 import で default
         self._messagebox = messagebox_fn or default_messagebox()
+        # Issue #155: 取込元 (.ex_) フォルダを GUI で都度選択可能にする (DI で
+        # mock 可能にする)。FacilityRootDialog の同パターンを踏襲。
+        self._askdirectory = filedialog_askdirectory or filedialog.askdirectory
 
         # ViewModel 初期化 (config から source/root/aliases を解決)
         if view_model is None:
@@ -347,27 +361,26 @@ class ExExtractorDialog:
         path_frame = ttk.Frame(outer)
         path_frame.pack(fill="x", pady=(0, 8))
 
-        source_str = (
-            str(self._vm.source_dir)
-            if self._vm.source_dir.exists()
-            else _LBL_NOT_SET
-        )
-        root_str = (
-            str(self._vm.facility_root_dir)
-            if self._vm.facility_root_dir.exists()
-            else _LBL_NOT_SET
-        )
-
+        # Issue #155: source_dir / facility_root_dir の Label は再描画で
+        # 値を更新する必要があるため self._lbl_source / self._lbl_facility_root
+        # で保持する (browse 後 / vm 変更時に _redraw で text を更新)。
         ttk.Label(path_frame, text=_LBL_SOURCE).grid(row=0, column=0, sticky="w")
-        ttk.Label(
-            path_frame, text=source_str, foreground="#444"
-        ).grid(row=0, column=1, sticky="w", padx=(8, 0))
+        self._lbl_source = ttk.Label(path_frame, text="", foreground="#444")
+        self._lbl_source.grid(row=0, column=1, sticky="w", padx=(8, 0))
+        # 取込元選択ボタン (Issue #155): TOML 固定の不便を解消、毎回違うフォルダ
+        # から処理可能にする。FacilityRootDialog の Browse パターンを踏襲。
+        self._btn_browse_source = ttk.Button(
+            path_frame,
+            text=_BTN_BROWSE_SOURCE,
+            command=self._on_browse_source,
+        )
+        self._btn_browse_source.grid(row=0, column=2, sticky="w", padx=(8, 0))
+
         ttk.Label(path_frame, text=_LBL_FACILITY_ROOT).grid(
             row=1, column=0, sticky="w"
         )
-        ttk.Label(
-            path_frame, text=root_str, foreground="#444"
-        ).grid(row=1, column=1, sticky="w", padx=(8, 0))
+        self._lbl_facility_root = ttk.Label(path_frame, text="", foreground="#444")
+        self._lbl_facility_root.grid(row=1, column=1, sticky="w", padx=(8, 0))
 
         # 実行ボタン + ステータスラベル
         action_frame = ttk.Frame(outer)
@@ -417,6 +430,20 @@ class ExExtractorDialog:
 
     def _redraw(self) -> None:
         """vm.state に基づき UI を再描画。"""
+        # Issue #155: source_dir / facility_root_dir のパス表示を毎回更新
+        # (browse 直後の _redraw で新値が即座に反映される)。存在しないパスは
+        # _LBL_NOT_SET 表示に切替えてユーザーに伝える。
+        self._lbl_source.configure(
+            text=str(self._vm.source_dir)
+            if self._vm.source_dir.exists()
+            else _LBL_NOT_SET
+        )
+        self._lbl_facility_root.configure(
+            text=str(self._vm.facility_root_dir)
+            if self._vm.facility_root_dir.exists()
+            else _LBL_NOT_SET
+        )
+
         # ボタン enable/disable
         self._btn_run.configure(
             state="normal" if self._vm.can_run else "disabled"
@@ -425,6 +452,10 @@ class ExExtractorDialog:
             state="normal" if self._vm.can_open_manual else "disabled"
         )
         self._btn_close.configure(
+            state="disabled" if self._vm.is_busy else "normal"
+        )
+        # browse は busy 中は disable (race / 走行中変更を防ぐ)
+        self._btn_browse_source.configure(
             state="disabled" if self._vm.is_busy else "normal"
         )
 
@@ -507,6 +538,49 @@ class ExExtractorDialog:
                 )
 
     # ----- イベントハンドラ -----
+
+    def _on_browse_source(self) -> None:
+        """取込元 (.ex_) フォルダを folder browser で都度選択する (Issue #155)。
+
+        分岐契約:
+        - busy 中 → 何もしない (UI disable 済 + defensive)
+        - キャンセル (空文字 return) → current value 保持
+        - 存在しない / ディレクトリでない → ``_TITLE_INVALID_SOURCE`` 通知
+        - ``exists()`` / ``is_dir()`` 自体が ``OSError`` を raise (Windows UNC /
+          ネットワーク切断 / 権限拒否) → 型名のみログ + 検証エラー通知
+          (silent-failure-hunter HIGH-1 対応)
+        - 成功時 → ``_vm.source_dir`` 更新 + ``_redraw`` で UI 反映
+          (TOML ``ex_source_dir`` は次回起動時の初期値として残置 / Issue #165)
+        """
+        if self._vm.is_busy:
+            return
+        path = self._askdirectory(parent=self._top, title=_TITLE_BROWSE_SOURCE)
+        if not path:
+            return
+        selected = Path(path)
+        try:
+            is_valid = selected.exists() and selected.is_dir()
+        except OSError as exc:
+            # PII 防御: path 文字列を log に出さない (型名のみ)。
+            # messagebox には選択 path を含めない (原因型のみ表示)。
+            logger.error(
+                "browse source validation OSError: %s", type(exc).__name__
+            )
+            self._messagebox.showerror(
+                _TITLE_INVALID_SOURCE,
+                _MSG_SOURCE_VALIDATION_ERROR_FMT.format(
+                    type=type(exc).__name__
+                ),
+            )
+            return
+        if not is_valid:
+            self._messagebox.showerror(
+                _TITLE_INVALID_SOURCE,
+                _MSG_INVALID_SOURCE_FMT.format(path=selected),
+            )
+            return
+        self._vm.source_dir = selected
+        self._redraw()
 
     def _on_run_click(self) -> None:
         if not self._vm.can_run:
