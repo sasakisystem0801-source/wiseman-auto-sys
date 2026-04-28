@@ -31,7 +31,7 @@ ex_extractor の出力には介護施設の事業所名・利用者氏名等の 
 - **`orphan_alias_canonicals` banner / CLI 警告には canonical 名（事業所正式名）が出る**: 運用者ローカル端末の表示に留め、SaaS log aggregator（Sentry / Datadog 等）への送信禁止
 - **スクショ共有時**: 事業所名・PDF ファイル名・利用者氏名が映る箇所は墨塗り or マスク必須
 - **stderr ログのファイル化**: `2>run.log` で保存する場合、検証完了後に削除するか暗号化フォルダへ移動
-- **Slack / Email でのログ貼付**: 必ず墨塗り後。`grep -E "本田|施設A|施設B"` 等で事業所名を含む行を除外してから共有
+- **Slack / Email でのログ貼付**: 必ず墨塗り後。`grep -E "<事業所名 1>|<事業所名 2>"` 等で事業所名を含む行を除外してから共有
 
 ex_extractor モジュール本体の logger は filename と enum 値のみ出力する設計だが、CLI レイヤ（`scripts/process_ex_files.py`）の `_print_summary` は alias 設定不整合通知のために canonical 名を例外的に出力する（ADR-014 §PII 保護方針）。
 
@@ -81,11 +81,11 @@ uv sync --extra dev
 
 | サンプル種別 | ファイル名規約 | 期待 status |
 |------------|----------------|-------------|
-| SUCCESS 経路 | `<本田様の現行運用で alias / 事業所名と一意マッチする ex_>` (1-2 件) | `SUCCESS` |
+| SUCCESS 経路 | `<運用者の現行運用で alias / 事業所名と一意マッチする ex_>` (1-2 件) | `SUCCESS` |
 | SKIPPED_AMBIGUOUS | `<事業所 A と B 両方を部分一致候補に持つ ex_>` (1 件) | `SKIPPED_AMBIGUOUS` |
 | SKIPPED_UNMATCHED | `<事業所名・alias と全くマッチしない ex_>` (1 件) | `SKIPPED_UNMATCHED` |
 
-サンプル選定は本田様の現行 `ex_source_dir` 配下から実例を流用するのが最も簡単。検証完了後、抽出された PDF は事業所フォルダに配布されるため、**検証用は本番ルートと隔離した一時フォルダで実施するのを推奨**。
+サンプル選定は運用者の現行 `ex_source_dir` 配下から実例を流用するのが最も簡単。検証完了後、抽出された PDF は事業所フォルダに配布されるため、**検証用は本番ルートと隔離した一時フォルダで実施するのを推奨**（具体手順は §2-2 推奨方式 + [`ex-test-fixtures.md`](./ex-test-fixtures.md)）。
 
 ---
 
@@ -140,24 +140,25 @@ Copy-Item "$HOME\Projects\wiseman-auto-sys\config\test.toml.example" `
   "$HOME\wiseman-hub\config\test.toml"
 
 # 2. 検証用ローカルパスを作成（本番 NAS は絶対に使わない）
+#    事業所名は実環境の検証用フォルダ名に置換（PII 観点で本ドキュメントは仮名 `サービスA` / `サービスB`）
 New-Item -ItemType Directory -Force -Path "$HOME\wiseman-test\ex_source"
-New-Item -ItemType Directory -Force -Path "$HOME\wiseman-test\facilities\本田デイサービス"
-New-Item -ItemType Directory -Force -Path "$HOME\wiseman-test\facilities\本田訪問サービス"
+New-Item -ItemType Directory -Force -Path "$HOME\wiseman-test\facilities\サービスA"
+New-Item -ItemType Directory -Force -Path "$HOME\wiseman-test\facilities\サービスB"
 
 # 3. test.toml を notepad で開き、検証用 ex_source_dir / facility_root_dir / facility_aliases を編集
 notepad "$HOME\wiseman-hub\config\test.toml"
 ```
 
-`test.toml` の主要編集ポイント:
+`test.toml` の主要編集ポイント（`<USERNAME>` と仮名 `サービスA/B` は実環境の値に置換）:
 
 ```toml
 [pdf_merge]
-ex_source_dir = "C:\\Users\\sasak\\wiseman-test\\ex_source"
-facility_root_dir = "C:\\Users\\sasak\\wiseman-test\\facilities"
+ex_source_dir = "C:\\Users\\<USERNAME>\\wiseman-test\\ex_source"
+facility_root_dir = "C:\\Users\\<USERNAME>\\wiseman-test\\facilities"
 
 [pdf_merge.facility_aliases]
-"本田デイサービス" = ["HD"]
-"本田訪問サービス" = ["HV"]
+"サービスA" = ["デイA"]
+"サービスB" = ["訪問B"]
 ```
 
 検証用 `.ex_` fixture (3 種: SUCCESS / AMBIGUOUS / UNMATCHED) の調達・命名・配置構造は [`ex-test-fixtures.md`](./ex-test-fixtures.md) 参照。
@@ -210,11 +211,11 @@ Launcher 起動後、ExExtractorDialog を開いて `ex_source_dir` 表示欄を
 
 ```toml
 [pdf_merge]
-ex_source_dir = "C:\\Users\\sasak\\OneDrive\\デスクトップ\\本田様\\ex_source"  # 検証用に一時設定
+ex_source_dir = "C:\\Users\\<USERNAME>\\<検証用フォルダパス>"  # 検証用に一時設定
 # facility_root_dir は本番 NAS のまま使う場合は本番 NAS 上に検証用フォルダを作らない／検証用 .ex_ も投入しない こと
 
 [pdf_merge.facility_aliases]
-"<本田様の事業所正式名>" = ["<短縮名 1>", "<別表記 1>"]
+"<事業所正式名>" = ["<短縮名 1>", "<別表記 1>"]
 ```
 
 ### 2-3. orphan alias を意図的に作成（AC-11 検証用、任意）

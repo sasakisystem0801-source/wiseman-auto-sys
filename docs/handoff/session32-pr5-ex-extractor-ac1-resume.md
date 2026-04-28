@@ -1,7 +1,7 @@
 # Session 32 中断メモ: PR5 ex_extractor Windows 実機検証 AC-1（再開用）
 
 **中断日時**: 2026-04-28 朝（TeamViewer タイムリミット）
-**Windows 機**: `C:\Users\sasak\` ユーザー、TeamViewer 経由
+**Windows 機**: `C:\Users\<USERNAME>\` ユーザー、TeamViewer 経由
 **main HEAD**: `f4a242e` (Mac 側 / Windows 側 同期済)
 
 ## 今回のスコープ（ユーザー指定）
@@ -136,12 +136,12 @@ ADR-014 §業務フロー上の位置づけ より、新ワークフロー = ①
 
 中断時点の課題:
 - `facility_root_dir = "\\Tera-station\share\03.FAX(...)"` が本番 NAS を指している
-- 検証用 .ex_ ファイル（SUCCESS / SKIPPED_AMBIGUOUS / SKIPPED_UNMATCHED）を本田様の運用環境からコピー必要
+- 検証用 .ex_ ファイル（SUCCESS / SKIPPED_AMBIGUOUS / SKIPPED_UNMATCHED）を運用環境からコピー必要
 - PowerShell `$env:WISEMAN_HUB_CONFIG` はショートカット起動に継承されない落とし穴あり（Codex セカンドオピニオン指摘、Mac セッション中に発覚）
 
 実装した対策（A1〜A5、本セッション中断記録の続編で追加）:
 - ✅ `config/test.toml.example` 新規 — 本番 NAS を絶対に指さない検証用テンプレート
-- ✅ `docs/handoff/ex-test-fixtures.md` 新規 — 3 種 fixture の発火条件・命名・本田様運用環境からの調達手順
+- ✅ `docs/handoff/ex-test-fixtures.md` 新規 — 3 種 fixture の発火条件・命名・運用環境からの調達手順
 - ✅ `docs/handoff/pr5-ex-extractor-runbook.md` §2-2 全面再構成 — `test.toml` + `WISEMAN_HUB_CONFIG` 経路を推奨化、PowerShell `Start-Process` / `.ps1` ラッパー（方式 A/B）でショートカット起動の落とし穴を回避、ユーザー環境変数永続化（方式 C）を非推奨と明記
 - ✅ runbook §5-2 — `test.toml` 経路でのクリーンアップ手順（環境変数解除 + ローカル fixture 削除）
 
