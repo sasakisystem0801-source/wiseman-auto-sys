@@ -1,0 +1,83 @@
+# =========================================================================
+# Wiseman Hub 検証専用 config テンプレート
+# =========================================================================
+#
+# PR5 ex_extractor Windows 実機検証 (AC-2〜AC-14) で本番 NAS や本番
+# ex_source_dir を汚さないための検証用 config。`WISEMAN_HUB_CONFIG`
+# 環境変数で本ファイルへ参照を切り替えて使用する。
+#
+# 詳細手順（コピー / WISEMAN_HUB_CONFIG 注入起動 / クリーンアップ）:
+#   docs/handoff/pr5-ex-extractor-runbook.md §2-2
+# 検証用 .ex_ fixture の発火条件・配置構造:
+#   docs/handoff/ex-test-fixtures.md
+# =========================================================================
+
+[app]
+version = "0.1.0"
+log_level = "DEBUG"        # 検証時は詳細ログを推奨
+log_dir = ""
+
+[wiseman]
+exe_path = ""              # 検証では Wiseman 起動なし → 空でも fail しない
+startup_wait_sec = 15
+window_title_pattern = ".*管理システム SP.*"
+
+[[reports.targets]]
+name = "ケア記録集計表"
+menu_path = ["ケア記録", "集計表"]
+output_format = "csv"
+
+[gcp]
+project_id = "wiseman-hub-prod"
+bucket_name = "wiseman-hub-prod-datalake"
+service_account_key_path = "config/sa-key.json"  # 検証では GCS 通信なし
+region = "asia-northeast1"
+
+[ocr_backend]
+# 検証では OCR 通信は発生しない（ex_extractor は SFX 経由の PDF 抽出のみ）
+endpoint_url = "https://example.invalid"
+api_key = "dummy-not-used-in-ex-extractor-validation"
+timeout_sec = 30
+max_retries = 3
+
+# ───────────────────────────────────────────────────────────────────────
+# [pdf_merge] 検証用パス（■ 検証ごとに編集）
+# ───────────────────────────────────────────────────────────────────────
+[pdf_merge]
+# PDF 結合は検証スコープ外（AC-2〜AC-14 は ex_extractor のみ）
+input_dir = ""
+output_dir = ""
+source_a_filename = ""
+source_d_filename = ""
+source_b_pattern = "B_{name}.pdf"
+source_c_pattern = "C_{name}.pdf"
+concat_order = ["A", "B", "C"]
+
+# ex_extractor 検証用パス（■ 必須編集、<USERNAME> を実環境のユーザー名に置換）
+# 本番 NAS (\\Tera-station\share\03.FAX(...)) を絶対に指さないこと。
+ex_source_dir = "C:\\Users\\<USERNAME>\\wiseman-test\\ex_source"
+facility_root_dir = "C:\\Users\\<USERNAME>\\wiseman-test\\facilities"
+
+[pdf_merge.user_name_bbox]
+x0 = 0.0
+y0 = 0.0
+x1 = 0.0
+y1 = 0.0
+dpi = 200
+
+# ───────────────────────────────────────────────────────────────────────
+# [pdf_merge.facility_aliases] AC-3 / AC-11 検証用 alias
+# ───────────────────────────────────────────────────────────────────────
+# canonical（key）は facility_root_dir 配下に実在するフォルダ名と完全一致が必要。
+# 値は必ず list 型で書く（"abc" 単独は禁止 — 文字単位分解されるため TypeError）。
+#
+# placeholder は実環境の検証用フォルダ名・短縮名に必ず置換する（そのままだと
+# 「<検証用事業所A名>」フォルダを期待することになる）。
+[pdf_merge.facility_aliases]
+"<検証用事業所A名>" = ["<短縮名 A1>", "<別表記 A1>"]
+"<検証用事業所B名>" = ["<短縮名 B1>"]
+
+# AC-11 (orphan_alias_canonicals banner 検証) で使う場合のみ追加。
+# 下記 canonical は facility_root_dir に存在しない → orphan として警告される。
+# 検証完了後は削除すること。
+# "消えた施設" = ["短縮"]

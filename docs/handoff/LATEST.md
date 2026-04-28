@@ -1,4 +1,58 @@
-# Handoff: Session 31 完了（PR #141 merged + PR #142 close 保留）
+# Handoff: Session 32 中断（PR5 ex_extractor Windows 実機検証 AC-1 途中）
+
+**更新日**: 2026-04-28（Session 32 / TeamViewer タイムリミットで中断）
+**ブランチ**: main
+**main HEAD（中断時点）**: `f4a242e` docs(handoff): Session 31 cleanup - PR #141 マージ反映 + PR #142 close 保留 (#143)
+
+## Session 32 進捗（中断）
+
+### 達成したこと（Windows 11 実機 + TeamViewer 経由）
+
+- **Phase 0 完了**: exe バックアップ（`wiseman_hub.exe.bak-20260428-075301`）+ `git pull --ff-only`（`f4a242e` 同期）+ `uv sync --extra dev`（差分なし）
+- **Phase 1 完了**: PyInstaller ビルド成功（78,632,876 bytes / 2026-04-28 8:00:08、warning 既知の `pycparser` / `jinja2` 3 件のみ、`wiseman_hub.*` 由来 0 件）
+- **Phase 2-1 完了**: 新 exe を `~/wiseman-hub/wiseman_hub.exe` に配備（旧版 78,570,672 → 新版 78,632,876、+62 KB は PR4 UI 統合分）
+- **AC-1 (1)(2) PASS**: Launcher 起動（コンソール非表示）+ 5 ボタン目「ex_ ファイル変換 + 振り分け」表示確認（スクショ取得済）
+
+### 中断時点の未完作業
+
+- **AC-1 (3) 未実施**: 5 ボタン目クリック → `ExExtractorDialog` 起動確認（**次回最優先**）
+- **デスクトップショートカット経由起動確認**: 新 exe（78,632,876 bytes）が起動することを確認（次回）
+- **AC-2〜AC-14**: 今回スコープ外（実 .ex_ 投入 + config 編集 + SFX 起動検証は次々回以降）
+
+詳細・再開コマンド: [`session32-pr5-ex-extractor-ac1-resume.md`](./session32-pr5-ex-extractor-ac1-resume.md)
+
+### Issue Net 変化（Session 32 中断時点）
+
+- **Close**: 0 件
+- **起票**: 0 件
+- **Net: 0 件**
+
+中断のため Net ≤ 0 だが、これは「進捗ゼロ扱い」基準の対象外（実機検証フェーズ途中で、コード変更や Issue 起票判断は AC-1 完走後にまとめて発生する設計）。AC-1 完走 + ADR-014 Accepted 昇格時に Issue Net 進捗を再計上する。
+
+### 発見事項（次回以降の課題）
+
+1. **runbook §2-2 config パス誤記**: 記載 `%USERPROFILE%\wiseman-hub\config.toml` → 実際は `%USERPROFILE%\wiseman-hub\config\default.toml`（`src/wiseman_hub/__main__.py:43-44` の `_default_config_path()` で frozen 時は `Path(sys.executable).parent / "config" / "default.toml"`）。Phase 5 完走時に修正 PR をまとめて起こす
+2. **Launcher 未使用ボタン削除提案（ユーザー明示指示）**: AC-1 完了後にユーザーと削除候補を確定 → 別 Issue 起票（CLAUDE.md triage 基準 #5 該当）→ 別 PR で UI 変更 + テスト変更を一体実施。今回 PR と混ぜない方針
+3. **AC-2〜14 検証時の本番 NAS 汚染防止**: `facility_root_dir = "\\Tera-station\share\03.FAX(...)"` が本番 NAS を指しているため、検証用 config（例: `~/wiseman-hub/config/test.toml` を `WISEMAN_HUB_CONFIG` で参照切替）を別途用意する必要あり。検証用 .ex_ ファイル（SUCCESS / SKIPPED_AMBIGUOUS / SKIPPED_UNMATCHED の 3 種）も本田様運用環境からコピー必要
+
+### 次回再開コマンド
+
+```bash
+# Mac 側
+cd /Users/yyyhhh/Projects/wiseman_auto_sys
+git checkout main && git pull --ff-only
+cat docs/handoff/session32-pr5-ex-extractor-ac1-resume.md  # 詳細
+
+# Windows 機側（TeamViewer 経由、PowerShell）
+# resume note の §「次回再開時の最初のアクション」を実施
+# 1. Launcher 起動: Start-Process "$HOME\wiseman-hub\wiseman_hub.exe"
+# 2. 5 ボタン目クリック → ExExtractorDialog 起動確認（実行ボタンは押さない）
+# 3. デスクトップショートカット経由起動でも新 exe（78,632,876 bytes）起動を確認
+```
+
+---
+
+# 旧サマリ: Session 31 完了（PR #141 merged + PR #142 close 保留）
 
 **更新日**: 2026-04-27（Session 31 / PR #141 マージ後）
 **ブランチ**: main
