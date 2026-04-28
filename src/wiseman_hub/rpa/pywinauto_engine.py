@@ -389,18 +389,22 @@ class PywinautoEngine(RPAEngine):
             {"auto_id": "txtFileName"},
             {"control_type": "Edit"},
         ]
+        # 最後に試行した selector の例外を保持し、from chain で原因を明示する
+        # (silent-failure-hunter I-3 / type-design Concerns 2)。
+        filename_last_exc: Exception | None = None
         for spec in filename_selectors:
             try:
                 save_dlg.child_window(**spec).set_edit_text(str(csv_path))
                 break
-            except (ElementNotFoundError, PywinautoTimeoutError, AttributeError):
+            except (ElementNotFoundError, PywinautoTimeoutError, AttributeError) as e:
+                filename_last_exc = e
                 continue
         else:
             logger.warning("ファイル名入力欄が見つかりません")
             raise FileNameFieldNotFoundError(
                 "保存ダイアログ内のファイル名入力欄が全 selector で発見できません: "
                 + ", ".join(repr(s) for s in filename_selectors)
-            )
+            ) from filename_last_exc
 
         time.sleep(0.5)
 
@@ -409,18 +413,20 @@ class PywinautoEngine(RPAEngine):
             {"title_re": ".*保存.*", "control_type": "Button"},
             {"title": "Save", "control_type": "Button"},
         ]
+        save_button_last_exc: Exception | None = None
         for spec in save_button_selectors:
             try:
                 save_dlg.child_window(**spec).click_input()
                 break
-            except (ElementNotFoundError, PywinautoTimeoutError):
+            except (ElementNotFoundError, PywinautoTimeoutError) as e:
+                save_button_last_exc = e
                 continue
         else:
             logger.warning("保存ボタンが見つかりません")
             raise SaveButtonNotFoundError(
                 "保存ダイアログ内の保存ボタンが全 selector で発見できません: "
                 + ", ".join(repr(s) for s in save_button_selectors)
-            )
+            ) from save_button_last_exc
 
         time.sleep(1)
 
