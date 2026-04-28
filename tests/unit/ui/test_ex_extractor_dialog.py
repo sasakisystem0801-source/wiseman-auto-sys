@@ -27,6 +27,7 @@ from wiseman_hub.pdf.facility_resolver import (
     ResolveResult,
 )
 from wiseman_hub.ui.ex_extractor_dialog import (
+    _TITLE_BROWSE_SOURCE,
     ExExtractorDialog,
     ExExtractorViewModel,
     UiState,
@@ -438,11 +439,11 @@ class TestExExtractorDialogSmoke:
             assert dialog.view_model.source_dir == original_source
             dialog._on_browse_source()
 
-            # askdirectory が呼ばれたことを確認 (parent + title 引数)
+            # askdirectory が呼ばれたことを確認 (parent 値 + title 定数を厳密検証)
             fake_askdirectory.assert_called_once()
             _, kwargs = fake_askdirectory.call_args
-            assert "parent" in kwargs
-            assert "取込元" in kwargs.get("title", "")
+            assert kwargs.get("parent") is dialog._top
+            assert kwargs.get("title") == _TITLE_BROWSE_SOURCE
 
             # vm.source_dir が新フォルダに更新されている
             assert dialog.view_model.source_dir == new_source
@@ -538,16 +539,18 @@ class TestExExtractorDialogSmoke:
         finally:
             root.destroy()
 
-    def test_browse_source_disabled_during_busy(
+    def test_browse_source_disabled_during_busy_and_reenabled_after_idle(
         self, tmp_path: Path
     ) -> None:
-        """Issue #155: 実行中 (BUSY) は browse ボタンが disable されている。
+        """Issue #155 (pr-test rating 6): BUSY 中は disable、IDLE 復帰で再有効化。
 
-        race / 実行中に source_dir が変更されることを防ぐ (UI レベルの予防)。
+        双方向の状態遷移を 1 テストで検証する (元実装は片方向のみ)。
+        race / 実行中の source_dir 変更を防ぐ UI 契約を契約として固定。
         """
         import tkinter as tk
 
         from wiseman_hub.config import PdfMergeConfig
+        from wiseman_hub.pdf.ex_extractor import ExtractionResult
 
         source = tmp_path / "ex_source"
         source.mkdir()
@@ -569,10 +572,216 @@ class TestExExtractorDialogSmoke:
             # 初期状態: IDLE → browse は normal
             assert str(dialog._btn_browse_source.cget("state")) == "normal"
 
-            # BUSY に遷移
+            # BUSY に遷移 → disable
             dialog.view_model.transition_to_busy()
             dialog._redraw()
             assert str(dialog._btn_browse_source.cget("state")) == "disabled"
+
+            # SHOWING_RESULT → IDLE に復帰すると再有効化
+            dialog.view_model.transition_to_showing_result(
+                ExtractionResult(items=())
+            )
+            dialog._redraw()
+            assert str(dialog._btn_browse_source.cget("state")) == "normal"
+            dialog._on_close()
+        finally:
+            root.destroy()
+
+    def test_browse_source_oserror_shows_error_and_keeps_value(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Issue #155 (silent-failure-hunter HIGH-1): exists()/is_dir() で OSError
+        (Windows UNC / ネットワーク切断 / 権限拒否) → silent failure せず通知。
+
+        元実装は try/except なしで、ハンドラから例外伝播 → ユーザーから見て
+        「ボタン押したのに何も起きない」状態。本テストで type 名のみ通知 +
+        値据え置きを契約化。
+        """
+        import logging
+        import tkinter as tk
+        from unittest.mock import patch
+
+        from wiseman_hub.config import PdfMergeConfig
+
+        original_source = tmp_path / "original_source"
+        original_source.mkdir()
+        root_dir = tmp_path / "facility_root"
+        root_dir.mkdir()
+
+        config = AppConfig(
+            pdf_merge=PdfMergeConfig(
+                ex_source_dir=str(original_source),
+                facility_root_dir=str(root_dir),
+            )
+        )
+
+        # askdirectory が UNC パス相当を返したと仮定し、Path.exists() が
+        # PermissionError (OSError サブクラス) を raise する経路をシミュレート
+        fake_askdirectory = MagicMock(return_value=r"\\unreachable\share")
+        messagebox = MagicMock()
+
+        root = tk.Tk()
+        try:
+            dialog = ExExtractorDialog(
+                parent=root,
+                config=config,
+                adapter=FakeSfxAdapter(),
+                filedialog_askdirectory=fake_askdirectory,
+                messagebox_fn=messagebox,
+            )
+
+            with (
+                patch.object(
+                    Path, "exists", side_effect=PermissionError("denied")
+                ),
+                caplog.at_level(
+                    logging.ERROR, logger="wiseman_hub.ui.ex_extractor_dialog"
+                ),
+            ):
+                dialog._on_browse_source()
+
+            # source_dir は更新されない
+            assert dialog.view_model.source_dir == original_source
+            # messagebox.showerror が 1 回呼ばれている (型名表示)
+            messagebox.showerror.assert_called_once()
+            args, _ = messagebox.showerror.call_args
+            assert "PermissionError" in args[1]
+            # logger に型名のみ記録 (PII 防御: path 文字列は出ない)
+            assert "PermissionError" in caplog.text
+            assert "unreachable" not in caplog.text
+            dialog._on_close()
+        finally:
+            root.destroy()
+
+    def test_browse_then_run_uses_selected_source(
+        self, tmp_path: Path
+    ) -> None:
+        """Issue #155 (pr-test rating 7): browse → run の end-to-end。
+
+        将来 ``_on_run_click`` が ``vm.source_dir`` 経由を外して
+        ``config.pdf_merge.ex_source_dir`` を直接参照するバグを入れた場合に
+        regression を検出する。
+        """
+        import tkinter as tk
+
+        from wiseman_hub.config import PdfMergeConfig
+        from wiseman_hub.pdf.ex_extractor import ExtractionResult
+
+        original_source = tmp_path / "original_source"
+        original_source.mkdir()
+        new_source = tmp_path / "new_source"
+        new_source.mkdir()
+        root_dir = tmp_path / "facility_root"
+        root_dir.mkdir()
+
+        config = AppConfig(
+            pdf_merge=PdfMergeConfig(
+                ex_source_dir=str(original_source),
+                facility_root_dir=str(root_dir),
+            )
+        )
+
+        called_args: dict[str, Path] = {}
+
+        def fake_extract(
+            source_dir: Path,
+            facility_root_dir: Path,
+            aliases: dict[str, list[str]],
+            adapter: object,
+        ) -> ExtractionResult:
+            called_args["source_dir"] = source_dir
+            return ExtractionResult(items=())
+
+        fake_askdirectory = MagicMock(return_value=str(new_source))
+
+        root = tk.Tk()
+        try:
+            dialog = ExExtractorDialog(
+                parent=root,
+                config=config,
+                adapter=FakeSfxAdapter(),
+                extract_fn=fake_extract,
+                filedialog_askdirectory=fake_askdirectory,
+            )
+            # browse で source_dir を new_source に変更
+            dialog._on_browse_source()
+            assert dialog.view_model.source_dir == new_source
+
+            # run → extract_fn が new_source を受け取ることを検証
+            dialog._on_run_click()
+            dialog._executor.shutdown(wait=True)
+            root.update()
+            root.update()
+
+            assert called_args["source_dir"] == new_source
+            dialog._on_close()
+        finally:
+            root.destroy()
+
+    def test_browse_then_run_with_unset_toml(
+        self, tmp_path: Path
+    ) -> None:
+        """Issue #155 受け入れ基準: TOML 未設定でも browse → run でフロー継続可能。
+
+        ex_source_dir が空文字列 (未設定) で起動 → Path(".") フォールバック →
+        can_run False → browse で valid フォルダ選択 → can_run True → 実行成功。
+        """
+        import tkinter as tk
+
+        from wiseman_hub.config import PdfMergeConfig
+        from wiseman_hub.pdf.ex_extractor import ExtractionResult
+
+        new_source = tmp_path / "new_source"
+        new_source.mkdir()
+        root_dir = tmp_path / "facility_root"
+        root_dir.mkdir()
+
+        # TOML ex_source_dir 未設定 (空文字列)
+        config = AppConfig(
+            pdf_merge=PdfMergeConfig(
+                ex_source_dir="",
+                facility_root_dir=str(root_dir),
+            )
+        )
+
+        called_args: dict[str, Path] = {}
+
+        def fake_extract(
+            source_dir: Path,
+            facility_root_dir: Path,
+            aliases: dict[str, list[str]],
+            adapter: object,
+        ) -> ExtractionResult:
+            called_args["source_dir"] = source_dir
+            return ExtractionResult(items=())
+
+        fake_askdirectory = MagicMock(return_value=str(new_source))
+
+        root = tk.Tk()
+        try:
+            dialog = ExExtractorDialog(
+                parent=root,
+                config=config,
+                adapter=FakeSfxAdapter(),
+                extract_fn=fake_extract,
+                filedialog_askdirectory=fake_askdirectory,
+            )
+            # 起動時 vm.source_dir = Path(".")（フォールバック）。"." は通常存在
+            # するが、is_valid なフォルダ (root_dir 等) でない場合 can_run False
+            # に依存する。本テストは GUI で valid フォルダを選び直してから実行。
+
+            # browse で new_source を選択 → vm 更新
+            dialog._on_browse_source()
+            assert dialog.view_model.source_dir == new_source
+            assert dialog.view_model.can_run is True
+
+            # run → extract_fn が new_source を受け取る
+            dialog._on_run_click()
+            dialog._executor.shutdown(wait=True)
+            root.update()
+            root.update()
+
+            assert called_args["source_dir"] == new_source
             dialog._on_close()
         finally:
             root.destroy()

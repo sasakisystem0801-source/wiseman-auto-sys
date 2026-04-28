@@ -274,6 +274,11 @@ _TITLE_INVALID_SOURCE: Final[str] = "取込元フォルダが無効"
 _MSG_INVALID_SOURCE_FMT: Final[str] = (
     "選択されたフォルダが存在しないかディレクトリではありません:\n{path}"
 )
+_TITLE_BROWSE_SOURCE: Final[str] = "取込元 (.ex_) フォルダを選択"
+_MSG_SOURCE_VALIDATION_ERROR_FMT: Final[str] = (
+    "取込元フォルダの状態を確認できませんでした (型: {type})。\n"
+    "ネットワーク切断 / 権限不足 / UNC パス到達不能の可能性があります。"
+)
 
 
 # DI 用 type alias
@@ -537,26 +542,38 @@ class ExExtractorDialog:
     def _on_browse_source(self) -> None:
         """取込元 (.ex_) フォルダを folder browser で都度選択する (Issue #155)。
 
-        - filedialog.askdirectory でユーザーがフォルダを選ぶ
-        - キャンセル時 (空文字 return) は current value を保持して何もしない
-        - 選択されたパスが存在しない / ディレクトリでない場合は messagebox で通知
-          (askdirectory は通常 valid path を返すが、シンボリックリンク切れ等の
-          防御的チェック)
-        - 成功時は ``_vm.source_dir`` を更新して ``_redraw`` で UI 反映
-          (TOML の ``ex_source_dir`` は次回起動時の初期値として残置)
+        分岐契約:
+        - busy 中 → 何もしない (UI disable 済 + defensive)
+        - キャンセル (空文字 return) → current value 保持
+        - 存在しない / ディレクトリでない → ``_TITLE_INVALID_SOURCE`` 通知
+        - ``exists()`` / ``is_dir()`` 自体が ``OSError`` を raise (Windows UNC /
+          ネットワーク切断 / 権限拒否) → 型名のみログ + 検証エラー通知
+          (silent-failure-hunter HIGH-1 対応)
+        - 成功時 → ``_vm.source_dir`` 更新 + ``_redraw`` で UI 反映
+          (TOML ``ex_source_dir`` は次回起動時の初期値として残置 / Issue #165)
         """
         if self._vm.is_busy:
-            # busy 中の race を防ぐ (UI 上は disable 済みだが defensive)
             return
-        path = self._askdirectory(
-            parent=self._top,
-            title="取込元 (.ex_) フォルダを選択",
-        )
+        path = self._askdirectory(parent=self._top, title=_TITLE_BROWSE_SOURCE)
         if not path:
-            # キャンセル時は current value 保持
             return
         selected = Path(path)
-        if not selected.exists() or not selected.is_dir():
+        try:
+            is_valid = selected.exists() and selected.is_dir()
+        except OSError as exc:
+            # PII 防御: path 文字列を log に出さない (型名のみ)。
+            # messagebox には選択 path を含めない (原因型のみ表示)。
+            logger.error(
+                "browse source validation OSError: %s", type(exc).__name__
+            )
+            self._messagebox.showerror(
+                _TITLE_INVALID_SOURCE,
+                _MSG_SOURCE_VALIDATION_ERROR_FMT.format(
+                    type=type(exc).__name__
+                ),
+            )
+            return
+        if not is_valid:
             self._messagebox.showerror(
                 _TITLE_INVALID_SOURCE,
                 _MSG_INVALID_SOURCE_FMT.format(path=selected),
