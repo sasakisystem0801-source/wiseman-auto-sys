@@ -30,6 +30,7 @@ from wiseman_hub.pdf.session import (
     list_sessions,
     load_session,
     save_session,
+    session_path,
     transition_session,
     with_session_lock,
 )
@@ -124,6 +125,7 @@ class TestSaveLoad:
         assert isinstance(loaded.candidates, tuple)
 
     def test_round_trip_with_candidates(self, tmp_path: Path) -> None:
+        """B/C 両方の SourceKind が round-trip で復元されることを保証する (Issue #45)。"""
         sessions_dir = tmp_path / ".sessions"
         cand = UserCandidate(
             page_index=0,
@@ -135,9 +137,15 @@ class TestSaveLoad:
             similar_candidates=(
                 CandidateState(
                     path=str(tmp_path / "B_other.pdf"),
-                    kind="B",
+                    kind=SourceKind.B,
                     distance=1,
                     extracted_name="塩津美貴子",
+                ),
+                CandidateState(
+                    path=str(tmp_path / "C_other.pdf"),
+                    kind=SourceKind.C,
+                    distance=2,
+                    extracted_name="塩津美喜",
                 ),
             ),
         )
@@ -148,12 +156,57 @@ class TestSaveLoad:
 
         assert len(loaded.candidates) == 1
         assert loaded.candidates[0].user_name_ocr == "塩津 美喜子"
-        assert loaded.candidates[0].similar_candidates[0].extracted_name == "塩津美貴子"
         assert isinstance(loaded.candidates, tuple)
         assert isinstance(loaded.candidates[0].similar_candidates, tuple)
-        loaded_kind = loaded.candidates[0].similar_candidates[0].kind
-        assert isinstance(loaded_kind, SourceKind)
-        assert loaded_kind == SourceKind.B
+        sims = loaded.candidates[0].similar_candidates
+        assert len(sims) == 2
+        assert sims[0].extracted_name == "塩津美貴子"
+        assert isinstance(sims[0].kind, SourceKind)
+        assert sims[0].kind == SourceKind.B
+        assert sims[1].extracted_name == "塩津美喜"
+        assert isinstance(sims[1].kind, SourceKind)
+        assert sims[1].kind == SourceKind.C
+
+    def test_serialized_kind_is_plain_string_in_json(self, tmp_path: Path) -> None:
+        """JSON 出力での kind が StrEnum repr ではなくプレーン文字列 ``"B"``/``"C"`` で
+        書き出されることを直接確認する (Issue #45 / レビュー C-1 対応)。
+
+        ``_to_dict`` の ``str(sim_original.kind)`` 明示変換が将来削除されても
+        round-trip テスト経由では検知できない可能性があるため、保存後の JSON を
+        直接読み込んで wire format を検証する。
+        """
+        sessions_dir = tmp_path / ".sessions"
+        cand = UserCandidate(
+            page_index=0,
+            user_name_ocr="x",
+            confidence="high",
+            status=PairStatus.AUTO_MATCHED,
+            matched_b_path=None,
+            matched_c_path=None,
+            similar_candidates=(
+                CandidateState(
+                    path=str(tmp_path / "B_a.pdf"),
+                    kind=SourceKind.B,
+                    distance=1,
+                    extracted_name="a",
+                ),
+                CandidateState(
+                    path=str(tmp_path / "C_a.pdf"),
+                    kind=SourceKind.C,
+                    distance=1,
+                    extracted_name="a",
+                ),
+            ),
+        )
+        s = _make_session(tmp_path, candidates=(cand,))
+        save_session(s, sessions_dir=sessions_dir)
+
+        raw = json.loads(session_path(s.session_id, sessions_dir).read_text())
+        sims = raw["candidates"][0]["similar_candidates"]
+        assert sims[0]["kind"] == "B"
+        assert sims[1]["kind"] == "C"
+        assert type(sims[0]["kind"]) is str
+        assert type(sims[1]["kind"]) is str
 
     def test_save_is_atomic_no_temp_file_left(self, tmp_path: Path) -> None:
         sessions_dir = tmp_path / ".sessions"
@@ -265,15 +318,25 @@ class TestLoadErrors:
 
     @pytest.mark.parametrize(
         "invalid_kind",
-        ["X", "", "a", "b", "c", "D", "BB"],
+        [
+            "X", "", "a", "b", "c", "D", "BB",  # str 系: 未知/空/小文字/別記号/連結
+            None, 0, 1, True, [], {},           # 非 str 系: JSON で起こりうる型違い
+        ],
     )
     def test_invalid_candidate_kind_raises(
-        self, tmp_path: Path, invalid_kind: str
+        self, tmp_path: Path, invalid_kind: Any
     ) -> None:
         """similar_candidates 内の kind が B/C 以外の場合、破損扱いで拒否する。
 
-        SourceKind StrEnum 化 (Issue #45) により、未知値/空文字/小文字/別記号などは
-        ``SourceKind(...)`` の ValueError 経由で SessionCorruptedError に翻訳される。
+        SourceKind StrEnum 化 (Issue #45) により、未知値/空文字/小文字/別記号や
+        手編集された session.json で混入しうる非 str 値 (None/数値/list/dict) も、
+        全て ``SourceKind(...)`` の ValueError 経由で SessionCorruptedError に翻訳される。
+
+        検証ケース:
+        - str 系: ``"X"`` (未知) / ``""`` (空) / ``"a"``/``"b"``/``"c"`` (小文字) /
+          ``"D"`` (隣接文字) / ``"BB"`` (連結)
+        - 非 str 系 (レビュー C-2 対応): ``None`` / ``0`` / ``1`` / ``True`` /
+          ``[]`` / ``{}`` (JSON 手編集や別系統データ混入時)
         """
         sessions_dir = tmp_path / ".sessions"
         sessions_dir.mkdir()
