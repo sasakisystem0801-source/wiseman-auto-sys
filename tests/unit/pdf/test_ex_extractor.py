@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from wiseman_hub.pdf.ex_extractor import (
+    _QUARANTINE_PREFIX,
     ExtractionErrorCode,
     ExtractionItem,
     ExtractionResult,
@@ -26,8 +27,11 @@ from wiseman_hub.pdf.ex_extractor import (
     SfxExtractionFailed,
     UnsupportedSfxPlatformError,
     WindowsSfxAdapter,
+    _quarantine_pre_existing_target,
     extract_directory,
     extract_one,
+    find_target_pdf,
+    find_unexpected_naming_pdfs,
 )
 from wiseman_hub.pdf.facility_resolver import (
     ResolveReason,
@@ -1516,52 +1520,260 @@ class TestExtractDirectoryIntegration:
 
 
 # ---------------------------------------------------------------------------
-# WindowsSfxAdapter の platform 非依存メソッド (3 件)
+# find_target_pdf / find_unexpected_naming_pdfs (basename 完全一致 + 変則命名検出)
+# D1' Codex review 反映で _collect_new_pdfs を置換した新ロジック
 # ---------------------------------------------------------------------------
 
 
-class TestWindowsSfxAdapterStaticMethods:
-    """test-analyzer H3: _snapshot_pdfs / _collect_new_pdfs は macOS でも検証可能。"""
+class TestFindTargetPdf:
+    """``find_target_pdf`` の basename 完全一致と探索順を検証。"""
 
-    def test_snapshot_pdfs_finds_lowercase_and_uppercase(
+    def test_finds_lowercase_pdf_in_first_dir(self, tmp_path: Path) -> None:
+        (tmp_path / "report.pdf").touch()
+        result = find_target_pdf("report", [tmp_path])
+        assert result is not None
+        assert result.name == "report.pdf"
+
+    def test_returns_none_when_only_unrelated_pdf(self, tmp_path: Path) -> None:
+        """basename 完全一致なので無関係な PDF は拾わない (AC-D 誤配布防止)。"""
+        (tmp_path / "noise.pdf").touch()
+        (tmp_path / "report_misc.pdf").touch()  # report_001.pdf 風だが stem 違い
+        result = find_target_pdf("report", [tmp_path])
+        assert result is None
+
+    def test_search_order_first_dir_takes_priority(self, tmp_path: Path) -> None:
+        """探索順は引数順 (AC-J): ex_file.parent 最優先で渡す呼び出し側との契約。"""
+        first = tmp_path / "first"
+        second = tmp_path / "second"
+        first.mkdir()
+        second.mkdir()
+        (first / "report.pdf").write_text("FIRST")
+        (second / "report.pdf").write_text("SECOND")
+
+        result = find_target_pdf("report", [first, second])
+        assert result is not None
+        assert result.read_text() == "FIRST"
+
+    def test_skips_missing_directory(self, tmp_path: Path) -> None:
+        existing = tmp_path / "exist"
+        existing.mkdir()
+        (existing / "report.pdf").touch()
+        ghost = tmp_path / "ghost"  # 存在しない
+
+        result = find_target_pdf("report", [ghost, existing])
+        assert result is not None
+        assert result.parent == existing
+
+    def test_returns_none_for_directory_with_same_basename(
         self, tmp_path: Path
     ) -> None:
-        (tmp_path / "a.pdf").touch()
-        (tmp_path / "b.PDF").touch()
-        (tmp_path / "c.txt").touch()
+        """is_file() ガードで「ディレクトリ <stem>.pdf/」を誤検出しない。"""
+        (tmp_path / "report.pdf").mkdir()  # stem.pdf という名前のディレクトリ
+        result = find_target_pdf("report", [tmp_path])
+        assert result is None
 
-        result = WindowsSfxAdapter._snapshot_pdfs([tmp_path])
+
+class TestFindUnexpectedNamingPdfs:
+    """変則命名検出 (UNEXPECTED_PDF_NAMING)。"""
+
+    def test_finds_underscore_suffix(self, tmp_path: Path) -> None:
+        (tmp_path / "report_001.pdf").touch()
+        (tmp_path / "report_002.pdf").touch()
+        result = find_unexpected_naming_pdfs("report", [tmp_path])
         names = {p.name for p in result}
-        assert names == {"a.pdf", "b.PDF"}
+        assert names == {"report_001.pdf", "report_002.pdf"}
 
-    def test_snapshot_pdfs_skips_missing_dir(self, tmp_path: Path) -> None:
-        (tmp_path / "a.pdf").touch()
-        result = WindowsSfxAdapter._snapshot_pdfs(
-            [tmp_path, tmp_path / "does_not_exist"]
+    def test_finds_paren_suffix(self, tmp_path: Path) -> None:
+        (tmp_path / "report (1).pdf").touch()
+        result = find_unexpected_naming_pdfs("report", [tmp_path])
+        assert len(result) == 1
+        assert result[0].name == "report (1).pdf"
+
+    def test_excludes_expected_target(self, tmp_path: Path) -> None:
+        """``<stem>.pdf`` は expected として除外される (Windows NTFS は case-insensitive)。"""
+        (tmp_path / "report.pdf").touch()
+        result = find_unexpected_naming_pdfs("report", [tmp_path])
+        assert result == []
+
+    def test_excludes_unrelated_prefix(self, tmp_path: Path) -> None:
+        """``food.pdf`` (boundary 文字でない) は ``foo`` と無関係扱い。"""
+        (tmp_path / "food.pdf").touch()
+        (tmp_path / "fooled.pdf").touch()
+        result = find_unexpected_naming_pdfs("foo", [tmp_path])
+        assert result == []
+
+    def test_finds_dot_suffix(self, tmp_path: Path) -> None:
+        """``report.x.pdf`` のような複数拡張子も変則扱い。"""
+        (tmp_path / "report.x.pdf").touch()
+        result = find_unexpected_naming_pdfs("report", [tmp_path])
+        assert len(result) == 1
+
+    def test_dedup_across_watch_dirs(self, tmp_path: Path) -> None:
+        """同じ Path が複数 watch_dirs に渡されても重複しない。"""
+        (tmp_path / "report_001.pdf").touch()
+        result = find_unexpected_naming_pdfs(
+            "report", [tmp_path, tmp_path]
         )
         assert len(result) == 1
 
-    def test_collect_new_pdfs_filters_by_mtime(self, tmp_path: Path) -> None:
-        """HIGH-D: SFX 起動前に存在した PDF は無関係扱いで除外される。"""
-        import os as _os
 
-        # SFX 起動 "前" の PDF (古い mtime)
-        old_pdf = tmp_path / "old.pdf"
-        old_pdf.touch()
-        old_mtime = old_pdf.stat().st_mtime - 100
-        _os.utime(old_pdf, (old_mtime, old_mtime))
+class TestQuarantinePreExistingTarget:
+    """``_quarantine_pre_existing_target`` の単体検証 (D1')."""
 
-        sfx_start = old_pdf.stat().st_mtime + 50  # 旧ファイルより新しい時刻
+    def test_no_pre_existing_returns_none(self, tmp_path: Path) -> None:
+        ex_file = tmp_path / "report.ex_"
+        ex_file.touch()
+        q_path, origin, code, detail = _quarantine_pre_existing_target(ex_file)
+        assert q_path is None
+        assert origin is None
+        assert code is None
+        assert detail is None
 
-        # SFX 起動後に出現した PDF
-        new_pdf = tmp_path / "new.pdf"
-        new_pdf.touch()  # 現在時刻 = sfx_start より新しい
+    def test_renames_existing_target(self, tmp_path: Path) -> None:
+        ex_file = tmp_path / "report.ex_"
+        ex_file.touch()
+        target = tmp_path / "report.pdf"
+        target.write_text("OLD")
+        q_path, origin, code, detail = _quarantine_pre_existing_target(ex_file)
+        assert q_path is not None
+        assert origin == target
+        assert code is None
+        assert not target.exists()  # 元の位置にはない
+        assert q_path.exists()  # 退避先に存在
+        assert q_path.read_text() == "OLD"  # 中身保持
 
-        before: set[Path] = set()  # snapshot 時点で何もなかった想定
-        result = WindowsSfxAdapter._collect_new_pdfs(
-            [tmp_path], before, sfx_start
+class TestExtractOnePreExistingPdfQuarantine:
+    """AC-A / AC-H / AC-I: 同名 PDF 同居状態の挙動 (Codex review HIGH 対応)。"""
+
+    def _ex_file(self, source_dir: Path, name: str = "サービスA_提供.ex_") -> Path:
+        ex = source_dir / name
+        ex.touch()
+        return ex
+
+    def _facility_root(self, base: Path, names: list[str]) -> Path:
+        root = base / "facilities"
+        root.mkdir()
+        for n in names:
+            (root / n).mkdir()
+        return root
+
+    def test_pre_existing_replaced_by_new_sfx_output(
+        self, tmp_path: Path
+    ) -> None:
+        """AC-H: 退避 → SFX 新規生成 → **新生成 PDF を採用、退避物は削除**。"""
+        source = tmp_path / "src"
+        source.mkdir()
+        ex_file = self._ex_file(source)
+        old_pdf = ex_file.with_suffix(".pdf")
+        old_pdf.write_text("OLD")  # 古い PDF が同居
+
+        root = self._facility_root(tmp_path, ["サービスA"])
+
+        def fake_extract(exe_path: Path, watch_dirs: object) -> list[Path]:
+            # SFX が新規生成 (退避中なのでこの write は新規 PDF)
+            new_pdf = exe_path.with_suffix(".pdf")
+            new_pdf.write_text("NEW")
+            return [new_pdf]
+
+        adapter = FakeSfxAdapter(side_effect=fake_extract, produced_pdfs=())
+        # produced_pdfs=() でも side_effect で実 PDF を作ってから adapter は
+        # その PDF を返す必要があるが、FakeSfxAdapter は produced_pdfs を返す設計。
+        # ここでは side_effect で生成し、produced_pdfs に Path を渡せないため
+        # 別パターンで検証。
+        # 改: produced_pdfs を side_effect 内で生成してから返すパターンに統一
+        produced = source / "サービスA_提供.pdf"
+
+        def side_effect(exe_path: Path, watch_dirs: object) -> None:
+            produced.write_text("NEW")
+
+        adapter = FakeSfxAdapter(
+            produced_pdfs=(produced,), side_effect=side_effect
         )
-        # old.pdf は mtime < sfx_start なので除外される
-        result_names = {p.name for p in result}
-        assert "new.pdf" in result_names
-        assert "old.pdf" not in result_names
+
+        item = extract_one(
+            ex_file=ex_file,
+            facility_root_dir=root,
+            facility_names=["サービスA"],
+            aliases={},
+            adapter=adapter,
+        )
+
+        assert item.status is ExtractionStatus.SUCCESS
+        # 移動先に新 PDF が存在し、内容は NEW
+        moved = root / "サービスA" / "サービスA_提供.pdf"
+        assert moved.exists()
+        assert moved.read_text() == "NEW"
+        # 退避物は削除済 (source 直下に quarantine 残骸がない)
+        quarantines = list(source.glob(f"*{_QUARANTINE_PREFIX}*"))
+        assert quarantines == []
+
+    def test_pre_existing_restored_when_sfx_produces_no_new_pdf(
+        self, tmp_path: Path
+    ) -> None:
+        """AC-I: 退避 → SFX が新規生成しない → **EXTRACT_FAILED + 退避物復元**。"""
+        source = tmp_path / "src"
+        source.mkdir()
+        ex_file = self._ex_file(source)
+        old_pdf = ex_file.with_suffix(".pdf")
+        old_pdf.write_text("OLD")
+
+        root = self._facility_root(tmp_path, ["サービスA"])
+
+        # SFX が SfxExtractionFailed(NO_PDF_PRODUCED) を投げる (新規生成失敗)
+        adapter = FakeSfxAdapter(
+            raise_on_extract=SfxExtractionFailed(
+                ExtractionErrorCode.NO_PDF_PRODUCED, "no pdf produced"
+            )
+        )
+
+        item = extract_one(
+            ex_file=ex_file,
+            facility_root_dir=root,
+            facility_names=["サービスA"],
+            aliases={},
+            adapter=adapter,
+        )
+
+        assert item.status is ExtractionStatus.EXTRACT_FAILED
+        assert item.error_code is ExtractionErrorCode.NO_PDF_PRODUCED
+        # 退避物が元の位置に復元されている (古い PDF はそのまま source に残る)
+        assert old_pdf.exists()
+        assert old_pdf.read_text() == "OLD"
+        # quarantine 残骸はない
+        quarantines = list(source.glob(f"*{_QUARANTINE_PREFIX}*"))
+        assert quarantines == []
+        # 移動先には何も入っていない
+        assert not (root / "サービスA" / "サービスA_提供.pdf").exists()
+
+    def test_unrelated_pdf_in_source_is_not_touched(self, tmp_path: Path) -> None:
+        """AC-D 拡張: basename 不一致 PDF は退避されず・移動されない。"""
+        source = tmp_path / "src"
+        source.mkdir()
+        ex_file = self._ex_file(source)
+        unrelated = source / "noise.pdf"
+        unrelated.write_text("UNRELATED")
+
+        root = self._facility_root(tmp_path, ["サービスA"])
+
+        produced = source / "サービスA_提供.pdf"
+
+        def side_effect(exe_path: Path, watch_dirs: object) -> None:
+            produced.write_text("NEW")
+
+        adapter = FakeSfxAdapter(
+            produced_pdfs=(produced,), side_effect=side_effect
+        )
+        item = extract_one(
+            ex_file=ex_file,
+            facility_root_dir=root,
+            facility_names=["サービスA"],
+            aliases={},
+            adapter=adapter,
+        )
+
+        assert item.status is ExtractionStatus.SUCCESS
+        # 無関係 PDF は触られていない
+        assert unrelated.exists()
+        assert unrelated.read_text() == "UNRELATED"
+        # 移動先には期待 PDF
+        assert (root / "サービスA" / "サービスA_提供.pdf").exists()
