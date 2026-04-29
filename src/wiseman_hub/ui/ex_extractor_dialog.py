@@ -328,11 +328,12 @@ class ExExtractorDialog:
         self._config_path = config_path
         self._adapter = adapter
         self._extract_fn: ExtractFn = extract_fn or extract_directory
-        # Issue #165 (R1): 取込元選択を TOML 永続化するための DI。FacilityRootDialog
-        # と同パターンで save_config を inject 可能にして UI test で mock できるようにする。
+        # 取込元選択を TOML 永続化するための DI。FacilityRootDialog と同パターンで
+        # save_config を inject 可能にして UI test で mock できるようにする。
         self._save_config_fn: SaveConfigFn = save_config_fn or save_config
-        # 永続化成功時に launcher.reload_config 等を呼ぶための callback (Codex review D4)。
-        # save 失敗時は呼ばない (AppConfig 不整合防止)。
+        # 永続化成功時に launcher.reload_config 等を呼ぶための callback。
+        # save 失敗時は呼ばない (AppConfig 不整合防止: 部分的に書き換わった
+        # in-memory state を他 dialog に伝搬させないため)。
         self._on_source_persisted = on_source_persisted
         self._manual_dialog_factory = manual_dialog_factory  # None なら遅延 import で default
         self._messagebox = messagebox_fn or default_messagebox()
@@ -523,6 +524,7 @@ class ExExtractorDialog:
                 for item in self._vm.result.items
                 if item.status is ExtractionStatus.PARTIAL_OUTPUT
                 or item.partially_moved
+                or item.cleanup_warning is not None
             )
             if attention:
                 self._render_filenames_section("--- 要確認 ---", attention)
@@ -554,11 +556,16 @@ class ExExtractorDialog:
                     "end",
                     f"      (一部 PDF 移動済: {len(item.partially_moved)} 件)\n",
                 )
+            if item.cleanup_warning is not None:
+                self._summary_text.insert(
+                    "end",
+                    f"      (後処理警告: {item.cleanup_warning.value})\n",
+                )
 
     # ----- イベントハンドラ -----
 
     def _on_browse_source(self) -> None:
-        """取込元 (.ex_) フォルダを folder browser で都度選択する (Issue #155 + #165)。
+        """取込元 (.ex_) フォルダを folder browser で都度選択する。
 
         分岐契約:
         - busy 中 → 何もしない (UI disable 済 + defensive)
@@ -566,12 +573,10 @@ class ExExtractorDialog:
         - 存在しない / ディレクトリでない → ``_TITLE_INVALID_SOURCE`` 通知
         - ``exists()`` / ``is_dir()`` 自体が ``OSError`` を raise (Windows UNC /
           ネットワーク切断 / 権限拒否) → 型名のみログ + 検証エラー通知
-          (silent-failure-hunter HIGH-1 対応)
         - 成功時 → ``_vm.source_dir`` 更新 + ``_config.pdf_merge.ex_source_dir`` 更新
-          + ``save_config`` で **TOML 永続化** (R1, Issue #165) +
-          ``on_source_persisted`` callback (launcher.reload_config 等) +
-          ``_redraw`` で UI 反映
-        - **save 失敗時** は callback を呼ばず (Codex review D4: AppConfig 不整合防止)、
+          + ``save_config`` で **TOML 永続化** + ``on_source_persisted`` callback
+          (launcher.reload_config 等) + ``_redraw`` で UI 反映
+        - **save 失敗時** は callback を呼ばず (AppConfig 不整合防止)、
           控えめエラー通知 + ViewModel 更新は維持 (今セッションは選択値で動作可能)
         """
         if self._vm.is_busy:
@@ -603,7 +608,7 @@ class ExExtractorDialog:
             return
 
         self._vm.source_dir = selected
-        # R1 (Issue #165): TOML 永続化。FacilityRootDialog._do_scan のパターン踏襲
+        # TOML 永続化。FacilityRootDialog._do_scan のパターン踏襲
         # (save_failed なら控えめ警告 + on_source_persisted は呼ばない)。
         # config_path 未指定時 (テスト等) は永続化を skip して ViewModel 更新のみ。
         save_failed_type: str | None = None
@@ -622,7 +627,8 @@ class ExExtractorDialog:
 
             if save_failed_type is None and self._on_source_persisted is not None:
                 # 保存成功時のみ launcher.reload_config 等の側方効果を発火
-                # (Codex review D4: 失敗時 reload は AppConfig 不整合の温床)
+                # (失敗時 reload は AppConfig 不整合の温床: 部分書き換えされた
+                # in-memory state を他 dialog に伝搬させない)
                 try:
                     self._on_source_persisted(self._config)
                 except Exception as exc:  # noqa: BLE001

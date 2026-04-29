@@ -44,6 +44,7 @@ extract_pdf 内で **遅延** することで macOS の ``--help`` / dry-run 動
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -52,7 +53,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol
+from typing import Final, Protocol
 
 from wiseman_hub.pdf.facility_resolver import (
     ResolveReason,
@@ -196,7 +197,7 @@ class WindowsSfxAdapter:
     ) -> Sequence[Path]:
         """SFX 実行 + ``<exe_path.stem>.pdf`` (= ex_file の stem) の検出。
 
-        誤配布防止 (D1' quarantine 方式) の前提:
+        誤配布防止 (quarantine 方式) の前提:
         - 呼び出し元 ``extract_one`` が SFX 実行前に ex_file.parent の同名 PDF を
           quarantine 退避済 (古い残骸を成功扱いで拾わない構造保証)
         - 本 adapter は「SFX 実行で得られた target」のみ返す責務に専念
@@ -256,6 +257,14 @@ class WindowsSfxAdapter:
                     ExtractionErrorCode.SFX_TIMEOUT,
                     f"no pdf produced within {timeout_sec}s",
                 ) from e
+            # SFX が遅延した上で変則命名 PDF を出した可能性: 後段の運用診断のために
+            # タイムアウト経路を踏んだことをログに残す (PII safe: count のみ)。
+            logger.warning(
+                "%s: timeout-fallback found %s, count=%d",
+                target_stem,
+                e.code.value,
+                len(e.partial_outputs),
+            )
             raise
 
     @classmethod
@@ -514,8 +523,9 @@ def _build_watch_dirs(ex_file: Path) -> list[Path]:
     依存で出力先が変わるため、ex_file 配下 + デスクトップ + ダウンロード
     を監視する。
 
-    探索順 (Codex review 反映): ``ex_file.parent`` を **最優先** に置く
-    (D1' quarantine 方式と整合: 取込元配下が SFX 抽出の本筋経路)。
+    探索順: ``ex_file.parent`` を **最優先** に置く (quarantine 方式と整合:
+    取込元配下が SFX 抽出の本筋経路。順序を変えると Desktop / Downloads 等の
+    別フォルダで誤配布リスクが復活するため不変条件として固定)。
     Desktop / Downloads はフォールバック。
     """
     return [
@@ -538,7 +548,7 @@ def find_target_pdf(
 
     探索順は ``watch_dirs`` 引数の順序 (呼び出し元が ``ex_file.parent`` 最優先で
     渡す責務、``_build_watch_dirs`` 参照)。複数 watch_dir に同名 PDF が存在する
-    場合、先頭ヒットを返す (D1' quarantine 方式と整合)。
+    場合、先頭ヒットを返す (quarantine 方式と整合)。
 
     実機 Windows NTFS は case-insensitive かつ case-preserving のため、SFX が
     ``.PDF`` で書き出しても ``.pdf`` のアクセスでヒットする。本プロジェクトは
@@ -573,18 +583,18 @@ def find_target_pdf(
 # quarantine ファイル名の prefix。dot 始まりにすることで Windows / Unix 双方で
 # 「隠しファイル / 一時ファイル」扱いになり、次回の glob("*.pdf") から自然に除外
 # される (find_target_pdf / find_unexpected_naming_pdfs はこの prefix を見ない)。
-_QUARANTINE_PREFIX: str = ".quarantine-"
+_QUARANTINE_PREFIX: Final[str] = ".quarantine-"
 
 
 def _quarantine_pre_existing_target(
     ex_file: Path,
 ) -> tuple[Path | None, Path | None, ExtractionErrorCode | None, str | None]:
-    """SFX 実行前の同名 PDF を一時退避する (D1' Codex review 反映)。
+    """SFX 実行前の同名 PDF を一時退避する。
 
     ``ex_file.parent / <stem>.pdf`` (大小文字両対応) が存在したら、同ディレクトリに
     ``<original>.quarantine-<ts>`` 形式でリネーム退避する。これにより SFX が新規
     PDF を生成しない / mtime 更新しない場合でも、古い PDF を成功扱いで移動する
-    誤配布事故 (Codex HIGH 指摘) を構造的に防止する。
+    誤配布事故を構造的に防止する。
 
     Returns:
         (quarantine_path, quarantine_origin, error_code, error_detail)
@@ -605,7 +615,10 @@ def _quarantine_pre_existing_target(
     if origin is None:
         return (None, None, None, None)
 
-    ts = time.strftime("%Y%m%d-%H%M%S")
+    # 秒精度の strftime だけだと、同一 ex_file の連続再処理 / 同秒に複数 .ex_ を
+    # 処理した場合に collision で rename が失敗する。urandom サフィックスで
+    # 構造的に回避。
+    ts = time.strftime("%Y%m%d-%H%M%S") + f"-{os.urandom(3).hex()}"
     quarantine_path = origin.with_name(f"{origin.name}{_QUARANTINE_PREFIX}{ts}")
     try:
         origin.rename(quarantine_path)
@@ -689,7 +702,7 @@ def find_unexpected_naming_pdfs(
 
     SFX が ``<stem>_001.pdf`` / ``<stem> (1).pdf`` 等の変則命名で出力した場合の
     検出用。``UNEXPECTED_PDF_NAMING`` エラー化のため、``partial_outputs`` として
-    運用者へ未対応パターンの存在を明示通知する目的 (Codex review 提案 M1)。
+    運用者へ未対応パターンの存在を明示通知する目的。
 
     判定ルール:
     - ``<stem>.pdf`` は expected として除外
@@ -800,7 +813,7 @@ def extract_one(
             "(ResolveResult invariant violation)"
         )
 
-    # Step 1.5: pre-existing target quarantine (D1' Codex review 反映)
+    # Step 1.5: pre-existing target quarantine
     # SFX 実行前に ex_file.parent の同名 PDF を一時退避し、SFX が新規生成しない
     # 場合に「古い PDF を成功扱いで移動」する誤配布事故を構造的に防ぐ。
     quarantine_path, quarantine_origin, q_error_code, q_error_detail = (
@@ -895,7 +908,7 @@ def extract_one(
     else:
         status = ExtractionStatus.SUCCESS
 
-    # Step 6: quarantine 後処理 (D1' 後段)
+    # Step 6: quarantine 後処理
     # - SUCCESS / MOVE_FAILED → 退避物削除 (target_pdf は新規生成された)
     # - EXTRACT_FAILED / PARTIAL_OUTPUT → 退避物復元 (target_pdf は生成されず)
     quarantine_post_warning: ExtractionErrorCode | None
