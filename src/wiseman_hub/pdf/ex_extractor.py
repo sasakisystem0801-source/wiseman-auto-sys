@@ -94,6 +94,9 @@ class ExtractionErrorCode(StrEnum):
     SFX_LAUNCH_FAILED = "sfx_launch_failed"
     SFX_TIMEOUT = "sfx_timeout"
     NO_PDF_PRODUCED = "no_pdf_produced"
+    UNEXPECTED_PDF_NAMING = "unexpected_pdf_naming"
+    QUARANTINE_FAILED = "quarantine_failed"
+    QUARANTINE_RESTORE_FAILED = "quarantine_restore_failed"
     MOVE_CONFLICT = "move_conflict"
     MOVE_IO_ERROR = "move_io_error"
     COPY_FAILED = "copy_failed"
@@ -191,10 +194,21 @@ class WindowsSfxAdapter:
     def extract_pdf(
         self, exe_path: Path, watch_dirs: Sequence[Path]
     ) -> Sequence[Path]:
-        # Codex HIGH-D 対応: mtime フィルタ用に SFX 起動前時刻を保持
-        # Desktop/Downloads に同時並行で別 PDF が出現しても拾わない
-        sfx_start = time.time()
-        before = self._snapshot_pdfs(watch_dirs)
+        """SFX 実行 + ``<exe_path.stem>.pdf`` (= ex_file の stem) の検出。
+
+        誤配布防止 (D1' quarantine 方式) の前提:
+        - 呼び出し元 ``extract_one`` が SFX 実行前に ex_file.parent の同名 PDF を
+          quarantine 退避済 (古い残骸を成功扱いで拾わない構造保証)
+        - 本 adapter は「SFX 実行で得られた target」のみ返す責務に専念
+        - basename 完全一致 (``<stem>.pdf`` / ``<stem>.PDF``) のみ採用、
+          無関係 PDF は拾わない
+
+        変則命名検出:
+        - ``<stem>.pdf`` が見つからず ``<stem>_*.pdf`` のみ存在する場合、
+          ``UNEXPECTED_PDF_NAMING`` で fail-fast (静かな ``NO_PDF_PRODUCED``
+          より診断性 + 運用者通知性が高い)
+        """
+        target_stem = exe_path.stem  # ex_file.stem と同じ
 
         try:
             proc = subprocess.Popen(  # noqa: S603 (信頼された .exe のみ)
@@ -220,75 +234,54 @@ class WindowsSfxAdapter:
                     dialog_clicked = self._click_sfx_dialog(proc.pid)
 
                 if proc.poll() is not None:
-                    # SFX 正常終了 → 書き込み完了を待ってから差分検出
+                    # SFX 正常終了 → 書き込み完了を待ってから target 検出
                     time.sleep(1)
-                    return self._collect_new_pdfs(watch_dirs, before, sfx_start)
+                    return self._resolve_target_or_raise(target_stem, watch_dirs)
         finally:
             if proc.poll() is None:
                 self._terminate_proc(proc)
 
         # タイムアウト後の最終チェック (旧版互換: 検出されれば成功扱い)
         time.sleep(1)
-        final_pdfs = self._collect_new_pdfs(watch_dirs, before, sfx_start)
-        if final_pdfs:
-            return final_pdfs
-        timeout_sec = int(self._MAX_WAIT_TICKS * self._TICK_INTERVAL_SEC)
-        raise SfxExtractionFailed(
-            ExtractionErrorCode.SFX_TIMEOUT,
-            f"no pdf produced within {timeout_sec}s",
-        )
-
-    # NTP 後方ステップ / filesystem mtime 解像度に対するマージン (秒)。
-    # SFX 実行中に Windows Time Service が同期で時計を巻き戻すと、本来 SFX が
-    # 生成した PDF の mtime が sfx_start より小さくなり誤って除外される。
-    # 5 秒のマージンは「SFX 実行中の NTP step は ±数秒以内」を仮定 (PR5 実機検証で要確認)。
-    _MTIME_GRACE_SEC: float = 5.0
+        try:
+            return self._resolve_target_or_raise(target_stem, watch_dirs)
+        except SfxExtractionFailed as e:
+            # target が無く変則命名も無いケースのみ SFX_TIMEOUT に格上げ
+            # (UNEXPECTED_PDF_NAMING 等は元の error_code を維持)
+            if e.code is ExtractionErrorCode.NO_PDF_PRODUCED:
+                timeout_sec = int(
+                    self._MAX_WAIT_TICKS * self._TICK_INTERVAL_SEC
+                )
+                raise SfxExtractionFailed(
+                    ExtractionErrorCode.SFX_TIMEOUT,
+                    f"no pdf produced within {timeout_sec}s",
+                ) from e
+            raise
 
     @classmethod
-    def _collect_new_pdfs(
-        cls,
-        watch_dirs: Sequence[Path],
-        before: set[Path],
-        sfx_start: float,
-    ) -> list[Path]:
-        """SFX 起動後に出現した PDF のみを返す (Codex HIGH-D: 誤配布防止)。
+    def _resolve_target_or_raise(
+        cls, target_stem: str, watch_dirs: Sequence[Path]
+    ) -> Sequence[Path]:
+        """target stem に一致する PDF を返す。なければ変則命名検出 → raise。
 
-        set 差分だけだと、SFX 実行中に別経路 (ユーザーの手動 DL 等) で生成された
-        PDF まで拾い、無関係な PDF が事業所フォルダに移動される。``mtime >=
-        sfx_start - _MTIME_GRACE_SEC`` で実時間ベースに絞ることで、watch_dirs に
-        Desktop/Downloads を含めたまま誤配布リスクを構造的に低減する。
-
-        残存リスク (PR4/PR5 設定で軽減検討):
-        - SFX 起動瞬間にユーザーが手動 DL した PDF は通過
-        - filesystem mtime 解像度 (NTFS は ~100ns / FAT32 は 2 秒) より小さい時間差
-        - 完全防御には watch_dirs を ex_file.parent のみに絞る将来改修が必要
+        - ``<stem>.pdf`` が watch_dirs にあれば 1 件返す (SUCCESS パス)
+        - なければ ``<stem>_*.pdf`` 等の変則命名を ``UNEXPECTED_PDF_NAMING`` で raise
+          (partial_outputs にファイル列挙、運用者へ未対応パターンを明示通知)
+        - 変則命名も無ければ ``NO_PDF_PRODUCED`` で raise
         """
-        threshold = sfx_start - cls._MTIME_GRACE_SEC
-        candidates = cls._snapshot_pdfs(watch_dirs) - before
-        new_pdfs: list[Path] = []
-        for pdf in candidates:
-            try:
-                mtime = pdf.stat().st_mtime
-            except OSError as e:
-                # silent-failure-hunter H-1: stat 失敗を logger に残す
-                # (network drive 切断 / 権限変化等の根本原因切り分け、PII-safe)
-                logger.warning(
-                    "stat failed for pdf candidate %s: %s",
-                    pdf.name,
-                    type(e).__name__,
-                )
-                continue
-            if mtime >= threshold:
-                new_pdfs.append(pdf)
-        return new_pdfs
-
-    @staticmethod
-    def _snapshot_pdfs(directories: Sequence[Path]) -> set[Path]:
-        pdfs: set[Path] = set()
-        for d in directories:
-            if d.exists():
-                pdfs |= set(d.glob("*.pdf")) | set(d.glob("*.PDF"))
-        return pdfs
+        target = find_target_pdf(target_stem, watch_dirs)
+        if target is not None:
+            return [target]
+        unexpected = find_unexpected_naming_pdfs(target_stem, watch_dirs)
+        if unexpected:
+            raise SfxExtractionFailed(
+                ExtractionErrorCode.UNEXPECTED_PDF_NAMING,
+                f"unexpected naming, count={len(unexpected)}",
+                partial_outputs=unexpected,
+            )
+        raise SfxExtractionFailed(
+            ExtractionErrorCode.NO_PDF_PRODUCED, "no pdf produced"
+        )
 
     @staticmethod
     def _terminate_proc(proc: subprocess.Popen[bytes]) -> None:
@@ -520,12 +513,222 @@ def _build_watch_dirs(ex_file: Path) -> list[Path]:
     旧 ``scripts/process_ex_files.py`` の挙動踏襲。SFX 自己解凍 EXE は cwd
     依存で出力先が変わるため、ex_file 配下 + デスクトップ + ダウンロード
     を監視する。
+
+    探索順 (Codex review 反映): ``ex_file.parent`` を **最優先** に置く
+    (D1' quarantine 方式と整合: 取込元配下が SFX 抽出の本筋経路)。
+    Desktop / Downloads はフォールバック。
     """
     return [
         ex_file.parent,
         Path.home() / "Desktop",
         Path.home() / "Downloads",
     ]
+
+
+# 変則命名検出時、target_stem の直後にあると「変則」と判定する文字。
+# 例: ``foo`` に対して ``foo_001.pdf`` (`_`) / ``foo (1).pdf`` (空白) /
+# ``foo.x.pdf`` (`.`) など。``food.pdf`` (`d`) は対象外 (boundary 文字でない)。
+_VARIANT_NAMING_BOUNDARY: tuple[str, ...] = ("_", "(", " ", "-", ".", "　")
+
+
+def find_target_pdf(
+    target_stem: str, watch_dirs: Sequence[Path]
+) -> Path | None:
+    """``<target_stem>.pdf`` を ``watch_dirs`` 横断で探す。
+
+    探索順は ``watch_dirs`` 引数の順序 (呼び出し元が ``ex_file.parent`` 最優先で
+    渡す責務、``_build_watch_dirs`` 参照)。複数 watch_dir に同名 PDF が存在する
+    場合、先頭ヒットを返す (D1' quarantine 方式と整合)。
+
+    実機 Windows NTFS は case-insensitive かつ case-preserving のため、SFX が
+    ``.PDF`` で書き出しても ``.pdf`` のアクセスでヒットする。本プロジェクトは
+    Windows 実機専用運用のため、大文字フォールバックは行わない。
+
+    PII 防御: ``OSError`` 時は ``logger.warning`` に型名のみ出力。
+    """
+    target_name = f"{target_stem}.pdf"
+    for d in watch_dirs:
+        try:
+            if not d.exists():
+                continue
+        except OSError as exc:
+            logger.warning(
+                "watch_dir exists() failed: %s", type(exc).__name__
+            )
+            continue
+        candidate = d / target_name
+        try:
+            if candidate.is_file():
+                return candidate
+        except OSError as exc:
+            logger.warning(
+                "candidate is_file() failed for %s: %s",
+                candidate.name,
+                type(exc).__name__,
+            )
+            continue
+    return None
+
+
+# quarantine ファイル名の prefix。dot 始まりにすることで Windows / Unix 双方で
+# 「隠しファイル / 一時ファイル」扱いになり、次回の glob("*.pdf") から自然に除外
+# される (find_target_pdf / find_unexpected_naming_pdfs はこの prefix を見ない)。
+_QUARANTINE_PREFIX: str = ".quarantine-"
+
+
+def _quarantine_pre_existing_target(
+    ex_file: Path,
+) -> tuple[Path | None, Path | None, ExtractionErrorCode | None, str | None]:
+    """SFX 実行前の同名 PDF を一時退避する (D1' Codex review 反映)。
+
+    ``ex_file.parent / <stem>.pdf`` (大小文字両対応) が存在したら、同ディレクトリに
+    ``<original>.quarantine-<ts>`` 形式でリネーム退避する。これにより SFX が新規
+    PDF を生成しない / mtime 更新しない場合でも、古い PDF を成功扱いで移動する
+    誤配布事故 (Codex HIGH 指摘) を構造的に防止する。
+
+    Returns:
+        (quarantine_path, quarantine_origin, error_code, error_detail)
+
+        - 退避なし (pre-existing 不在): (None, None, None, None)
+        - 退避成功: (quarantine_path, origin, None, None)
+        - 退避失敗 (OSError): (None, origin_or_None, QUARANTINE_FAILED, type 名)
+    """
+    target_stem = ex_file.stem
+    target = ex_file.parent / f"{target_stem}.pdf"
+    origin: Path | None = None
+    try:
+        if target.is_file():
+            origin = target
+    except OSError:
+        # stat 不能 → 退避対象外として続行 (SFX 後にも探索する経路がある)
+        pass
+    if origin is None:
+        return (None, None, None, None)
+
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    quarantine_path = origin.with_name(f"{origin.name}{_QUARANTINE_PREFIX}{ts}")
+    try:
+        origin.rename(quarantine_path)
+    except OSError as exc:
+        # PII 防御: filename と enum 値のみ、フルパスは出さない
+        logger.warning(
+            "%s: quarantine pre-existing target failed: %s",
+            ex_file.name,
+            type(exc).__name__,
+        )
+        return (
+            None,
+            origin,
+            ExtractionErrorCode.QUARANTINE_FAILED,
+            type(exc).__name__,
+        )
+    return (quarantine_path, origin, None, None)
+
+
+def _restore_quarantine(
+    quarantine_path: Path | None,
+    origin: Path | None,
+    ex_file_name: str,
+) -> ExtractionErrorCode | None:
+    """退避物を元の位置に戻す。SFX が新規生成しなかった場合に呼ぶ。
+
+    既に origin が存在する (想定外: 部分的に SFX が生成した等) 場合は
+    quarantine を削除して新規分を優先 (origin 上書きを避ける)。
+
+    Returns:
+        - 復元成功 / 退避なし: None
+        - 復元失敗: QUARANTINE_RESTORE_FAILED (cleanup_warning として記録される)
+    """
+    if quarantine_path is None or origin is None:
+        return None
+    try:
+        if origin.exists():
+            # SUCCESS 経路でない (extract_failed) のに origin が存在する想定外ケース。
+            # 新規生成分を優先して quarantine は削除 (origin 上書き防止)。
+            quarantine_path.unlink(missing_ok=True)
+            return None
+        quarantine_path.rename(origin)
+        return None
+    except OSError as exc:
+        # 復元失敗は運用 critical: 元の PDF が quarantine 名で残ったまま
+        logger.warning(
+            "%s: quarantine restore failed: %s",
+            ex_file_name,
+            type(exc).__name__,
+        )
+        return ExtractionErrorCode.QUARANTINE_RESTORE_FAILED
+
+
+def _delete_quarantine(
+    quarantine_path: Path | None, ex_file_name: str
+) -> ExtractionErrorCode | None:
+    """SUCCESS / MOVE_FAILED 経路で退避物を削除する。
+
+    Returns:
+        - 削除成功 / 退避なし: None
+        - 削除失敗: CLEANUP_FAILED (cleanup_warning 既存経路と同じ扱い)
+    """
+    if quarantine_path is None:
+        return None
+    try:
+        quarantine_path.unlink(missing_ok=True)
+        return None
+    except OSError as exc:
+        logger.warning(
+            "%s: quarantine cleanup failed: %s",
+            ex_file_name,
+            type(exc).__name__,
+        )
+        return ExtractionErrorCode.CLEANUP_FAILED
+
+
+def find_unexpected_naming_pdfs(
+    target_stem: str, watch_dirs: Sequence[Path]
+) -> list[Path]:
+    """``<target_stem>`` を prefix とする変則命名 PDF を返す。
+
+    SFX が ``<stem>_001.pdf`` / ``<stem> (1).pdf`` 等の変則命名で出力した場合の
+    検出用。``UNEXPECTED_PDF_NAMING`` エラー化のため、``partial_outputs`` として
+    運用者へ未対応パターンの存在を明示通知する目的 (Codex review 提案 M1)。
+
+    判定ルール:
+    - ``<stem>.pdf`` は expected として除外
+    - ``<stem>`` で始まり、直後の文字が ``_VARIANT_NAMING_BOUNDARY`` の場合のみ採用
+      (``food.pdf`` のような無関係な前方一致を構造的に除外)
+
+    Windows 実機専用運用のため大文字 ``.PDF`` 経路は持たない (NTFS は
+    case-insensitive で ``*.pdf`` glob が ``foo.PDF`` も拾う)。
+
+    PII 防御: ``OSError`` 時は ``logger.warning`` に型名のみ出力。
+    """
+    expected = f"{target_stem}.pdf"
+    found: list[Path] = []
+    seen: set[Path] = set()
+    for d in watch_dirs:
+        try:
+            if not d.exists():
+                continue
+        except OSError:
+            continue
+        try:
+            paths = list(d.glob("*.pdf"))
+        except OSError as exc:
+            logger.warning(
+                "glob failed in %s: %s", d.name, type(exc).__name__
+            )
+            continue
+        for p in paths:
+            if p in seen:
+                continue
+            if p.name == expected:
+                continue
+            if not p.name.startswith(target_stem):
+                continue
+            suffix = p.name[len(target_stem):]
+            if suffix and suffix[0] in _VARIANT_NAMING_BOUNDARY:
+                found.append(p)
+                seen.add(p)
+    return found
 
 
 def extract_one(
@@ -597,17 +800,38 @@ def extract_one(
             "(ResolveResult invariant violation)"
         )
 
+    # Step 1.5: pre-existing target quarantine (D1' Codex review 反映)
+    # SFX 実行前に ex_file.parent の同名 PDF を一時退避し、SFX が新規生成しない
+    # 場合に「古い PDF を成功扱いで移動」する誤配布事故を構造的に防ぐ。
+    quarantine_path, quarantine_origin, q_error_code, q_error_detail = (
+        _quarantine_pre_existing_target(ex_file)
+    )
+    if q_error_code is not None:
+        # 退避失敗時は SFX 実行に進まない (古い PDF が同居したまま処理 → 誤配布リスク)
+        return ExtractionItem(
+            source_path=ex_file,
+            resolve_result=result,
+            status=ExtractionStatus.EXTRACT_FAILED,
+            error_code=q_error_code,
+            error_detail=q_error_detail,
+        )
+
     # Step 2: .exe コピー
     exe_path = ex_file.with_suffix(".exe")
     try:
         shutil.copy2(ex_file, exe_path)
     except OSError as e:
+        # quarantine を元に戻してから return (退避物が孤立しないように)
+        restore_warning = _restore_quarantine(
+            quarantine_path, quarantine_origin, ex_file.name
+        )
         return ExtractionItem(
             source_path=ex_file,
             resolve_result=result,
             status=ExtractionStatus.EXTRACT_FAILED,
             error_code=ExtractionErrorCode.COPY_FAILED,
             error_detail=type(e).__name__,
+            cleanup_warning=restore_warning,
         )
 
     # Step 3: SFX 抽出 + 移動 (cleanup を必ず実施)
@@ -671,6 +895,22 @@ def extract_one(
     else:
         status = ExtractionStatus.SUCCESS
 
+    # Step 6: quarantine 後処理 (D1' 後段)
+    # - SUCCESS / MOVE_FAILED → 退避物削除 (target_pdf は新規生成された)
+    # - EXTRACT_FAILED / PARTIAL_OUTPUT → 退避物復元 (target_pdf は生成されず)
+    quarantine_post_warning: ExtractionErrorCode | None
+    if status in (ExtractionStatus.SUCCESS, ExtractionStatus.MOVE_FAILED):
+        quarantine_post_warning = _delete_quarantine(
+            quarantine_path, ex_file.name
+        )
+    else:
+        quarantine_post_warning = _restore_quarantine(
+            quarantine_path, quarantine_origin, ex_file.name
+        )
+    # 既存の cleanup_warning (.exe 削除失敗) を上書きしない: 先勝ち優先で primary を保持
+    if cleanup_warning is None and quarantine_post_warning is not None:
+        cleanup_warning = quarantine_post_warning
+
     # HIGH-G / M-1: silent な warning 状態を logger に出す
     # PII 防御: filename と enum 値のみ、フルパス / 事業所名は出さない
     if partial_outputs:
@@ -681,7 +921,7 @@ def extract_one(
         )
     if cleanup_warning is not None:
         logger.warning(
-            "%s: %s (.exe could not be removed)",
+            "%s: cleanup warning %s",
             ex_file.name,
             cleanup_warning.value,
         )
