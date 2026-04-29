@@ -1,0 +1,163 @@
+"""C (経過報告書) PDF 自動配置エンジン（MVP）。
+
+各行ごとに:
+    1. 担当者から xlsx パスを解決（ReportStaffEntry の template 展開）
+    2. xlsx 内の利用者シートを特定（氏名一致）
+    3. Excel COM で 1 ページ目を PDF 化
+    4. FAX 事業所フォルダ配下の経過報告書サブフォルダに配置
+
+xlsx パステンプレート（{era}=令和年, {month}=月数値）:
+    base_dir = ``\\\\Tera-station\\share\\PT 宮下``
+    year_subfolder_template = ``リハ経過報告書\\令和{era}年``
+    file_template = ``リハ経過報告書 (宮下) {month}月 .xlsx``
+"""
+
+from __future__ import annotations
+
+import io
+import logging
+from dataclasses import dataclass, field
+from enum import StrEnum
+from pathlib import Path
+
+from openpyxl import load_workbook
+
+from wiseman_hub.cloud.sheets import ChecklistRow
+from wiseman_hub.config import ChecklistConfig, ReportStaffEntry
+from wiseman_hub.pdf.excel_com import ExcelExporter
+
+logger = logging.getLogger(__name__)
+
+
+class CPlacementStatus(StrEnum):
+    PENDING = "pending"
+    SUCCESS = "success"
+    SKIPPED_NO_FACILITY = "skipped_no_facility"
+    SKIPPED_NO_STAFF = "skipped_no_staff"  # 担当者マッピング未登録
+    SKIPPED_NO_XLSX = "skipped_no_xlsx"
+    SKIPPED_NO_SHEET = "skipped_no_sheet"  # xlsx 内に対象利用者シートなし
+    SKIPPED_AMBIGUOUS_SHEET = "skipped_ambiguous_sheet"
+    ERROR = "error"
+
+
+@dataclass
+class CPlacementResult:
+    row: ChecklistRow
+    status: CPlacementStatus = CPlacementStatus.PENDING
+    xlsx_path: Path | None = None
+    sheet_name: str | None = None
+    target_pdf: Path | None = None
+    sheet_candidates: list[str] = field(default_factory=list)
+    message: str = ""
+
+
+def western_to_reiwa(year: int) -> int:
+    """西暦 → 令和年（2019 = R1）。"""
+    return year - 2018
+
+
+def resolve_xlsx_path(entry: ReportStaffEntry, year: int, month: int) -> Path:
+    """ReportStaffEntry から xlsx パスを組み立てる（{era}/{month} を展開）。"""
+    era = western_to_reiwa(year)
+    base = Path(entry.base_dir)
+    year_sub = entry.year_subfolder_template.format(era=era, month=month)
+    fname = entry.file_template.format(era=era, month=month)
+    return base / year_sub / fname
+
+
+def _normalize_name(name: str) -> str:
+    return name.replace("　", "").replace(" ", "").strip()
+
+
+def find_sheet_for_user(xlsx_path: Path, user_name: str) -> tuple[str | None, list[str]]:
+    """xlsx 内のシート名から利用者氏名にマッチするものを探す。"""
+    if not xlsx_path.exists():
+        return None, []
+    target = _normalize_name(user_name)
+    with open(xlsx_path, "rb") as f:
+        wb = load_workbook(io.BytesIO(f.read()), read_only=True)
+    try:
+        names = list(wb.sheetnames)
+    finally:
+        wb.close()
+    matches = [n for n in names if _normalize_name(n) == target]
+    if len(matches) == 1:
+        return matches[0], names
+    return None, names
+
+
+def resolve_facility(facility_name: str, routing: dict[str, str]) -> str | None:
+    if facility_name in routing:
+        return routing[facility_name]
+    return None
+
+
+def plan_c_placement(
+    rows: list[ChecklistRow],
+    cfg: ChecklistConfig,
+    year: int,
+    month: int,
+) -> list[CPlacementResult]:
+    """C 配置の計画を立てる（実 PDF 化はしない）。"""
+    fax_root = Path(cfg.fax_root)
+    results: list[CPlacementResult] = []
+    for row in rows:
+        result = CPlacementResult(row=row)
+        fax_folder = resolve_facility(row.facility, cfg.facility_routing)
+        if not fax_folder:
+            result.status = CPlacementStatus.SKIPPED_NO_FACILITY
+            result.message = f"居宅マッピング未登録: {row.facility}"
+            results.append(result)
+            continue
+        staff_entry = cfg.report_staff.get(row.staff)
+        if staff_entry is None:
+            result.status = CPlacementStatus.SKIPPED_NO_STAFF
+            result.message = f"担当者マッピング未登録: {row.staff}"
+            results.append(result)
+            continue
+        xlsx_path = resolve_xlsx_path(staff_entry, year, month)
+        if not xlsx_path.exists():
+            result.status = CPlacementStatus.SKIPPED_NO_XLSX
+            result.message = f"xlsx 不在: {xlsx_path}"
+            results.append(result)
+            continue
+        sheet_name, all_sheets = find_sheet_for_user(xlsx_path, row.name)
+        if sheet_name is None:
+            if all_sheets:
+                # 候補は表示用に絞る (姓 or 名のいずれかを含む)
+                result.sheet_candidates = all_sheets
+            result.status = CPlacementStatus.SKIPPED_NO_SHEET
+            result.message = f"利用者シート未発見: {row.name}"
+            results.append(result)
+            continue
+        target = fax_root / fax_folder / cfg.c_output_subfolder / f"{row.name}.pdf"
+        result.xlsx_path = xlsx_path
+        result.sheet_name = sheet_name
+        result.target_pdf = target
+        result.status = CPlacementStatus.PENDING
+        results.append(result)
+    return results
+
+
+def execute_c_placement(
+    results: list[CPlacementResult], exporter: ExcelExporter
+) -> list[CPlacementResult]:
+    """PENDING の plan を Excel COM で PDF 化して配置する。"""
+    try:
+        for r in results:
+            if r.status != CPlacementStatus.PENDING:
+                continue
+            if r.xlsx_path is None or r.sheet_name is None or r.target_pdf is None:
+                r.status = CPlacementStatus.ERROR
+                r.message = "internal: missing xlsx/sheet/target"
+                continue
+            try:
+                exporter.export_first_page(r.xlsx_path, r.sheet_name, r.target_pdf)
+                r.status = CPlacementStatus.SUCCESS
+            except Exception as exc:  # MVP: 詳細分類は後段
+                r.status = CPlacementStatus.ERROR
+                r.message = f"export failed: {exc.__class__.__name__}: {exc}"
+                logger.exception("Excel export failed for %s", r.row.name)
+    finally:
+        exporter.close()
+    return results
