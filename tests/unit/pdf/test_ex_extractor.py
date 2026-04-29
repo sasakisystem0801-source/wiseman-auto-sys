@@ -1982,3 +1982,124 @@ class TestExtractOneUnexpectedNamingIntegration:
         assert not (root / "サービスA" / "サービスA_提供_001.pdf").exists()
         # 元の変則命名 PDF は source に残る (運用者が手動対応)
         assert unexpected_pdf.exists()
+
+
+class TestSnapshotPdfsAndFallback:
+    """SFX 出力 PDF 名が ex_file の stem と一致しない実機ケース対応:
+    snapshot 差分検出を fallback として使う設計の検証。
+    """
+
+    def test_snapshot_pdfs_excludes_quarantine(self, tmp_path: Path) -> None:
+        """``.quarantine-`` prefix を含む PDF は snapshot から除外される
+        (古い退避 PDF を「新規生成」と誤認させない構造保証)。"""
+        (tmp_path / "regular.pdf").touch()
+        (tmp_path / f"old.pdf{_QUARANTINE_PREFIX}20260101000000-aaaa").touch()
+        (tmp_path / "data.txt").touch()  # 非 PDF は除外
+
+        snapshot = WindowsSfxAdapter._snapshot_pdfs([tmp_path])
+        names = {p.name for p in snapshot}
+        assert names == {"regular.pdf"}
+
+    def test_snapshot_pdfs_handles_missing_dir(self, tmp_path: Path) -> None:
+        ghost = tmp_path / "ghost"
+        snapshot = WindowsSfxAdapter._snapshot_pdfs([ghost])
+        assert snapshot == set()
+
+    def test_resolve_falls_back_to_snapshot_diff_single_new(
+        self, tmp_path: Path
+    ) -> None:
+        """SFX が ex_file.stem と異なる名前で 1 件 PDF を出した場合、
+        snapshot 差分で fallback 検出される (実機 SFX の任意命名対応)。"""
+        before: set[Path] = set()  # SFX 起動前は空
+        # SFX 起動後に SFX 名固有の短い名前で 1 件出現
+        sfx_output = tmp_path / "提供実績.pdf"
+        sfx_output.touch()
+
+        result = WindowsSfxAdapter._resolve_target_or_raise(
+            target_stem="long_ex_file_stem_with_facility_suffix",
+            watch_dirs=[tmp_path],
+            primary_dir=tmp_path,
+            before_snapshot=before,
+        )
+        assert len(result) == 1
+        assert result[0].name == "提供実績.pdf"
+
+    def test_resolve_prefers_basename_over_snapshot_diff(
+        self, tmp_path: Path
+    ) -> None:
+        """``<stem>.pdf`` が見つかれば snapshot 差分より優先 (既存契約維持)。"""
+        before: set[Path] = set()
+        target = tmp_path / "stem.pdf"
+        target.touch()
+        # 余計な PDF も増えているが target を優先
+        other = tmp_path / "別名.pdf"
+        other.touch()
+
+        result = WindowsSfxAdapter._resolve_target_or_raise(
+            target_stem="stem",
+            watch_dirs=[tmp_path],
+            primary_dir=tmp_path,
+            before_snapshot=before,
+        )
+        assert len(result) == 1
+        assert result[0].name == "stem.pdf"
+
+    def test_resolve_picks_latest_when_multiple_new(
+        self, tmp_path: Path
+    ) -> None:
+        """新規生成が複数 → 最新 mtime を採用 (誤検知ではなく救済路)。"""
+        import time as _time
+
+        before: set[Path] = set()
+        old = tmp_path / "old_output.pdf"
+        old.touch()
+        _time.sleep(0.01)
+        newer = tmp_path / "newer_output.pdf"
+        newer.touch()
+
+        result = WindowsSfxAdapter._resolve_target_or_raise(
+            target_stem="unrelated_stem",
+            watch_dirs=[tmp_path],
+            primary_dir=tmp_path,
+            before_snapshot=before,
+        )
+        assert len(result) == 1
+        assert result[0].name == "newer_output.pdf"
+
+    def test_resolve_excludes_pre_existing_from_diff(
+        self, tmp_path: Path
+    ) -> None:
+        """before_snapshot に含まれる PDF は差分から除外される
+        (誤配布防止: 既存 PDF を SFX 出力扱いにしない)。"""
+        pre_existing = tmp_path / "pre_existing.pdf"
+        pre_existing.touch()
+        before = {pre_existing}
+        # SFX が新たに出した 1 件
+        sfx_out = tmp_path / "sfx_new.pdf"
+        sfx_out.touch()
+
+        result = WindowsSfxAdapter._resolve_target_or_raise(
+            target_stem="unrelated",
+            watch_dirs=[tmp_path],
+            primary_dir=tmp_path,
+            before_snapshot=before,
+        )
+        assert len(result) == 1
+        assert result[0].name == "sfx_new.pdf"
+
+    def test_resolve_raises_no_pdf_when_no_diff(
+        self, tmp_path: Path
+    ) -> None:
+        """SFX 起動前後で PDF 集合に変化なし → NO_PDF_PRODUCED。"""
+        existing = tmp_path / "stays.pdf"
+        existing.touch()
+        before = {existing}
+
+        with pytest.raises(SfxExtractionFailed) as exc_info:
+            WindowsSfxAdapter._resolve_target_or_raise(
+                target_stem="other_stem",
+                watch_dirs=[tmp_path],
+                primary_dir=tmp_path,
+                before_snapshot=before,
+            )
+        assert exc_info.value.code is ExtractionErrorCode.NO_PDF_PRODUCED

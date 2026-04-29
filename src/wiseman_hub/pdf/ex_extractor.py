@@ -210,6 +210,10 @@ class WindowsSfxAdapter:
           より診断性 + 運用者通知性が高い)
         """
         target_stem = exe_path.stem  # ex_file.stem と同じ
+        # SFX 起動前 snapshot: ex_file.parent のみ取る (誤配布リスクを最小化)。
+        # quarantine で退避済の同名 PDF は snapshot に含まれない (`.quarantine-`
+        # prefix を除外) ため、新規生成を確実に差分として検出できる。
+        before_snapshot = self._snapshot_pdfs([exe_path.parent])
 
         try:
             proc = subprocess.Popen(  # noqa: S603 (信頼された .exe のみ)
@@ -237,7 +241,9 @@ class WindowsSfxAdapter:
                 if proc.poll() is not None:
                     # SFX 正常終了 → 書き込み完了を待ってから target 検出
                     time.sleep(1)
-                    return self._resolve_target_or_raise(target_stem, watch_dirs)
+                    return self._resolve_target_or_raise(
+                        target_stem, watch_dirs, exe_path.parent, before_snapshot
+                    )
         finally:
             if proc.poll() is None:
                 self._terminate_proc(proc)
@@ -245,7 +251,9 @@ class WindowsSfxAdapter:
         # タイムアウト後の最終チェック (旧版互換: 検出されれば成功扱い)
         time.sleep(1)
         try:
-            return self._resolve_target_or_raise(target_stem, watch_dirs)
+            return self._resolve_target_or_raise(
+                target_stem, watch_dirs, exe_path.parent, before_snapshot
+            )
         except SfxExtractionFailed as e:
             # target が無く変則命名も無いケースのみ SFX_TIMEOUT に格上げ
             # (UNEXPECTED_PDF_NAMING 等は元の error_code を維持)
@@ -267,20 +275,80 @@ class WindowsSfxAdapter:
             )
             raise
 
+    @staticmethod
+    def _snapshot_pdfs(dirs: Sequence[Path]) -> set[Path]:
+        """指定ディレクトリ群の現在の *.pdf 集合を返す (`.quarantine-` は除外)。
+
+        OSError は警告ログのみで握りつぶし、その dir は空集合扱い (ネットワーク
+        ドライブの瞬断等で SFX 実行自体は止めない)。
+        """
+        snapshot: set[Path] = set()
+        for d in dirs:
+            try:
+                if not d.exists():
+                    continue
+                for p in d.iterdir():
+                    if not p.is_file():
+                        continue
+                    if p.suffix.lower() != ".pdf":
+                        continue
+                    if _QUARANTINE_PREFIX in p.name:
+                        continue
+                    snapshot.add(p)
+            except OSError as exc:
+                logger.warning(
+                    "snapshot iterdir failed: %s", type(exc).__name__
+                )
+                continue
+        return snapshot
+
     @classmethod
     def _resolve_target_or_raise(
-        cls, target_stem: str, watch_dirs: Sequence[Path]
+        cls,
+        target_stem: str,
+        watch_dirs: Sequence[Path],
+        primary_dir: Path,
+        before_snapshot: set[Path],
     ) -> Sequence[Path]:
-        """target stem に一致する PDF を返す。なければ変則命名検出 → raise。
+        """target stem に一致する PDF を返す。なければ snapshot 差分 → 変則命名 → raise。
 
-        - ``<stem>.pdf`` が watch_dirs にあれば 1 件返す (SUCCESS パス)
-        - なければ ``<stem>_*.pdf`` 等の変則命名を ``UNEXPECTED_PDF_NAMING`` で raise
-          (partial_outputs にファイル列挙、運用者へ未対応パターンを明示通知)
-        - 変則命名も無ければ ``NO_PDF_PRODUCED`` で raise
+        検出順序:
+        1. ``<stem>.pdf`` が watch_dirs にあれば 1 件返す (basename 完全一致)
+        2. ``primary_dir`` (= ex_file.parent) で SFX 起動後に **新規出現** した
+           PDF を検出 (quarantine 退避済の古い PDF は差分から除外される)
+           - 1 件 → 採用 (SFX が任意名で出すケース対応、実機 PDF 名 ≠ ex_file.stem)
+           - 2 件以上 → 最新 mtime を採用 + 警告ログ (PII safe: count のみ)
+        3. ``<stem>_*.pdf`` 等の変則命名 → UNEXPECTED_PDF_NAMING で raise
+        4. 何も見つからなければ NO_PDF_PRODUCED で raise
+
+        誤配布リスク評価:
+        - quarantine 方式で同名 pre-existing は退避済 → snapshot 差分に古い残骸は混入しない
+        - primary_dir は ``ex_file.parent`` のみ (Desktop / Downloads は基本対象外、
+          ユーザーの手動 DL 等を巻き込まない)
         """
         target = find_target_pdf(target_stem, watch_dirs)
         if target is not None:
             return [target]
+
+        after = cls._snapshot_pdfs([primary_dir])
+        new_pdfs = sorted(after - before_snapshot)
+        if len(new_pdfs) == 1:
+            logger.info(
+                "%s: snapshot-diff fallback matched 1 new pdf", target_stem
+            )
+            return [new_pdfs[0]]
+        if len(new_pdfs) >= 2:
+            try:
+                latest = max(new_pdfs, key=lambda p: p.stat().st_mtime)
+            except OSError:
+                latest = new_pdfs[0]
+            logger.warning(
+                "%s: snapshot-diff found %d new pdfs, picked latest by mtime",
+                target_stem,
+                len(new_pdfs),
+            )
+            return [latest]
+
         unexpected = find_unexpected_naming_pdfs(target_stem, watch_dirs)
         if unexpected:
             raise SfxExtractionFailed(
