@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -1058,6 +1059,10 @@ class TestExtractDirectory:
 
 
 class TestWindowsSfxAdapterPlatformGuard:
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="win32 上では UnsupportedSfxPlatformError を投げない (実機検証で別途確認)",
+    )
     def test_constructor_raises_on_macos(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
