@@ -837,3 +837,259 @@ class TestExExtractorDialogSmoke:
             dialog._on_close()
         finally:
             root.destroy()
+
+    # -----------------------------------------------------------------
+    # R1 (Issue #165) 取込元永続化 + Codex review D4 (save 失敗時 reload なし)
+    # -----------------------------------------------------------------
+
+    def test_browse_source_persists_to_toml_when_config_path_given(
+        self, tmp_path: Path
+    ) -> None:
+        """AC-C: config_path 指定時、save_config_fn(config, path, create_if_missing=True)
+        が呼び出され ex_source_dir が更新される。
+        """
+        import tkinter as tk
+
+        from wiseman_hub.config import PdfMergeConfig
+
+        original_source = tmp_path / "original_source"
+        original_source.mkdir()
+        new_source = tmp_path / "new_source"
+        new_source.mkdir()
+        root_dir = tmp_path / "facility_root"
+        root_dir.mkdir()
+        config_path = tmp_path / "default.toml"
+
+        config = AppConfig(
+            pdf_merge=PdfMergeConfig(
+                ex_source_dir=str(original_source),
+                facility_root_dir=str(root_dir),
+            )
+        )
+
+        fake_askdirectory = MagicMock(return_value=str(new_source))
+        save_calls: list[tuple[AppConfig, Path, dict]] = []
+
+        def fake_save(cfg: AppConfig, path: Path, **kwargs: object) -> None:
+            save_calls.append((cfg, path, kwargs))
+
+        root = tk.Tk()
+        try:
+            dialog = ExExtractorDialog(
+                parent=root,
+                config=config,
+                config_path=config_path,
+                adapter=FakeSfxAdapter(),
+                save_config_fn=fake_save,
+                filedialog_askdirectory=fake_askdirectory,
+            )
+            dialog._on_browse_source()
+
+            assert len(save_calls) == 1
+            saved_cfg, saved_path, saved_kwargs = save_calls[0]
+            assert saved_path == config_path
+            # ex_source_dir が選択値で更新されている
+            assert saved_cfg.pdf_merge.ex_source_dir == str(new_source)
+            assert saved_kwargs.get("create_if_missing") is True
+            dialog._on_close()
+        finally:
+            root.destroy()
+
+    def test_browse_source_skips_persist_when_config_path_none(
+        self, tmp_path: Path
+    ) -> None:
+        """config_path = None なら save_config_fn は呼ばれず、ViewModel のみ更新。
+
+        既存の Tk smoke テスト互換用 (本番経路では config_path 必ず渡される)。
+        """
+        import tkinter as tk
+
+        from wiseman_hub.config import PdfMergeConfig
+
+        original_source = tmp_path / "original_source"
+        original_source.mkdir()
+        new_source = tmp_path / "new_source"
+        new_source.mkdir()
+        root_dir = tmp_path / "facility_root"
+        root_dir.mkdir()
+
+        config = AppConfig(
+            pdf_merge=PdfMergeConfig(
+                ex_source_dir=str(original_source),
+                facility_root_dir=str(root_dir),
+            )
+        )
+
+        fake_askdirectory = MagicMock(return_value=str(new_source))
+        save_called = []
+
+        def fake_save(*args: object, **kwargs: object) -> None:
+            save_called.append((args, kwargs))
+
+        root = tk.Tk()
+        try:
+            dialog = ExExtractorDialog(
+                parent=root,
+                config=config,
+                # config_path 渡さない (= None)
+                adapter=FakeSfxAdapter(),
+                save_config_fn=fake_save,
+                filedialog_askdirectory=fake_askdirectory,
+            )
+            dialog._on_browse_source()
+
+            assert dialog.view_model.source_dir == new_source  # ViewModel は更新
+            assert save_called == []  # save は呼ばれない
+            dialog._on_close()
+        finally:
+            root.destroy()
+
+    def test_browse_source_calls_on_source_persisted_after_save_success(
+        self, tmp_path: Path
+    ) -> None:
+        """AC-L (Codex review D4): save 成功時のみ on_source_persisted callback 呼出。"""
+        import tkinter as tk
+
+        from wiseman_hub.config import PdfMergeConfig
+
+        new_source = tmp_path / "new_source"
+        new_source.mkdir()
+        root_dir = tmp_path / "facility_root"
+        root_dir.mkdir()
+        config_path = tmp_path / "default.toml"
+
+        config = AppConfig(
+            pdf_merge=PdfMergeConfig(
+                ex_source_dir=str(tmp_path / "original"),
+                facility_root_dir=str(root_dir),
+            )
+        )
+        (tmp_path / "original").mkdir()
+
+        fake_askdirectory = MagicMock(return_value=str(new_source))
+        callback_calls: list[AppConfig] = []
+
+        root = tk.Tk()
+        try:
+            dialog = ExExtractorDialog(
+                parent=root,
+                config=config,
+                config_path=config_path,
+                adapter=FakeSfxAdapter(),
+                save_config_fn=lambda *a, **kw: None,  # save 成功
+                on_source_persisted=callback_calls.append,
+                filedialog_askdirectory=fake_askdirectory,
+            )
+            dialog._on_browse_source()
+
+            assert len(callback_calls) == 1
+            assert callback_calls[0] is config
+            dialog._on_close()
+        finally:
+            root.destroy()
+
+    def test_browse_source_does_not_call_on_persisted_when_save_fails(
+        self, tmp_path: Path
+    ) -> None:
+        """AC-L (Codex review D4): save 失敗時は on_source_persisted を呼ばない
+        (AppConfig 不整合防止 + reload は成功時のみが正しい契約)。"""
+        import tkinter as tk
+
+        from wiseman_hub.config import PdfMergeConfig
+
+        new_source = tmp_path / "new_source"
+        new_source.mkdir()
+        root_dir = tmp_path / "facility_root"
+        root_dir.mkdir()
+        config_path = tmp_path / "default.toml"
+
+        (tmp_path / "original").mkdir()
+        config = AppConfig(
+            pdf_merge=PdfMergeConfig(
+                ex_source_dir=str(tmp_path / "original"),
+                facility_root_dir=str(root_dir),
+            )
+        )
+
+        fake_askdirectory = MagicMock(return_value=str(new_source))
+        callback_calls: list[AppConfig] = []
+
+        def failing_save(*args: object, **kwargs: object) -> None:
+            raise PermissionError("simulated save failure")
+
+        messagebox = MagicMock()
+
+        root = tk.Tk()
+        try:
+            dialog = ExExtractorDialog(
+                parent=root,
+                config=config,
+                config_path=config_path,
+                adapter=FakeSfxAdapter(),
+                save_config_fn=failing_save,
+                on_source_persisted=callback_calls.append,
+                messagebox_fn=messagebox,
+                filedialog_askdirectory=fake_askdirectory,
+            )
+            dialog._on_browse_source()
+
+            # callback は呼ばれていない (D4)
+            assert callback_calls == []
+            # ViewModel は今セッション用に更新されている (AC-F)
+            assert dialog.view_model.source_dir == new_source
+            # 警告 messagebox が表示されている (showerror で warning レベル伝達)
+            messagebox.showerror.assert_called()
+            error_titles = [c.args[0] for c in messagebox.showerror.call_args_list]
+            assert any("設定保存失敗" in t for t in error_titles)
+            dialog._on_close()
+        finally:
+            root.destroy()
+
+    def test_browse_source_save_failure_does_not_break_ui(
+        self, tmp_path: Path
+    ) -> None:
+        """AC-F: save 失敗してもダイアログは継続使用可能 (実行ボタン引き続き使える)。"""
+        import tkinter as tk
+
+        from wiseman_hub.config import PdfMergeConfig
+
+        new_source = tmp_path / "new_source"
+        new_source.mkdir()
+        root_dir = tmp_path / "facility_root"
+        root_dir.mkdir()
+        config_path = tmp_path / "default.toml"
+        (tmp_path / "original").mkdir()
+
+        config = AppConfig(
+            pdf_merge=PdfMergeConfig(
+                ex_source_dir=str(tmp_path / "original"),
+                facility_root_dir=str(root_dir),
+            )
+        )
+
+        fake_askdirectory = MagicMock(return_value=str(new_source))
+        messagebox = MagicMock()
+
+        def failing_save(*args: object, **kwargs: object) -> None:
+            raise OSError("disk full")
+
+        root = tk.Tk()
+        try:
+            dialog = ExExtractorDialog(
+                parent=root,
+                config=config,
+                config_path=config_path,
+                adapter=FakeSfxAdapter(),
+                save_config_fn=failing_save,
+                messagebox_fn=messagebox,
+                filedialog_askdirectory=fake_askdirectory,
+            )
+            dialog._on_browse_source()
+
+            # 失敗後も dialog は破壊されていない (継続使用可能)
+            assert dialog._top.winfo_exists()
+            # 「実行」ボタンの state が disabled でない (can_run は判定可能)
+            assert dialog.view_model.can_run is True  # source/root とも存在
+            dialog._on_close()
+        finally:
+            root.destroy()
