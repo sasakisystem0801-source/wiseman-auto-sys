@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import logging
 import shutil
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
 from wiseman_hub.pdf.ex_extractor import (
+    _QUARANTINE_PREFIX,
     ExtractionErrorCode,
     ExtractionItem,
     ExtractionResult,
@@ -26,8 +28,11 @@ from wiseman_hub.pdf.ex_extractor import (
     SfxExtractionFailed,
     UnsupportedSfxPlatformError,
     WindowsSfxAdapter,
+    _quarantine_pre_existing_target,
     extract_directory,
     extract_one,
+    find_target_pdf,
+    find_unexpected_naming_pdfs,
 )
 from wiseman_hub.pdf.facility_resolver import (
     ResolveReason,
@@ -1054,6 +1059,10 @@ class TestExtractDirectory:
 
 
 class TestWindowsSfxAdapterPlatformGuard:
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="win32 上では UnsupportedSfxPlatformError を投げない (実機検証で別途確認)",
+    )
     def test_constructor_raises_on_macos(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1516,52 +1525,460 @@ class TestExtractDirectoryIntegration:
 
 
 # ---------------------------------------------------------------------------
-# WindowsSfxAdapter の platform 非依存メソッド (3 件)
+# find_target_pdf / find_unexpected_naming_pdfs (basename 完全一致 + 変則命名検出)
 # ---------------------------------------------------------------------------
 
 
-class TestWindowsSfxAdapterStaticMethods:
-    """test-analyzer H3: _snapshot_pdfs / _collect_new_pdfs は macOS でも検証可能。"""
+class TestFindTargetPdf:
+    """``find_target_pdf`` の basename 完全一致と探索順を検証。"""
 
-    def test_snapshot_pdfs_finds_lowercase_and_uppercase(
+    def test_finds_lowercase_pdf_in_first_dir(self, tmp_path: Path) -> None:
+        (tmp_path / "report.pdf").touch()
+        result = find_target_pdf("report", [tmp_path])
+        assert result is not None
+        assert result.name == "report.pdf"
+
+    def test_returns_none_when_only_unrelated_pdf(self, tmp_path: Path) -> None:
+        """basename 完全一致なので無関係な PDF は拾わない (誤配布防止)。"""
+        (tmp_path / "noise.pdf").touch()
+        (tmp_path / "report_misc.pdf").touch()  # report_001.pdf 風だが stem 違い
+        result = find_target_pdf("report", [tmp_path])
+        assert result is None
+
+    def test_search_order_first_dir_takes_priority(self, tmp_path: Path) -> None:
+        """探索順は引数順: ex_file.parent 最優先で渡す呼び出し側との契約。"""
+        first = tmp_path / "first"
+        second = tmp_path / "second"
+        first.mkdir()
+        second.mkdir()
+        (first / "report.pdf").write_text("FIRST")
+        (second / "report.pdf").write_text("SECOND")
+
+        result = find_target_pdf("report", [first, second])
+        assert result is not None
+        assert result.read_text() == "FIRST"
+
+    def test_skips_missing_directory(self, tmp_path: Path) -> None:
+        existing = tmp_path / "exist"
+        existing.mkdir()
+        (existing / "report.pdf").touch()
+        ghost = tmp_path / "ghost"  # 存在しない
+
+        result = find_target_pdf("report", [ghost, existing])
+        assert result is not None
+        assert result.parent == existing
+
+    def test_returns_none_for_directory_with_same_basename(
         self, tmp_path: Path
     ) -> None:
-        (tmp_path / "a.pdf").touch()
-        (tmp_path / "b.PDF").touch()
-        (tmp_path / "c.txt").touch()
+        """is_file() ガードで「ディレクトリ <stem>.pdf/」を誤検出しない。"""
+        (tmp_path / "report.pdf").mkdir()  # stem.pdf という名前のディレクトリ
+        result = find_target_pdf("report", [tmp_path])
+        assert result is None
 
-        result = WindowsSfxAdapter._snapshot_pdfs([tmp_path])
+
+class TestFindUnexpectedNamingPdfs:
+    """変則命名検出 (UNEXPECTED_PDF_NAMING)。"""
+
+    def test_finds_underscore_suffix(self, tmp_path: Path) -> None:
+        (tmp_path / "report_001.pdf").touch()
+        (tmp_path / "report_002.pdf").touch()
+        result = find_unexpected_naming_pdfs("report", [tmp_path])
         names = {p.name for p in result}
-        assert names == {"a.pdf", "b.PDF"}
+        assert names == {"report_001.pdf", "report_002.pdf"}
 
-    def test_snapshot_pdfs_skips_missing_dir(self, tmp_path: Path) -> None:
-        (tmp_path / "a.pdf").touch()
-        result = WindowsSfxAdapter._snapshot_pdfs(
-            [tmp_path, tmp_path / "does_not_exist"]
+    def test_finds_paren_suffix(self, tmp_path: Path) -> None:
+        (tmp_path / "report (1).pdf").touch()
+        result = find_unexpected_naming_pdfs("report", [tmp_path])
+        assert len(result) == 1
+        assert result[0].name == "report (1).pdf"
+
+    def test_excludes_expected_target(self, tmp_path: Path) -> None:
+        """``<stem>.pdf`` は expected として除外される (Windows NTFS は case-insensitive)。"""
+        (tmp_path / "report.pdf").touch()
+        result = find_unexpected_naming_pdfs("report", [tmp_path])
+        assert result == []
+
+    def test_excludes_unrelated_prefix(self, tmp_path: Path) -> None:
+        """``food.pdf`` (boundary 文字でない) は ``foo`` と無関係扱い。"""
+        (tmp_path / "food.pdf").touch()
+        (tmp_path / "fooled.pdf").touch()
+        result = find_unexpected_naming_pdfs("foo", [tmp_path])
+        assert result == []
+
+    def test_finds_dot_suffix(self, tmp_path: Path) -> None:
+        """``report.x.pdf`` のような複数拡張子も変則扱い。"""
+        (tmp_path / "report.x.pdf").touch()
+        result = find_unexpected_naming_pdfs("report", [tmp_path])
+        assert len(result) == 1
+
+    def test_dedup_across_watch_dirs(self, tmp_path: Path) -> None:
+        """同じ Path が複数 watch_dirs に渡されても重複しない。"""
+        (tmp_path / "report_001.pdf").touch()
+        result = find_unexpected_naming_pdfs(
+            "report", [tmp_path, tmp_path]
         )
         assert len(result) == 1
 
-    def test_collect_new_pdfs_filters_by_mtime(self, tmp_path: Path) -> None:
-        """HIGH-D: SFX 起動前に存在した PDF は無関係扱いで除外される。"""
-        import os as _os
 
-        # SFX 起動 "前" の PDF (古い mtime)
-        old_pdf = tmp_path / "old.pdf"
-        old_pdf.touch()
-        old_mtime = old_pdf.stat().st_mtime - 100
-        _os.utime(old_pdf, (old_mtime, old_mtime))
+class TestQuarantinePreExistingTarget:
+    """``_quarantine_pre_existing_target`` の単体検証."""
 
-        sfx_start = old_pdf.stat().st_mtime + 50  # 旧ファイルより新しい時刻
+    def test_no_pre_existing_returns_none(self, tmp_path: Path) -> None:
+        ex_file = tmp_path / "report.ex_"
+        ex_file.touch()
+        q_path, origin, code, detail = _quarantine_pre_existing_target(ex_file)
+        assert q_path is None
+        assert origin is None
+        assert code is None
+        assert detail is None
 
-        # SFX 起動後に出現した PDF
-        new_pdf = tmp_path / "new.pdf"
-        new_pdf.touch()  # 現在時刻 = sfx_start より新しい
+    def test_renames_existing_target(self, tmp_path: Path) -> None:
+        ex_file = tmp_path / "report.ex_"
+        ex_file.touch()
+        target = tmp_path / "report.pdf"
+        target.write_text("OLD")
+        q_path, origin, code, detail = _quarantine_pre_existing_target(ex_file)
+        assert q_path is not None
+        assert origin == target
+        assert code is None
+        assert not target.exists()  # 元の位置にはない
+        assert q_path.exists()  # 退避先に存在
+        assert q_path.read_text() == "OLD"  # 中身保持
 
-        before: set[Path] = set()  # snapshot 時点で何もなかった想定
-        result = WindowsSfxAdapter._collect_new_pdfs(
-            [tmp_path], before, sfx_start
+class TestExtractOnePreExistingPdfQuarantine:
+    """同名 PDF 同居状態の挙動 (誤配布事故の構造的防止)。"""
+
+    def _ex_file(self, source_dir: Path, name: str = "サービスA_提供.ex_") -> Path:
+        ex = source_dir / name
+        ex.touch()
+        return ex
+
+    def _facility_root(self, base: Path, names: list[str]) -> Path:
+        root = base / "facilities"
+        root.mkdir()
+        for n in names:
+            (root / n).mkdir()
+        return root
+
+    def test_pre_existing_replaced_by_new_sfx_output(
+        self, tmp_path: Path
+    ) -> None:
+        """退避 → SFX 新規生成 → **新生成 PDF を採用、退避物は削除**。"""
+        source = tmp_path / "src"
+        source.mkdir()
+        ex_file = self._ex_file(source)
+        old_pdf = ex_file.with_suffix(".pdf")
+        old_pdf.write_text("OLD")  # 古い PDF が同居
+
+        root = self._facility_root(tmp_path, ["サービスA"])
+
+        produced = source / "サービスA_提供.pdf"
+
+        def side_effect(exe_path: Path, watch_dirs: object) -> None:
+            # SFX 模擬: 退避中 (origin が無い状態) で新規 PDF を実生成
+            produced.write_text("NEW")
+
+        adapter = FakeSfxAdapter(
+            produced_pdfs=(produced,), side_effect=side_effect
         )
-        # old.pdf は mtime < sfx_start なので除外される
-        result_names = {p.name for p in result}
-        assert "new.pdf" in result_names
-        assert "old.pdf" not in result_names
+
+        item = extract_one(
+            ex_file=ex_file,
+            facility_root_dir=root,
+            facility_names=["サービスA"],
+            aliases={},
+            adapter=adapter,
+        )
+
+        assert item.status is ExtractionStatus.SUCCESS
+        # 移動先に新 PDF が存在し、内容は NEW
+        moved = root / "サービスA" / "サービスA_提供.pdf"
+        assert moved.exists()
+        assert moved.read_text() == "NEW"
+        # 退避物は削除済 (source 直下に quarantine 残骸がない)
+        quarantines = list(source.glob(f"*{_QUARANTINE_PREFIX}*"))
+        assert quarantines == []
+
+    def test_pre_existing_restored_when_sfx_produces_no_new_pdf(
+        self, tmp_path: Path
+    ) -> None:
+        """退避 → SFX が新規生成しない → **EXTRACT_FAILED + 退避物復元**。"""
+        source = tmp_path / "src"
+        source.mkdir()
+        ex_file = self._ex_file(source)
+        old_pdf = ex_file.with_suffix(".pdf")
+        old_pdf.write_text("OLD")
+
+        root = self._facility_root(tmp_path, ["サービスA"])
+
+        # SFX が SfxExtractionFailed(NO_PDF_PRODUCED) を投げる (新規生成失敗)
+        adapter = FakeSfxAdapter(
+            raise_on_extract=SfxExtractionFailed(
+                ExtractionErrorCode.NO_PDF_PRODUCED, "no pdf produced"
+            )
+        )
+
+        item = extract_one(
+            ex_file=ex_file,
+            facility_root_dir=root,
+            facility_names=["サービスA"],
+            aliases={},
+            adapter=adapter,
+        )
+
+        assert item.status is ExtractionStatus.EXTRACT_FAILED
+        assert item.error_code is ExtractionErrorCode.NO_PDF_PRODUCED
+        # 退避物が元の位置に復元されている (古い PDF はそのまま source に残る)
+        assert old_pdf.exists()
+        assert old_pdf.read_text() == "OLD"
+        # quarantine 残骸はない
+        quarantines = list(source.glob(f"*{_QUARANTINE_PREFIX}*"))
+        assert quarantines == []
+        # 移動先には何も入っていない
+        assert not (root / "サービスA" / "サービスA_提供.pdf").exists()
+
+    def test_unrelated_pdf_in_source_is_not_touched(self, tmp_path: Path) -> None:
+        """basename 不一致 PDF は退避されず・移動されない。"""
+        source = tmp_path / "src"
+        source.mkdir()
+        ex_file = self._ex_file(source)
+        unrelated = source / "noise.pdf"
+        unrelated.write_text("UNRELATED")
+
+        root = self._facility_root(tmp_path, ["サービスA"])
+
+        produced = source / "サービスA_提供.pdf"
+
+        def side_effect(exe_path: Path, watch_dirs: object) -> None:
+            produced.write_text("NEW")
+
+        adapter = FakeSfxAdapter(
+            produced_pdfs=(produced,), side_effect=side_effect
+        )
+        item = extract_one(
+            ex_file=ex_file,
+            facility_root_dir=root,
+            facility_names=["サービスA"],
+            aliases={},
+            adapter=adapter,
+        )
+
+        assert item.status is ExtractionStatus.SUCCESS
+        # 無関係 PDF は触られていない
+        assert unrelated.exists()
+        assert unrelated.read_text() == "UNRELATED"
+        # 移動先には期待 PDF
+        assert (root / "サービスA" / "サービスA_提供.pdf").exists()
+
+
+class TestQuarantineFailureAbortsBeforeSfx:
+    """退避失敗時は SFX を呼ばずに即 EXTRACT_FAILED で return する契約."""
+
+    def test_quarantine_rename_failure_aborts_before_sfx(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """rename OSError → SFX adapter は呼ばれず QUARANTINE_FAILED で return."""
+        source = tmp_path / "src"
+        source.mkdir()
+        ex_file = source / "サービスA_提供.ex_"
+        ex_file.touch()
+        # quarantine 対象の同名 PDF を同居させる
+        old_pdf = ex_file.with_suffix(".pdf")
+        old_pdf.write_text("OLD")
+
+        root = tmp_path / "facilities"
+        root.mkdir()
+        (root / "サービスA").mkdir()
+
+        # Path.rename を OSError raise に差し替え
+        original_rename = Path.rename
+
+        def fake_rename(self: Path, target: Path) -> Path:
+            if self == old_pdf:
+                raise PermissionError("locked by AV")
+            return original_rename(self, target)
+
+        monkeypatch.setattr(Path, "rename", fake_rename)
+
+        # adapter call 数を counter で検査
+        call_counter = {"count": 0}
+
+        def side_effect(exe_path: Path, watch_dirs: object) -> None:
+            call_counter["count"] += 1
+
+        adapter = FakeSfxAdapter(produced_pdfs=(), side_effect=side_effect)
+
+        item = extract_one(
+            ex_file=ex_file,
+            facility_root_dir=root,
+            facility_names=["サービスA"],
+            aliases={},
+            adapter=adapter,
+        )
+
+        # 1. SFX adapter は呼ばれていない (古い PDF 同居のまま処理回避)
+        assert call_counter["count"] == 0
+        # 2. EXTRACT_FAILED + QUARANTINE_FAILED で return
+        assert item.status is ExtractionStatus.EXTRACT_FAILED
+        assert item.error_code is ExtractionErrorCode.QUARANTINE_FAILED
+        # 3. error_detail は型名のみ (フルパス・PII を含まない)
+        assert item.error_detail == "PermissionError"
+        # 4. 古い PDF は元の位置に残る (退避失敗 → 動かない)
+        assert old_pdf.exists()
+        assert old_pdf.read_text() == "OLD"
+        # 5. 移動先には何も入らない
+        assert not (root / "サービスA" / "サービスA_提供.pdf").exists()
+
+
+class TestQuarantineRestoreFailureRecorded:
+    """SFX 失敗 + 復元失敗 → cleanup_warning + primary 上書き禁止契約."""
+
+    def test_restore_failure_recorded_as_cleanup_warning(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """SFX が NO_PDF_PRODUCED → restore で OSError → cleanup_warning に記録."""
+        source = tmp_path / "src"
+        source.mkdir()
+        ex_file = source / "サービスA_提供.ex_"
+        ex_file.touch()
+        old_pdf = ex_file.with_suffix(".pdf")
+        old_pdf.write_text("OLD")
+
+        root = tmp_path / "facilities"
+        root.mkdir()
+        (root / "サービスA").mkdir()
+
+        # adapter は SfxExtractionFailed(NO_PDF_PRODUCED) を投げる
+        adapter = FakeSfxAdapter(
+            raise_on_extract=SfxExtractionFailed(
+                ExtractionErrorCode.NO_PDF_PRODUCED, "no pdf produced"
+            )
+        )
+
+        # restore の Path.rename を OSError raise に差し替え (delete 経路は影響しない)
+        original_rename = Path.rename
+
+        def fake_rename(self: Path, target: Path) -> Path:
+            # quarantine から origin への戻り rename (target が old_pdf) を阻害
+            if target == old_pdf:
+                raise PermissionError("locked by AV")
+            return original_rename(self, target)
+
+        monkeypatch.setattr(Path, "rename", fake_rename)
+
+        item = extract_one(
+            ex_file=ex_file,
+            facility_root_dir=root,
+            facility_names=["サービスA"],
+            aliases={},
+            adapter=adapter,
+        )
+
+        # primary error は SFX 由来の NO_PDF_PRODUCED 維持
+        assert item.status is ExtractionStatus.EXTRACT_FAILED
+        assert item.error_code is ExtractionErrorCode.NO_PDF_PRODUCED
+        # cleanup_warning に QUARANTINE_RESTORE_FAILED 記録
+        assert item.cleanup_warning is ExtractionErrorCode.QUARANTINE_RESTORE_FAILED
+
+    def test_primary_cleanup_warning_not_overridden_by_quarantine(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """先勝ち契約: .exe 削除失敗 (primary) を quarantine 警告で上書きしない."""
+        source = tmp_path / "src"
+        source.mkdir()
+        ex_file = source / "サービスA_提供.ex_"
+        ex_file.touch()
+        old_pdf = ex_file.with_suffix(".pdf")
+        old_pdf.write_text("OLD")
+
+        root = tmp_path / "facilities"
+        root.mkdir()
+        (root / "サービスA").mkdir()
+
+        adapter = FakeSfxAdapter(
+            raise_on_extract=SfxExtractionFailed(
+                ExtractionErrorCode.NO_PDF_PRODUCED, "no pdf produced"
+            )
+        )
+
+        # 1. .exe の unlink を OSError 化 → primary cleanup_warning = CLEANUP_FAILED
+        # 2. restore も OSError 化 → quarantine_post_warning = QUARANTINE_RESTORE_FAILED
+        # 期待: primary (CLEANUP_FAILED) が維持される
+        original_unlink = Path.unlink
+        original_rename = Path.rename
+        exe_path = ex_file.with_suffix(".exe")
+
+        def fake_unlink(self: Path, missing_ok: bool = False) -> None:
+            if self == exe_path:
+                raise PermissionError("exe locked")
+            return original_unlink(self, missing_ok=missing_ok)
+
+        def fake_rename(self: Path, target: Path) -> Path:
+            if target == old_pdf:
+                raise PermissionError("av lock")
+            return original_rename(self, target)
+
+        monkeypatch.setattr(Path, "unlink", fake_unlink)
+        monkeypatch.setattr(Path, "rename", fake_rename)
+
+        item = extract_one(
+            ex_file=ex_file,
+            facility_root_dir=root,
+            facility_names=["サービスA"],
+            aliases={},
+            adapter=adapter,
+        )
+
+        assert item.status is ExtractionStatus.EXTRACT_FAILED
+        assert item.error_code is ExtractionErrorCode.NO_PDF_PRODUCED
+        # 先勝ち: .exe 削除失敗が primary cleanup_warning を取る
+        assert item.cleanup_warning is ExtractionErrorCode.CLEANUP_FAILED
+
+
+class TestExtractOneUnexpectedNamingIntegration:
+    """UNEXPECTED_PDF_NAMING の extract_one 経由統合検証."""
+
+    def test_unexpected_naming_pdf_propagates_error_code(
+        self, tmp_path: Path
+    ) -> None:
+        """SFX が <stem>_001.pdf のみ生成 → PARTIAL_OUTPUT + UNEXPECTED_PDF_NAMING."""
+        source = tmp_path / "src"
+        source.mkdir()
+        ex_file = source / "サービスA_提供.ex_"
+        ex_file.touch()
+
+        root = tmp_path / "facilities"
+        root.mkdir()
+        (root / "サービスA").mkdir()
+
+        # adapter は SfxExtractionFailed(UNEXPECTED_PDF_NAMING) を投げる
+        # (実機では SFX が <stem>_001.pdf を出力した状況)
+        unexpected_pdf = source / "サービスA_提供_001.pdf"
+        unexpected_pdf.write_text("UNEXPECTED_CONTENT")
+
+        adapter = FakeSfxAdapter(
+            raise_on_extract=SfxExtractionFailed(
+                ExtractionErrorCode.UNEXPECTED_PDF_NAMING,
+                "unexpected naming, count=1",
+                partial_outputs=(unexpected_pdf,),
+            )
+        )
+
+        item = extract_one(
+            ex_file=ex_file,
+            facility_root_dir=root,
+            facility_names=["サービスA"],
+            aliases={},
+            adapter=adapter,
+        )
+
+        # PARTIAL_OUTPUT (partial_outputs があるため EXTRACT_FAILED から昇格)
+        assert item.status is ExtractionStatus.PARTIAL_OUTPUT
+        assert item.error_code is ExtractionErrorCode.UNEXPECTED_PDF_NAMING
+        # partial_outputs に変則命名 PDF が運用者へ列挙される
+        assert unexpected_pdf in item.partial_outputs
+        # 自動移動はされない (構造的禁止)
+        assert not (root / "サービスA" / "サービスA_提供_001.pdf").exists()
+        # 元の変則命名 PDF は source に残る (運用者が手動対応)
+        assert unexpected_pdf.exists()

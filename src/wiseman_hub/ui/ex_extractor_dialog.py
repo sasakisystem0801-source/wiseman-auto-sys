@@ -35,7 +35,7 @@ from pathlib import Path
 from tkinter import filedialog, ttk
 from typing import Final, Protocol
 
-from wiseman_hub.config import AppConfig
+from wiseman_hub.config import AppConfig, save_config
 from wiseman_hub.pdf.ex_extractor import (
     ExtractionItem,
     ExtractionResult,
@@ -279,10 +279,16 @@ _MSG_SOURCE_VALIDATION_ERROR_FMT: Final[str] = (
     "取込元フォルダの状態を確認できませんでした (型: {type})。\n"
     "ネットワーク切断 / 権限不足 / UNC パス到達不能の可能性があります。"
 )
+_MSG_SOURCE_SAVE_FAILED_FMT: Final[str] = (
+    "取込元の設定保存に失敗しました ({type})。\n"
+    "今回のセッションでは選択値で動作しますが、次回起動時には反映されません。"
+)
+_TITLE_SOURCE_SAVE_FAILED: Final[str] = "設定保存失敗"
 
 
 # DI 用 type alias
 ExtractFn = Callable[..., ExtractionResult]
+SaveConfigFn = Callable[..., None]
 
 
 class _ManualDialogProtocol(Protocol):
@@ -304,8 +310,11 @@ class ExExtractorDialog:
         *,
         config: AppConfig,
         adapter: SfxAdapter,
+        config_path: Path | None = None,
         view_model: ExExtractorViewModel | None = None,
         extract_fn: ExtractFn | None = None,
+        save_config_fn: SaveConfigFn | None = None,
+        on_source_persisted: Callable[[AppConfig], None] | None = None,
         manual_dialog_factory: Callable[..., _ManualDialogProtocol] | None = None,
         messagebox_fn: MessageBoxLike | None = None,
         filedialog_askdirectory: Callable[..., str] | None = None,
@@ -314,8 +323,18 @@ class ExExtractorDialog:
 
         self._parent = parent
         self._config = config
+        # config_path = None の場合は永続化を skip (Tk smoke テスト等の DI 互換)。
+        # 本番経路 (__main__._make_ex_extractor_callback) からは必ず明示的に渡される。
+        self._config_path = config_path
         self._adapter = adapter
         self._extract_fn: ExtractFn = extract_fn or extract_directory
+        # 取込元選択を TOML 永続化するための DI。FacilityRootDialog と同パターンで
+        # save_config を inject 可能にして UI test で mock できるようにする。
+        self._save_config_fn: SaveConfigFn = save_config_fn or save_config
+        # 永続化成功時に launcher.reload_config 等を呼ぶための callback。
+        # save 失敗時は呼ばない (AppConfig 不整合防止: 部分的に書き換わった
+        # in-memory state を他 dialog に伝搬させないため)。
+        self._on_source_persisted = on_source_persisted
         self._manual_dialog_factory = manual_dialog_factory  # None なら遅延 import で default
         self._messagebox = messagebox_fn or default_messagebox()
         # Issue #155: 取込元 (.ex_) フォルダを GUI で都度選択可能にする (DI で
@@ -505,6 +524,7 @@ class ExExtractorDialog:
                 for item in self._vm.result.items
                 if item.status is ExtractionStatus.PARTIAL_OUTPUT
                 or item.partially_moved
+                or item.cleanup_warning is not None
             )
             if attention:
                 self._render_filenames_section("--- 要確認 ---", attention)
@@ -536,11 +556,16 @@ class ExExtractorDialog:
                     "end",
                     f"      (一部 PDF 移動済: {len(item.partially_moved)} 件)\n",
                 )
+            if item.cleanup_warning is not None:
+                self._summary_text.insert(
+                    "end",
+                    f"      (後処理警告: {item.cleanup_warning.value})\n",
+                )
 
     # ----- イベントハンドラ -----
 
     def _on_browse_source(self) -> None:
-        """取込元 (.ex_) フォルダを folder browser で都度選択する (Issue #155)。
+        """取込元 (.ex_) フォルダを folder browser で都度選択する。
 
         分岐契約:
         - busy 中 → 何もしない (UI disable 済 + defensive)
@@ -548,9 +573,11 @@ class ExExtractorDialog:
         - 存在しない / ディレクトリでない → ``_TITLE_INVALID_SOURCE`` 通知
         - ``exists()`` / ``is_dir()`` 自体が ``OSError`` を raise (Windows UNC /
           ネットワーク切断 / 権限拒否) → 型名のみログ + 検証エラー通知
-          (silent-failure-hunter HIGH-1 対応)
-        - 成功時 → ``_vm.source_dir`` 更新 + ``_redraw`` で UI 反映
-          (TOML ``ex_source_dir`` は次回起動時の初期値として残置 / Issue #165)
+        - 成功時 → ``_vm.source_dir`` 更新 + ``_config.pdf_merge.ex_source_dir`` 更新
+          + ``save_config`` で **TOML 永続化** + ``on_source_persisted`` callback
+          (launcher.reload_config 等) + ``_redraw`` で UI 反映
+        - **save 失敗時** は callback を呼ばず (AppConfig 不整合防止)、
+          控えめエラー通知 + ViewModel 更新は維持 (今セッションは選択値で動作可能)
         """
         if self._vm.is_busy:
             return
@@ -579,8 +606,45 @@ class ExExtractorDialog:
                 _MSG_INVALID_SOURCE_FMT.format(path=selected),
             )
             return
+
         self._vm.source_dir = selected
+        # TOML 永続化。FacilityRootDialog._do_scan のパターン踏襲
+        # (save_failed なら控えめ警告 + on_source_persisted は呼ばない)。
+        # config_path 未指定時 (テスト等) は永続化を skip して ViewModel 更新のみ。
+        save_failed_type: str | None = None
+        if self._config_path is not None:
+            self._config.pdf_merge.ex_source_dir = str(selected)
+            try:
+                self._save_config_fn(
+                    self._config, self._config_path, create_if_missing=True
+                )
+            except Exception as exc:  # noqa: BLE001 — 保存失敗で UI を止めない
+                logger.error(
+                    "save_config failed (ex_source_dir won't persist): %s",
+                    type(exc).__name__,
+                )
+                save_failed_type = type(exc).__name__
+
+            if save_failed_type is None and self._on_source_persisted is not None:
+                # 保存成功時のみ launcher.reload_config 等の側方効果を発火
+                # (失敗時 reload は AppConfig 不整合の温床: 部分書き換えされた
+                # in-memory state を他 dialog に伝搬させない)
+                try:
+                    self._on_source_persisted(self._config)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "on_source_persisted callback failed: %s",
+                        type(exc).__name__,
+                    )
+
         self._redraw()
+        if save_failed_type is not None:
+            # MessageBoxLike Protocol は showwarning 未定義のため showerror を流用
+            # (タイトル「設定保存失敗」で warning レベルの意図を伝達)
+            self._messagebox.showerror(
+                _TITLE_SOURCE_SAVE_FAILED,
+                _MSG_SOURCE_SAVE_FAILED_FMT.format(type=save_failed_type),
+            )
 
     def _on_run_click(self) -> None:
         if not self._vm.can_run:

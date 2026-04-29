@@ -6,6 +6,15 @@
 
 ### 変更履歴
 
+- 2026-04-29: **PR6** (実機運用問題対応) - 実機で「自動振り分け 0 / 失敗 3 件 (no_pdf_produced)」が発生:
+  - **背景**: `.ex_` と過去抽出残骸の同名 `.pdf` が同居 → SFX が新規 PDF を生成しない / mtime 更新せず、`_collect_new_pdfs` の snapshot 差分が空 list を返し no_pdf_produced 失敗
+  - **D1' (basename 完全一致 + quarantine 方式)**: `_collect_new_pdfs` (snapshot 差分 + mtime フィルタ) を廃止し、SFX 実行前に `ex_file.parent / <stem>.pdf` を `<orig>.quarantine-<ts>` 形式で一時退避する方式に変更。SFX 実行後、新規生成 PDF があれば採用し退避物を削除、新規生成しなければ EXTRACT_FAILED + 退避物を元の位置に復元。「古い PDF を成功扱いで移動する」誤配布事故を構造的に防止
+  - **`find_target_pdf` 新設**: SFX 後の PDF 検出を `<exe_path.stem>.pdf` の basename 完全一致に統一。`ex_file.parent` 最優先の探索順を `_build_watch_dirs` に集約 (この探索順は不変条件; 順序変更は Desktop / Downloads 等での誤配布リスク復活を意味する)
+  - **`UNEXPECTED_PDF_NAMING` 追加**: SFX が `<stem>_001.pdf` 等の変則命名で出力した場合、静かな `NO_PDF_PRODUCED` ではなく専用エラーコードで運用者へ未対応パターンを明示通知。boundary 文字 (`_`/`(`/`半角空白`/`-`/`.`/`全角空白`) 直後の prefix matching で `food.pdf` のような無関係前方一致は除外
+  - **`QUARANTINE_FAILED` / `QUARANTINE_RESTORE_FAILED` 追加**: 退避処理自体の失敗を独立 enum で表現。退避失敗時は SFX 実行に進まない (古い PDF 同居のまま処理する誤配布リスクを遮断)
+  - **取込元永続化 (Issue #165)**: `ExExtractorDialog._on_browse_source` で選択値を `pdf_merge.ex_source_dir` に書き戻し、`save_config(create_if_missing=True)` で TOML 永続化 (FacilityRootDialog と同パターン)。save 失敗時は `on_source_persisted` callback (= `launcher.reload_config`) を呼ばず AppConfig 不整合を構造的に防止
+  - **case-insensitive 単純化**: 本リポジトリは Windows 実機専用運用 (NTFS は case-insensitive かつ case-preserving) のため、`.PDF` 大文字フォールバック経路を削除し `.pdf` 単一探索に統一
+  - **トレードオフ**: 旧 `_MTIME_GRACE_SEC = 5.0` による NTP 後方ステップ吸収は basename 完全一致 + quarantine で代替された。`_build_watch_dirs` の探索順固定が誤配布防止の不変条件であり、変更時はテストで検証必須
 - 2026-04-27: 本 ADR 作成（PR2 で初版を追加）
 - 2026-04-27: Evaluator 指摘 HIGH-1/HIGH-2 を反映（alias canonical 実在検証 + 語境界要求の追加）。テストデータを仮名化（PII 保護徹底、AC2-9 PARTIAL → PASS）
 - 2026-04-27: 5 agents + Codex 並列レビュー指摘を反映（alias 複数 hit → AMBIGUOUS_ALIAS、正規化完全一致複数 → AMBIGUOUS_EXACT、ResolveResult `__post_init__` 不変条件強制、空白除去廃止で境界文字化、UNMATCHED reason 細分化、`is_auto_distributable` プロパティ、`find_orphan_alias_canonicals` ヘルパー追加、ADR 自身の実名残置を仮名化）

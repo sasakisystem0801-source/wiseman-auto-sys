@@ -139,12 +139,14 @@ def _make_ex_extractor_callback(
         dialog = ExExtractorDialog(
             parent=launcher.get_root(),
             config=config,
+            config_path=config_path,
             adapter=adapter,
+            # 取込元選択を TOML 永続化したら、Launcher の他 dialog
+            # (settings / facility_root) が新値で動くように reload。
+            # save 成功時のみ呼ばれる契約 (ExExtractorDialog._on_browse_source 側で保証)。
+            on_source_persisted=launcher.reload_config,
         )
         dialog.get_toplevel().wait_window()
-
-        # ダイアログ内で config 変更はしないため reload_config 不要
-        # (ex_source_dir / facility_aliases の編集は PR5 settings タブ化で対応)
 
     return open_ex_extractor
 
