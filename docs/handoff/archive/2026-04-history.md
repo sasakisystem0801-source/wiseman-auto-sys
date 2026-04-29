@@ -326,3 +326,84 @@ Codex 回答の核心:
 - CI: success (Windows Integration Tests / build-smoke / test-unit 3.11/3.12 / test-integration 全 PASS)
 - ADR 14 件すべて Status 確定（最新 ADR-014 は Proposed のまま、実機検証完走後に Accepted 昇格予定）
 
+
+---
+
+# 旧サマリ: Session 34 完了 - PR #149 マージ + Mac 側打ち止め記録
+
+**更新日**: 2026-04-28（Session 34 / Mac で進められる範囲で打ち止め）
+**main HEAD**: `1e1fbe8` refactor(config): 新規 3 型に Literal + __post_init__ 検証を追加 (Refs #27 PR-A) (#149)
+
+## マージ済 PR
+
+| PR | Issue | 内容 | 規模 |
+|----|-------|------|------|
+| #149 (1e1fbe8) | #27 PR-A | 新規 3 型 (`OcrBackendConfig`, `UserNameBBox`, `PdfMergeConfig`) に Literal + `__post_init__` 検証 + `is_configured` + `merger._KNOWN_KINDS` を `VALID_CONCAT_LETTERS` に統合 (DRY) | 6 ファイル / +306 / -64 |
+
+### Issue #27 段階実装の方針
+
+- PR-A ✅ (Session 34): 新規 3 型
+- PR-B: 既存 6 型横展開 — 次セッションで見送り、別途タイミングで
+- PR-C: Path 型移行 → ROI 低い、Issue #151 (tuple 化) で型強化に振り替え
+
+### Issue Net（Session 34）
+
+- Close: 0 / 起票: 3 (#150 P1 / #151 P2 / #152 P2、すべて PR #149 レビュー由来) / **Net: -3 件 ❌**
+
+### 学び
+
+- **CRITICAL silent failure を即「スコープ外」と判定しない**: PR #149 の初判定で UI 層 cast を「別 Issue」としたが、最小修正で対応可と判明
+- **`Issue #27` 等のタスク参照を docstring に書かない**: CLAUDE.md「Don't reference the current task」原則を 8 箇所違反、レビュー指摘で発覚
+- **rating 6-7 borderline の Issue 起票判断**: PR スコープ追加で対処可能なら Issue 化しない (#151/#152 反省)
+
+---
+
+# 旧サマリ: Session 33 完了 - PR #146/#147 マージ + Issue Net -3 件
+
+**更新日**: 2026-04-28（Session 33 / Issue #45 + #14 完了 + #40 検討 close）
+**main HEAD**: `7de14ee` refactor(rpa): export_csv 失敗モードを ExportCsvError 階層で区別化 (Closes #14) (#147)
+
+## マージ済 PR (Issue Net -3 件)
+
+| PR | Issue | 内容 | 規模 |
+|----|-------|------|------|
+| #146 (607ad29) | #45 完了 ✅ | SourceKind を Literal から StrEnum に統一 (JSON 検証一元化) | 4 ファイル / +101 / -22 |
+| #147 (7de14ee) | #14 完了 ✅ | export_csv 失敗モードを ExportCsvError 階層 (5 サブクラス) で区別化 | 6 ファイル / +280 / -35 |
+
+### 検討して close した Issue
+
+- **#40** (CLOSED not planned): B/C 異名 distance 0 マッチエッジケース
+  - impl-plan 起動 → 数学的に「両方 distance 0 + 異名」は matcher の評価関数の対称性により発生不可能と判明
+  - revert + Issue コメントに検討プロセス記録 (実装前に dead code 発見できた Generator-Evaluator 分離の成功例)
+
+### 学び
+
+1. **`patch.dict(sys.modules)` の落とし穴**: with 終了時に「with 内で追加された全キー」を削除する。新規 import は patch.dict ブロックの **前** に置く
+2. **Issue 起票時の前提が誤りの場合の対応 (#40 教訓)**: impl-plan 段階で dead code 判明 → 即座に revert + Issue close (not planned) + 検討プロセス記録
+3. **Codex review が 6 エージェント見落としを発見**: PR #147 で 6 並列が見落とした「印刷ボタン取得失敗が ExportCsvError 階層外」を Codex が発見 → **大規模 PR (3+ ファイル / 200+ 行) では `/codex review` セカンドオピニオンが価値あり**
+
+---
+
+# 旧サマリ: Session 32 中断 + macOS 側 A1-A5 検証準備整備完了
+
+**更新日**: 2026-04-28（Session 32 / Windows 実機中断後、macOS 側で A1-A5 マージ済）
+**main HEAD (当時)**: `cf9f8b1` docs(handoff): Session 32 中断記録 + PR5 検証準備整備 (A1-A5) (#144)
+
+## 進捗
+
+### 午前: Windows 11 実機（TeamViewer 経由）
+
+- **Phase 0-1 完了**: exe バックアップ + `git pull --ff-only` (`f4a242e` 同期) + `uv sync --extra dev` + PyInstaller ビルド成功 (78,632,876 bytes / 2026-04-28 8:00:08)
+- **Phase 2-1 完了**: 新 exe を `~/wiseman-hub/wiseman_hub.exe` に配備
+- **AC-1 (1)(2) PASS**: Launcher 起動 + 5 ボタン目「ex_ ファイル変換 + 振り分け」表示確認
+- **中断**: TeamViewer タイムリミットで AC-1 (3) 未実施 → Session 35 で完走
+
+### 午後: macOS 側 A1-A5 検証準備整備（PR #144 マージ済）
+
+- A1: runbook §2-2 config パス誤記修正
+- A2: `config/test.toml.example` 新規 + `WISEMAN_HUB_CONFIG` 経路で本番 NAS 非汚染
+- A3: `session32-...md` AC-1 (3) 実機チェックリスト精緻化
+- A4: `docs/handoff/ex-test-fixtures.md` 新規（3 種 fixture 仕様）
+- A5: ショートカット起動の env var 非継承落とし穴を runbook §2-2 に明文化
+
+### Issue Net（Session 32）: 0 件（中断中、コード変更なし）
