@@ -839,13 +839,13 @@ class TestExExtractorDialogSmoke:
             root.destroy()
 
     # -----------------------------------------------------------------
-    # R1 (Issue #165) 取込元永続化 + Codex review D4 (save 失敗時 reload なし)
+    # 取込元 TOML 永続化 + save 失敗時の reload 抑止契約
     # -----------------------------------------------------------------
 
     def test_browse_source_persists_to_toml_when_config_path_given(
         self, tmp_path: Path
     ) -> None:
-        """AC-C: config_path 指定時、save_config_fn(config, path, create_if_missing=True)
+        """config_path 指定時、save_config_fn(config, path, create_if_missing=True)
         が呼び出され ex_source_dir が更新される。
         """
         import tkinter as tk
@@ -891,6 +891,73 @@ class TestExExtractorDialogSmoke:
             # ex_source_dir が選択値で更新されている
             assert saved_cfg.pdf_merge.ex_source_dir == str(new_source)
             assert saved_kwargs.get("create_if_missing") is True
+            dialog._on_close()
+        finally:
+            root.destroy()
+
+    def test_browse_source_preserves_other_pdf_merge_fields(
+        self, tmp_path: Path
+    ) -> None:
+        """Partial Update 規約: ex_source_dir のみ更新し、pdf_merge 他キーは不変."""
+        import tkinter as tk
+
+        from wiseman_hub.config import PdfMergeConfig
+
+        original_source = tmp_path / "original_source"
+        original_source.mkdir()
+        new_source = tmp_path / "new_source"
+        new_source.mkdir()
+        root_dir = tmp_path / "facility_root"
+        root_dir.mkdir()
+        config_path = tmp_path / "default.toml"
+
+        # 他フィールドに非デフォルト値をセット (更新対象外であることを検証)
+        original_aliases = {"事業所A": ["A支店", "A店"]}
+        config = AppConfig(
+            pdf_merge=PdfMergeConfig(
+                ex_source_dir=str(original_source),
+                facility_root_dir=str(root_dir),
+                input_dir="/some/input",
+                output_dir="/some/output",
+                source_a_filename="A.pdf",
+                source_d_filename="D.pdf",
+                source_b_pattern="custom_B_{name}.pdf",
+                source_c_pattern="custom_C_{name}.pdf",
+                facility_aliases=original_aliases,
+            )
+        )
+
+        fake_askdirectory = MagicMock(return_value=str(new_source))
+        save_calls: list[AppConfig] = []
+
+        def fake_save(cfg: AppConfig, path: Path, **kwargs: object) -> None:
+            save_calls.append(cfg)
+
+        root = tk.Tk()
+        try:
+            dialog = ExExtractorDialog(
+                parent=root,
+                config=config,
+                config_path=config_path,
+                adapter=FakeSfxAdapter(),
+                save_config_fn=fake_save,
+                filedialog_askdirectory=fake_askdirectory,
+            )
+            dialog._on_browse_source()
+
+            assert len(save_calls) == 1
+            saved_cfg = save_calls[0]
+            # ex_source_dir のみ更新
+            assert saved_cfg.pdf_merge.ex_source_dir == str(new_source)
+            # 他キーは原値を保持 (Partial Update)
+            assert saved_cfg.pdf_merge.facility_root_dir == str(root_dir)
+            assert saved_cfg.pdf_merge.input_dir == "/some/input"
+            assert saved_cfg.pdf_merge.output_dir == "/some/output"
+            assert saved_cfg.pdf_merge.source_a_filename == "A.pdf"
+            assert saved_cfg.pdf_merge.source_d_filename == "D.pdf"
+            assert saved_cfg.pdf_merge.source_b_pattern == "custom_B_{name}.pdf"
+            assert saved_cfg.pdf_merge.source_c_pattern == "custom_C_{name}.pdf"
+            assert saved_cfg.pdf_merge.facility_aliases == original_aliases
             dialog._on_close()
         finally:
             root.destroy()
@@ -947,7 +1014,7 @@ class TestExExtractorDialogSmoke:
     def test_browse_source_calls_on_source_persisted_after_save_success(
         self, tmp_path: Path
     ) -> None:
-        """AC-L (Codex review D4): save 成功時のみ on_source_persisted callback 呼出。"""
+        """save 成功時のみ on_source_persisted callback が呼ばれる契約。"""
         import tkinter as tk
 
         from wiseman_hub.config import PdfMergeConfig
@@ -991,7 +1058,7 @@ class TestExExtractorDialogSmoke:
     def test_browse_source_does_not_call_on_persisted_when_save_fails(
         self, tmp_path: Path
     ) -> None:
-        """AC-L (Codex review D4): save 失敗時は on_source_persisted を呼ばない
+        """save 失敗時は on_source_persisted を呼ばない契約
         (AppConfig 不整合防止 + reload は成功時のみが正しい契約)。"""
         import tkinter as tk
 
@@ -1035,7 +1102,7 @@ class TestExExtractorDialogSmoke:
 
             # callback は呼ばれていない (D4)
             assert callback_calls == []
-            # ViewModel は今セッション用に更新されている (AC-F)
+            # ViewModel は今セッション用に更新されている (save 失敗でも UI 続行可能)
             assert dialog.view_model.source_dir == new_source
             # 警告 messagebox が表示されている (showerror で warning レベル伝達)
             messagebox.showerror.assert_called()
@@ -1048,7 +1115,7 @@ class TestExExtractorDialogSmoke:
     def test_browse_source_save_failure_does_not_break_ui(
         self, tmp_path: Path
     ) -> None:
-        """AC-F: save 失敗してもダイアログは継続使用可能 (実行ボタン引き続き使える)。"""
+        """save 失敗してもダイアログは継続使用可能 (実行ボタン引き続き使える)。"""
         import tkinter as tk
 
         from wiseman_hub.config import PdfMergeConfig
