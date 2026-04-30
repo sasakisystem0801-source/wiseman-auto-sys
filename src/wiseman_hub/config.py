@@ -358,11 +358,12 @@ def _resolve_sa_key_path(key_path_str: str, config_path: Path) -> str:
     """SA キーパスを絶対パスに解決する。
 
     - 絶対パスならそのまま返す
-    - 相対パスの場合は ``config_path.parent`` を起点に解決
-        （`config/default.toml` の隣の `config/sa-key.json` を相対指定する
-        運用想定。exe 配布物 (PyInstaller onefile) でも同じ階層関係を保つ
-        ように、CLAUDE.md ADR-011 で `$HOME\\wiseman-hub\\config\\sa-key.json`
-        が実装上の正となる）
+    - 相対パスの場合の起点:
+        - 通常: ``config_path.parent`` （TOML の隣を見る）
+        - ただし TOML 値が ``config/...`` 始まりかつ ``config_path`` 自身が
+            ``config/`` 配下にある場合は、重複を避けるため一段上の
+            ``config_path.parent.parent`` を起点にする
+            （TOML 値はプロジェクトルート起点で書かれている既存運用に追従）
     - 空文字列はそのまま返す（GCP 機能未使用環境を許容）
     """
     if not key_path_str:
@@ -370,7 +371,14 @@ def _resolve_sa_key_path(key_path_str: str, config_path: Path) -> str:
     p = Path(key_path_str)
     if p.is_absolute():
         return str(p)
-    return str((config_path.parent / p).resolve())
+    base = config_path.parent
+    if (
+        base.name == "config"
+        and p.parts
+        and p.parts[0] == "config"
+    ):
+        base = base.parent
+    return str((base / p).resolve())
 
 
 def load_config(path: Path | None = None) -> AppConfig:
