@@ -69,6 +69,7 @@ a = Analysis(
         "wiseman_hub.app",
         # チェックリスト連携 B/C 自動配置機能（feature/checklist-bc-mvp）
         "wiseman_hub.cloud.sheets",
+        "wiseman_hub.cloud.env_scanner",
         "wiseman_hub.pdf.checklist_b",
         "wiseman_hub.pdf.checklist_c",
         "wiseman_hub.pdf.excel_com",

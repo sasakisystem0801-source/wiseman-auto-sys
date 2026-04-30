@@ -131,6 +131,11 @@ class ChecklistSettingsDialog:
         # 下段ボタン
         btn = ttk.Frame(top, padding=10)
         btn.pack(fill="x")
+        ttk.Button(
+            btn,
+            text="環境スキャン → GCP 同期",
+            command=self._on_scan_env,
+        ).pack(side="left", padx=4)
         ttk.Button(btn, text="保存", command=self._on_save).pack(side="right", padx=4)
         ttk.Button(btn, text="キャンセル", command=self._top.destroy).pack(
             side="right", padx=4
@@ -140,6 +145,48 @@ class ChecklistSettingsDialog:
         d = filedialog.askdirectory(parent=self._top, initialdir=var.get() or ".")
         if d:
             var.set(d)
+
+    def _on_scan_env(self) -> None:
+        """FAX 事業所ルート配下のフォルダ名を GCS にアップロードする。
+
+        AI による居宅マッピング自動生成のためのデータ提供。スキャン対象は
+        現在の入力欄の `fax_root` 値 (保存前でも可)。
+        """
+        fax_root_str = self._fax_root.get().strip()
+        if not fax_root_str:
+            messagebox.showerror(
+                "FAX ルート未設定",
+                "FAX 事業所ルートを先に入力してください",
+                parent=self._top,
+            )
+            return
+        from pathlib import Path
+
+        from wiseman_hub.cloud.env_scanner import scan_and_upload
+
+        try:
+            result = scan_and_upload(self._config.gcp, Path(fax_root_str))
+        except (FileNotFoundError, NotADirectoryError) as exc:
+            messagebox.showerror(
+                "スキャン失敗",
+                f"{type(exc).__name__}: {exc}",
+                parent=self._top,
+            )
+            return
+        except Exception as exc:
+            logger.error("env scan upload failed: %s", type(exc).__name__)
+            messagebox.showerror(
+                "GCS アップロード失敗",
+                f"{type(exc).__name__}: {exc}",
+                parent=self._top,
+            )
+            return
+        messagebox.showinfo(
+            "GCP 同期完了",
+            f"{result.folder_count} 件のフォルダを送信しました\n"
+            f"GCS URI: {result.gcs_uri}",
+            parent=self._top,
+        )
 
     def _on_save(self) -> None:
         try:
