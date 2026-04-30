@@ -250,10 +250,10 @@ class ChecklistConfig:
     report_staff: 担当者名 → ReportStaffEntry の辞書（C 用 xlsx パス解決）
     """
 
-    spreadsheet_id: str = ""
-    karte_root: str = ""
+    spreadsheet_id: str = "18RPsg3Ya0r7djQVzED5KAa5KyhbB9YRm"
+    karte_root: str = "\\\\Tera-station\\share\\02.カルテ"
     monitoring_subfolder: str = "08.運動器機能向上計画書"
-    fax_root: str = ""
+    fax_root: str = "\\\\Tera-station\\share\\03.FAX(事業所)"
     b_output_subfolder: str = "運動機能向上計画書"
     c_output_subfolder: str = "経過報告書"
     facility_routing: dict[str, str] = field(default_factory=dict)
