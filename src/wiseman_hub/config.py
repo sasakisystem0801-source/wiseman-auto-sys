@@ -354,6 +354,25 @@ def _validate_facility_aliases(aliases: dict[str, list[str]]) -> None:
             seen_aliases[alias] = canonical
 
 
+def _resolve_sa_key_path(key_path_str: str, config_path: Path) -> str:
+    """SA キーパスを絶対パスに解決する。
+
+    - 絶対パスならそのまま返す
+    - 相対パスの場合は ``config_path.parent`` を起点に解決
+        （`config/default.toml` の隣の `config/sa-key.json` を相対指定する
+        運用想定。exe 配布物 (PyInstaller onefile) でも同じ階層関係を保つ
+        ように、CLAUDE.md ADR-011 で `$HOME\\wiseman-hub\\config\\sa-key.json`
+        が実装上の正となる）
+    - 空文字列はそのまま返す（GCP 機能未使用環境を許容）
+    """
+    if not key_path_str:
+        return key_path_str
+    p = Path(key_path_str)
+    if p.is_absolute():
+        return str(p)
+    return str((config_path.parent / p).resolve())
+
+
 def load_config(path: Path | None = None) -> AppConfig:
     """TOML設定ファイルを読み込んでAppConfigを返す。"""
     if path is None:
@@ -368,7 +387,11 @@ def load_config(path: Path | None = None) -> AppConfig:
     app_data = data.get("app", {})
     wiseman_data = data.get("wiseman", {})
     schedule_data = data.get("schedule", {})
-    gcp_data = data.get("gcp", {})
+    gcp_data = dict(data.get("gcp", {}))
+    if "service_account_key_path" in gcp_data:
+        gcp_data["service_account_key_path"] = _resolve_sa_key_path(
+            gcp_data["service_account_key_path"], path
+        )
     updater_data = data.get("updater", {})
     ocr_backend_data = data.get("ocr_backend", {})
     pdf_merge_data = dict(data.get("pdf_merge", {}))
