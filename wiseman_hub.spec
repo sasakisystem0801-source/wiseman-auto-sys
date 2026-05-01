@@ -70,12 +70,16 @@ a = Analysis(
         # チェックリスト連携 B/C 自動配置機能（feature/checklist-bc-mvp）
         "wiseman_hub.cloud.sheets",
         "wiseman_hub.cloud.env_scanner",
+        "wiseman_hub.cloud.mapping_sync",
         "wiseman_hub.pdf.checklist_b",
         "wiseman_hub.pdf.checklist_c",
         "wiseman_hub.pdf.excel_com",
         "wiseman_hub.ui.checklist_b_dialog",
         "wiseman_hub.ui.checklist_c_dialog",
         "wiseman_hub.ui.checklist_settings_dialog",
+        # mapping_sync が NotFound 等で参照する google.api_core.exceptions
+        # （PyInstaller 自動検出に頼らず明示する：過去 hidden import 漏れ事故防止）
+        "google.api_core.exceptions",
         # openpyxl の遅延 import 補強
         "openpyxl",
         "openpyxl.workbook",

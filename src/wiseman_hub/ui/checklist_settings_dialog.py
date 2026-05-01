@@ -136,6 +136,16 @@ class ChecklistSettingsDialog:
             text="環境スキャン → GCP 同期",
             command=self._on_scan_env,
         ).pack(side="left", padx=4)
+        ttk.Button(
+            btn,
+            text="対照表 → GCP へ送信",
+            command=self._on_push_routing,
+        ).pack(side="left", padx=4)
+        ttk.Button(
+            btn,
+            text="GCP から対照表を取得",
+            command=self._on_pull_routing,
+        ).pack(side="left", padx=4)
         ttk.Button(btn, text="保存", command=self._on_save).pack(side="right", padx=4)
         ttk.Button(btn, text="キャンセル", command=self._top.destroy).pack(
             side="right", padx=4
@@ -185,6 +195,154 @@ class ChecklistSettingsDialog:
             "GCP 同期完了",
             f"{result.folder_count} 件のフォルダを送信しました\n"
             f"GCS URI: {result.gcs_uri}",
+            parent=self._top,
+        )
+
+    def _on_push_routing(self) -> None:
+        """Text widget の対照表を JSON 化して GCS にアップロードする。
+
+        過去失敗対策（feedback_external_api_ok_actual_ng.md）:
+            push 直後に pull で読み戻し、内容が一致するまで「成功」と通知しない。
+            push 200 OK でも実態 NG（書き込みが反映されない / 別ユーザーの上書き）
+            のケースを構造的に検出する。
+        """
+        try:
+            routing = _parse_routing_toml(self._routing_text.get("1.0", "end"))
+        except (tomllib.TOMLDecodeError, ValueError, TypeError) as exc:
+            messagebox.showerror(
+                "対照表 解析エラー",
+                f"{type(exc).__name__}: {exc}",
+                parent=self._top,
+            )
+            return
+        if not routing:
+            messagebox.showwarning(
+                "対照表 空",
+                "対照表が空です。1 行以上入力してから送信してください。",
+                parent=self._top,
+            )
+            return
+        from wiseman_hub.cloud.mapping_sync import (
+            MappingConfigError,
+            MappingSyncError,
+            pull_routing,
+            push_routing,
+        )
+
+        try:
+            uri = push_routing(self._config.gcp, routing)
+        except MappingConfigError as exc:
+            messagebox.showerror(
+                "GCP 設定不足",
+                f"{exc}\n\n設定ダイアログで [gcp] 項目を入力するか、"
+                "config/default.toml を確認してください。",
+                parent=self._top,
+            )
+            return
+        except MappingSyncError as exc:
+            messagebox.showerror(
+                "GCP 送信失敗",
+                f"{exc}",
+                parent=self._top,
+            )
+            return
+
+        # 閉ループ確認: push 直後に pull で読み戻して一致を確認
+        try:
+            verified = pull_routing(self._config.gcp)
+        except MappingSyncError as exc:
+            messagebox.showwarning(
+                "送信検証失敗",
+                f"送信は成功しましたが読み戻し検証に失敗:\n{exc}\n"
+                "GCS 側の状態を確認してください。",
+                parent=self._top,
+            )
+            return
+        if verified != routing:
+            messagebox.showwarning(
+                "送信検証 不一致",
+                f"送信内容 {len(routing)} 件と読み戻し {len(verified)} 件が一致しません。"
+                "別ユーザーの並行更新かもしれません。",
+                parent=self._top,
+            )
+            return
+        messagebox.showinfo(
+            "GCP 送信完了",
+            f"{len(routing)} 件を送信し、読み戻し検証 OK\nGCS URI: {uri}",
+            parent=self._top,
+        )
+
+    def _on_pull_routing(self) -> None:
+        """GCS から最新対照表を取得し Text widget を上書きする。
+
+        既存値が非空のときは上書き確認ダイアログを表示。保存ボタンは別途押下必須
+        （取得 = 編集枠への反映、永続化は保存で確定）。
+        """
+        from wiseman_hub.cloud.mapping_sync import (
+            MappingConfigError,
+            MappingNotFoundError,
+            MappingSyncError,
+            pull_routing,
+        )
+
+        # 既存値が非空なら上書き確認
+        # 過去失敗対策（codex review MEDIUM-3）: parse 失敗時は黙って空扱いにせず、
+        # 「壊れた編集データを失う」ことを明示的に確認する。
+        text = self._routing_text.get("1.0", "end")
+        try:
+            current = _parse_routing_toml(text)
+            parse_failed = False
+        except (tomllib.TOMLDecodeError, ValueError, TypeError):
+            current = {}
+            parse_failed = bool(text.strip())
+        if parse_failed and not messagebox.askyesno(
+            "編集中の対照表が解析不能",
+            "現在の編集内容を解析できません。\n"
+            "GCP からの取得結果で上書きしますか？\n"
+            "（既存編集内容は失われます）",
+            parent=self._top,
+        ):
+            return
+        if current and not messagebox.askyesno(
+            "上書き確認",
+            f"現在 {len(current)} 件の対照表が編集中です。"
+            "GCP からの取得結果で上書きしますか？",
+            parent=self._top,
+        ):
+            return
+
+        try:
+            routing = pull_routing(self._config.gcp)
+        except MappingConfigError as exc:
+            messagebox.showerror(
+                "GCP 設定不足",
+                f"{exc}\n\n設定ダイアログで [gcp] 項目を入力するか、"
+                "config/default.toml を確認してください。",
+                parent=self._top,
+            )
+            return
+        except MappingNotFoundError:
+            messagebox.showinfo(
+                "対照表 未登録",
+                "GCP に対照表がまだ登録されていません。\n"
+                "1) 編集枠に対照表を入力\n"
+                "2) 「対照表 → GCP へ送信」ボタンで送信\n"
+                "の順で初回登録してください。",
+                parent=self._top,
+            )
+            return
+        except MappingSyncError as exc:
+            messagebox.showerror(
+                "GCP 取得失敗",
+                f"{exc}",
+                parent=self._top,
+            )
+            return
+        self._routing_text.delete("1.0", "end")
+        self._routing_text.insert("1.0", _routing_to_toml(routing))
+        messagebox.showinfo(
+            "GCP 取得完了",
+            f"{len(routing)} 件を取得しました\n保存ボタンで永続化してください",
             parent=self._top,
         )
 
@@ -250,10 +408,14 @@ class ChecklistSettingsDialog:
 
 
 def _routing_to_toml(routing: dict[str, str]) -> str:
-    """居宅マッピングを TOML 風テキストに変換（key = "value" の羅列）。"""
+    """居宅マッピングを TOML 風テキストに変換（key = "value" の羅列）。
+
+    過去失敗対策（codex review MEDIUM-2）: key/value に ``"`` や ``\\`` が混入した場合
+    に TOML として再パース不能になるため、両側を ``_escape_toml`` で escape する。
+    """
     lines: list[str] = []
     for key, value in routing.items():
-        lines.append(f'"{key}" = "{value}"')
+        lines.append(f'"{_escape_toml(key)}" = "{_escape_toml(value)}"')
     return "\n".join(lines)
 
 
