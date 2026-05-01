@@ -63,16 +63,12 @@ def main() -> int:
         client_email = "<unreadable>"
     print(f"[OK]   from_service_account_json: {client_email}")
 
-    # Phase 2: bucket 存在確認
-    try:
-        bucket = client.bucket(bucket_name)
-        if not bucket.exists():
-            print(f"[FAIL] bucket exists: {bucket_name} not found or no access")
-            return 1
-    except Exception as exc:  # noqa: BLE001 — diagnostic boundary
-        print(f"[FAIL] bucket exists: {type(exc).__name__}: {exc}")
-        return 1
-    print(f"[OK]   bucket exists: {bucket_name}")
+    # Phase 2: bucket reference 構築
+    # `bucket.exists()` は ``storage.buckets.get`` 権限が必要だが、本機能 (push/pull) は
+    # オブジェクトレベルの権限（objectCreator/objectViewer）のみで動作する。
+    # bucket アクセス可否は Phase 3-5 の実 I/O で判定する。
+    bucket = client.bucket(bucket_name)
+    print(f"[OK]   bucket reference: {bucket_name} (existence は Phase 3 で検証)")
 
     # Phase 3: write smoke
     blob = bucket.blob(HEALTH_CHECK_BLOB)
@@ -95,15 +91,25 @@ def main() -> int:
         return 1
     print(f"[OK]   read smoke: {body!r}")
 
-    # Phase 5: delete smoke
+    # Phase 5: delete smoke (失敗は warning、本機能 push/pull は delete 権限不要)
     try:
         blob.delete(timeout=30.0)
+        print("[OK]   delete smoke: removed")
     except Exception as exc:  # noqa: BLE001 — diagnostic boundary
-        print(f"[FAIL] delete smoke: {type(exc).__name__}: {exc}")
-        return 1
-    print("[OK]   delete smoke: removed")
+        # google-cloud-storage は Forbidden を様々な型で投げる（resumable_media 経由など）。
+        # 型判定より文字列で 403 を識別する方が頑健。
+        msg = str(exc)
+        if "403" in msg or "objects.delete" in msg:
+            print(
+                f"[WARN] delete smoke: storage.objects.delete 権限なし "
+                f"({HEALTH_CHECK_BLOB} は GCS に残ります)。"
+                f"本機能 push/pull は delete 不要のため許容。"
+            )
+        else:
+            print(f"[FAIL] delete smoke: {type(exc).__name__}: {msg[:200]}")
+            return 1
 
-    print("ALL GREEN — SA can read/write/delete in mappings/ prefix")
+    print("READ/WRITE OK — SA can push/pull in mappings/ prefix")
     return 0
 
 
