@@ -43,6 +43,41 @@ def test_append_no_log_dir_returns_none(tmp_path: Path) -> None:
     assert result is None
 
 
+def test_concurrent_append_no_line_corruption(tmp_path: Path) -> None:
+    """threading.Lock で並行 append しても 1 行 1 record が保たれる（HIGH-2 対策検証）。"""
+    import threading
+
+    fixed = _dt.datetime(2026, 5, 4, 9, 0, tzinfo=_dt.UTC)
+    n_threads = 16
+    per_thread = 25
+    barrier = threading.Barrier(n_threads)
+
+    def worker(tid: int) -> None:
+        barrier.wait()
+        for i in range(per_thread):
+            append_audit_record(
+                str(tmp_path),
+                "c_placement",
+                {"tid": tid, "i": i},
+                now=fixed,
+            )
+
+    threads = [threading.Thread(target=worker, args=(t,)) for t in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    path = tmp_path / "audit" / "c_placement_2026-05-04.jsonl"
+    lines = path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == n_threads * per_thread
+    # 各行が valid JSON で破損していないこと
+    for line in lines:
+        record = json.loads(line)
+        assert "tid" in record
+        assert "i" in record
+
+
 def test_append_creates_audit_subdir(tmp_path: Path) -> None:
     """audit/ サブディレクトリが自動作成される。"""
     sub = tmp_path / "logs"
