@@ -117,7 +117,9 @@ gcloud storage buckets add-iam-policy-binding gs://wiseman-hub-prod-datalake \
 
 ---
 
-## Session 40 で派生した教訓 / 永続化済 memory
+## Session 40 で派生した教訓 / 永続化済 memory + ハーネス強化
+
+### 教訓 memory（グローバル）
 
 | 教訓 | 永続化先 |
 |------|---------|
@@ -125,6 +127,16 @@ gcloud storage buckets add-iam-policy-binding gs://wiseman-hub-prod-datalake \
 | 削除コマンド前の件数アサーション必須（`-WhatIf` 目視だけは見落とす） | `~/.claude/memory/feedback_destructive_command_safety.md` |
 | Buffalo NAS の trashbox は SMB Remove-Item でも元パス保持で残る（VSS 無効でも別機構） | `~/.claude/memory/feedback_nas_trashbox_recovery.md` |
 | MEMORY.md にも索引追加済 | `~/.claude/memory/MEMORY.md` |
+
+### ハーネス強化（3 層構造、AI 自律性を阻害しない最小実装）
+
+| 層 | 場所 | 役割 |
+|----|------|------|
+| L1: グローバル必読 | `~/.claude/CLAUDE.md` CRITICAL に 1 行ポインタ追加 | 全プロジェクトで毎セッション読まれる、destructive 操作の総則シグナル |
+| L2: プロジェクト固有運用 | `wiseman_auto_sys/CLAUDE.md` に「Tera-station NAS の destructive 操作プロトコル」セクション + trashbox 場所表 | catchup 必読領域、4 項プロトコル + 復旧経路 |
+| L3: 詳細参照 | 上記 memory 3 件 | AI が状況に応じて自律的に深掘り |
+
+設計方針: hooks / rules 細分化は **採用せず**（AI 自律性阻害大、ROI 低）。memory 詳細 + CLAUDE.md ポインタで AI が状況に応じて自律判断できる構造を選択。
 
 ---
 
