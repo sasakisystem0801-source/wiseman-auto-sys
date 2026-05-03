@@ -21,14 +21,17 @@ from wiseman_hub.cloud.sheets import (
     parse_sheet,
     select_c_rows,
 )
-from wiseman_hub.config import AppConfig
+from wiseman_hub.config import AppConfig, save_config
 from wiseman_hub.pdf.checklist_c import (
     CPlacementResult,
     CPlacementStatus,
+    apply_xlsx_selection,
+    cache_key,
     execute_c_placement,
     plan_c_placement,
 )
 from wiseman_hub.pdf.excel_com import create_exporter
+from wiseman_hub.ui.xlsx_picker_dialog import XlsxPickerDialog
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +39,7 @@ logger = logging.getLogger(__name__)
 _STATUS_LABEL: dict[CPlacementStatus, str] = {
     CPlacementStatus.PENDING: "実行待ち",
     CPlacementStatus.SUCCESS: "成功",
+    CPlacementStatus.NEEDS_REVIEW: "▶ 要レビュー（ダブルクリックで選択）",
     CPlacementStatus.SKIPPED_NO_FACILITY: "⚠ 居宅マッピング未登録",
     CPlacementStatus.SKIPPED_NO_STAFF: "⚠ 担当者マッピング未登録",
     CPlacementStatus.SKIPPED_NO_XLSX: "⚠ xlsx 不在",
@@ -228,6 +232,11 @@ class ChecklistCDialog:
             return
         idx = int(sel[0])
         r = self._results[idx]
+        # NEEDS_REVIEW 行は xlsx 選択モーダルを開く
+        if r.status == CPlacementStatus.NEEDS_REVIEW:
+            self._open_picker_for_review(idx, r)
+            return
+        # それ以外（PENDING/SUCCESS 等）は対象フォルダを開く
         target = r.target_pdf or r.xlsx_path
         if target is None:
             return
@@ -236,6 +245,62 @@ class ChecklistCDialog:
             messagebox.showinfo("フォルダ未作成", str(folder))
             return
         _open_folder(folder)
+
+    def _open_picker_for_review(self, idx: int, r: CPlacementResult) -> None:
+        """NEEDS_REVIEW 行のレビュー UI を開き、選択結果を CPlacementResult に反映する。"""
+        title_context = (
+            f"{r.row.staff} / {r.row.name} / {r.row.facility}"
+        )
+        picker = XlsxPickerDialog(
+            parent=self._top,
+            candidates=r.xlsx_candidates,
+            folder_tree=r.folder_tree,
+            title_context=title_context,
+        )
+        picker.get_toplevel().wait_window()
+        selected, remember = picker.get_result()
+        if selected is None:
+            self._status_var.set("選択キャンセル")
+            return
+
+        # cache に追加（記憶チェック ON 時のみ）
+        if remember and self._config_path is not None:
+            year, month = self._current_year_month()
+            if year is not None and month is not None:
+                key = cache_key(r.row.staff, year, month)
+                self._config.checklist.xlsx_path_cache[key] = str(selected)
+                try:
+                    save_config(self._config, self._config_path)
+                except OSError as exc:
+                    logger.warning("save_config failed: %s", type(exc).__name__)
+                    messagebox.showwarning(
+                        "キャッシュ保存失敗",
+                        f"選択は反映しますが永続化に失敗: {type(exc).__name__}",
+                        parent=self._top,
+                    )
+
+        # result を選択 xlsx で再評価（in-place）
+        apply_xlsx_selection(r, selected, self._config.checklist)
+        self._refresh_tree()
+        self._update_exec_button()
+        if r.status == CPlacementStatus.PENDING:
+            self._status_var.set(f"{r.row.name}: 選択完了 → 実行待ち")
+        else:
+            self._status_var.set(f"{r.row.name}: {_STATUS_LABEL.get(r.status, r.status.value)}")
+
+    def _current_year_month(self) -> tuple[int | None, int | None]:
+        """現在選択中の対象月から (year, month) を取り出す（cache_key 用）。"""
+        sheet = self._month_var.get()
+        ym = _sheet_name_to_year_month(sheet)
+        if ym is None:
+            return None, None
+        return ym
+
+    def _update_exec_button(self) -> None:
+        ready = sum(1 for r in self._results if r.status == CPlacementStatus.PENDING)
+        total = len(self._results)
+        self._status_var.set(f"対象 {total} 件 / 実行可能 {ready} 件")
+        self._exec_btn.configure(state="normal" if ready > 0 else "disabled")
 
     def _on_execute(self) -> None:
         if not messagebox.askyesno("実行確認", "PENDING 状態の行を配置します。続行しますか？"):

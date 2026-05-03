@@ -229,3 +229,82 @@ def test_plan_c_placement_needs_review_propagates_candidates(tmp_path: Path) -> 
     assert results[0].xlsx_candidates == [xlsx]
     # NEEDS_REVIEW 段階では target_pdf は確定しない
     assert results[0].target_pdf is None
+
+
+# ---------- T4: apply_xlsx_selection ----------
+
+
+def _make_xlsx_with_sheet(path: Path, sheet_names: list[str]) -> Path:
+    """openpyxl で実 xlsx を生成（シート名一致のテスト用）。"""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    # デフォルトシートを最初の名前で置き換え
+    wb.active.title = sheet_names[0]
+    for name in sheet_names[1:]:
+        wb.create_sheet(name)
+    wb.save(path)
+    return path
+
+
+def test_apply_xlsx_selection_sheet_match_sets_pending(tmp_path: Path) -> None:
+    from wiseman_hub.pdf.checklist_c import apply_xlsx_selection
+
+    fax_root = tmp_path / "FAX"
+    fax_root.mkdir()
+    cfg = ChecklistConfig(
+        fax_root=str(fax_root),
+        c_output_subfolder="経過報告書",
+        facility_routing={"事業所A": "事業所A_FAX"},
+    )
+    xlsx = _make_xlsx_with_sheet(tmp_path / "x.xlsx", ["テスト 太郎", "他"])
+    result = CPlacementResult(
+        row=_row(name="テスト 太郎", staff="宮下", facility="事業所A"),
+        status=CPlacementStatus.NEEDS_REVIEW,
+        xlsx_candidates=[xlsx, tmp_path / "y.xlsx"],
+        folder_tree={"name": "x"},
+        message="prev",
+    )
+    apply_xlsx_selection(result, xlsx, cfg)
+    assert result.status == CPlacementStatus.PENDING
+    assert result.xlsx_path == xlsx
+    assert result.sheet_name == "テスト 太郎"
+    assert result.target_pdf == fax_root / "事業所A_FAX" / "経過報告書" / "テスト 太郎.pdf"
+    # NEEDS_REVIEW 時のフィールドはクリア
+    assert result.xlsx_candidates == []
+    assert result.folder_tree is None
+    assert result.message == ""
+
+
+def test_apply_xlsx_selection_sheet_not_found(tmp_path: Path) -> None:
+    from wiseman_hub.pdf.checklist_c import apply_xlsx_selection
+
+    cfg = ChecklistConfig(
+        fax_root=str(tmp_path),
+        c_output_subfolder="経過報告書",
+        facility_routing={"事業所A": "事業所A_FAX"},
+    )
+    xlsx = _make_xlsx_with_sheet(tmp_path / "x.xlsx", ["別人"])
+    result = CPlacementResult(
+        row=_row(name="テスト 太郎", staff="宮下", facility="事業所A"),
+        status=CPlacementStatus.NEEDS_REVIEW,
+    )
+    apply_xlsx_selection(result, xlsx, cfg)
+    assert result.status == CPlacementStatus.SKIPPED_NO_SHEET
+    assert "別人" in result.sheet_candidates
+    assert result.target_pdf is None
+
+
+def test_apply_xlsx_selection_no_facility_routing(tmp_path: Path) -> None:
+    from wiseman_hub.pdf.checklist_c import apply_xlsx_selection
+
+    cfg = ChecklistConfig(
+        fax_root=str(tmp_path), facility_routing={}, c_output_subfolder="経過報告書"
+    )
+    xlsx = _make_xlsx_with_sheet(tmp_path / "x.xlsx", ["テスト 太郎"])
+    result = CPlacementResult(
+        row=_row(name="テスト 太郎", staff="宮下", facility="未知居宅"),
+        status=CPlacementStatus.NEEDS_REVIEW,
+    )
+    apply_xlsx_selection(result, xlsx, cfg)
+    assert result.status == CPlacementStatus.SKIPPED_NO_FACILITY
