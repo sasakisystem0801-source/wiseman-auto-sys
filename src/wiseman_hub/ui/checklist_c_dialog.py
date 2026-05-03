@@ -303,7 +303,24 @@ class ChecklistCDialog:
         self._exec_btn.configure(state="normal" if ready > 0 else "disabled")
 
     def _on_execute(self) -> None:
-        if not messagebox.askyesno("実行確認", "PENDING 状態の行を配置します。続行しますか？"):
+        # PENDING 行を抽出して詳細確認
+        pending = [r for r in self._results if r.status == CPlacementStatus.PENDING]
+        if not pending:
+            messagebox.showinfo("対象なし", "実行可能な行がありません")
+            return
+        # 配置前確認: 件数 + サンプル 5 件まで対象 / 出力先を表示（業務安全性）
+        sample_lines = []
+        for r in pending[:5]:
+            target = str(r.target_pdf) if r.target_pdf else "(target unset)"
+            sample_lines.append(f"・{r.row.name}\n  → {target}")
+        more = "" if len(pending) <= 5 else f"\n... 他 {len(pending) - 5} 件"
+        msg = (
+            f"PENDING {len(pending)} 件を配置します。\n\n"
+            + "\n".join(sample_lines)
+            + more
+            + "\n\n続行しますか？"
+        )
+        if not messagebox.askyesno("実行確認", msg):
             return
         self._exec_btn.configure(state="disabled")
         self._status_var.set("Excel 経由で PDF 化中...")
@@ -312,7 +329,9 @@ class ChecklistCDialog:
         def _bg() -> None:
             try:
                 exporter = create_exporter()
-                execute_c_placement(self._results, exporter)
+                execute_c_placement(
+                    self._results, exporter, log_dir=self._config.log_dir
+                )
             except Exception:
                 logger.exception("execute_c_placement failed")
             self._top.after(0, self._on_execute_done)

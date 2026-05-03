@@ -323,9 +323,17 @@ def apply_xlsx_selection(
 
 
 def execute_c_placement(
-    results: list[CPlacementResult], exporter: ExcelExporter
+    results: list[CPlacementResult],
+    exporter: ExcelExporter,
+    log_dir: str = "",
 ) -> list[CPlacementResult]:
-    """PENDING の plan を Excel COM で PDF 化して配置する。"""
+    """PENDING の plan を Excel COM で PDF 化して配置する。
+
+    ``log_dir`` が指定されている場合、各行ごとに ``c_placement`` 監査ログに
+    成功/失敗 record を JSON Lines で追記する（PR-α v3 の業務安全性層）。
+    """
+    from wiseman_hub.audit import append_audit_record
+
     try:
         for r in results:
             if r.status != CPlacementStatus.PENDING:
@@ -341,6 +349,20 @@ def execute_c_placement(
                 r.status = CPlacementStatus.ERROR
                 r.message = f"export failed: {exc.__class__.__name__}: {exc}"
                 logger.exception("Excel export failed for %s", r.row.name)
+            append_audit_record(
+                log_dir,
+                kind="c_placement",
+                record={
+                    "user": r.row.name,
+                    "facility": r.row.facility,
+                    "staff": r.row.staff,
+                    "xlsx_path": str(r.xlsx_path) if r.xlsx_path else None,
+                    "sheet_name": r.sheet_name,
+                    "target_pdf": str(r.target_pdf) if r.target_pdf else None,
+                    "status": r.status.value,
+                    "message": r.message,
+                },
+            )
     finally:
         exporter.close()
     return results
