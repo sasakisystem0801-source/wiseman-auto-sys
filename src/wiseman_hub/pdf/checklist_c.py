@@ -285,6 +285,43 @@ def plan_c_placement(
     return results
 
 
+def apply_xlsx_selection(
+    result: CPlacementResult,
+    xlsx_path: Path,
+    cfg: ChecklistConfig,
+) -> None:
+    """ユーザーがレビュー UI で選択した xlsx_path を result に in-place 反映する。
+
+    シート検査 → 利用者シート存在 + 単独 → PENDING + target_pdf 確定。
+    シート未検出または曖昧 → SKIPPED_NO_SHEET / SKIPPED_AMBIGUOUS_SHEET。
+
+    呼び出し側 (UI) は本関数の後に必要に応じて cfg.xlsx_path_cache を更新する。
+    本関数は cache 操作を行わない（責務分離）。
+    """
+    fax_root = Path(cfg.fax_root)
+    fax_folder = resolve_facility(result.row.facility, cfg.facility_routing)
+    if not fax_folder:
+        result.status = CPlacementStatus.SKIPPED_NO_FACILITY
+        result.message = f"居宅マッピング未登録: {result.row.facility}"
+        return
+    sheet_name, all_sheets = find_sheet_for_user(xlsx_path, result.row.name)
+    if sheet_name is None:
+        if all_sheets:
+            result.sheet_candidates = all_sheets
+        result.status = CPlacementStatus.SKIPPED_NO_SHEET
+        result.message = f"利用者シート未発見: {result.row.name}"
+        return
+    target = fax_root / fax_folder / cfg.c_output_subfolder / f"{result.row.name}.pdf"
+    result.xlsx_path = xlsx_path
+    result.sheet_name = sheet_name
+    result.target_pdf = target
+    result.status = CPlacementStatus.PENDING
+    # NEEDS_REVIEW 時のフィールドはクリア（UI に古い候補を表示させない）
+    result.xlsx_candidates = []
+    result.folder_tree = None
+    result.message = ""
+
+
 def execute_c_placement(
     results: list[CPlacementResult], exporter: ExcelExporter
 ) -> list[CPlacementResult]:
