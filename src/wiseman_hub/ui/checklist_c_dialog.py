@@ -31,6 +31,7 @@ from wiseman_hub.pdf.checklist_c import (
     plan_c_placement,
 )
 from wiseman_hub.pdf.excel_com import create_exporter
+from wiseman_hub.ui.placement_confirm_dialog import PlacementConfirmDialog
 from wiseman_hub.ui.xlsx_picker_dialog import XlsxPickerDialog
 
 logger = logging.getLogger(__name__)
@@ -315,19 +316,11 @@ class ChecklistCDialog:
         if not pending:
             messagebox.showinfo("対象なし", "実行可能な行がありません")
             return
-        # 配置前確認: 件数 + サンプル 5 件まで対象 / 出力先を表示（業務安全性）
-        sample_lines = []
-        for r in pending[:5]:
-            target = str(r.target_pdf) if r.target_pdf else "(target unset)"
-            sample_lines.append(f"・{r.row.name}\n  → {target}")
-        more = "" if len(pending) <= 5 else f"\n... 他 {len(pending) - 5} 件"
-        msg = (
-            f"PENDING {len(pending)} 件を配置します。\n\n"
-            + "\n".join(sample_lines)
-            + more
-            + "\n\n続行しますか？"
-        )
-        if not messagebox.askyesno("実行確認", msg):
+        # 配置前確認: 全件を Treeview で提示（HIGH-3 対策、業務安全性）
+        confirm = PlacementConfirmDialog(parent=self._top, pending_results=pending)
+        confirm.get_toplevel().wait_window()
+        if not confirm.get_proceed():
+            self._status_var.set("配置キャンセル")
             return
         self._exec_btn.configure(state="disabled")
         self._status_var.set("Excel 経由で PDF 化中...")
