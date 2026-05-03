@@ -81,6 +81,18 @@ Development happens on macOS; Wiseman runs only on Windows.
 | デスクトップショートカット | `$HOME\wiseman-hub\wiseman_hub.exe` を起動（作業フォルダ = `$HOME\wiseman-hub`） |
 | 本番データ | `\\Tera-station\share\03.FAX(事業所)`（UNC パス、40 事業所、ADR-013） |
 | Wiseman 本体 | `C:\Users\sasak\AppData\Local\Programs\WISEMAN\WISEMANVSYSTEM\` |
+| **NAS ゴミ箱（誤削除リカバリ経路）** | **`\\Tera-station\share\trashbox\`**（Buffalo Tera-station の trashbox 機能、SMB 経由 `Remove-Item` でも元パス保持で残る、VSS 無効でも別機構で動作。Session 40 で 6 ファイル誤削除→完全復旧の実績あり） |
+
+#### Tera-station NAS の destructive 操作プロトコル
+
+`\\Tera-station\share\` 上のファイル削除/上書き/移動を実行する前に必須:
+
+1. **完全一致リスト + 件数アサーション**: ワイルドカード `*` / 正規表現は誤マッチリスク。`@('a.pdf','b.pdf')` + `-contains` で厳格に絞り、`if ($targets.Count -ne $expected) { throw }` を必ず挟む
+2. **PowerShell コマンドは 1 行詰め**: `|` 改行繋ぎはコピペで切れて Where-Object フィルタが消失する事故あり（Session 40）。複数行が必須なら件数アサーションを必ず追加
+3. **`-WhatIf` の出力で件数を目視カウント**してから実行: 「1 件削除予定なのに N 件マッチ」は **フィルタが効いていない明確なシグナル**、即停止
+4. **誤削除時は `\\Tera-station\share\trashbox\` を最初に確認**: 元のパス構造を保持して全ファイル残るので `Move-Item` で復旧可能
+
+詳細とコマンド例: グローバル memory `feedback_destructive_command_safety.md` / `feedback_powershell_pipe_continuation_risk.md` / `feedback_nas_trashbox_recovery.md`
 
 #### main を実機反映する正規手順
 
