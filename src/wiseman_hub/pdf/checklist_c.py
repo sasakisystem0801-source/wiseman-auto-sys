@@ -26,6 +26,11 @@ from openpyxl import load_workbook
 from wiseman_hub.cloud.sheets import ChecklistRow
 from wiseman_hub.config import ChecklistConfig, ReportStaffEntry
 from wiseman_hub.pdf.excel_com import ExcelExporter
+from wiseman_hub.pdf.staff_path_scanner import (
+    build_folder_tree,
+    scan_candidates,
+    scan_fallback,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -70,13 +75,112 @@ def western_to_reiwa(year: int) -> int:
     return year - 2018
 
 
+def cache_key(staff: str, year: int, month: int) -> str:
+    """xlsx_path_cache の dict キー形式（"{staff}:{year}:{month}"）を組み立てる。"""
+    return f"{staff}:{year}:{month}"
+
+
 def resolve_xlsx_path(entry: ReportStaffEntry, year: int, month: int) -> Path:
-    """ReportStaffEntry から xlsx パスを組み立てる（{era}/{month} を展開）。"""
+    """[deprecated] 旧 MVP の単純 template 展開（後方互換専用）。
+
+    新規コードからは ``resolve_xlsx`` 経由で cache + scanner を使うこと。
+    suggest_patterns 空 + 旧 *_template フィールドが両方埋まっているときの
+    フォールバック用に残置している。
+
+    template が空のときは ``base_dir`` を返すだけになるが、呼び出し側で
+    ``exists()`` 失敗扱いになるので機能はしない。
+    """
     era = western_to_reiwa(year)
     base = Path(entry.base_dir)
     year_sub = entry.year_subfolder_template.format(era=era, month=month)
     fname = entry.file_template.format(era=era, month=month)
     return base / year_sub / fname
+
+
+@dataclass
+class ResolveResult:
+    """resolve_xlsx の戻り値。
+
+    呼び出し側 ``plan_c_placement`` が CPlacementResult に統合する。
+    status は CPlacementStatus の以下のサブセットのみを返す:
+        - PENDING: cache hit でパス確定（後段でシート検査）
+        - NEEDS_REVIEW: 候補抽出に成功（複数 or 単独）、人間レビュー UI で選択待ち
+        - SKIPPED_NO_XLSX: 候補ゼロ + folder_tree も組めない（base_dir 不在等）
+    """
+
+    status: CPlacementStatus
+    xlsx_path: Path | None = None
+    candidates: list[Path] = field(default_factory=list)
+    folder_tree: dict[str, Any] | None = None
+    message: str = ""
+
+
+def resolve_xlsx(
+    staff: str,
+    entry: ReportStaffEntry,
+    year: int,
+    month: int,
+    cache: dict[str, str],
+) -> ResolveResult:
+    """担当者ごとの xlsx パス解決。cache hit → PENDING / miss → NEEDS_REVIEW。
+
+    解決順序:
+        1. cache hit でファイル存在 → PENDING（自動確定）
+        2. cache stale（path 不在） → fall through、再 scan
+        3. suggest_patterns で候補抽出 → 単独/複数とも NEEDS_REVIEW（自動確定しない）
+        4. 候補ゼロ + 旧 *_template があれば legacy fallback で path 試行
+        5. 候補ゼロ → フォルダツリー + scan_fallback で NEEDS_REVIEW
+        6. base_dir 不在 → SKIPPED_NO_XLSX
+
+    自動確定するのは「cache hit」のみ。これは過去に人間が UI で選択 +
+    「記憶する」を確定した path であり、deterministic な根拠を持つ。
+    """
+    key = cache_key(staff, year, month)
+    cached_str = cache.get(key)
+    if cached_str:
+        cached_path = Path(cached_str)
+        if cached_path.exists():
+            return ResolveResult(
+                status=CPlacementStatus.PENDING,
+                xlsx_path=cached_path,
+            )
+        # cache stale
+        logger.info("cache stale for %s, re-scanning", key)
+
+    # suggest_patterns で候補絞り込み
+    candidates = scan_candidates(entry, year, month)
+    if candidates:
+        return ResolveResult(
+            status=CPlacementStatus.NEEDS_REVIEW,
+            candidates=candidates,
+            message=f"{len(candidates)} 件候補あり、確認後に選択してください",
+        )
+
+    # 後方互換: suggest_patterns 空かつ legacy template が埋まっている場合
+    if not entry.suggest_patterns and entry.year_subfolder_template and entry.file_template:
+        legacy = resolve_xlsx_path(entry, year, month)
+        if legacy.exists():
+            return ResolveResult(
+                status=CPlacementStatus.PENDING,
+                xlsx_path=legacy,
+                message="legacy template 経路で解決",
+            )
+
+    # フォールバック: base_dir 配下を浅く scan + folder_tree 提示
+    base = Path(entry.base_dir) if entry.base_dir else None
+    if base is None or not base.exists():
+        return ResolveResult(
+            status=CPlacementStatus.SKIPPED_NO_XLSX,
+            message=f"base_dir 不在または未設定: {entry.base_dir or '(empty)'}",
+        )
+    fallback = scan_fallback(base, max_depth=3)
+    tree = build_folder_tree(base, max_depth=3)
+    return ResolveResult(
+        status=CPlacementStatus.NEEDS_REVIEW,
+        candidates=fallback,
+        folder_tree=tree,
+        message="候補なし、フォルダから選択してください",
+    )
 
 
 def _normalize_name(name: str) -> str:
@@ -112,7 +216,15 @@ def plan_c_placement(
     year: int,
     month: int,
 ) -> list[CPlacementResult]:
-    """C 配置の計画を立てる（実 PDF 化はしない）。"""
+    """C 配置の計画を立てる（実 PDF 化はしない）。
+
+    各行ごとに:
+        1. 居宅 → FAX フォルダ resolve
+        2. 担当者 → ReportStaffEntry resolve
+        3. resolve_xlsx で cache hit / 候補抽出 / フォールバック
+        4. PENDING のみシート検査して target_pdf 確定
+        5. NEEDS_REVIEW は xlsx_candidates / folder_tree を保持して UI に渡す
+    """
     fax_root = Path(cfg.fax_root)
     results: list[CPlacementResult] = []
     for row in rows:
@@ -129,16 +241,36 @@ def plan_c_placement(
             result.message = f"担当者マッピング未登録: {row.staff}"
             results.append(result)
             continue
-        xlsx_path = resolve_xlsx_path(staff_entry, year, month)
-        if not xlsx_path.exists():
-            result.status = CPlacementStatus.SKIPPED_NO_XLSX
-            result.message = f"xlsx 不在: {xlsx_path}"
+
+        resolved = resolve_xlsx(
+            staff=row.staff,
+            entry=staff_entry,
+            year=year,
+            month=month,
+            cache=cfg.xlsx_path_cache,
+        )
+
+        if resolved.status == CPlacementStatus.NEEDS_REVIEW:
+            result.status = CPlacementStatus.NEEDS_REVIEW
+            result.xlsx_candidates = resolved.candidates
+            result.folder_tree = resolved.folder_tree
+            result.message = resolved.message
+            # NEEDS_REVIEW では target_pdf 確定不能、ユーザー選択後に再 plan
             results.append(result)
             continue
+
+        if resolved.status == CPlacementStatus.SKIPPED_NO_XLSX:
+            result.status = CPlacementStatus.SKIPPED_NO_XLSX
+            result.message = resolved.message
+            results.append(result)
+            continue
+
+        # PENDING（cache hit または legacy fallback）
+        xlsx_path = resolved.xlsx_path
+        assert xlsx_path is not None
         sheet_name, all_sheets = find_sheet_for_user(xlsx_path, row.name)
         if sheet_name is None:
             if all_sheets:
-                # 候補は表示用に絞る (姓 or 名のいずれかを含む)
                 result.sheet_candidates = all_sheets
             result.status = CPlacementStatus.SKIPPED_NO_SHEET
             result.message = f"利用者シート未発見: {row.name}"
