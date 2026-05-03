@@ -61,12 +61,12 @@ tk_required = pytest.mark.tk_required
 class TestLauncherUI:
     """Launcher の Tkinter UI 構築・ボタン動作。"""
 
-    def test_launcher_builds_three_buttons_in_workflow_order(
+    def test_launcher_builds_buttons_in_workflow_order(
         self, tmp_path: Path
     ) -> None:
-        """Issue #154 受け入れ基準: 業務フロー順 3 ボタンで起動する。
+        """業務フロー順 5 ボタンで起動する (PR #172 で B/C を追加)。
 
-        順序: ex_ 変換 (①) → 事業所結合 (③) → 設定。
+        順序: ex_ 変換 → B 配置 → C 配置 → 事業所結合 → 設定。
         """
         import tkinter as tk
 
@@ -81,11 +81,13 @@ class TestLauncherUI:
                 root=root,
             )
             labels = launcher.button_labels()
-            assert len(labels) == 3
+            assert len(labels) == 5
             # 業務フロー順
             assert "ex_" in labels[0]
-            assert "事業所" in labels[1]
-            assert "設定" in labels[2]
+            assert labels[1].startswith("B:")
+            assert labels[2].startswith("C:")
+            assert "事業所" in labels[3]
+            assert "設定" in labels[4]
             # 旧ワークフローの文言が UI に出ないことを契約化
             joined = " ".join(labels)
             assert "PDF マージ処理" not in joined

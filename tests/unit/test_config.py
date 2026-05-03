@@ -1273,3 +1273,59 @@ timeout_sec = 0
         """既存 config/default.toml が新検証下でも回帰なく読める（regression guard）。"""
         config = load_config(Path("config/default.toml"))
         assert isinstance(config, AppConfig)
+
+
+class TestSaKeyPathResolution:
+    """SA キーパスの絶対化ロジック検証 (実機 exe 配布レイアウトでの重複防止)。"""
+
+    def test_resolves_sibling_when_value_is_filename_only(
+        self, tmp_path: Path
+    ) -> None:
+        cfg_dir = tmp_path / "any"
+        cfg_dir.mkdir()
+        cfg_path = cfg_dir / "default.toml"
+        cfg_path.write_text(
+            '[gcp]\nservice_account_key_path = "sa-key.json"\n', encoding="utf-8"
+        )
+        config = load_config(cfg_path)
+        assert config.gcp.service_account_key_path == str(
+            (cfg_dir / "sa-key.json").resolve()
+        )
+
+    def test_avoids_duplicate_config_segment_for_distribution_layout(
+        self, tmp_path: Path
+    ) -> None:
+        """実機 exe 配布レイアウト ($HOME/wiseman-hub/config/default.toml) で
+        TOML 値 "config/sa-key.json" が config/config/sa-key.json に二重化
+        されない (本番障害再現テスト)。"""
+        dist_root = tmp_path / "wiseman-hub"
+        cfg_dir = dist_root / "config"
+        cfg_dir.mkdir(parents=True)
+        cfg_path = cfg_dir / "default.toml"
+        cfg_path.write_text(
+            '[gcp]\nservice_account_key_path = "config/sa-key.json"\n',
+            encoding="utf-8",
+        )
+        config = load_config(cfg_path)
+        # 期待: $tmp/wiseman-hub/config/sa-key.json (重複なし)
+        expected = (dist_root / "config" / "sa-key.json").resolve()
+        assert config.gcp.service_account_key_path == str(expected)
+
+    def test_keeps_absolute_path_unchanged(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "default.toml"
+        abs_key = tmp_path / "external" / "sa-key.json"
+        cfg_path.write_text(
+            f'[gcp]\nservice_account_key_path = "{abs_key.as_posix()}"\n',
+            encoding="utf-8",
+        )
+        config = load_config(cfg_path)
+        assert config.gcp.service_account_key_path == abs_key.as_posix()
+
+    def test_empty_value_remains_empty(self, tmp_path: Path) -> None:
+        """GCP 機能未使用環境では空文字列のままにする (既存運用維持)。"""
+        cfg_path = tmp_path / "default.toml"
+        cfg_path.write_text(
+            '[gcp]\nservice_account_key_path = ""\n', encoding="utf-8"
+        )
+        config = load_config(cfg_path)
+        assert config.gcp.service_account_key_path == ""

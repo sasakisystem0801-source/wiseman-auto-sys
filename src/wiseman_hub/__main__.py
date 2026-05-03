@@ -151,6 +151,57 @@ def _make_ex_extractor_callback(
     return open_ex_extractor
 
 
+def _make_checklist_b_callback(
+    config_path: Path,
+    get_launcher: Callable[[], _LauncherLike],
+) -> Callable[[], None]:
+    """Launcher に注入する「B: 運動機能向上計画書 自動配置」コールバック。"""
+
+    def open_checklist_b() -> None:
+        from wiseman_hub.config import load_config
+        from wiseman_hub.ui.checklist_b_dialog import ChecklistBDialog
+
+        launcher = get_launcher()
+        config = load_config(config_path)
+        dialog = ChecklistBDialog(
+            parent=launcher.get_root(), config=config, config_path=config_path
+        )
+        dialog.get_toplevel().wait_window()
+        # 設定が変更された可能性 → Launcher 側を再ロード
+        try:
+            updated = load_config(config_path)
+            launcher.reload_config(updated)
+        except (OSError, ValueError, TypeError):
+            pass
+
+    return open_checklist_b
+
+
+def _make_checklist_c_callback(
+    config_path: Path,
+    get_launcher: Callable[[], _LauncherLike],
+) -> Callable[[], None]:
+    """Launcher に注入する「C: 経過報告書 自動配置」コールバック。"""
+
+    def open_checklist_c() -> None:
+        from wiseman_hub.config import load_config
+        from wiseman_hub.ui.checklist_c_dialog import ChecklistCDialog
+
+        launcher = get_launcher()
+        config = load_config(config_path)
+        dialog = ChecklistCDialog(
+            parent=launcher.get_root(), config=config, config_path=config_path
+        )
+        dialog.get_toplevel().wait_window()
+        try:
+            updated = load_config(config_path)
+            launcher.reload_config(updated)
+        except (OSError, ValueError, TypeError):
+            pass
+
+    return open_checklist_c
+
+
 def _make_settings_callback(
     config_path: Path,
     get_launcher: Callable[[], _LauncherLike],
@@ -397,6 +448,12 @@ def main() -> None:
                     config_path, _get_launcher
                 ),
                 on_open_ex_extractor=_make_ex_extractor_callback(
+                    config_path, _get_launcher
+                ),
+                on_open_checklist_b=_make_checklist_b_callback(
+                    config_path, _get_launcher
+                ),
+                on_open_checklist_c=_make_checklist_c_callback(
                     config_path, _get_launcher
                 ),
             )

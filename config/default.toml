@@ -82,3 +82,30 @@ release_bucket = ""
 # [pdf_merge.facility_aliases]
 # "本田デイケア" = ["本田DC", "本田デイ"]
 # "きなり(メール)※持参" = ["きなり"]
+
+# スプレッドシート連携 B(運動機能向上計画書)/C(経過報告書) PDF 自動配置機能の設定。
+# 設定値は GUI（設定ダイアログ「チェックリスト連携」タブ）から編集することを想定。
+# [checklist]
+# spreadsheet_id = ""                                                # Google Drive 上の xlsx file id
+# karte_root = "\\\\Tera-station\\share\\02.カルテ"                  # B 用カルテルート
+# monitoring_subfolder = "08.運動器機能向上計画書"
+# fax_root = "\\\\Tera-station\\share\\03.FAX(事業所)"               # 出力先ルート
+# b_output_subfolder = "運動機能向上計画書"
+# c_output_subfolder = "経過報告書"
+#
+# 居宅名（スプレッドシート O 列）→ FAX 事業所フォルダ名 のマッピング
+# [checklist.facility_routing]
+# "きなり" = "きなり(メール)※持参"
+# "ケアプラン太子" = "ケアプラン太子（メール）※持参"
+# "シスナブ御津" = "シスナブ御津(メール)"
+#
+# 担当者 → C 用 xlsx パステンプレート（{era}=令和年, {month}=月数値）
+# [checklist.report_staff."宮下"]
+# base_dir = "\\\\Tera-station\\share\\PT 宮下"
+# year_subfolder_template = "リハ経過報告書\\令和{era}年"
+# file_template = "リハ経過報告書 (宮下) {month}月 .xlsx"
+#
+# [checklist.report_staff."小林"]
+# base_dir = "\\\\Tera-station\\share\\OT小林"
+# year_subfolder_template = "経過報告書\\R{era}"
+# file_template = "経過報告書 R{era}.{month}.xlsx"

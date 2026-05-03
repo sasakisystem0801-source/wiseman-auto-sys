@@ -22,8 +22,12 @@ dependencies = [
     "pandas>=2.2.0",
     # PDF (分割・再結合・画像切出)
     "pymupdf>=1.24.0",
+    # Excel xlsx 読込（チェックリスト連携 B/C 機能）
+    "openpyxl>=3.1.0",
     # HTTP クライアント (Cloud Run OCR プロキシ呼出)
     "httpx>=0.27.0",
+    # Excel COM 操作（C 経過報告書を 1 ページ目だけ PDF 化、Windows 限定）
+    "pywin32>=308; sys_platform == 'win32'",
     # TOML (Python <3.11 fallback)
     "tomli>=2.0.0; python_version < '3.11'",
     # TOML 書き戻し（設定 GUI から TOML を保存、コメント維持）

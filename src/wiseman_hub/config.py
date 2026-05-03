@@ -221,6 +221,46 @@ class PdfMergeConfig:
 
 
 @dataclass
+class ReportStaffEntry:
+    """C(経過報告書) 用に、担当者ごとの xlsx 配置ルールを定義する。
+
+    base_dir: 担当者フォルダの絶対パス（例: ``\\\\Tera-station\\share\\PT 宮下``）
+    year_subfolder_template: base_dir 配下の年フォルダ template。``{era}`` は令和年（数値）
+        例: ``リハ経過報告書\\令和{era}年`` / ``経過報告書\\R{era}``
+    file_template: 月別 xlsx ファイル名 template。``{era}`` / ``{month}`` を埋め込む
+        例: ``リハ経過報告書 (宮下) {month}月 .xlsx`` / ``経過報告書 R{era}.{month}.xlsx``
+    """
+
+    base_dir: str = ""
+    year_subfolder_template: str = ""
+    file_template: str = ""
+
+
+@dataclass
+class ChecklistConfig:
+    """スプレッドシート連携 B/C PDF 自動配置機能の設定（MVP）。
+
+    spreadsheet_id: Google Drive 上の xlsx file id
+    karte_root: B 用カルテルート（``\\\\Tera-station\\share\\02.カルテ``）
+    monitoring_subfolder: 利用者フォルダ配下のモニタリング書類サブフォルダ名
+    fax_root: 出力先 FAX 事業所ルート（``\\\\Tera-station\\share\\03.FAX(事業所)``）
+    b_output_subfolder: FAX 事業所フォルダ配下の B 出力サブフォルダ名（運動機能向上計画書）
+    c_output_subfolder: FAX 事業所フォルダ配下の C 出力サブフォルダ名（経過報告書）
+    facility_routing: 居宅名（スプレッドシート O 列） → FAX 事業所フォルダ名 の辞書
+    report_staff: 担当者名 → ReportStaffEntry の辞書（C 用 xlsx パス解決）
+    """
+
+    spreadsheet_id: str = "18RPsg3Ya0r7djQVzED5KAa5KyhbB9YRm"
+    karte_root: str = "\\\\Tera-station\\share\\02.カルテ"
+    monitoring_subfolder: str = "08.運動器機能向上計画書"
+    fax_root: str = "\\\\Tera-station\\share\\03.FAX(事業所)"
+    b_output_subfolder: str = "運動機能向上計画書"
+    c_output_subfolder: str = "経過報告書"
+    facility_routing: dict[str, str] = field(default_factory=dict)
+    report_staff: dict[str, ReportStaffEntry] = field(default_factory=dict)
+
+
+@dataclass
 class AppConfig:
     version: str = "0.1.0"
     log_level: str = "INFO"
@@ -232,6 +272,7 @@ class AppConfig:
     updater: UpdaterConfig = field(default_factory=UpdaterConfig)
     ocr_backend: OcrBackendConfig = field(default_factory=OcrBackendConfig)
     pdf_merge: PdfMergeConfig = field(default_factory=PdfMergeConfig)
+    checklist: ChecklistConfig = field(default_factory=ChecklistConfig)
 
 
 def _coerce_facility_aliases(aliases_data: Any) -> dict[str, list[str]]:
@@ -313,6 +354,33 @@ def _validate_facility_aliases(aliases: dict[str, list[str]]) -> None:
             seen_aliases[alias] = canonical
 
 
+def _resolve_sa_key_path(key_path_str: str, config_path: Path) -> str:
+    """SA キーパスを絶対パスに解決する。
+
+    - 絶対パスならそのまま返す
+    - 相対パスの場合の起点:
+        - 通常: ``config_path.parent`` （TOML の隣を見る）
+        - ただし TOML 値が ``config/...`` 始まりかつ ``config_path`` 自身が
+            ``config/`` 配下にある場合は、重複を避けるため一段上の
+            ``config_path.parent.parent`` を起点にする
+            （TOML 値はプロジェクトルート起点で書かれている既存運用に追従）
+    - 空文字列はそのまま返す（GCP 機能未使用環境を許容）
+    """
+    if not key_path_str:
+        return key_path_str
+    p = Path(key_path_str)
+    if p.is_absolute():
+        return str(p)
+    base = config_path.parent
+    if (
+        base.name == "config"
+        and p.parts
+        and p.parts[0] == "config"
+    ):
+        base = base.parent
+    return str((base / p).resolve())
+
+
 def load_config(path: Path | None = None) -> AppConfig:
     """TOML設定ファイルを読み込んでAppConfigを返す。"""
     if path is None:
@@ -327,7 +395,11 @@ def load_config(path: Path | None = None) -> AppConfig:
     app_data = data.get("app", {})
     wiseman_data = data.get("wiseman", {})
     schedule_data = data.get("schedule", {})
-    gcp_data = data.get("gcp", {})
+    gcp_data = dict(data.get("gcp", {}))
+    if "service_account_key_path" in gcp_data:
+        gcp_data["service_account_key_path"] = _resolve_sa_key_path(
+            gcp_data["service_account_key_path"], path
+        )
     updater_data = data.get("updater", {})
     ocr_backend_data = data.get("ocr_backend", {})
     pdf_merge_data = dict(data.get("pdf_merge", {}))
@@ -367,6 +439,41 @@ def load_config(path: Path | None = None) -> AppConfig:
         facility_aliases=facility_aliases,
     )
 
+    checklist_data = dict(data.get("checklist", {}))
+    routing_data = checklist_data.pop("facility_routing", {})
+    staff_data = checklist_data.pop("report_staff", {})
+    facility_routing: dict[str, str] = {}
+    if routing_data:
+        if not isinstance(routing_data, dict):
+            raise TypeError(
+                f"[checklist.facility_routing] must be a table; "
+                f"got {type(routing_data).__name__}"
+            )
+        for key, value in routing_data.items():
+            if not isinstance(value, str):
+                raise TypeError(
+                    "checklist.facility_routing values must be strings"
+                )
+            facility_routing[str(key)] = value
+    report_staff: dict[str, ReportStaffEntry] = {}
+    if staff_data:
+        if not isinstance(staff_data, dict):
+            raise TypeError(
+                f"[checklist.report_staff] must be a table; "
+                f"got {type(staff_data).__name__}"
+            )
+        for staff_name, entry_data in staff_data.items():
+            if not isinstance(entry_data, dict):
+                raise TypeError(
+                    "checklist.report_staff entries must be tables"
+                )
+            report_staff[str(staff_name)] = ReportStaffEntry(**entry_data)
+    checklist = ChecklistConfig(
+        **checklist_data,
+        facility_routing=facility_routing,
+        report_staff=report_staff,
+    )
+
     return AppConfig(
         version=app_data.get("version", "0.1.0"),
         log_level=app_data.get("log_level", "INFO"),
@@ -378,6 +485,7 @@ def load_config(path: Path | None = None) -> AppConfig:
         updater=UpdaterConfig(**updater_data),
         ocr_backend=OcrBackendConfig(**ocr_backend_data),
         pdf_merge=pdf_merge,
+        checklist=checklist,
     )
 
 
@@ -461,6 +569,60 @@ def _set_facility_aliases(
     pdf_merge_table["facility_aliases"] = aliases_table
 
 
+def _update_checklist(doc: TOMLDocument, checklist: ChecklistConfig) -> None:
+    """[checklist] とネスト [checklist.facility_routing] / [checklist.report_staff.<name>] を書き戻す。
+
+    facility_routing / report_staff は動的キー dict のため pdf_merge と同じく完全置換する。
+    """
+    routing = dict(checklist.facility_routing)
+    staff = {
+        name: asdict(entry) for name, entry in checklist.report_staff.items()
+    }
+    checklist_dict = asdict(checklist)
+    checklist_dict.pop("facility_routing", None)
+    checklist_dict.pop("report_staff", None)
+
+    if "checklist" in doc:
+        table = _require_table(doc, "checklist")
+        for key, value in checklist_dict.items():
+            table[key] = value
+        if "facility_routing" in table:
+            del table["facility_routing"]
+        if "report_staff" in table:
+            del table["report_staff"]
+        if routing:
+            routing_table = tomlkit.table()
+            for k, v in routing.items():
+                routing_table[k] = v
+            table["facility_routing"] = routing_table
+        if staff:
+            staff_table = tomlkit.table()
+            for name, entry in staff.items():
+                inner = tomlkit.table()
+                for k, v in entry.items():
+                    inner[k] = v
+                staff_table[name] = inner
+            table["report_staff"] = staff_table
+    else:
+        new_table = tomlkit.table()
+        for key, value in checklist_dict.items():
+            new_table[key] = value
+        if routing:
+            routing_table = tomlkit.table()
+            for k, v in routing.items():
+                routing_table[k] = v
+            new_table["facility_routing"] = routing_table
+        if staff:
+            staff_table = tomlkit.table()
+            for name, entry in staff.items():
+                inner = tomlkit.table()
+                for k, v in entry.items():
+                    inner[k] = v
+                staff_table[name] = inner
+            new_table["report_staff"] = staff_table
+        doc["checklist"] = new_table
+
+
 def _update_reports(doc: TOMLDocument, reports: list[ReportTarget]) -> None:
     """[[reports.targets]] 配列を書き戻す。
 
@@ -534,6 +696,7 @@ def save_config(cfg: AppConfig, path: Path, *, create_if_missing: bool = False) 
         _update_table_from_dataclass(doc, section, asdict(getattr(cfg, section)))
 
     _update_pdf_merge(doc, cfg.pdf_merge)
+    _update_checklist(doc, cfg.checklist)
     _update_reports(doc, cfg.reports)
 
     # tomlkit.dumps が例外を投げる場合は payload 生成前に伝播し、target は保持される。

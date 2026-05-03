@@ -40,11 +40,15 @@ class LauncherAction(enum.Enum):
     OPEN_SETTINGS = "open_settings"
     OPEN_FACILITY_MERGER = "open_facility_merger"
     OPEN_EX_EXTRACTOR = "open_ex_extractor"
+    OPEN_CHECKLIST_B = "open_checklist_b"
+    OPEN_CHECKLIST_C = "open_checklist_c"
 
 
 _BTN_OPEN_SETTINGS = "設定"
 _BTN_OPEN_FACILITY_MERGER = "事業所フォルダ一括結合"
 _BTN_OPEN_EX_EXTRACTOR = "ex_ ファイル変換 + 振り分け"
+_BTN_OPEN_CHECKLIST_B = "B: 運動機能向上計画書 自動配置"
+_BTN_OPEN_CHECKLIST_C = "C: 経過報告書 自動配置"
 
 _TITLE_UNIMPL = "未実装"
 
@@ -60,6 +64,15 @@ _MSG_EX_EXTRACTOR_PLACEHOLDER = (
 )
 
 _MSG_FACILITY_MERGER_UNIMPL = "事業所フォルダ結合ダイアログ（未統合）"
+
+_TITLE_CHECKLIST_B_PLACEHOLDER = "B 自動配置（未統合）"
+_MSG_CHECKLIST_B_PLACEHOLDER = (
+    "B 運動機能向上計画書の自動配置は次セッションで統合予定です。"
+)
+_TITLE_CHECKLIST_C_PLACEHOLDER = "C 自動配置（未統合）"
+_MSG_CHECKLIST_C_PLACEHOLDER = (
+    "C 経過報告書の自動配置は次セッションで統合予定です。"
+)
 
 
 class Launcher:
@@ -79,6 +92,8 @@ class Launcher:
         on_open_settings: Callable[[], None] | None = None,
         on_open_facility_merger: Callable[[], None] | None = None,
         on_open_ex_extractor: Callable[[], None] | None = None,
+        on_open_checklist_b: Callable[[], None] | None = None,
+        on_open_checklist_c: Callable[[], None] | None = None,
         messagebox_fn: MessageBoxLike | None = None,
     ) -> None:
         assert_main_thread("Launcher")
@@ -90,6 +105,8 @@ class Launcher:
         self._on_open_settings = on_open_settings
         self._on_open_facility_merger = on_open_facility_merger
         self._on_open_ex_extractor = on_open_ex_extractor
+        self._on_open_checklist_b = on_open_checklist_b
+        self._on_open_checklist_c = on_open_checklist_c
 
         self._owns_root = root is None
         self._root = root if root is not None else tk.Tk()
@@ -102,7 +119,7 @@ class Launcher:
     def _build_ui(self) -> None:
         root = self._root
         root.title("Wiseman PDF ツール")
-        root.geometry("420x260")
+        root.geometry("420x380")
 
         ttk.Label(
             root,
@@ -114,11 +131,21 @@ class Launcher:
         btn_frame = ttk.Frame(root, padding=12)
         btn_frame.pack(fill="both", expand=True)
 
-        # 業務フロー順: ex_ 変換 (①) → 事業所結合 (③) → 設定
+        # 業務フロー順: ex_ 変換 (①) → B/C 自動配置 → 事業所結合 (③) → 設定
         self._btn_ex_extractor = ttk.Button(
             btn_frame,
             text=_BTN_OPEN_EX_EXTRACTOR,
             command=lambda: self.invoke_action(LauncherAction.OPEN_EX_EXTRACTOR),
+        )
+        self._btn_checklist_b = ttk.Button(
+            btn_frame,
+            text=_BTN_OPEN_CHECKLIST_B,
+            command=lambda: self.invoke_action(LauncherAction.OPEN_CHECKLIST_B),
+        )
+        self._btn_checklist_c = ttk.Button(
+            btn_frame,
+            text=_BTN_OPEN_CHECKLIST_C,
+            command=lambda: self.invoke_action(LauncherAction.OPEN_CHECKLIST_C),
         )
         self._btn_facility_merger = ttk.Button(
             btn_frame,
@@ -135,18 +162,22 @@ class Launcher:
 
         for btn in (
             self._btn_ex_extractor,
+            self._btn_checklist_b,
+            self._btn_checklist_c,
             self._btn_facility_merger,
             self._btn_settings,
         ):
             btn.pack(fill="x", pady=6, ipady=6)
 
-    def button_labels(self) -> tuple[str, str, str]:
+    def button_labels(self) -> tuple[str, str, str, str, str]:
         """各ボタンのラベル（テスト用）。
 
-        順序: ex_ 変換 / 事業所結合 / 設定（業務フロー順、Issue #154 で旧 UI 除去後）。
+        順序: ex_ 変換 / B 自動配置 / C 自動配置 / 事業所結合 / 設定。
         """
         return (
             _BTN_OPEN_EX_EXTRACTOR,
+            _BTN_OPEN_CHECKLIST_B,
+            _BTN_OPEN_CHECKLIST_C,
             _BTN_OPEN_FACILITY_MERGER,
             _BTN_OPEN_SETTINGS,
         )
@@ -180,6 +211,18 @@ class Launcher:
                     self._on_open_ex_extractor,
                     _TITLE_EX_EXTRACTOR_PLACEHOLDER,
                     _MSG_EX_EXTRACTOR_PLACEHOLDER,
+                )
+            case LauncherAction.OPEN_CHECKLIST_B:
+                self._invoke_or_show(
+                    self._on_open_checklist_b,
+                    _TITLE_CHECKLIST_B_PLACEHOLDER,
+                    _MSG_CHECKLIST_B_PLACEHOLDER,
+                )
+            case LauncherAction.OPEN_CHECKLIST_C:
+                self._invoke_or_show(
+                    self._on_open_checklist_c,
+                    _TITLE_CHECKLIST_C_PLACEHOLDER,
+                    _MSG_CHECKLIST_C_PLACEHOLDER,
                 )
             case _:
                 raise ValueError(f"Unhandled LauncherAction: {action}")
