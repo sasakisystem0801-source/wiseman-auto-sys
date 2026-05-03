@@ -1,6 +1,5 @@
-"""T1 範囲: CPlacementStatus と CPlacementResult の dataclass / enum 拡張テスト。
-
-T2/T3 で resolve_xlsx / plan_c_placement のロジックテストを追加する。
+"""T1: CPlacementStatus / CPlacementResult dataclass 拡張テスト。
+T3: resolve_xlsx (cache + scanner + 後方互換) + plan_c_placement 統合テスト。
 """
 
 from __future__ import annotations
@@ -8,7 +7,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from wiseman_hub.cloud.sheets import ChecklistRow
-from wiseman_hub.pdf.checklist_c import CPlacementResult, CPlacementStatus
+from wiseman_hub.config import ChecklistConfig, ReportStaffEntry
+from wiseman_hub.pdf.checklist_c import (
+    CPlacementResult,
+    CPlacementStatus,
+    cache_key,
+    plan_c_placement,
+    resolve_xlsx,
+)
 
 
 def _row(name: str = "テスト 太郎", staff: str = "宮下", facility: str = "事業所A") -> ChecklistRow:
@@ -74,3 +80,152 @@ def test_result_can_record_folder_tree() -> None:
     assert result.folder_tree is not None
     assert result.folder_tree["name"] == "PT 宮下"
     assert result.folder_tree["children"][0]["name"] == "リハ経過報告書"
+
+
+# ---------- T3: resolve_xlsx ----------
+
+
+def _entry_with_xlsx(tmp_path: Path) -> tuple[ReportStaffEntry, Path]:
+    """テスト用 PT 宮下 fixture を作って ReportStaffEntry を返す。"""
+    base = tmp_path / "PT 宮下"
+    (base / "リハ経過報告書" / "令和8年").mkdir(parents=True)
+    xlsx = base / "リハ経過報告書" / "令和8年" / "リハ経過報告書（宮下）3月    .xlsx"
+    xlsx.write_text("")
+    entry = ReportStaffEntry(
+        base_dir=str(base),
+        suggest_patterns=["リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx"],
+    )
+    return entry, xlsx
+
+
+def test_cache_key_format() -> None:
+    assert cache_key("宮下", 2026, 3) == "宮下:2026:3"
+
+
+def test_resolve_xlsx_cache_hit_returns_pending(tmp_path: Path) -> None:
+    entry, xlsx = _entry_with_xlsx(tmp_path)
+    cache = {"宮下:2026:3": str(xlsx)}
+    result = resolve_xlsx("宮下", entry, 2026, 3, cache)
+    assert result.status == CPlacementStatus.PENDING
+    assert result.xlsx_path == xlsx
+
+
+def test_resolve_xlsx_cache_stale_falls_through(tmp_path: Path) -> None:
+    entry, _ = _entry_with_xlsx(tmp_path)
+    cache = {"宮下:2026:3": str(tmp_path / "missing" / "stale.xlsx")}
+    result = resolve_xlsx("宮下", entry, 2026, 3, cache)
+    # cache stale で fall through、suggest_patterns で候補発見
+    assert result.status == CPlacementStatus.NEEDS_REVIEW
+    assert len(result.candidates) == 1
+
+
+def test_resolve_xlsx_candidates_returns_needs_review(tmp_path: Path) -> None:
+    entry, xlsx = _entry_with_xlsx(tmp_path)
+    cache: dict[str, str] = {}
+    result = resolve_xlsx("宮下", entry, 2026, 3, cache)
+    # 候補単独でも自動確定しない（NEEDS_REVIEW）
+    assert result.status == CPlacementStatus.NEEDS_REVIEW
+    assert result.candidates == [xlsx]
+
+
+def test_resolve_xlsx_legacy_template_fallback(tmp_path: Path) -> None:
+    """suggest_patterns 空 + 旧 *_template が完全 path を生成する場合は PENDING。"""
+    base = tmp_path / "PT 宮下"
+    (base / "リハ経過報告書" / "令和8年").mkdir(parents=True)
+    xlsx = base / "リハ経過報告書" / "令和8年" / "report.xlsx"
+    xlsx.write_text("")
+    entry = ReportStaffEntry(
+        base_dir=str(base),
+        suggest_patterns=[],
+        year_subfolder_template="リハ経過報告書/令和{era}年",
+        file_template="report.xlsx",
+    )
+    cache: dict[str, str] = {}
+    result = resolve_xlsx("宮下", entry, 2026, 3, cache)
+    assert result.status == CPlacementStatus.PENDING
+    assert result.xlsx_path == xlsx
+
+
+def test_resolve_xlsx_no_candidates_returns_folder_tree(tmp_path: Path) -> None:
+    base = tmp_path / "PT 宮下"
+    (base / "リハ経過報告書").mkdir(parents=True)
+    # xlsx 不在
+    entry = ReportStaffEntry(
+        base_dir=str(base),
+        suggest_patterns=["リハ経過報告書/令和{era}年/*.xlsx"],
+    )
+    result = resolve_xlsx("宮下", entry, 2026, 3, cache={})
+    assert result.status == CPlacementStatus.NEEDS_REVIEW
+    assert result.folder_tree is not None
+    assert result.folder_tree["name"] == "PT 宮下"
+
+
+def test_resolve_xlsx_missing_base_dir_returns_skipped(tmp_path: Path) -> None:
+    entry = ReportStaffEntry(
+        base_dir=str(tmp_path / "nowhere"),
+        suggest_patterns=["x/y.xlsx"],
+    )
+    result = resolve_xlsx("宮下", entry, 2026, 3, cache={})
+    assert result.status == CPlacementStatus.SKIPPED_NO_XLSX
+
+
+def test_resolve_xlsx_empty_base_dir_returns_skipped() -> None:
+    entry = ReportStaffEntry(base_dir="", suggest_patterns=["x.xlsx"])
+    result = resolve_xlsx("宮下", entry, 2026, 3, cache={})
+    assert result.status == CPlacementStatus.SKIPPED_NO_XLSX
+
+
+# ---------- T3: plan_c_placement 統合 ----------
+
+
+def _checklist_cfg(
+    tmp_path: Path,
+    *,
+    cache: dict[str, str] | None = None,
+    routing: dict[str, str] | None = None,
+    suggest: list[str] | None = None,
+) -> tuple[ChecklistConfig, Path]:
+    fax_root = tmp_path / "FAX"
+    fax_root.mkdir()
+    base = tmp_path / "PT 宮下"
+    (base / "リハ経過報告書" / "令和8年").mkdir(parents=True)
+    xlsx = base / "リハ経過報告書" / "令和8年" / "リハ経過報告書（宮下）3月    .xlsx"
+    xlsx.write_text("")
+    entry = ReportStaffEntry(
+        base_dir=str(base),
+        suggest_patterns=suggest
+        or ["リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx"],
+    )
+    cfg = ChecklistConfig(
+        fax_root=str(fax_root),
+        c_output_subfolder="経過報告書",
+        facility_routing=routing or {"事業所A": "事業所A_FAX"},
+        report_staff={"宮下": entry},
+        xlsx_path_cache=cache or {},
+    )
+    return cfg, xlsx
+
+
+def test_plan_c_placement_skipped_no_facility(tmp_path: Path) -> None:
+    cfg, _ = _checklist_cfg(tmp_path, routing={})
+    rows = [ChecklistRow(name="X", monitoring_raw=None, staff="宮下", facility="未登録居宅")]
+    results = plan_c_placement(rows, cfg, 2026, 3)
+    assert results[0].status == CPlacementStatus.SKIPPED_NO_FACILITY
+
+
+def test_plan_c_placement_skipped_no_staff(tmp_path: Path) -> None:
+    cfg, _ = _checklist_cfg(tmp_path)
+    rows = [ChecklistRow(name="X", monitoring_raw=None, staff="未知担当者", facility="事業所A")]
+    results = plan_c_placement(rows, cfg, 2026, 3)
+    assert results[0].status == CPlacementStatus.SKIPPED_NO_STAFF
+
+
+def test_plan_c_placement_needs_review_propagates_candidates(tmp_path: Path) -> None:
+    """cache miss で candidates が CPlacementResult に伝搬。"""
+    cfg, xlsx = _checklist_cfg(tmp_path)
+    rows = [ChecklistRow(name="X", monitoring_raw=None, staff="宮下", facility="事業所A")]
+    results = plan_c_placement(rows, cfg, 2026, 3)
+    assert results[0].status == CPlacementStatus.NEEDS_REVIEW
+    assert results[0].xlsx_candidates == [xlsx]
+    # NEEDS_REVIEW 段階では target_pdf は確定しない
+    assert results[0].target_pdf is None
