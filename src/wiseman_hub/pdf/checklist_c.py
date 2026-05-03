@@ -19,6 +19,7 @@ import logging
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 from openpyxl import load_workbook
 
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 class CPlacementStatus(StrEnum):
     PENDING = "pending"
     SUCCESS = "success"
+    NEEDS_REVIEW = "needs_review"  # cache miss + 候補あり/なし、人間レビュー UI で選択待ち
     SKIPPED_NO_FACILITY = "skipped_no_facility"
     SKIPPED_NO_STAFF = "skipped_no_staff"  # 担当者マッピング未登録
     SKIPPED_NO_XLSX = "skipped_no_xlsx"
@@ -42,12 +44,24 @@ class CPlacementStatus(StrEnum):
 
 @dataclass
 class CPlacementResult:
+    """C 配置プランの 1 行分の結果。
+
+    NEEDS_REVIEW 時のフィールド:
+        xlsx_candidates: scanner が glob 抽出した候補 xlsx の絶対パス list
+        rejected_candidates: 候補から除外したパス → 除外理由（例: "staff_token_mismatch"）
+        folder_tree: 候補ゼロ時に UI で表示する base_dir 配下のフォルダツリー。
+            形式は ``{"name": str, "path": str, "is_dir": bool, "children": [...]}``。
+    """
+
     row: ChecklistRow
     status: CPlacementStatus = CPlacementStatus.PENDING
     xlsx_path: Path | None = None
     sheet_name: str | None = None
     target_pdf: Path | None = None
     sheet_candidates: list[str] = field(default_factory=list)
+    xlsx_candidates: list[Path] = field(default_factory=list)
+    rejected_candidates: dict[Path, str] = field(default_factory=dict)
+    folder_tree: dict[str, Any] | None = None
     message: str = ""
 
 

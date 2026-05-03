@@ -225,13 +225,21 @@ class ReportStaffEntry:
     """C(経過報告書) 用に、担当者ごとの xlsx 配置ルールを定義する。
 
     base_dir: 担当者フォルダの絶対パス（例: ``\\\\Tera-station\\share\\PT 宮下``）
-    year_subfolder_template: base_dir 配下の年フォルダ template。``{era}`` は令和年（数値）
-        例: ``リハ経過報告書\\令和{era}年`` / ``経過報告書\\R{era}``
-    file_template: 月別 xlsx ファイル名 template。``{era}`` / ``{month}`` を埋め込む
-        例: ``リハ経過報告書 (宮下) {month}月 .xlsx`` / ``経過報告書 R{era}.{month}.xlsx``
+    suggest_patterns: 候補 xlsx を絞り込む glob 風パターン（``{era}``/``{month}`` 埋め込み可）。
+        複数指定可能で、上から順に試行され、いずれかに該当する xlsx を全て候補とする。
+        パターン階層は ``/`` 区切り、ワイルドカード ``*`` のみサポート（再帰 ``**`` 不可）。
+        例（PT 宮下）: ``["リハ経過報告書/令和*年/リハ経過報告書*{month}月*.xlsx"]``
+        例（PT 木塚）: ``["経過報告書/令和*年度*/経過報告書*木塚*{month}月*.xlsx"]``
+        空 list の場合は year_subfolder_template/file_template にフォールバック（後方互換）。
+
+    year_subfolder_template / file_template:
+        旧 MVP 互換フィールド（deprecated、suggest_patterns が空の場合のみ使用）。
+        新規入力では suggest_patterns を使うこと。
     """
 
     base_dir: str = ""
+    suggest_patterns: list[str] = field(default_factory=list)
+    # deprecated（後方互換、suggest_patterns 空時のフォールバック）
     year_subfolder_template: str = ""
     file_template: str = ""
 
@@ -248,6 +256,10 @@ class ChecklistConfig:
     c_output_subfolder: FAX 事業所フォルダ配下の C 出力サブフォルダ名（経過報告書）
     facility_routing: 居宅名（スプレッドシート O 列） → FAX 事業所フォルダ名 の辞書
     report_staff: 担当者名 → ReportStaffEntry の辞書（C 用 xlsx パス解決）
+    xlsx_path_cache: 確定済み xlsx パスのキャッシュ。キー形式は ``"{staff}:{year}:{month}"``
+        （例: ``"宮下:2026:3"``）、値は xlsx の絶対パス文字列。レビュー UI で
+        ユーザーが選択した結果を永続化し、次回以降は cache hit で自動解決する。
+        cache stale（path 不在）時はミスして再 scan する。
     """
 
     spreadsheet_id: str = "18RPsg3Ya0r7djQVzED5KAa5KyhbB9YRm"
@@ -258,6 +270,7 @@ class ChecklistConfig:
     c_output_subfolder: str = "経過報告書"
     facility_routing: dict[str, str] = field(default_factory=dict)
     report_staff: dict[str, ReportStaffEntry] = field(default_factory=dict)
+    xlsx_path_cache: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -300,6 +313,32 @@ def _coerce_facility_aliases(aliases_data: Any) -> dict[str, list[str]]:
             normalized.append(element)
         coerced[canonical] = normalized
     return coerced
+
+
+def _coerce_report_staff_entry(staff_name: str, entry_data: dict[str, Any]) -> ReportStaffEntry:
+    """TOML の checklist.report_staff.<name> table を ReportStaffEntry に強制変換する。
+
+    suggest_patterns は list[str] の正規化（list でない型は TypeError、要素が str でなければ TypeError）。
+    deprecated フィールド（year_subfolder_template / file_template）は str 強制。
+    PII 配慮: 例外メッセージに担当者名は含めるが（運用上トラブルシュートに必要）、
+    パス値は含めない（NAS 構造はログ送信先で機密扱いになる）。
+    """
+    suggest_data = entry_data.pop("suggest_patterns", [])
+    suggest_patterns: list[str] = []
+    if suggest_data:
+        if not isinstance(suggest_data, list):
+            raise TypeError(
+                f"checklist.report_staff.{staff_name}.suggest_patterns must be a list of strings; "
+                f"got {type(suggest_data).__name__}"
+            )
+        for element in suggest_data:
+            if not isinstance(element, str):
+                raise TypeError(
+                    f"checklist.report_staff.{staff_name}.suggest_patterns elements must be strings; "
+                    f"got {type(element).__name__}"
+                )
+            suggest_patterns.append(element)
+    return ReportStaffEntry(suggest_patterns=suggest_patterns, **entry_data)
 
 
 def _validate_facility_aliases(aliases: dict[str, list[str]]) -> None:
@@ -442,6 +481,7 @@ def load_config(path: Path | None = None) -> AppConfig:
     checklist_data = dict(data.get("checklist", {}))
     routing_data = checklist_data.pop("facility_routing", {})
     staff_data = checklist_data.pop("report_staff", {})
+    cache_data = checklist_data.pop("xlsx_path_cache", {})
     facility_routing: dict[str, str] = {}
     if routing_data:
         if not isinstance(routing_data, dict):
@@ -467,11 +507,28 @@ def load_config(path: Path | None = None) -> AppConfig:
                 raise TypeError(
                     "checklist.report_staff entries must be tables"
                 )
-            report_staff[str(staff_name)] = ReportStaffEntry(**entry_data)
+            normalized_entry = _coerce_report_staff_entry(
+                str(staff_name), dict(entry_data)
+            )
+            report_staff[str(staff_name)] = normalized_entry
+    xlsx_path_cache: dict[str, str] = {}
+    if cache_data:
+        if not isinstance(cache_data, dict):
+            raise TypeError(
+                f"[checklist.xlsx_path_cache] must be a table; "
+                f"got {type(cache_data).__name__}"
+            )
+        for key, value in cache_data.items():
+            if not isinstance(value, str):
+                raise TypeError(
+                    "checklist.xlsx_path_cache values must be strings"
+                )
+            xlsx_path_cache[str(key)] = value
     checklist = ChecklistConfig(
         **checklist_data,
         facility_routing=facility_routing,
         report_staff=report_staff,
+        xlsx_path_cache=xlsx_path_cache,
     )
 
     return AppConfig(
@@ -570,56 +627,71 @@ def _set_facility_aliases(
 
 
 def _update_checklist(doc: TOMLDocument, checklist: ChecklistConfig) -> None:
-    """[checklist] とネスト [checklist.facility_routing] / [checklist.report_staff.<name>] を書き戻す。
+    """[checklist] とネスト dict（facility_routing / report_staff / xlsx_path_cache）を書き戻す。
 
-    facility_routing / report_staff は動的キー dict のため pdf_merge と同じく完全置換する。
+    動的キー dict は pdf_merge と同じく完全置換する。report_staff entry の suggest_patterns
+    は list[str] のため tomlkit.array() で構築する。
     """
     routing = dict(checklist.facility_routing)
     staff = {
         name: asdict(entry) for name, entry in checklist.report_staff.items()
     }
+    cache = dict(checklist.xlsx_path_cache)
     checklist_dict = asdict(checklist)
     checklist_dict.pop("facility_routing", None)
     checklist_dict.pop("report_staff", None)
+    checklist_dict.pop("xlsx_path_cache", None)
+
+    def _build_routing_table() -> Table:
+        routing_table = tomlkit.table()
+        for k, v in routing.items():
+            routing_table[k] = v
+        return routing_table
+
+    def _build_staff_table() -> Table:
+        staff_table = tomlkit.table()
+        for name, entry in staff.items():
+            inner = tomlkit.table()
+            for k, v in entry.items():
+                if isinstance(v, list):
+                    arr = tomlkit.array()
+                    for element in v:
+                        arr.append(element)
+                    inner[k] = arr
+                else:
+                    inner[k] = v
+            staff_table[name] = inner
+        return staff_table
+
+    def _build_cache_table() -> Table:
+        cache_table = tomlkit.table()
+        for k, v in cache.items():
+            cache_table[k] = v
+        return cache_table
 
     if "checklist" in doc:
         table = _require_table(doc, "checklist")
         for key, value in checklist_dict.items():
             table[key] = value
-        if "facility_routing" in table:
-            del table["facility_routing"]
-        if "report_staff" in table:
-            del table["report_staff"]
+        for nested in ("facility_routing", "report_staff", "xlsx_path_cache"):
+            if nested in table:
+                del table[nested]
         if routing:
-            routing_table = tomlkit.table()
-            for k, v in routing.items():
-                routing_table[k] = v
-            table["facility_routing"] = routing_table
+            table["facility_routing"] = _build_routing_table()
         if staff:
-            staff_table = tomlkit.table()
-            for name, entry in staff.items():
-                inner = tomlkit.table()
-                for k, v in entry.items():
-                    inner[k] = v
-                staff_table[name] = inner
-            table["report_staff"] = staff_table
+            table["report_staff"] = _build_staff_table()
+        if cache:
+            table["xlsx_path_cache"] = _build_cache_table()
     else:
         new_table = tomlkit.table()
         for key, value in checklist_dict.items():
             new_table[key] = value
         if routing:
-            routing_table = tomlkit.table()
-            for k, v in routing.items():
-                routing_table[k] = v
-            new_table["facility_routing"] = routing_table
+            new_table["facility_routing"] = _build_routing_table()
         if staff:
-            staff_table = tomlkit.table()
-            for name, entry in staff.items():
-                inner = tomlkit.table()
-                for k, v in entry.items():
-                    inner[k] = v
-                staff_table[name] = inner
-            new_table["report_staff"] = staff_table
+            new_table["report_staff"] = _build_staff_table()
+        if cache:
+            new_table["xlsx_path_cache"] = _build_cache_table()
         doc["checklist"] = new_table
 
 

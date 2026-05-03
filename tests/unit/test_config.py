@@ -8,9 +8,11 @@ import pytest
 
 from wiseman_hub.config import (
     AppConfig,
+    ChecklistConfig,
     ConcatSourceLetter,
     OcrBackendConfig,
     PdfMergeConfig,
+    ReportStaffEntry,
     UserNameBBox,
     load_config,
     save_config,
@@ -1329,3 +1331,171 @@ class TestSaKeyPathResolution:
         )
         config = load_config(cfg_path)
         assert config.gcp.service_account_key_path == ""
+
+
+class TestChecklistStaffPathExtension:
+    """T1: report_staff suggest_patterns + xlsx_path_cache の TOML 往復・検証。"""
+
+    def test_load_suggest_patterns(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            """\
+[checklist.report_staff."宮下"]
+base_dir = "\\\\\\\\Tera-station\\\\share\\\\PT 宮下"
+suggest_patterns = [
+    "リハ経過報告書/令和*年/リハ経過報告書*{month}月*.xlsx",
+]
+""",
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        entry = cfg.checklist.report_staff["宮下"]
+        assert entry.base_dir == "\\\\Tera-station\\share\\PT 宮下"
+        assert entry.suggest_patterns == [
+            "リハ経過報告書/令和*年/リハ経過報告書*{month}月*.xlsx",
+        ]
+        # deprecated フィールドは空のまま
+        assert entry.year_subfolder_template == ""
+        assert entry.file_template == ""
+
+    def test_load_legacy_template_only_entry(self, tmp_path: Path) -> None:
+        """後方互換: 旧 *_template のみの entry が動く（suggest_patterns 未指定）。"""
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            """\
+[checklist.report_staff."宮下"]
+base_dir = "\\\\\\\\Tera-station\\\\share\\\\PT 宮下"
+year_subfolder_template = "リハ経過報告書\\\\令和{era}年"
+file_template = "リハ経過報告書 (宮下) {month}月 .xlsx"
+""",
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        entry = cfg.checklist.report_staff["宮下"]
+        assert entry.suggest_patterns == []
+        assert entry.year_subfolder_template == "リハ経過報告書\\令和{era}年"
+        assert entry.file_template == "リハ経過報告書 (宮下) {month}月 .xlsx"
+
+    def test_suggest_patterns_must_be_list(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            """\
+[checklist.report_staff."宮下"]
+base_dir = "/x"
+suggest_patterns = "not-a-list"
+""",
+            encoding="utf-8",
+        )
+        with pytest.raises(TypeError, match="suggest_patterns must be a list"):
+            load_config(cfg_path)
+
+    def test_suggest_patterns_elements_must_be_str(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            """\
+[checklist.report_staff."宮下"]
+base_dir = "/x"
+suggest_patterns = ["ok", 123]
+""",
+            encoding="utf-8",
+        )
+        with pytest.raises(TypeError, match="elements must be strings"):
+            load_config(cfg_path)
+
+    def test_load_xlsx_path_cache(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            """\
+[checklist.xlsx_path_cache]
+"宮下:2026:3" = "\\\\\\\\Tera-station\\\\share\\\\PT 宮下\\\\xx.xlsx"
+"小島:2026:3" = "\\\\\\\\Tera-station\\\\share\\\\PT 小島\\\\yy.xlsx"
+""",
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        cache = cfg.checklist.xlsx_path_cache
+        assert cache["宮下:2026:3"] == "\\\\Tera-station\\share\\PT 宮下\\xx.xlsx"
+        assert cache["小島:2026:3"] == "\\\\Tera-station\\share\\PT 小島\\yy.xlsx"
+
+    def test_xlsx_path_cache_must_be_table(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            """\
+[checklist]
+xlsx_path_cache = "not-a-table"
+""",
+            encoding="utf-8",
+        )
+        with pytest.raises(TypeError, match="xlsx_path_cache.*must be a table"):
+            load_config(cfg_path)
+
+    def test_xlsx_path_cache_values_must_be_str(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            """\
+[checklist.xlsx_path_cache]
+"宮下:2026:3" = 12345
+""",
+            encoding="utf-8",
+        )
+        with pytest.raises(TypeError, match="xlsx_path_cache values must be strings"):
+            load_config(cfg_path)
+
+    def test_save_roundtrip_preserves_suggest_patterns_and_cache(
+        self, tmp_path: Path
+    ) -> None:
+        """save_config → load_config で suggest_patterns と xlsx_path_cache が完全保持。"""
+        cfg = AppConfig()
+        cfg.checklist = ChecklistConfig(
+            report_staff={
+                "宮下": ReportStaffEntry(
+                    base_dir="\\\\Tera-station\\share\\PT 宮下",
+                    suggest_patterns=[
+                        "リハ経過報告書/令和*年/リハ経過報告書*{month}月*.xlsx",
+                    ],
+                ),
+                "小島": ReportStaffEntry(
+                    base_dir="\\\\Tera-station\\share\\PT 小島",
+                    suggest_patterns=[
+                        "リハ経過報告書(新)/経過報告書*令和*{month}月(最新)*.xlsx",
+                    ],
+                ),
+            },
+            xlsx_path_cache={
+                "宮下:2026:3": "\\\\Tera-station\\share\\PT 宮下\\a.xlsx",
+                "小島:2026:3": "\\\\Tera-station\\share\\PT 小島\\b.xlsx",
+            },
+        )
+        target = tmp_path / "out.toml"
+        save_config(cfg, target, create_if_missing=True)
+        reloaded = load_config(target)
+        assert reloaded.checklist.report_staff["宮下"].suggest_patterns == [
+            "リハ経過報告書/令和*年/リハ経過報告書*{month}月*.xlsx",
+        ]
+        assert reloaded.checklist.report_staff["小島"].suggest_patterns == [
+            "リハ経過報告書(新)/経過報告書*令和*{month}月(最新)*.xlsx",
+        ]
+        assert reloaded.checklist.xlsx_path_cache == {
+            "宮下:2026:3": "\\\\Tera-station\\share\\PT 宮下\\a.xlsx",
+            "小島:2026:3": "\\\\Tera-station\\share\\PT 小島\\b.xlsx",
+        }
+
+    def test_save_roundtrip_with_legacy_template_entry(self, tmp_path: Path) -> None:
+        """旧 *_template のみのエントリも save_config 経由で TOML 往復可能。"""
+        cfg = AppConfig()
+        cfg.checklist = ChecklistConfig(
+            report_staff={
+                "宮下": ReportStaffEntry(
+                    base_dir="\\\\Tera-station\\share\\PT 宮下",
+                    year_subfolder_template="リハ経過報告書\\令和{era}年",
+                    file_template="リハ経過報告書 (宮下) {month}月 .xlsx",
+                ),
+            },
+        )
+        target = tmp_path / "out.toml"
+        save_config(cfg, target, create_if_missing=True)
+        reloaded = load_config(target)
+        entry = reloaded.checklist.report_staff["宮下"]
+        assert entry.suggest_patterns == []
+        assert entry.year_subfolder_template == "リハ経過報告書\\令和{era}年"
+        assert entry.file_template == "リハ経過報告書 (宮下) {month}月 .xlsx"
