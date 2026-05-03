@@ -318,14 +318,17 @@ def _coerce_facility_aliases(aliases_data: Any) -> dict[str, list[str]]:
 def _coerce_report_staff_entry(staff_name: str, entry_data: dict[str, Any]) -> ReportStaffEntry:
     """TOML の checklist.report_staff.<name> table を ReportStaffEntry に強制変換する。
 
-    suggest_patterns は list[str] の正規化（list でない型は TypeError、要素が str でなければ TypeError）。
+    suggest_patterns は list[str] の正規化:
+        - キー存在 + 値が list でない → TypeError（空文字 ``""`` も不正、Codex review M6 対策）
+        - 要素が str でない → TypeError
+        - 空 list ``[]`` は正当（旧 *_template フォールバック対象）
     deprecated フィールド（year_subfolder_template / file_template）は str 強制。
     PII 配慮: 例外メッセージに担当者名は含めるが（運用上トラブルシュートに必要）、
     パス値は含めない（NAS 構造はログ送信先で機密扱いになる）。
     """
-    suggest_data = entry_data.pop("suggest_patterns", [])
     suggest_patterns: list[str] = []
-    if suggest_data:
+    if "suggest_patterns" in entry_data:
+        suggest_data = entry_data.pop("suggest_patterns")
         if not isinstance(suggest_data, list):
             raise TypeError(
                 f"checklist.report_staff.{staff_name}.suggest_patterns must be a list of strings; "

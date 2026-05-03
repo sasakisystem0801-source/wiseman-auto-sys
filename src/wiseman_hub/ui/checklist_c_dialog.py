@@ -263,8 +263,19 @@ class ChecklistCDialog:
             self._status_var.set("選択キャンセル")
             return
 
-        # cache に追加（記憶チェック ON 時のみ）
-        if remember and self._config_path is not None:
+        # 先に result を選択 xlsx で再評価（in-place）してから cache 判断
+        # 重要: シート未発見等で SKIPPED になった選択は cache に残してはいけない
+        # （次回 cache hit で誤った xlsx を自動使用するリスク防止 / Codex review HIGH-1）
+        apply_xlsx_selection(r, selected, self._config.checklist)
+        self._refresh_tree()
+        self._update_exec_button()
+
+        # cache 永続化は status=PENDING（シート検査も通った）場合のみ
+        if (
+            remember
+            and r.status == CPlacementStatus.PENDING
+            and self._config_path is not None
+        ):
             year, month = self._current_year_month()
             if year is not None and month is not None:
                 key = cache_key(r.row.staff, year, month)
@@ -279,10 +290,6 @@ class ChecklistCDialog:
                         parent=self._top,
                     )
 
-        # result を選択 xlsx で再評価（in-place）
-        apply_xlsx_selection(r, selected, self._config.checklist)
-        self._refresh_tree()
-        self._update_exec_button()
         if r.status == CPlacementStatus.PENDING:
             self._status_var.set(f"{r.row.name}: 選択完了 → 実行待ち")
         else:
