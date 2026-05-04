@@ -868,7 +868,9 @@ class TestManualSelectWiring:
 
         dialog._on_manual_select()
 
-        cand = session.candidates[0]
+        # Issue #44 immutable 化: 元 `session` 変数は mutation されないので
+        # 更新後の状態は `dialog._session`（_apply_update が新 Session を代入）から取得する。
+        cand = dialog._session.candidates[0]
         assert cand.status == PairStatus.MANUALLY_SELECTED
         assert cand.matched_b_path == "/manual/B.pdf"
         assert cand.matched_c_path == "/manual/C.pdf"
@@ -907,9 +909,11 @@ class TestManualSelectWiring:
         dialog._on_manual_select()
 
         assert len(mb.askyesno_calls) == 1
-        assert session.candidates[0].status == PairStatus.MANUALLY_SELECTED
-        assert session.candidates[0].matched_b_path == "/manual/B.pdf"
-        assert session.candidates[0].matched_c_path is None
+        # Issue #44 immutable 化: 更新後の状態は `dialog._session` から取得
+        cand = dialog._session.candidates[0]
+        assert cand.status == PairStatus.MANUALLY_SELECTED
+        assert cand.matched_b_path == "/manual/B.pdf"
+        assert cand.matched_c_path is None
 
     def test_partial_selection_asks_confirm_no(self, tk_root: tk.Tk) -> None:
         """片側のみ選択 → askyesno → no → no-op（save 呼出なし）"""
