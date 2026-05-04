@@ -1,12 +1,52 @@
-# Handoff: Session 41 - PR #177 (PR-α v3) 担当者 xlsx パス cache + サジェスト UI 完成、reviewer HIGH 全反映
+# Handoff: Session 42 - C 業務化 SDD 移行（spec/tasks 整備、PR #180）
 
-**更新日**: 2026-05-04（Session 41 / Mac 開発機）
-**main HEAD**: `c949fbf` docs(handoff): LATEST.md にハーネス強化セクション追加（Session 40 補完）
-**作業ブランチ**: `feature/staff-path-sync` HEAD `6716545`（push 済、PR #177 OPEN、PR #172 にスタック）
+**更新日**: 2026-05-04（Session 42 / Mac 開発機）
+**main HEAD**: `f71a512` docs(handoff): Session 41 完了 (#178)
+**作業ブランチ**: `docs/c-business-deployment-spec` HEAD `f06e923`（PR #180 OPEN、ドキュメント整備）
 
 ---
 
-## 🎯 Session 41 の最大成果
+## 🚪 まずここを読む（次セッション最初の入口）
+
+C 機能（経過報告書配置）の業務化に関する**業務全体像 / マッチング設計 / カオス問題 / 成功条件**は `specs/c-business-deployment/spec.md` に統合済。**業務文脈は本 LATEST.md ではなく spec を先に読むこと**。
+
+| ファイル | 役割 | 想定読み手 |
+|---------|------|----------|
+| [specs/c-business-deployment/spec.md](../../specs/c-business-deployment/spec.md) | C 業務化の単一 source of truth（業務目的+マッチングフロー+カオス問題+ADR-015 引継+B 処理パターン+成功条件） | catchup 直後の AI agent / 新規参加者 |
+| [specs/c-business-deployment/tasks.md](../../specs/c-business-deployment/tasks.md) | 残タスク（Phase 1-6）+ 完了済タスク + ブロッカー/リスク | 進捗追跡担当 |
+| 本 LATEST.md | **セッション差分メモ**（前セッションで何が変わったか + 次セッション直近のアクション） | 引き継ぎ確認担当 |
+
+`docs/handoff/LATEST.md` は本来 Session 差分専用。業務全体像との混在は wiseman 特有の問題として spec 整備で解消（Session 42 / PR #180）。
+
+---
+
+## 🎯 Session 42 の成果
+
+### PR #178（Session 41 handoff）+ PR #176（Session 40 handoff）+ PR #179（PR-α v3 = 旧 #177）+ PR #172（B/C MVP）すべて main マージ完了
+
+詳細経緯は spec の「実装状態」セクション参照。
+
+### PR #180（本セッションで作成中、進行中）: C 業務化 spec/tasks 整備
+
+- `specs/c-business-deployment/spec.md`（233 行、上記入口リンク先）
+- `specs/c-business-deployment/tasks.md`（132 行、Phase 1-6 残タスク）
+- 本 LATEST.md 改定（業務全体像を spec 参照に縮退、セッション差分メモ役割に戻す）
+
+### Session 42 で得た最大の教訓
+
+「**handoff/catchup 機構は他プロジェクトで正常機能、wiseman 特有の業務文脈統合不在が問題**」。グローバル設定変更ではなくプロジェクトレベルで spec/tasks 整備して解決（Codex セカンドオピニオン同意）。
+
+---
+
+## ⏭ 次セッションの直近アクション（残作業は spec/tasks 参照）
+
+1. **PR #180 マージ判断**（番号単位明示認可待ち、ドキュメントのみ）
+2. **Phase 1-5 実機作業**: `specs/c-business-deployment/tasks.md` の Phase 1（exe 反映）→ Phase 2（5 担当者 suggest_patterns 投入）→ Phase 3（cache populate）→ Phase 4（配置実行）→ Phase 5（業務継続性）
+3. **Phase 6 振り返り**: 実機ペインポイント観測、必要なら Stage 0（GCS スナップショット + AI 駆動 mapping）の縮小版設計判断（Codex 推奨は YAGNI 維持）
+
+---
+
+## 🎯 Session 41 の最大成果（保存：参考・既マージ済）
 
 ### PR #177 (PR-α v3) 完成 + reviewer HIGH 6 件全反映
 
