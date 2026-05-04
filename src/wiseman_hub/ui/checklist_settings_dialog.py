@@ -420,15 +420,30 @@ def _routing_to_toml(routing: dict[str, str]) -> str:
 
 
 def _staff_to_toml(staff: dict[str, ReportStaffEntry]) -> str:
-    """担当者マッピングを TOML 風テキスト（``[name]\\n  key = "v"``）に変換。"""
+    """担当者マッピングを TOML 風テキスト（``[name]\\n  key = "v"``）に変換。
+
+    PR #179 (PR-α v3) で追加された ``suggest_patterns`` (list[str]) も書き出す。
+    deprecated フィールド (``year_subfolder_template`` / ``file_template``) は
+    値が非空のときのみ書き出す（後方互換）。
+    """
     lines: list[str] = []
     for name, entry in staff.items():
         lines.append(f'["{name}"]')
         lines.append(f'base_dir = "{_escape_toml(entry.base_dir)}"')
-        lines.append(
-            f'year_subfolder_template = "{_escape_toml(entry.year_subfolder_template)}"'
-        )
-        lines.append(f'file_template = "{_escape_toml(entry.file_template)}"')
+        if entry.suggest_patterns:
+            inner = ", ".join(
+                f'"{_escape_toml(p)}"' for p in entry.suggest_patterns
+            )
+            lines.append(f"suggest_patterns = [{inner}]")
+        else:
+            lines.append("suggest_patterns = []")
+        # deprecated 後方互換: 値が空なら出力しない（新規入力では suggest_patterns を使う）
+        if entry.year_subfolder_template:
+            lines.append(
+                f'year_subfolder_template = "{_escape_toml(entry.year_subfolder_template)}"'
+            )
+        if entry.file_template:
+            lines.append(f'file_template = "{_escape_toml(entry.file_template)}"')
         lines.append("")
     return "\n".join(lines)
 
@@ -454,7 +469,11 @@ def _parse_routing_toml(text: str) -> dict[str, str]:
 
 
 def _parse_staff_toml(text: str) -> dict[str, ReportStaffEntry]:
-    """``[名前]\\n  base_dir = "..."`` 形式を解析して ReportStaffEntry の dict に。"""
+    """``[名前]\\n  base_dir = "..."`` 形式を解析して ReportStaffEntry の dict に。
+
+    PR #179 (PR-α v3) で追加された ``suggest_patterns`` (list[str]) も読み取る。
+    suggest_patterns 要素が文字列でない場合は TypeError を送出（保存前に GUI が検知）。
+    """
     text = text.strip()
     if not text:
         return {}
@@ -465,8 +484,21 @@ def _parse_staff_toml(text: str) -> dict[str, ReportStaffEntry]:
     for name, entry in parsed.items():
         if not isinstance(entry, dict):
             raise TypeError(f"staff[{name}] must be a table")
+        suggest_raw = entry.get("suggest_patterns", [])
+        if not isinstance(suggest_raw, list):
+            raise TypeError(
+                f"staff[{name}].suggest_patterns must be a list of strings"
+            )
+        suggest_patterns: list[str] = []
+        for element in suggest_raw:
+            if not isinstance(element, str):
+                raise TypeError(
+                    f"staff[{name}].suggest_patterns elements must be strings"
+                )
+            suggest_patterns.append(element)
         result[str(name)] = ReportStaffEntry(
             base_dir=str(entry.get("base_dir", "")),
+            suggest_patterns=suggest_patterns,
             year_subfolder_template=str(entry.get("year_subfolder_template", "")),
             file_template=str(entry.get("file_template", "")),
         )
