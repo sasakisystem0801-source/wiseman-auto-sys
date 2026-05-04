@@ -95,8 +95,11 @@ class TestFacilityMergerDialog:
             # 結果テキストに user_key が含まれるが full_name は含まれない（PII 防御）
             text_widget = dialog._result_text  # type: ignore[attr-defined]
             content = text_widget.get("1.0", "end")
-            assert "塩津.pdf" in content
-            assert "A+B+C" in content
+            # 新仕様（facility_merger_dialog.py:254-260）: 出力は事業所単位 1 ファイル
+            # `{facility_name}.pdf`、user は `  ✓ {user_key}` で列挙、結合順は "A→B→C"
+            assert "facility.pdf" in content
+            assert "塩津" in content
+            assert "A→B→C" in content
             assert "美貴子" not in content  # full_name 漏洩チェック
 
             dialog.get_toplevel().destroy()

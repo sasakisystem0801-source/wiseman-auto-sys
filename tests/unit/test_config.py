@@ -1321,7 +1321,9 @@ class TestSaKeyPathResolution:
             encoding="utf-8",
         )
         config = load_config(cfg_path)
-        assert config.gcp.service_account_key_path == abs_key.as_posix()
+        # _resolve_sa_key_path は str(Path) を返す = OS native 区切り
+        # （Windows: "C:\\..\\sa-key.json" / POSIX: "/.../sa-key.json"）
+        assert config.gcp.service_account_key_path == str(abs_key)
 
     def test_empty_value_remains_empty(self, tmp_path: Path) -> None:
         """GCP 機能未使用環境では空文字列のままにする (既存運用維持)。"""
