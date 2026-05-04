@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -84,6 +85,10 @@ class TestWisemanHubWithMock:
         # upload_filesは呼ばれない（CSVがないため）
         mock_upload.assert_not_called()
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="macOS 専用テスト: Windows では PywinautoEngine が選択される正常動作",
+    )
     def test_create_rpa_engine_returns_mock_on_macos(self, tmp_path: Path) -> None:
         """macOS環境ではMockEngineが自動選択される"""
         config_path = self._create_config_toml(tmp_path)

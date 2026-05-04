@@ -16,7 +16,7 @@ import logging
 import os
 import tkinter as tk
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -661,9 +661,11 @@ class _SaveSessionSpy:
     def __init__(self) -> None:
         self.calls: list[Session] = []
 
-    def __call__(self, session: Session, *, sessions_dir: Path) -> Path:
+    def __call__(self, session: Session, *, sessions_dir: Path) -> Session:
+        # Issue #44 immutable 化以降、save_session は Session を返す契約。
+        # spy は updated_at を進めた新 Session を返し、本物 save_session の戻り値型を満たす。
         self.calls.append(session)
-        return sessions_dir / f"{session.session_id}.json"
+        return replace(session, updated_at=datetime.now(UTC).isoformat())
 
 
 class _FailingSaveSession:
@@ -671,7 +673,7 @@ class _FailingSaveSession:
         self.exc = exc
         self.calls = 0
 
-    def __call__(self, session: Session, *, sessions_dir: Path) -> Path:
+    def __call__(self, session: Session, *, sessions_dir: Path) -> Session:
         self.calls += 1
         raise self.exc
 
@@ -981,7 +983,9 @@ class TestCallbackException:
         title, msg = mb.showerror_calls[0]
         assert "内部エラー" in title
         assert "OSError" in msg
-        assert "disk full" in msg  # 画面は PII 露出可
+        # PII 防御: str(exc_value) は path を含み得るため画面表示は型名のみ
+        # （confirm_dialog._on_callback_exception の実装方針に対応）
+        assert "disk full" not in msg
 
         # aborted が伝搬すれば最終結果 resolved_all は False 固定
         assert dialog._aborted is True

@@ -1945,6 +1945,9 @@ class TestImmutability:
         original_updated_at = s.updated_at
         original_status = s.status
 
+        # Windows のタイマー解像度問題回避: datetime.now(UTC).isoformat() が
+        # 同 ms 内呼出で同値になり updated_at != 比較が失敗するため微小 sleep
+        time.sleep(0.002)
         new_s = transition_session(s, SessionStatus.INTERRUPTED_PHASE_A)
 
         assert isinstance(new_s, Session)
