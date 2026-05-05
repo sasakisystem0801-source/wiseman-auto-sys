@@ -1,8 +1,8 @@
 # C 機能業務化 Tasks
 
-**最終更新**: 2026-05-04（Session 42）
+**最終更新**: 2026-05-05（Session 43）
 **spec**: `./spec.md`
-**現在フェーズ**: Phase 1 - 実機反映（着手前）
+**現在フェーズ**: Phase 3 - cache populate（着手前、Session 44 で実施予定）
 
 ---
 
@@ -24,44 +24,67 @@
 - [x] **PR #178** Session 41 handoff マージ
 - [x] Codex セカンドオピニオン取得（Session 42、Stage 0 構想に対する PII / 順序評価）
 
+### Session 43 強化フェーズ（業務化基盤の整備）
+
+- [x] **PR #181** Windows pytest 11 fail 修正（test 側追従漏れ） / Session 43
+- [x] **PR #182** TestManualSelectWiring を immutable session 契約に追従 / Session 43
+- [x] **PR #183** ChecklistSettingsDialog 保存事故防止（suggest_patterns round-trip） / Session 43
+- [x] **PR #184** PR-β v1: report_staff GCS 同期 + 「GCP から担当者を取得」UI ボタン / Session 43
+  - 業務責任者の手動 TOML コピペ運用を「ワンクリック取得」に置換
+  - 初回 GCS 投入スクリプト（`scripts/init_gcs_report_staff.py`）
+- [x] **PR #185** Treeview ヘッダー sort + ステータスサマリー集計を共通化（DRY、C ダイアログ適用） / Session 43
+- [x] **PR #186** PR-γ v1: lookup 表記揺れ吸収正規化レイヤー / Session 43
+  - 全角/半角空白・英数・括弧・連続空白を `normalize_lookup_key` で吸収
+  - 「介護相談支援センター　LEBEN」未マッチ問題を恒常解消
+
+### Phase 1: 実機 exe 反映 ✅ 完了 (Session 43)
+
+- [x] **1-1** リポジトリ最新化（PR #181-#186 順次取込）
+- [x] **1-2** 現行 exe バックアップ（複数世代）
+- [x] **1-3** 依存同期 + テスト（uv sync --extra dev、Mac 1000 PASS、Windows 1014 PASS + 環境 ERROR 1 件）
+- [x] **1-4** Launcher 起動中なら停止
+- [x] **1-5** clean ビルド（pyinstaller 6.19.0 / Python 3.11.9）
+- [x] **1-6** build warning 検査（無害 3 件のみ: `pycparser.lextab` / `pycparser.yacctab` / `jinja2`）
+- [x] **1-7** 配布先に上書き（`$HOME\wiseman-hub\wiseman_hub.exe` Length 79,240,050+α）
+- [x] **1-8** 起動確認（コンソール窓出ない、Launcher 起動、5 ボタン構成、`ImportError` なし、Tk 同梱で環境問題回避を実証）
+
+### Phase 2: 5 担当者の suggest_patterns 投入 ✅ 完了 (Session 43)
+
+PR #184 (PR-β v1) で **設定ダイアログ「GCP から担当者を取得」ボタン** によるワンクリック投入に再設計。手動 TOML 編集は不要。
+
+- [x] **2-1** Mac 側で `scripts/init_gcs_report_staff.py` で 5 担当者初期データ JSON 生成
+- [x] **2-2** Mac 側で `gs://wiseman-hub-prod-datalake/mappings/report-staff-latest.json` に投入
+- [x] **2-3** Windows 機側で C ダイアログ → 設定 → 「GCP から担当者を取得」 → 5 件取得
+- [x] **2-4** 「保存」ボタンで `default.toml` 永続化
+- [x] **2-5** 設定ダイアログ再オープンで 5 担当者の TOML が round-trip 保持されていることを確認 (PR #183 fix の実機実証)
+
+実機 NAS 確認結果:
+- PT 全員: 半角空白あり（`\\Tera-station\share\PT 宮下` 等）
+- OT 小林のみ: 空白なし（`\\Tera-station\share\OT小林`）
+
+### Phase 2 補完: 居宅マッピング不足の AI 自動補完 ✅ 完了 (Session 43)
+
+「対象行を読込」で発覚した未登録 9 件 (4 種類) を Session 40 B 処理パターンで AI 自動マッチング:
+
+- [x] **2-6** GCS スナップショット (`fax-folders-20260502-075905.json`) を pull
+- [x] **2-7** AI で 4 種類 (あんサポートオフィス / 大津みやび野ホーム / まほろばの里 / 介護相談支援センター LEBEN) を FAX フォルダ実体と match
+- [x] **2-8** Mac から push_routing で 4 件追加 (39 → 43 件)
+- [x] **2-9** 全角空白版「介護相談支援センター　LEBEN」も追加で push (43 → 44 件)
+- [x] **2-10** Windows 機側で「GCP から対照表を取得」 → 44 件取得 → 保存
+
+Phase 2 補完後の状態:
+- ⚠ 居宅未登録: 9 件 → **0 件** (PR #186 PR-γ v1 の正規化で全角空白問題も完全吸収)
+- ⚠ 担当者未登録: 1 件 (藤井雅章 / 小島/木塚 併記、別問題で残存)
+
 ---
 
 ## 進行中タスク
 
-なし（Phase 1 着手前）
+なし（Phase 3 着手前、Session 44 で実施予定）
 
 ---
 
 ## 残タスク
-
-### Phase 1: 実機 exe 反映（runbook: `docs/handoff/1c-exe-redistribution-runbook.md`）
-
-実行環境: 本田様 PC、TeamViewer 経由 PowerShell
-
-- [ ] **1-1** リポジトリ最新化（`git checkout main && git pull --ff-only`）
-- [ ] **1-2** 現行 exe バックアップ（`wiseman_hub.exe.bak-<timestamp>`）
-- [ ] **1-3** 依存同期 + テスト（`uv sync --extra dev && uv run pytest -q -m "not integration"`）
-- [ ] **1-4** Launcher 起動中なら停止
-- [ ] **1-5** clean ビルド（`uv run pyinstaller wiseman_hub.spec --clean --noconfirm`）
-- [ ] **1-6** build warning 検査（プロジェクト由来 warning がないこと）
-- [ ] **1-7** 配布先に上書き（`Copy-Item -Force dist\wiseman_hub.exe "$dist\wiseman_hub.exe"`）
-- [ ] **1-8** 起動確認（コンソール窓出ない、Launcher 起動、`ImportError` なし）
-
-完了条件: Launcher が PR #179 ベースで起動し、C 機能ボタンから C ダイアログが開く
-
-### Phase 2: 5 担当者の suggest_patterns 投入（runbook: `docs/handoff/staff-path-cache-runbook.md` Phase 0）
-
-`$HOME\wiseman-hub\config\default.toml` に追記:
-
-- [ ] **2-1** PT 宮下 entry 追加（`base_dir = "\\\\Tera-station\\share\\PT 宮下"`、suggest_patterns: `リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx`）
-- [ ] **2-2** PT 小島 entry 追加（新旧 2 系統対応、suggest_patterns: `リハ経過報告書(新)/経過報告書*令和{era}年{month}月*.xlsx`）
-- [ ] **2-3** PT 平瀬 entry 追加（担当者名なし、suggest_patterns: `リハ経過報告書/令和{era}年/新経過報告書 {month}月*.xlsx`）
-- [ ] **2-4** PT 木塚 entry 追加（同フォルダ別人混在、suggest_patterns: `経過報告書/令和*{era}*年度*/経過報告書*木塚*{month}月*.xlsx`）
-- [ ] **2-5** OT 小林 entry 追加（suggest_patterns: `経過報告書/R{era}/*{month}月*.xlsx`）
-
-完了条件: TOML 構文エラーなし、アプリ再起動で `[checklist.report_staff."<staff>"]` が認識される
-
-注意: pattern が NAS 実態と完全一致しない場合は cache populate（Phase 3）でフォルダツリーから直接選択 → 「記憶する」で吸収可能
 
 ### Phase 3: 5 担当者 × 26 年 3 月で cache populate（runbook Phase 1）
 
@@ -130,3 +153,4 @@ GUI 操作（PowerShell ではなく）:
 | 日付 | 内容 |
 |------|------|
 | 2026-05-04 | 初版作成（Session 42、Phase 1 着手前） |
+| 2026-05-05 | Session 43 完了反映（Phase 1+2 完了マーク、Phase 2 補完追加、PR #181-186 記録、Phase 3 着手前） |
