@@ -5,13 +5,18 @@ from __future__ import annotations
 import logging
 import re
 import threading
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from tkinter import messagebox as _tk_messagebox
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
 if TYPE_CHECKING:
     import tkinter as tk
+    from tkinter import ttk
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 
 _TITLE_INTERNAL_ERROR = "内部エラー"
@@ -121,3 +126,118 @@ def install_tk_exception_guard(
     # tkinter の stub は report_callback_exception を公開していないが、
     # 実体は Tk / Toplevel で動的に読まれる公式 API（Python docs: Tk.report_callback_exception）。
     root.report_callback_exception = _handler  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# Treeview sort + ステータス集計 共通ヘルパ
+# ---------------------------------------------------------------------------
+# 業務責任者が毎月 80 件超を扱う C / B ダイアログ等で、ステータス別集約・並び替え
+# が UX 必須。複数 Treeview ダイアログ間で DRY 共通化する（C, B, ex_extractor 等）。
+
+
+def make_treeview_sortable(
+    tree: ttk.Treeview,
+    columns: Sequence[str],
+    *,
+    key_funcs: Mapping[str, Callable[[str], object]] | None = None,
+) -> None:
+    """``ttk.Treeview`` のヘッダークリックで sort できるようにする。
+
+    各カラムについて 1 回目クリックで昇順、2 回目で降順の toggle。
+    ヘッダーのテキスト末尾に ``▲`` (asc) / ``▼`` (desc) を付加して状態可視化する。
+
+    :param tree: 対象 Treeview。
+    :param columns: ``tree.heading(col, ...)`` の col 識別子リスト。
+    :param key_funcs: 特定カラムのカスタム sort key 関数。例えばステータス列を
+        業務優先度順に並べたい場合に使用。``key_funcs[col](cell_value: str) -> sortable``。
+        指定がないカラムは文字列辞書順 sort。
+
+    使用例::
+
+        tree = ttk.Treeview(parent, columns=cols, show="headings")
+        for c in cols:
+            tree.heading(c, text=...)  # heading text 設定は呼出側
+        make_treeview_sortable(
+            tree, cols, key_funcs={"status": status_sort_key_fn}
+        )
+    """
+    state: dict[str, str] = {}  # col -> "asc" / "desc"
+    base_text: dict[str, str] = {}
+
+    def _identity(v: str) -> Any:
+        # Any で受けることで sort key として比較可能（key_funcs 側も
+        # tuple/int 等の sortable を返す前提、互換性は呼出側責務）
+        return v
+
+    def _sort_by(col: str) -> None:
+        # 現状の Treeview の項目を (sort_key, iid) のリストにして sort
+        items = list(tree.get_children(""))
+        key_fn: Callable[[str], Any] = (key_funcs or {}).get(col, _identity)
+        rows = [(key_fn(tree.set(iid, col)), iid) for iid in items]
+        new_order = state.get(col) != "asc"  # toggle
+        rows.sort(key=lambda r: r[0], reverse=not new_order)
+        for index, (_key, iid) in enumerate(rows):
+            tree.move(iid, "", index)
+        state[col] = "asc" if new_order else "desc"
+        # 全カラムの heading から ▲▼ を一旦消し、本カラムだけ更新
+        for c in columns:
+            tree.heading(c, text=base_text.get(c, ""))
+        marker = " ▲" if new_order else " ▼"
+        tree.heading(col, text=base_text.get(col, "") + marker)
+
+    def _make_handler(c: str) -> Callable[[], None]:
+        # closure で col を bind（lambda c=col: の default-arg トリック回避、mypy 友好的）
+        return lambda: _sort_by(c)
+
+    for col in columns:
+        # 既存 heading text を保存（後で sort 矢印付加時に基底として使う）
+        base_text[col] = str(tree.heading(col, "text"))
+        tree.heading(col, command=_make_handler(col))
+
+
+@dataclass(frozen=True)
+class StatusCounts:
+    """ステータス別件数集計（``count_by_status`` の戻り値）。"""
+
+    total: int
+    by_status: Mapping[str, int]
+
+    def to_summary_text(
+        self,
+        *,
+        prefix: str = "対象",
+        ordered_labels: Sequence[str] | None = None,
+        omit_zero: bool = True,
+    ) -> str:
+        """``対象 N 件 / ラベル1 X / ラベル2 Y`` 形式の集計テキストを返す。
+
+        :param ordered_labels: 表示順を固定したい場合のラベル順序。
+            ``None`` の場合は ``by_status`` の元順序（dict 挿入順）。
+        :param omit_zero: 0 件のラベルは表示から省く（既定 True、視認性優先）。
+        """
+        labels = ordered_labels if ordered_labels is not None else list(self.by_status)
+        parts = [f"{prefix} {self.total} 件"]
+        for label in labels:
+            count = self.by_status.get(label, 0)
+            if omit_zero and count == 0:
+                continue
+            parts.append(f"{label} {count}")
+        return " / ".join(parts)
+
+
+def count_by_status(
+    items: Iterable[T],
+    status_label_fn: Callable[[T], str],
+) -> StatusCounts:
+    """``items`` を ``status_label_fn`` で分類して件数集計する純粋関数。
+
+    Tk 不要。テスト容易性のため UI から分離した汎用集計。
+    集計順序は最初に出現したラベル順（dict 挿入順）。
+    """
+    counts: dict[str, int] = {}
+    total = 0
+    for item in items:
+        label = status_label_fn(item)
+        counts[label] = counts.get(label, 0) + 1
+        total += 1
+    return StatusCounts(total=total, by_status=counts)
