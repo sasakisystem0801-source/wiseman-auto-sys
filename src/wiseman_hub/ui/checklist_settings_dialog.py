@@ -146,6 +146,11 @@ class ChecklistSettingsDialog:
             text="GCP から対照表を取得",
             command=self._on_pull_routing,
         ).pack(side="left", padx=4)
+        ttk.Button(
+            btn,
+            text="GCP から担当者を取得",
+            command=self._on_pull_staff,
+        ).pack(side="left", padx=4)
         ttk.Button(btn, text="保存", command=self._on_save).pack(side="right", padx=4)
         ttk.Button(btn, text="キャンセル", command=self._top.destroy).pack(
             side="right", padx=4
@@ -343,6 +348,77 @@ class ChecklistSettingsDialog:
         messagebox.showinfo(
             "GCP 取得完了",
             f"{len(routing)} 件を取得しました\n保存ボタンで永続化してください",
+            parent=self._top,
+        )
+
+    def _on_pull_staff(self) -> None:
+        """GCS から最新担当者マッピングを取得し Text widget を上書きする（PR-β v1）。
+
+        既存値が非空のときは上書き確認ダイアログを表示。保存ボタンは別途押下必須
+        （取得 = 編集枠への反映、永続化は保存で確定）。pull_routing と同じ UX。
+        """
+        from wiseman_hub.cloud.mapping_sync import (
+            MappingConfigError,
+            MappingNotFoundError,
+            MappingSyncError,
+            pull_report_staff,
+        )
+
+        # 既存編集値が解析可能か検査して上書き確認の文言を分岐
+        text = self._staff_text.get("1.0", "end")
+        try:
+            current = _parse_staff_toml(text)
+            parse_failed = False
+        except (tomllib.TOMLDecodeError, ValueError, TypeError):
+            current = {}
+            parse_failed = bool(text.strip())
+        if parse_failed and not messagebox.askyesno(
+            "編集中の担当者マッピングが解析不能",
+            "現在の編集内容を解析できません。\n"
+            "GCP からの取得結果で上書きしますか？\n"
+            "（既存編集内容は失われます）",
+            parent=self._top,
+        ):
+            return
+        if current and not messagebox.askyesno(
+            "上書き確認",
+            f"現在 {len(current)} 件の担当者マッピングが編集中です。"
+            "GCP からの取得結果で上書きしますか？",
+            parent=self._top,
+        ):
+            return
+
+        try:
+            staff = pull_report_staff(self._config.gcp)
+        except MappingConfigError as exc:
+            messagebox.showerror(
+                "GCP 設定不足",
+                f"{exc}\n\n設定ダイアログで [gcp] 項目を入力するか、"
+                "config/default.toml を確認してください。",
+                parent=self._top,
+            )
+            return
+        except MappingNotFoundError:
+            messagebox.showinfo(
+                "担当者マッピング 未登録",
+                "GCP に担当者マッピングがまだ登録されていません。\n"
+                "初回は管理者が `scripts/init_gcs_report_staff.py` 等で\n"
+                "GCS に投入する必要があります。",
+                parent=self._top,
+            )
+            return
+        except MappingSyncError as exc:
+            messagebox.showerror(
+                "GCP 取得失敗",
+                f"{exc}",
+                parent=self._top,
+            )
+            return
+        self._staff_text.delete("1.0", "end")
+        self._staff_text.insert("1.0", _staff_to_toml(staff))
+        messagebox.showinfo(
+            "GCP 取得完了",
+            f"{len(staff)} 件を取得しました\n保存ボタンで永続化してください",
             parent=self._top,
         )
 

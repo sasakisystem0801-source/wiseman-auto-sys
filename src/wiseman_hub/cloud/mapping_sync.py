@@ -1,22 +1,36 @@
-"""居宅 → FAX 事業所フォルダ 対照表の GCS 双方向同期。
+"""居宅 → FAX 事業所フォルダ 対照表 / 担当者マッピングの GCS 双方向同期。
 
 設定ダイアログから「GCP へ送信」「GCP から取得」ボタン経由で呼ばれる最小機能。
 
 GCS 配置:
-    gs://<bucket>/mappings/facility-routing-latest.json
+    gs://<bucket>/mappings/facility-routing-latest.json   # 居宅 → FAX フォルダ
+    gs://<bucket>/mappings/report-staff-latest.json       # 担当者 → ReportStaffEntry (PR-β v1)
 
-JSON フォーマット:
+居宅マッピング JSON フォーマット:
     {
       "version": "1",
       "generated_at": "2026-05-01T12:34:56+09:00",
       "mappings": {"居宅名": "FAX フォルダ名", ...}
     }
 
+担当者マッピング JSON フォーマット (PR-β v1):
+    {
+      "version": "1",
+      "generated_at": "...",
+      "staff": {
+        "宮下": {
+          "base_dir": "\\\\Tera-station\\share\\PT 宮下",
+          "suggest_patterns": ["リハ経過報告書/令和{era}年/..."]
+        },
+        ...
+      }
+    }
+
 PII 配慮:
-    居宅名・FAX フォルダ名はログに出さない（件数のみ）。
+    居宅名・FAX フォルダ名・担当者名・xlsx パスはログに出さない（件数のみ）。
 
 過去失敗対策（feedback_external_api_ok_actual_ng.md）:
-    push 後の閉ループ確認は呼び出し元（settings_dialog._on_push_routing）で実施。
+    push 後の閉ループ確認は呼び出し元（settings_dialog._on_push_routing 等）で実施。
     本モジュールは push / pull の単一責務に留める。
 """
 
@@ -32,12 +46,13 @@ from google.api_core import exceptions as gcs_exc
 from google.auth import exceptions as auth_exc
 from google.cloud import storage
 
-from wiseman_hub.config import GcpConfig
+from wiseman_hub.config import GcpConfig, ReportStaffEntry
 
 logger = logging.getLogger(__name__)
 
 
 MAPPING_BLOB_PATH = "mappings/facility-routing-latest.json"
+REPORT_STAFF_BLOB_PATH = "mappings/report-staff-latest.json"
 SCHEMA_VERSION = "1"
 
 # GCS 操作のソフトタイムアウト（秒）。ネットワーク不調で UI が無限フリーズするのを防ぐ。
@@ -159,6 +174,112 @@ def pull_routing(gcp: GcpConfig) -> dict[str, str]:
             raise MappingSyncError("mappings entry must be str -> str")
         result[k] = v
     logger.info("mapping pull: %d entries", len(result))
+    return result
+
+
+def push_report_staff(
+    gcp: GcpConfig, staff: dict[str, ReportStaffEntry]
+) -> str:
+    """担当者マッピング dict を JSON 化して GCS にアップロードし、GCS URI を返す（PR-β v1）。
+
+    Raises:
+        MappingConfigError: GCP 設定不足
+        MappingSyncError: 認証 / ネットワーク / 権限エラーを統合
+    """
+    _validate_gcp(gcp)
+    now = _dt.datetime.now(_dt.UTC).astimezone()
+    payload: dict[str, Any] = {
+        "version": SCHEMA_VERSION,
+        "generated_at": now.isoformat(),
+        "staff": {
+            name: {
+                "base_dir": entry.base_dir,
+                "suggest_patterns": list(entry.suggest_patterns),
+            }
+            for name, entry in staff.items()
+        },
+    }
+    client = _client(gcp)
+    try:
+        bucket = client.bucket(gcp.bucket_name)
+        blob = bucket.blob(REPORT_STAFF_BLOB_PATH)
+        blob.upload_from_string(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            content_type="application/json; charset=utf-8",
+            timeout=_GCS_TIMEOUT_SEC,
+        )
+    except (gcs_exc.GoogleAPIError, OSError) as exc:
+        logger.error("report_staff push failed: %s", type(exc).__name__)
+        raise MappingSyncError(f"push failed: {type(exc).__name__}") from exc
+
+    uri = f"gs://{gcp.bucket_name}/{REPORT_STAFF_BLOB_PATH}"
+    logger.info("report_staff push: %d entries -> %s", len(staff), uri)
+    return uri
+
+
+def pull_report_staff(gcp: GcpConfig) -> dict[str, ReportStaffEntry]:
+    """GCS から最新担当者マッピングを取得して dict[str, ReportStaffEntry] で返す（PR-β v1）。
+
+    Raises:
+        MappingConfigError: GCP 設定不足
+        MappingNotFoundError: blob 不在（初回利用時）
+        MappingSyncError: 認証 / ネットワーク / 権限 / 不正 JSON エラーを統合
+    """
+    _validate_gcp(gcp)
+    client = _client(gcp)
+    try:
+        bucket = client.bucket(gcp.bucket_name)
+        blob = bucket.blob(REPORT_STAFF_BLOB_PATH)
+        body = blob.download_as_bytes(timeout=_GCS_TIMEOUT_SEC)
+    except gcs_exc.NotFound as exc:
+        raise MappingNotFoundError(
+            "担当者マッピングが GCS にまだ登録されていません"
+        ) from exc
+    except (gcs_exc.GoogleAPIError, OSError) as exc:
+        logger.error("report_staff pull failed: %s", type(exc).__name__)
+        raise MappingSyncError(f"pull failed: {type(exc).__name__}") from exc
+
+    try:
+        payload: Any = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise MappingSyncError(f"invalid JSON: {type(exc).__name__}") from exc
+
+    if not isinstance(payload, dict):
+        raise MappingSyncError("payload is not a JSON object")
+    version = payload.get("version")
+    if version != SCHEMA_VERSION:
+        raise MappingSyncError(
+            f"unsupported schema version: {version!r} (expected {SCHEMA_VERSION!r})"
+        )
+    staff_raw = payload.get("staff")
+    if not isinstance(staff_raw, dict):
+        raise MappingSyncError("payload.staff is not an object")
+    result: dict[str, ReportStaffEntry] = {}
+    for name, entry in staff_raw.items():
+        if not isinstance(name, str):
+            raise MappingSyncError("staff key must be str")
+        if not isinstance(entry, dict):
+            raise MappingSyncError(f"staff[{name}] must be an object")
+        base_dir = entry.get("base_dir", "")
+        if not isinstance(base_dir, str):
+            raise MappingSyncError(f"staff[{name}].base_dir must be str")
+        suggest_raw = entry.get("suggest_patterns", [])
+        if not isinstance(suggest_raw, list):
+            raise MappingSyncError(
+                f"staff[{name}].suggest_patterns must be a list"
+            )
+        suggest_patterns: list[str] = []
+        for element in suggest_raw:
+            if not isinstance(element, str):
+                raise MappingSyncError(
+                    f"staff[{name}].suggest_patterns elements must be str"
+                )
+            suggest_patterns.append(element)
+        result[name] = ReportStaffEntry(
+            base_dir=base_dir,
+            suggest_patterns=suggest_patterns,
+        )
+    logger.info("report_staff pull: %d entries", len(result))
     return result
 
 

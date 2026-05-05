@@ -12,13 +12,16 @@ from google.auth import exceptions as auth_exc
 
 from wiseman_hub.cloud.mapping_sync import (
     MAPPING_BLOB_PATH,
+    REPORT_STAFF_BLOB_PATH,
     MappingConfigError,
     MappingNotFoundError,
     MappingSyncError,
+    pull_report_staff,
     pull_routing,
+    push_report_staff,
     push_routing,
 )
-from wiseman_hub.config import GcpConfig
+from wiseman_hub.config import GcpConfig, ReportStaffEntry
 
 
 @pytest.fixture
@@ -251,3 +254,196 @@ class TestRoundTrip:
             push_routing(gcp, original)
             recovered = pull_routing(gcp)
         assert recovered == original
+
+
+# ---------------------------------------------------------------------------
+# PR-β v1: report_staff の GCS 同期テスト
+# ---------------------------------------------------------------------------
+
+
+class TestPushReportStaff:
+    def test_uploads_json_with_required_keys(self, gcp: GcpConfig) -> None:
+        blob = MagicMock()
+        original = {
+            "宮下": ReportStaffEntry(
+                base_dir="\\\\Tera-station\\share\\PT 宮下",
+                suggest_patterns=["リハ経過報告書/令和{era}年/*{month}月*.xlsx"],
+            ),
+            "小林": ReportStaffEntry(
+                base_dir="\\\\Tera-station\\share\\OT小林",
+                suggest_patterns=["経過報告書/R{era}/*{month}月*.xlsx"],
+            ),
+        }
+        with patch(
+            "wiseman_hub.cloud.mapping_sync.storage.Client.from_service_account_json",
+            _make_storage_mock(blob),
+        ):
+            uri = push_report_staff(gcp, original)
+        assert uri == f"gs://test-bucket/{REPORT_STAFF_BLOB_PATH}"
+        args, kwargs = blob.upload_from_string.call_args
+        body = json.loads(args[0])
+        assert body["version"] == "1"
+        assert "generated_at" in body
+        assert set(body["staff"].keys()) == {"宮下", "小林"}
+        assert body["staff"]["宮下"]["base_dir"] == original["宮下"].base_dir
+        assert (
+            body["staff"]["宮下"]["suggest_patterns"]
+            == original["宮下"].suggest_patterns
+        )
+        assert kwargs["content_type"] == "application/json; charset=utf-8"
+
+    def test_validates_gcp_before_upload(self, fake_sa_key: Path) -> None:
+        bad = GcpConfig(
+            project_id="",
+            bucket_name="b",
+            service_account_key_path=str(fake_sa_key),
+        )
+        with pytest.raises(MappingConfigError, match="project_id"):
+            push_report_staff(bad, {"宮下": ReportStaffEntry()})
+
+    def test_raises_mapping_sync_error_on_gcs_failure(self, gcp: GcpConfig) -> None:
+        blob = MagicMock()
+        blob.upload_from_string.side_effect = gcs_exc.Forbidden("denied")
+        with patch(
+            "wiseman_hub.cloud.mapping_sync.storage.Client.from_service_account_json",
+            _make_storage_mock(blob),
+        ), pytest.raises(MappingSyncError, match="push failed"):
+            push_report_staff(gcp, {"宮下": ReportStaffEntry()})
+
+
+class TestPullReportStaff:
+    def test_returns_dict_from_valid_json(self, gcp: GcpConfig) -> None:
+        blob = MagicMock()
+        blob.download_as_bytes.return_value = json.dumps(
+            {
+                "version": "1",
+                "generated_at": "2026-05-05T12:00:00+09:00",
+                "staff": {
+                    "宮下": {
+                        "base_dir": "\\\\Tera-station\\share\\PT 宮下",
+                        "suggest_patterns": [
+                            "リハ経過報告書/令和{era}年/*{month}月*.xlsx",
+                        ],
+                    },
+                },
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+        with patch(
+            "wiseman_hub.cloud.mapping_sync.storage.Client.from_service_account_json",
+            _make_storage_mock(blob),
+        ):
+            result = pull_report_staff(gcp)
+        assert set(result.keys()) == {"宮下"}
+        assert result["宮下"].base_dir == "\\\\Tera-station\\share\\PT 宮下"
+        assert result["宮下"].suggest_patterns == [
+            "リハ経過報告書/令和{era}年/*{month}月*.xlsx"
+        ]
+
+    def test_raises_not_found_when_blob_absent(self, gcp: GcpConfig) -> None:
+        """初回利用ガイダンスで識別するため MappingNotFoundError 専用例外。"""
+        blob = MagicMock()
+        blob.download_as_bytes.side_effect = gcs_exc.NotFound("absent")
+        with patch(
+            "wiseman_hub.cloud.mapping_sync.storage.Client.from_service_account_json",
+            _make_storage_mock(blob),
+        ), pytest.raises(MappingNotFoundError):
+            pull_report_staff(gcp)
+
+    def test_raises_on_invalid_json(self, gcp: GcpConfig) -> None:
+        blob = MagicMock()
+        blob.download_as_bytes.return_value = b"not a json{"
+        with patch(
+            "wiseman_hub.cloud.mapping_sync.storage.Client.from_service_account_json",
+            _make_storage_mock(blob),
+        ), pytest.raises(MappingSyncError, match="invalid JSON"):
+            pull_report_staff(gcp)
+
+    def test_raises_on_unsupported_schema_version(self, gcp: GcpConfig) -> None:
+        blob = MagicMock()
+        blob.download_as_bytes.return_value = json.dumps(
+            {"version": "99", "staff": {}}
+        ).encode("utf-8")
+        with patch(
+            "wiseman_hub.cloud.mapping_sync.storage.Client.from_service_account_json",
+            _make_storage_mock(blob),
+        ), pytest.raises(MappingSyncError, match="schema version"):
+            pull_report_staff(gcp)
+
+    def test_raises_when_staff_missing(self, gcp: GcpConfig) -> None:
+        blob = MagicMock()
+        blob.download_as_bytes.return_value = json.dumps(
+            {"version": "1", "generated_at": "x"}
+        ).encode("utf-8")
+        with patch(
+            "wiseman_hub.cloud.mapping_sync.storage.Client.from_service_account_json",
+            _make_storage_mock(blob),
+        ), pytest.raises(MappingSyncError, match="staff"):
+            pull_report_staff(gcp)
+
+    def test_raises_when_suggest_patterns_not_list(self, gcp: GcpConfig) -> None:
+        blob = MagicMock()
+        blob.download_as_bytes.return_value = json.dumps(
+            {
+                "version": "1",
+                "staff": {"宮下": {"base_dir": "x", "suggest_patterns": "not list"}},
+            }
+        ).encode("utf-8")
+        with patch(
+            "wiseman_hub.cloud.mapping_sync.storage.Client.from_service_account_json",
+            _make_storage_mock(blob),
+        ), pytest.raises(MappingSyncError, match="suggest_patterns must be a list"):
+            pull_report_staff(gcp)
+
+    def test_raises_when_suggest_pattern_element_not_str(
+        self, gcp: GcpConfig
+    ) -> None:
+        blob = MagicMock()
+        blob.download_as_bytes.return_value = json.dumps(
+            {
+                "version": "1",
+                "staff": {"宮下": {"base_dir": "x", "suggest_patterns": [1]}},
+            }
+        ).encode("utf-8")
+        with patch(
+            "wiseman_hub.cloud.mapping_sync.storage.Client.from_service_account_json",
+            _make_storage_mock(blob),
+        ), pytest.raises(MappingSyncError, match="elements must be str"):
+            pull_report_staff(gcp)
+
+
+class TestReportStaffRoundTrip:
+    def test_push_then_pull_returns_same_entries(self, gcp: GcpConfig) -> None:
+        blob = MagicMock()
+        captured: dict[str, bytes] = {}
+
+        def upload(s: str, **_: object) -> None:
+            captured["body"] = s.encode("utf-8")
+
+        def download(**_: object) -> bytes:
+            return captured["body"]
+
+        blob.upload_from_string.side_effect = upload
+        blob.download_as_bytes.side_effect = download
+        original = {
+            "宮下": ReportStaffEntry(
+                base_dir="\\\\Tera-station\\share\\PT 宮下",
+                suggest_patterns=[
+                    "リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx",
+                ],
+            ),
+            "小林": ReportStaffEntry(
+                base_dir="\\\\Tera-station\\share\\OT小林",
+                suggest_patterns=["経過報告書/R{era}/*{month}月*.xlsx"],
+            ),
+        }
+        with patch(
+            "wiseman_hub.cloud.mapping_sync.storage.Client.from_service_account_json",
+            _make_storage_mock(blob),
+        ):
+            push_report_staff(gcp, original)
+            recovered = pull_report_staff(gcp)
+        assert set(recovered.keys()) == set(original.keys())
+        for name, entry in original.items():
+            assert recovered[name].base_dir == entry.base_dir
+            assert recovered[name].suggest_patterns == entry.suggest_patterns
