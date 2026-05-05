@@ -15,6 +15,15 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
 
+from wiseman_hub.cloud.sheet_list_cache import (
+    cache_dir_for as _sheet_cache_dir_for,
+)
+from wiseman_hub.cloud.sheet_list_cache import (
+    load as _load_sheet_cache,
+)
+from wiseman_hub.cloud.sheet_list_cache import (
+    save as _save_sheet_cache,
+)
 from wiseman_hub.cloud.sheets import (
     download_xlsx,
     list_sheet_names,
@@ -121,6 +130,9 @@ class ChecklistCDialog:
         self._results: list[CPlacementResult] = []
         self._xlsx_bytes: bytes = b""
         self._build_ui()
+        # PR-δ v1: 起動時にローカル cache からシート一覧を即時 populate
+        # （Drive API クリック必須だった UX を解消）
+        self._try_load_sheet_cache()
 
     def get_toplevel(self) -> tk.Toplevel:
         return self._top
@@ -135,7 +147,8 @@ class ChecklistCDialog:
             head, textvariable=self._month_var, state="readonly", width=12
         )
         self._month_combo.pack(side="left", padx=4)
-        ttk.Button(head, text="シート一覧取得", command=self._on_load_sheets).pack(
+        # PR-δ v1: 名称を「更新」に変更（cache からの初期 populate あり）
+        ttk.Button(head, text="シート一覧更新", command=self._on_load_sheets).pack(
             side="left", padx=4
         )
         ttk.Button(head, text="対象行を読込", command=self._on_load_rows).pack(
@@ -179,7 +192,7 @@ class ChecklistCDialog:
 
         bottom = ttk.Frame(top, padding=8)
         bottom.pack(fill="x")
-        self._status_var = tk.StringVar(value="シート一覧取得から開始してください")
+        self._status_var = tk.StringVar(value="対象月を選んで「対象行を読込」してください")
         ttk.Label(bottom, textvariable=self._status_var).pack(side="left")
         ttk.Button(bottom, text="閉じる", command=self._top.destroy).pack(side="right")
         self._exec_btn = ttk.Button(
@@ -240,6 +253,34 @@ class ChecklistCDialog:
         if sheet_names:
             self._month_combo.current(len(sheet_names) - 1)
         self._status_var.set(f"シート一覧取得完了 ({len(sheet_names)} シート)")
+        # PR-δ v1: 次回起動時に即時 populate できるよう cache に永続化
+        if self._config_path is not None:
+            cache_dir = _sheet_cache_dir_for(self._config_path)
+            _save_sheet_cache(
+                cache_dir, self._config.checklist.spreadsheet_id, sheet_names
+            )
+
+    def _try_load_sheet_cache(self) -> None:
+        """起動時に cache から sheet_names を populate（cache hit 時のみ）。
+
+        cache miss / config_path 未指定 / spreadsheet_id 未設定 時は no-op。
+        xlsx_bytes は cache していないため空のまま。「対象行を読込」時に
+        必要なら自動 download される（_on_load_rows のフロー）。
+        """
+        if self._config_path is None:
+            return
+        spreadsheet_id = self._config.checklist.spreadsheet_id
+        if not spreadsheet_id:
+            return
+        cache_dir = _sheet_cache_dir_for(self._config_path)
+        cached = _load_sheet_cache(cache_dir, spreadsheet_id)
+        if cached:
+            self._month_combo["values"] = cached
+            if cached:
+                self._month_combo.current(len(cached) - 1)
+            self._status_var.set(
+                f"シート一覧 (キャッシュ {len(cached)} 件) - 最新化は「シート一覧更新」"
+            )
 
     def _on_load_error(self, err_type: str) -> None:
         self._status_var.set(f"取得失敗: {err_type}")
@@ -255,6 +296,21 @@ class ChecklistCDialog:
             messagebox.showerror("シート名形式不正", f"対応外: {sheet}")
             return
         year, month = ym
+        # PR-δ v1: cache hit で combo は埋まっているが xlsx_bytes が未取得な場合、
+        # ここで透過的に download（業務責任者は「シート一覧更新」を意識せずに
+        # 即「対象行を読込」できる）
+        if not self._xlsx_bytes:
+            self._status_var.set("xlsx をダウンロード中（初回 / キャッシュ後）...")
+            self._top.update_idletasks()
+            try:
+                self._xlsx_bytes = download_xlsx(
+                    self._config.gcp, self._config.checklist.spreadsheet_id
+                )
+            except Exception as exc:
+                err_type = type(exc).__name__
+                messagebox.showerror("ダウンロード失敗", f"{err_type}: {exc}")
+                self._status_var.set(f"ダウンロード失敗: {err_type}")
+                return
         try:
             rows = parse_sheet(self._xlsx_bytes, sheet)
         except Exception as exc:
