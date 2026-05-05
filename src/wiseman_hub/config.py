@@ -18,6 +18,7 @@ from tomlkit import TOMLDocument
 from tomlkit.items import InlineTable, Table
 
 from wiseman_hub.utils.atomic_io import write_bytes_atomically
+from wiseman_hub.utils.text_norm import normalize_lookup_key
 
 logger = logging.getLogger(__name__)
 
@@ -497,7 +498,9 @@ def load_config(path: Path | None = None) -> AppConfig:
                 raise TypeError(
                     "checklist.facility_routing values must be strings"
                 )
-            facility_routing[str(key)] = value
+            # PR-γ v1: lookup 表記揺れ吸収のため key は normalize_lookup_key
+            # を通して保存する（全角/半角空白・全角/半角英数・括弧等を統一）
+            facility_routing[normalize_lookup_key(str(key))] = value
     report_staff: dict[str, ReportStaffEntry] = {}
     if staff_data:
         if not isinstance(staff_data, dict):
@@ -513,7 +516,8 @@ def load_config(path: Path | None = None) -> AppConfig:
             normalized_entry = _coerce_report_staff_entry(
                 str(staff_name), dict(entry_data)
             )
-            report_staff[str(staff_name)] = normalized_entry
+            # PR-γ v1: 同上、staff key も lookup 正規化
+            report_staff[normalize_lookup_key(str(staff_name))] = normalized_entry
     xlsx_path_cache: dict[str, str] = {}
     if cache_data:
         if not isinstance(cache_data, dict):
