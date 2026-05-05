@@ -194,3 +194,145 @@ class TestInstallTkExceptionGuard:
 
         with pytest.raises(KeyboardInterrupt):
             root.report_callback_exception(ValueError, ValueError("x"), None)
+
+
+# ---------------------------------------------------------------------------
+# count_by_status / StatusCounts (pure function, Tk 不要)
+# ---------------------------------------------------------------------------
+
+
+class TestCountByStatus:
+    def test_empty_iterable_returns_zero_total(self) -> None:
+        from wiseman_hub.ui.common import count_by_status
+
+        result = count_by_status([], lambda x: "x")
+        assert result.total == 0
+        assert dict(result.by_status) == {}
+
+    def test_groups_by_label_and_counts(self) -> None:
+        from wiseman_hub.ui.common import count_by_status
+
+        items = ["a", "a", "b", "c", "b"]
+        result = count_by_status(items, lambda x: x)
+        assert result.total == 5
+        assert dict(result.by_status) == {"a": 2, "b": 2, "c": 1}
+
+    def test_label_fn_can_classify_objects(self) -> None:
+        from wiseman_hub.ui.common import count_by_status
+
+        items = [1, 2, 3, 4, 5]
+        result = count_by_status(items, lambda n: "even" if n % 2 == 0 else "odd")
+        assert result.total == 5
+        assert dict(result.by_status) == {"odd": 3, "even": 2}
+
+    def test_preserves_first_occurrence_order(self) -> None:
+        """dict 挿入順を保つ（Python 3.7+ 仕様、to_summary_text のデフォルト順序保証）。"""
+        from wiseman_hub.ui.common import count_by_status
+
+        result = count_by_status(["c", "a", "b", "a"], lambda x: x)
+        assert list(result.by_status.keys()) == ["c", "a", "b"]
+
+
+class TestStatusCountsToSummaryText:
+    def test_default_omits_zero_labels(self) -> None:
+        from wiseman_hub.ui.common import StatusCounts
+
+        counts = StatusCounts(total=5, by_status={"x": 2, "y": 0, "z": 3})
+        text = counts.to_summary_text()
+        assert text == "対象 5 件 / x 2 / z 3"
+        assert "y" not in text
+
+    def test_includes_zero_when_omit_false(self) -> None:
+        from wiseman_hub.ui.common import StatusCounts
+
+        counts = StatusCounts(total=5, by_status={"x": 2, "y": 0, "z": 3})
+        text = counts.to_summary_text(omit_zero=False)
+        assert text == "対象 5 件 / x 2 / y 0 / z 3"
+
+    def test_ordered_labels_overrides_dict_order(self) -> None:
+        from wiseman_hub.ui.common import StatusCounts
+
+        counts = StatusCounts(total=5, by_status={"a": 1, "b": 2, "c": 2})
+        text = counts.to_summary_text(ordered_labels=["b", "c", "a"])
+        assert text == "対象 5 件 / b 2 / c 2 / a 1"
+
+    def test_ordered_labels_can_include_unseen_labels(self) -> None:
+        """サマリー表示順を固定したい場面で、未出現ラベルは omit_zero で省略される。"""
+        from wiseman_hub.ui.common import StatusCounts
+
+        counts = StatusCounts(total=2, by_status={"a": 2})
+        text = counts.to_summary_text(ordered_labels=["a", "b", "c"])
+        # b, c は未出現 = 0 件 = omit_zero (default True) で省略
+        assert text == "対象 2 件 / a 2"
+
+    def test_custom_prefix(self) -> None:
+        from wiseman_hub.ui.common import StatusCounts
+
+        counts = StatusCounts(total=3, by_status={"x": 3})
+        text = counts.to_summary_text(prefix="合計")
+        assert text == "合計 3 件 / x 3"
+
+
+# ---------------------------------------------------------------------------
+# make_treeview_sortable (Tk 必要、`tk_required` mark で skip 可)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.tk_required
+class TestMakeTreeviewSortable:
+    def test_clicking_header_sorts_ascending_then_descending(self) -> None:
+        import tkinter as tk
+        from tkinter import ttk
+
+        from wiseman_hub.ui.common import make_treeview_sortable
+
+        root = tk.Tk()
+        try:
+            tree = ttk.Treeview(root, columns=("name",), show="headings")
+            tree.heading("name", text="氏名")
+            tree.insert("", "end", iid="0", values=("c",))
+            tree.insert("", "end", iid="1", values=("a",))
+            tree.insert("", "end", iid="2", values=("b",))
+            make_treeview_sortable(tree, ("name",))
+
+            # 1 回目クリック → 昇順
+            tree.heading("name")["command"]()
+            assert [tree.set(i, "name") for i in tree.get_children()] == ["a", "b", "c"]
+            assert "▲" in str(tree.heading("name", "text"))
+
+            # 2 回目クリック → 降順
+            tree.heading("name")["command"]()
+            assert [tree.set(i, "name") for i in tree.get_children()] == ["c", "b", "a"]
+            assert "▼" in str(tree.heading("name", "text"))
+        finally:
+            root.destroy()
+
+    def test_status_column_uses_custom_priority_key(self) -> None:
+        """業務優先度順 sort key の例 (要対応 → 完了)。"""
+        import tkinter as tk
+        from tkinter import ttk
+
+        from wiseman_hub.ui.common import make_treeview_sortable
+
+        root = tk.Tk()
+        try:
+            tree = ttk.Treeview(root, columns=("status",), show="headings")
+            tree.heading("status", text="ステータス")
+            tree.insert("", "end", iid="0", values=("成功",))
+            tree.insert("", "end", iid="1", values=("要レビュー",))
+            tree.insert("", "end", iid="2", values=("実行待ち",))
+
+            priority = {"要レビュー": 0, "実行待ち": 30, "成功": 90}
+
+            def status_key(cell: str) -> tuple[int, str]:
+                return (priority.get(cell, 99), cell)
+
+            make_treeview_sortable(
+                tree, ("status",), key_funcs={"status": status_key}
+            )
+
+            tree.heading("status")["command"]()  # 昇順 = 業務優先度低い順 (要対応 → 完了)
+            order = [tree.set(i, "status") for i in tree.get_children()]
+            assert order == ["要レビュー", "実行待ち", "成功"]
+        finally:
+            root.destroy()

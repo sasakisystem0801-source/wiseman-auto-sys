@@ -31,6 +31,7 @@ from wiseman_hub.pdf.checklist_c import (
     plan_c_placement,
 )
 from wiseman_hub.pdf.excel_com import create_exporter
+from wiseman_hub.ui.common import count_by_status, make_treeview_sortable
 from wiseman_hub.ui.placement_confirm_dialog import PlacementConfirmDialog
 from wiseman_hub.ui.xlsx_picker_dialog import XlsxPickerDialog
 
@@ -48,6 +49,50 @@ _STATUS_LABEL: dict[CPlacementStatus, str] = {
     CPlacementStatus.SKIPPED_AMBIGUOUS_SHEET: "⚠ シート候補複数",
     CPlacementStatus.ERROR: "✗ エラー",
 }
+
+# サマリーラベル用の短縮形（status bar の幅制限内に複数件数を並べるため）
+_STATUS_SHORT_LABEL: dict[CPlacementStatus, str] = {
+    CPlacementStatus.PENDING: "実行待ち",
+    CPlacementStatus.SUCCESS: "成功",
+    CPlacementStatus.NEEDS_REVIEW: "要レビュー",
+    CPlacementStatus.SKIPPED_NO_FACILITY: "⚠居宅未登録",
+    CPlacementStatus.SKIPPED_NO_STAFF: "⚠担当者未登録",
+    CPlacementStatus.SKIPPED_NO_XLSX: "⚠xlsx不在",
+    CPlacementStatus.SKIPPED_NO_SHEET: "⚠シート未発見",
+    CPlacementStatus.SKIPPED_AMBIGUOUS_SHEET: "⚠シート候補複数",
+    CPlacementStatus.ERROR: "✗エラー",
+}
+
+# サマリー表示順（業務優先度: 残作業 → エラー系 → 完了）
+_STATUS_SUMMARY_ORDER: list[str] = [
+    "実行待ち",
+    "要レビュー",
+    "⚠居宅未登録",
+    "⚠担当者未登録",
+    "⚠xlsx不在",
+    "⚠シート未発見",
+    "⚠シート候補複数",
+    "✗エラー",
+    "成功",
+]
+
+# Treeview ステータス列 sort 用の優先度（業務優先度: 要対応が上、完了が下）
+_STATUS_SORT_PRIORITY: dict[str, int] = {
+    "▶ 要レビュー（ダブルクリックで選択）": 0,
+    "⚠ 居宅マッピング未登録": 10,
+    "⚠ 担当者マッピング未登録": 11,
+    "⚠ xlsx 不在": 12,
+    "⚠ 利用者シート未発見": 13,
+    "⚠ シート候補複数": 14,
+    "✗ エラー": 20,
+    "実行待ち": 30,
+    "成功": 90,
+}
+
+
+def _status_column_sort_key(cell: str) -> tuple[int, str]:
+    """ステータス列の Treeview 表示文字列を業務優先度順に並べる sort key。"""
+    return (_STATUS_SORT_PRIORITY.get(cell, 99), cell)
 
 _SHEET_NAME_RE = re.compile(r"^(\d{2})年(\d{1,2})月$")
 
@@ -119,6 +164,13 @@ class ChecklistCDialog:
         scroll.pack(side="right", fill="y")
         self._tree.configure(yscrollcommand=scroll.set)
         self._tree.bind("<Double-1>", self._on_row_double_click)
+
+        # ヘッダークリックで sort（ステータス列のみ業務優先度順、他は文字列順）
+        make_treeview_sortable(
+            self._tree,
+            cols,
+            key_funcs={"status": _status_column_sort_key},
+        )
 
         bottom = ttk.Frame(top, padding=8)
         bottom.pack(fill="x")
@@ -207,7 +259,14 @@ class ChecklistCDialog:
         self._results = plan_c_placement(c_rows, self._config.checklist, year, month)
         self._refresh_tree()
         ready = sum(1 for r in self._results if r.status == CPlacementStatus.PENDING)
-        self._status_var.set(f"対象 {len(self._results)} 件 / 実行可能 {ready} 件")
+        # ステータス別件数を集計してサマリー表示（0 件は省略、業務優先度順）
+        counts = count_by_status(
+            self._results,
+            lambda r: _STATUS_SHORT_LABEL.get(r.status, r.status.value),
+        )
+        self._status_var.set(
+            counts.to_summary_text(ordered_labels=_STATUS_SUMMARY_ORDER)
+        )
         self._exec_btn.configure(state="normal" if ready > 0 else "disabled")
 
     def _refresh_tree(self) -> None:
