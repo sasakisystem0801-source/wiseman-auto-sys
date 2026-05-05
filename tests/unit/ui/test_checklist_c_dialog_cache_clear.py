@@ -74,7 +74,12 @@ class TestCacheClearMenu:
         # 月選択を埋めておく (cache_key 解決に必要)
         dlg._month_var.set("26年3月")
         # 1 行 PENDING 状態を仕込む (cache hit 済みの想定)
-        row = ChecklistRow(name="テスト太郎", facility="テスト居宅", staff="宮下")
+        row = ChecklistRow(
+            name="テスト太郎",
+            monitoring_raw="",
+            staff="宮下",
+            facility="テスト居宅",
+        )
         result = CPlacementResult(row=row)
         result.status = CPlacementStatus.PENDING
         result.xlsx_path = Path(r"\\nas\share\PT 宮下\3月.xlsx")
