@@ -164,6 +164,11 @@ class ChecklistCDialog:
         scroll.pack(side="right", fill="y")
         self._tree.configure(yscrollcommand=scroll.set)
         self._tree.bind("<Double-1>", self._on_row_double_click)
+        # 右クリックメニュー: 誤投入された xlsx_path_cache を 1 クリックで削除
+        # （PowerShell + notepad で TOML 直接編集していた業務責任者負担の解消）
+        self._tree.bind("<Button-3>", self._on_row_right_click)
+        # macOS では右クリックが Button-2 になる環境があるためフォールバック
+        self._tree.bind("<Button-2>", self._on_row_right_click)
 
         # ヘッダークリックで sort（ステータス列のみ業務優先度順、他は文字列順）
         make_treeview_sortable(
@@ -285,6 +290,97 @@ class ChecklistCDialog:
                     r.message,
                 ),
             )
+
+    def _on_row_right_click(self, event: object) -> None:
+        """右クリックでコンテキストメニュー表示。誤投入 cache の 1 クリック undo 用。"""
+        # クリック位置の行を選択状態に切り替え（普通の Tk Treeview の慣習）
+        try:
+            row_id = self._tree.identify_row(event.y)  # type: ignore[attr-defined]
+        except (AttributeError, tk.TclError):
+            return
+        if not row_id:
+            return
+        self._tree.selection_set(row_id)
+        idx = int(row_id)
+        r = self._results[idx]
+
+        # cache key が解決できない（年月未取得 / 担当者未登録）行はメニュー無効
+        year, month = self._current_year_month()
+        has_cache_entry = (
+            year is not None
+            and month is not None
+            and r.row.staff
+            and cache_key(r.row.staff, year, month) in self._config.checklist.xlsx_path_cache
+        )
+
+        menu = tk.Menu(self._top, tearoff=False)
+        menu.add_command(
+            label="キャッシュをクリア（要レビューに戻す）",
+            command=lambda: self._clear_cache_for_row(idx),
+            state="normal" if has_cache_entry else "disabled",
+        )
+        try:
+            menu.tk_popup(event.x_root, event.y_root)  # type: ignore[attr-defined]
+        finally:
+            menu.grab_release()
+
+    def _clear_cache_for_row(self, idx: int) -> None:
+        """選択行の (staff, year, month) cache を削除し、行を再 plan して NEEDS_REVIEW に戻す。"""
+        if idx < 0 or idx >= len(self._results):
+            return
+        r = self._results[idx]
+        year, month = self._current_year_month()
+        if year is None or month is None:
+            return
+        key = cache_key(r.row.staff, year, month)
+        cache = self._config.checklist.xlsx_path_cache
+        if key not in cache:
+            return
+        # 削除確認（誤クリック保護）
+        confirm = messagebox.askyesno(
+            "キャッシュ削除確認",
+            f"{r.row.staff} の {year}年{month}月 キャッシュを削除しますか？\n"
+            f"パス: {cache[key]}\n\n"
+            f"削除後、対象行は ▶ 要レビュー に戻り再選択が必要になります。",
+            parent=self._top,
+        )
+        if not confirm:
+            return
+        del cache[key]
+        # 永続化
+        if self._config_path is not None:
+            try:
+                save_config(self._config, self._config_path)
+            except OSError as exc:
+                logger.warning("save_config failed after cache clear: %s", type(exc).__name__)
+                messagebox.showwarning(
+                    "キャッシュ削除済（永続化失敗）",
+                    f"メモリ上の cache は削除しましたが TOML 保存に失敗: {type(exc).__name__}",
+                    parent=self._top,
+                )
+        # 当該行を再 plan して NEEDS_REVIEW に戻す
+        new_results = plan_c_placement(
+            [r.row], self._config.checklist, year, month
+        )
+        if new_results:
+            self._results[idx] = new_results[0]
+        self._refresh_tree()
+        self._update_status_summary()
+        self._status_var.set(
+            f"{r.row.staff} {year}年{month}月: キャッシュ削除 → 要レビュー"
+        )
+
+    def _update_status_summary(self) -> None:
+        """ステータスバーをサマリー集計で更新（_on_load_rows と同じ表示）。"""
+        counts = count_by_status(
+            self._results,
+            lambda r: _STATUS_SHORT_LABEL.get(r.status, r.status.value),
+        )
+        self._status_var.set(
+            counts.to_summary_text(ordered_labels=_STATUS_SUMMARY_ORDER)
+        )
+        ready = sum(1 for r in self._results if r.status == CPlacementStatus.PENDING)
+        self._exec_btn.configure(state="normal" if ready > 0 else "disabled")
 
     def _on_row_double_click(self, _event: object) -> None:
         sel = self._tree.selection()
