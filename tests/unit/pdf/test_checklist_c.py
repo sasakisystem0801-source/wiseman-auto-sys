@@ -213,6 +213,34 @@ def test_plan_c_placement_skipped_no_facility(tmp_path: Path) -> None:
     assert results[0].status == CPlacementStatus.SKIPPED_NO_FACILITY
 
 
+def test_plan_c_placement_normalizes_facility_lookup(tmp_path: Path) -> None:
+    """PR-γ v1: 全角空白入力（スプレッドシート）が半角空白登録の routing にマッチ。
+
+    実機 Phase 3 で「介護相談支援センター　LEBEN」(全角空白) が
+    「介護相談支援センター LEBEN」(半角空白) で登録された routing と
+    マッチしなかった事象 (regression case) を固定する。
+    """
+    from wiseman_hub.utils.text_norm import normalize_lookup_key
+
+    cfg, _ = _checklist_cfg(
+        tmp_path,
+        routing={
+            normalize_lookup_key("介護相談支援センター LEBEN"): "LEBEN(メール)",
+        },
+    )
+    rows = [
+        ChecklistRow(
+            name="X",
+            monitoring_raw=None,
+            staff="宮下",
+            facility="介護相談支援センター　LEBEN",  # 全角空白
+        )
+    ]
+    results = plan_c_placement(rows, cfg, 2026, 3)
+    # 居宅未登録判定にならない（lookup 正規化が効いている）
+    assert results[0].status != CPlacementStatus.SKIPPED_NO_FACILITY
+
+
 def test_plan_c_placement_skipped_no_staff(tmp_path: Path) -> None:
     cfg, _ = _checklist_cfg(tmp_path)
     rows = [ChecklistRow(name="X", monitoring_raw=None, staff="未知担当者", facility="事業所A")]

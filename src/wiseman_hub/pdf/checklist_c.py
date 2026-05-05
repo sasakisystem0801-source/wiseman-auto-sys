@@ -31,6 +31,7 @@ from wiseman_hub.pdf.staff_path_scanner import (
     scan_candidates,
     scan_fallback,
 )
+from wiseman_hub.utils.text_norm import normalize_lookup_key
 
 logger = logging.getLogger(__name__)
 
@@ -205,9 +206,15 @@ def find_sheet_for_user(xlsx_path: Path, user_name: str) -> tuple[str | None, li
 
 
 def resolve_facility(facility_name: str, routing: dict[str, str]) -> str | None:
-    if facility_name in routing:
-        return routing[facility_name]
-    return None
+    """居宅名 → FAX フォルダ名 を解決する。
+
+    PR-γ v1: 表記揺れ吸収のため lookup 時に ``normalize_lookup_key`` で正規化する。
+    ``routing`` 側 (config.py の ``_load_checklist`` で読込時に正規化済み) と
+    query 側の両方を同じ関数で正規化することで、全角/半角空白・全角/半角英数・
+    括弧等の表記揺れを業務責任者の意識から外す。
+    """
+    key = normalize_lookup_key(facility_name)
+    return routing.get(key)
 
 
 def plan_c_placement(
@@ -235,7 +242,9 @@ def plan_c_placement(
             result.message = f"居宅マッピング未登録: {row.facility}"
             results.append(result)
             continue
-        staff_entry = cfg.report_staff.get(row.staff)
+        # PR-γ v1: lookup 表記揺れ吸収（staff 側）。
+        # message 表示は元の row.staff（業務責任者が分かる表記のまま）。
+        staff_entry = cfg.report_staff.get(normalize_lookup_key(row.staff))
         if staff_entry is None:
             result.status = CPlacementStatus.SKIPPED_NO_STAFF
             result.message = f"担当者マッピング未登録: {row.staff}"
