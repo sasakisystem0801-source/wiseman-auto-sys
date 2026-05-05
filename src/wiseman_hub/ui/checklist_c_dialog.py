@@ -531,32 +531,69 @@ class ChecklistCDialog:
             messagebox.showinfo("対象なし", "実行可能な行がありません")
             return
         # 配置前確認: 全件を Treeview で提示（HIGH-3 対策、業務安全性）
+        # PR-ζ v1: 行選択 + dry-run / 実配置 2 ボタン化
         confirm = PlacementConfirmDialog(parent=self._top, pending_results=pending)
         confirm.get_toplevel().wait_window()
         if not confirm.get_proceed():
             self._status_var.set("配置キャンセル")
             return
+        dry_run = confirm.get_dry_run()
+        # selected_indices は PENDING 抽出後の pending list 内 index
+        selected_pending = [
+            pending[i] for i in confirm.get_selected_indices() if 0 <= i < len(pending)
+        ]
+        if not selected_pending:
+            self._status_var.set("選択行なし、配置中止")
+            return
         self._exec_btn.configure(state="disabled")
-        self._status_var.set("Excel 経由で PDF 化中...")
+        if dry_run:
+            self._status_var.set(
+                f"ドライラン中... ({len(selected_pending)} 件、実書込なし)"
+            )
+        else:
+            self._status_var.set(
+                f"Excel 経由で PDF 化中... ({len(selected_pending)} 件)"
+            )
         self._top.update_idletasks()
 
         def _bg() -> None:
             try:
-                exporter = create_exporter()
+                # dry_run 時は exporter を生成しない（COM 起動コストも 0）
+                exporter = None if dry_run else create_exporter()
+                # 選択行のみを execute_c_placement に渡す。
+                # `results` パラメータが list を受けるので、渡す行だけ実行される
+                # （PENDING 以外の行はスキップされる既存仕様）。
                 execute_c_placement(
-                    self._results, exporter, log_dir=self._config.log_dir
+                    selected_pending,
+                    exporter,
+                    log_dir=self._config.log_dir,
+                    dry_run=dry_run,
                 )
             except Exception:
                 logger.exception("execute_c_placement failed")
-            self._top.after(0, self._on_execute_done)
+            self._top.after(
+                0, lambda: self._on_execute_done(dry_run, len(selected_pending))
+            )
 
         threading.Thread(target=_bg, daemon=True).start()
 
-    def _on_execute_done(self) -> None:
+    def _on_execute_done(self, dry_run: bool, target_count: int) -> None:
         self._refresh_tree()
-        success = sum(1 for r in self._results if r.status == CPlacementStatus.SUCCESS)
-        self._status_var.set(f"配置完了: 成功 {success} 件")
-        self._exec_btn.configure(state="disabled")
+        if dry_run:
+            self._status_var.set(
+                f"ドライラン完了: {target_count} 件のパス検証 OK（PDF 未書込、再実行可）"
+            )
+            # ドライラン後は実配置に進めるよう exec ボタンを再有効化
+            ready = sum(
+                1 for r in self._results if r.status == CPlacementStatus.PENDING
+            )
+            self._exec_btn.configure(state="normal" if ready > 0 else "disabled")
+        else:
+            success = sum(
+                1 for r in self._results if r.status == CPlacementStatus.SUCCESS
+            )
+            self._status_var.set(f"配置完了: 成功 {success} 件")
+            self._exec_btn.configure(state="disabled")
 
 
 def _open_folder(folder: Path) -> None:

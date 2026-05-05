@@ -333,16 +333,26 @@ def apply_xlsx_selection(
 
 def execute_c_placement(
     results: list[CPlacementResult],
-    exporter: ExcelExporter,
+    exporter: ExcelExporter | None,
     log_dir: str = "",
+    *,
+    dry_run: bool = False,
 ) -> list[CPlacementResult]:
     """PENDING の plan を Excel COM で PDF 化して配置する。
 
     ``log_dir`` が指定されている場合、各行ごとに ``c_placement`` 監査ログに
     成功/失敗 record を JSON Lines で追記する（PR-α v3 の業務安全性層）。
+
+    ``dry_run=True`` の場合は ExcelExporter を呼ばず PDF を実際に書き込まない
+    （``exporter`` は ``None`` を渡してよい）。各行のパス解決 + シート検査が
+    正しく完了したかだけを検証し、``status`` は PENDING のまま、``message`` に
+    ``dry-run: 配置可能`` を記録する。監査ログには ``dry_run=true`` フラグを
+    付与し、実配置とは区別できる。本番前の動作テスト用（PR-ζ v1）。
     """
     from wiseman_hub.audit import append_audit_record
 
+    if not dry_run and exporter is None:
+        raise ValueError("execute_c_placement: exporter must be provided when dry_run=False")
     try:
         for r in results:
             if r.status != CPlacementStatus.PENDING:
@@ -351,13 +361,24 @@ def execute_c_placement(
                 r.status = CPlacementStatus.ERROR
                 r.message = "internal: missing xlsx/sheet/target"
                 continue
-            try:
-                exporter.export_first_page(r.xlsx_path, r.sheet_name, r.target_pdf)
-                r.status = CPlacementStatus.SUCCESS
-            except Exception as exc:  # MVP: 詳細分類は後段
-                r.status = CPlacementStatus.ERROR
-                r.message = f"export failed: {exc.__class__.__name__}: {exc}"
-                logger.exception("Excel export failed for %s", r.row.name)
+            if dry_run:
+                # 実 PDF 書込なし。パス解決 + シート検査が plan_c_placement
+                # で完了済みなので、ここでは「配置可能」と確認するだけ。
+                # status は PENDING のまま、再実行（実配置）が可能な状態を保つ。
+                r.message = "dry-run: 配置可能"
+            else:
+                assert exporter is not None  # 上の guard で保証済（mypy 用）
+                try:
+                    exporter.export_first_page(
+                        r.xlsx_path, r.sheet_name, r.target_pdf
+                    )
+                    r.status = CPlacementStatus.SUCCESS
+                except Exception as exc:  # MVP: 詳細分類は後段
+                    r.status = CPlacementStatus.ERROR
+                    r.message = (
+                        f"export failed: {exc.__class__.__name__}: {exc}"
+                    )
+                    logger.exception("Excel export failed for %s", r.row.name)
             append_audit_record(
                 log_dir,
                 kind="c_placement",
@@ -367,11 +388,15 @@ def execute_c_placement(
                     "staff": r.row.staff,
                     "xlsx_path": str(r.xlsx_path) if r.xlsx_path else None,
                     "sheet_name": r.sheet_name,
-                    "target_pdf": str(r.target_pdf) if r.target_pdf else None,
+                    "target_pdf": (
+                        str(r.target_pdf) if r.target_pdf else None
+                    ),
                     "status": r.status.value,
                     "message": r.message,
+                    "dry_run": dry_run,
                 },
             )
     finally:
-        exporter.close()
+        if not dry_run and exporter is not None:
+            exporter.close()
     return results
