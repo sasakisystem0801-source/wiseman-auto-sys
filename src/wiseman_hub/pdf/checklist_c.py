@@ -372,6 +372,17 @@ def execute_c_placement(
                     exporter.export_first_page(
                         r.xlsx_path, r.sheet_name, r.target_pdf
                     )
+                    # 二重ガード: exporter 側の存在確認に加えて、ここでも最終的な
+                    # 物理ファイル存在を検証する（exporter 実装が黙って成功扱い
+                    # する事案 / Excel COM サイレント失敗事案の再発防止）。
+                    if not r.target_pdf.exists():
+                        raise RuntimeError(
+                            f"PDF was not written to: {r.target_pdf}"
+                        )
+                    if r.target_pdf.stat().st_size == 0:
+                        raise RuntimeError(
+                            f"PDF is empty (0 bytes): {r.target_pdf}"
+                        )
                     r.status = CPlacementStatus.SUCCESS
                 except Exception as exc:  # MVP: 詳細分類は後段
                     r.status = CPlacementStatus.ERROR

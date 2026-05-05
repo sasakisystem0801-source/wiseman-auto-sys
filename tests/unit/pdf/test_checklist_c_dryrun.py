@@ -24,6 +24,12 @@ from wiseman_hub.pdf.checklist_c import (
 )
 
 
+def _fake_write_pdf(xlsx_path: Path, sheet_name: str, output_pdf: Path) -> None:
+    """exporter mock の write 動作を模す（実 PDF 風バイトを書く）。"""
+    output_pdf.parent.mkdir(parents=True, exist_ok=True)
+    output_pdf.write_bytes(b"%PDF-1.4\n%FAKE\n%%EOF\n")
+
+
 def _make_pending_result(tmp_path: Path) -> CPlacementResult:
     """PENDING で全フィールド埋まった結果を返す。"""
     row = ChecklistRow(
@@ -121,6 +127,10 @@ class TestRealRun:
     def test_real_run_calls_export_and_marks_success(self, tmp_path: Path) -> None:
         r = _make_pending_result(tmp_path)
         exporter = MagicMock()
+        # exporter は本来 PDF を書く責務を持つので、mock も実ファイルを書く挙動に
+        # 仕込む。これにより execute_c_placement の二重ガード（書込後の存在 +
+        # サイズ確認、Hotfix）を通過できる。
+        exporter.export_first_page.side_effect = _fake_write_pdf
         execute_c_placement([r], exporter=exporter, log_dir="", dry_run=False)
         exporter.export_first_page.assert_called_once_with(
             r.xlsx_path, r.sheet_name, r.target_pdf
@@ -131,6 +141,7 @@ class TestRealRun:
     def test_real_run_audit_log_has_dry_run_false(self, tmp_path: Path) -> None:
         r = _make_pending_result(tmp_path)
         exporter = MagicMock()
+        exporter.export_first_page.side_effect = _fake_write_pdf
         execute_c_placement(
             [r], exporter=exporter, log_dir=str(tmp_path), dry_run=False
         )
@@ -138,6 +149,33 @@ class TestRealRun:
         assert len(lines) == 1
         assert lines[0]["dry_run"] is False
         assert lines[0]["status"] == CPlacementStatus.SUCCESS.value
+
+    def test_real_run_silent_failure_marks_error(self, tmp_path: Path) -> None:
+        """exporter が例外を出さずに PDF を書かなかった場合、SUCCESS にせず ERROR。
+
+        Hotfix: Excel COM の ExportAsFixedFormat が DisplayAlerts=False で
+        サイレント失敗する既知事案 (UNC + 特殊文字 + 親フォルダ未存在) の
+        再発防止。`output_pdf.exists()` が False なら必ず ERROR に転帰する。
+        """
+        r = _make_pending_result(tmp_path)
+        exporter = MagicMock()
+        # PDF を書かない mock (旧仕様の Excel COM のサイレント失敗を再現)
+        exporter.export_first_page.return_value = None
+        execute_c_placement([r], exporter=exporter, log_dir="", dry_run=False)
+        assert r.status == CPlacementStatus.ERROR
+        assert "PDF was not written" in r.message
+
+    def test_real_run_empty_pdf_marks_error(self, tmp_path: Path) -> None:
+        """exporter が 0 バイトの PDF を書いた場合も ERROR (壊れた PDF を SUCCESS にしない)。"""
+        r = _make_pending_result(tmp_path)
+        exporter = MagicMock()
+        def _empty_write(xlsx_path: Path, sheet_name: str, output_pdf: Path) -> None:
+            output_pdf.parent.mkdir(parents=True, exist_ok=True)
+            output_pdf.write_bytes(b"")  # 0 bytes
+        exporter.export_first_page.side_effect = _empty_write
+        execute_c_placement([r], exporter=exporter, log_dir="", dry_run=False)
+        assert r.status == CPlacementStatus.ERROR
+        assert "empty" in r.message.lower() or "0 bytes" in r.message
 
     def test_real_run_export_exception_marks_error(self, tmp_path: Path) -> None:
         r = _make_pending_result(tmp_path)

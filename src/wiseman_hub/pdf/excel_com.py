@@ -69,9 +69,38 @@ class Win32ExcelExporter:
                     f"Sheet not found in xlsx: {sheet_name}"
                 ) from exc
             ws.Select()
-            output_pdf.parent.mkdir(parents=True, exist_ok=True)
+            # 親ディレクトリ作成 (UNC でも通常成功するが、SMB 権限/接続問題で
+            # 黙って失敗する可能性があるため作成後に存在確認)
+            try:
+                output_pdf.parent.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                raise RuntimeError(
+                    f"Failed to create output directory: "
+                    f"{output_pdf.parent} ({type(exc).__name__}: {exc})"
+                ) from exc
+            if not output_pdf.parent.exists():
+                # mkdir が例外を出さずに失敗するケース (UNC SMB 仕様上ありうる)
+                raise RuntimeError(
+                    f"Output directory does not exist after mkdir: "
+                    f"{output_pdf.parent}"
+                )
             # xlTypePDF = 0, From=1, To=1 で 1 ページ目のみ
             ws.ExportAsFixedFormat(0, str(output_pdf), From=1, To=1)
+            # Excel COM の ExportAsFixedFormat は内部警告を DisplayAlerts=False で
+            # 抑制すると **例外を出さずにサイレント失敗** することがある
+            # (特に UNC パス + 特殊文字 + 親フォルダ未存在の組み合わせ)。
+            # 監査ログに status=SUCCESS が記録されたまま PDF が NAS に
+            # 存在しない事故が業務側で発生したため、書込後に存在 + サイズ > 0
+            # を必ず検証する。
+            if not output_pdf.exists():
+                raise RuntimeError(
+                    f"ExportAsFixedFormat reported success but file is missing: "
+                    f"{output_pdf}"
+                )
+            if output_pdf.stat().st_size == 0:
+                raise RuntimeError(
+                    f"ExportAsFixedFormat produced an empty file: {output_pdf}"
+                )
         finally:
             wb.Close(SaveChanges=False)
 
