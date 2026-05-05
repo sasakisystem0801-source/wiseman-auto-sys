@@ -311,11 +311,14 @@ class ChecklistCDialog:
         title_context = (
             f"{r.row.staff} / {r.row.name} / {r.row.facility}"
         )
+        year, month = self._current_year_month()
         picker = XlsxPickerDialog(
             parent=self._top,
             candidates=r.xlsx_candidates,
             folder_tree=r.folder_tree,
             title_context=title_context,
+            target_year=year,
+            target_month=month,
         )
         picker.get_toplevel().wait_window()
         selected, remember = picker.get_result()
