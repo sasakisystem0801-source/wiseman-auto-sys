@@ -55,12 +55,26 @@ def _read_audit_lines(log_dir: Path) -> list[dict]:
 
 class TestDryRun:
     def test_dry_run_does_not_call_exporter(self, tmp_path: Path) -> None:
+        """dry_run=True で exporter が渡されても export_first_page / close を呼ばない。
+
+        Evaluator 指摘 (HIGH): 旧版は exporter=None を渡しながらローカル MagicMock に
+        assert_not_called していたため、実装が誤って exporter を触っても通過してしまう
+        欠陥があった。本テストでは実際に渡された MagicMock に対してアサートすることで、
+        AC1-a「dry_run=True 時 export_first_page が一度も呼ばれない」を保証する。
+        """
         r = _make_pending_result(tmp_path)
-        exporter = MagicMock()
+        mock_exporter = MagicMock()
+        execute_c_placement([r], exporter=mock_exporter, log_dir="", dry_run=True)
+        mock_exporter.export_first_page.assert_not_called()
+        mock_exporter.close.assert_not_called()
+
+    def test_dry_run_accepts_exporter_none(self, tmp_path: Path) -> None:
+        """dry_run=True で exporter=None も許容（呼出側が exporter を作らない用途）。"""
+        r = _make_pending_result(tmp_path)
+        # 例外を出さず正常完了することの確認
         execute_c_placement([r], exporter=None, log_dir="", dry_run=True)
-        # exporter は不要 → 引数 None で動く
-        exporter.export_first_page.assert_not_called()
-        exporter.close.assert_not_called()
+        assert r.status == CPlacementStatus.PENDING
+        assert "dry-run" in r.message
 
     def test_dry_run_keeps_status_pending(self, tmp_path: Path) -> None:
         """dry_run 後も status=PENDING を保ち再実行可能（実配置に進める）。"""

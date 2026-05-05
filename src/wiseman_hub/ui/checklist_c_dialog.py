@@ -557,6 +557,7 @@ class ChecklistCDialog:
         self._top.update_idletasks()
 
         def _bg() -> None:
+            error_message: str | None = None
             try:
                 # dry_run 時は exporter を生成しない（COM 起動コストも 0）
                 exporter = None if dry_run else create_exporter()
@@ -569,16 +570,40 @@ class ChecklistCDialog:
                     log_dir=self._config.log_dir,
                     dry_run=dry_run,
                 )
-            except Exception:
+            except Exception as exc:  # noqa: BLE001  (broad ok: UI top-level guard)
                 logger.exception("execute_c_placement failed")
+                # Evaluator 指摘 (LOW): 例外時に「N 件 OK」と誤表示しないよう
+                # error_message を保存して UI 側で表示分岐
+                error_message = f"{type(exc).__name__}: {exc}"
             self._top.after(
-                0, lambda: self._on_execute_done(dry_run, len(selected_pending))
+                0,
+                lambda: self._on_execute_done(
+                    dry_run, len(selected_pending), error_message
+                ),
             )
 
         threading.Thread(target=_bg, daemon=True).start()
 
-    def _on_execute_done(self, dry_run: bool, target_count: int) -> None:
+    def _on_execute_done(
+        self, dry_run: bool, target_count: int, error_message: str | None = None
+    ) -> None:
         self._refresh_tree()
+        if error_message is not None:
+            # _bg() で execute_c_placement が例外を投げた場合の分岐
+            self._status_var.set(
+                f"{'ドライラン' if dry_run else '配置'}失敗: {error_message}"
+            )
+            messagebox.showerror(
+                f"{'ドライラン' if dry_run else '配置'}失敗",
+                f"{error_message}\n\n詳細はログを確認してください。",
+                parent=self._top,
+            )
+            # 失敗時も exec_btn を回復させ再試行可能に（PENDING 行が残っているため）
+            ready = sum(
+                1 for r in self._results if r.status == CPlacementStatus.PENDING
+            )
+            self._exec_btn.configure(state="normal" if ready > 0 else "disabled")
+            return
         if dry_run:
             self._status_var.set(
                 f"ドライラン完了: {target_count} 件のパス検証 OK（PDF 未書込、再実行可）"

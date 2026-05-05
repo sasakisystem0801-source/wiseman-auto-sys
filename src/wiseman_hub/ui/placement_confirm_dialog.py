@@ -159,11 +159,18 @@ class PlacementConfirmDialog:
             text="※ 不正な path がある場合はキャンセルし、該当行をダブルクリックで再選択してください。",
             foreground="#a06000",
         ).pack(side="left")
-        ttk.Button(bottom, text="キャンセル", command=self._on_cancel).pack(
+        # ボタン配置の意図:
+        #   描画順は左 → 右で [ドライラン] [キャンセル] [実配置を実行]。
+        #   - ドライラン（安全）は左端、目線が止まりやすい位置に置き推奨フロー誘導
+        #   - キャンセルを中央に挟み、ドライランと実配置を直接隣接させない
+        #     （慣性クリックで dry-run 直後に実配置を押す事故を緩和）
+        #   - 実配置（破壊的）は右端
+        # tkinter の pack(side="right") は後から追加するほど左寄りになるため、
+        # 「左に置きたいボタンほど後で pack」する順序になっている。
+        ttk.Button(bottom, text="実配置を実行", command=self._on_real_run).pack(
             side="right", padx=4
         )
-        # 実配置（破壊的）→ ドライラン（安全）の順で並べ、安全側を右端（OK 押下慣性ガード）
-        ttk.Button(bottom, text="実配置を実行", command=self._on_real_run).pack(
+        ttk.Button(bottom, text="キャンセル", command=self._on_cancel).pack(
             side="right", padx=4
         )
         ttk.Button(
