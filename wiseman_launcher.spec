@@ -80,7 +80,12 @@ a = Analysis(
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 # Windows .ico、macOS は icon を無視（warning のみ）。本番は Windows のみ。
-_ICON = str(ROOT / "assets" / "icon.ico")
+# Sug-4 (codex review threadId 019dfce6) 反映: icon 不在で silent build 完走 →
+# 環境差で気づかぬ regression を生むため、spec parse 時点で fail-fast する。
+_ICON_PATH = ROOT / "assets" / "icon.ico"
+if not _ICON_PATH.exists():
+    raise FileNotFoundError(f"icon asset not found: {_ICON_PATH}")
+_ICON = str(_ICON_PATH)
 
 exe = EXE(
     pyz,

@@ -26,7 +26,12 @@ from pathlib import Path
 
 from . import __version__
 from .current import read_current
-from .manifest import ManifestError, fetch_manifest, parse_manifest, validate_manifest
+from .manifest import (
+    ManifestError,
+    fetch_manifest,
+    parse_manifest,
+    validate_manifest,
+)
 
 logger = logging.getLogger("wiseman_launcher")
 
@@ -49,7 +54,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="manifest fetch + validate のみ実施（download/spawn なし）",
+        help=(
+            "manifest fetch + validate のみ実施（download/spawn なし、"
+            "副作用ゼロ: corrupt current.json の quarantine もしない）"
+        ),
     )
     parser.add_argument(
         "--manifest-url",
@@ -84,10 +92,30 @@ def _semver_tuple(s: str) -> tuple[int, int, int]:
         return (0, 0, 0)
 
 
-def run_dry_run(manifest_url: str, current_path: Path) -> int:
-    """dry-run の主処理。manifest fetch + validate + 比較ログまで。"""
-    current = read_current(current_path)
-    logger.info("current version: %s (released_at=%s)", current.version, current.released_at or "n/a")
+def run_dry_run(manifest_url: str, current_path: Path, *, verbose: bool = False) -> int:
+    """dry-run の主処理。manifest fetch + validate + 比較ログまで。
+
+    副作用ゼロ保証 (codex I-3 反映):
+        - current.json の破損 quarantine もしない (read_current に quarantine_corrupt=False)
+        - manifest を fetch + validate + 比較するだけ、ファイル書込なし
+
+    Args:
+        manifest_url: HTTPS URL (entry で検証済前提)
+        current_path: ローカル current.json のパス
+        verbose: True なら full path をログ表示 (I-5: 通常は machine-specific path 隠蔽)
+    """
+    current = read_current(current_path, quarantine_corrupt=False, verbose=verbose)
+    logger.info(
+        "current version: %s (released_at=%s)",
+        current.version,
+        current.released_at or "n/a",
+    )
+
+    # C-1: manifest_url の HTTPS 検証は fetch_manifest() 内で実施されるが、
+    # exit code を CONFIG/MANIFEST に振り分けるため早期検証も実施
+    if not manifest_url.startswith("https://"):
+        logger.error("--manifest-url must use HTTPS scheme")
+        return EXIT_CONFIG
 
     try:
         raw = fetch_manifest(manifest_url)
@@ -143,7 +171,7 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_CONFIG
 
     try:
-        return run_dry_run(args.manifest_url, args.current_path)
+        return run_dry_run(args.manifest_url, args.current_path, verbose=args.verbose)
     except Exception:  # noqa: BLE001 — top-level safety net
         logger.exception("unexpected error in launcher")
         return EXIT_UNEXPECTED

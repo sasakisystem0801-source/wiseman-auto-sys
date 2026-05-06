@@ -125,3 +125,96 @@ def test_write_current_atomic_missing_parent_dir(tmp_path: Path) -> None:
 def test_default_current_matches_contract() -> None:
     assert DEFAULT_CURRENT.version == "0.0.0"
     assert DEFAULT_CURRENT.released_at == ""
+
+
+# I-3: dry-run 副作用ゼロ ---------------------------------------------------
+
+def test_read_current_no_quarantine_when_dry_run(tmp_path: Path) -> None:
+    """I-3: quarantine_corrupt=False で破損ファイルを rename しない。"""
+    p = tmp_path / "current.json"
+    p.write_bytes(b"{not json")
+    out = read_current(p, quarantine_corrupt=False)
+    assert out == DEFAULT_CURRENT
+    # 破損ファイルはそのまま残る
+    assert p.exists()
+    assert p.read_bytes() == b"{not json"
+    # quarantine ファイルは作られない
+    assert not list(tmp_path.glob("current.json.corrupt-*"))
+
+
+def test_read_current_no_quarantine_for_invalid_utf8(tmp_path: Path) -> None:
+    p = tmp_path / "current.json"
+    p.write_bytes(b"\xff\xfe\xfd")
+    out = read_current(p, quarantine_corrupt=False)
+    assert out == DEFAULT_CURRENT
+    assert p.exists()
+
+
+def test_read_current_no_quarantine_for_not_dict(tmp_path: Path) -> None:
+    p = tmp_path / "current.json"
+    p.write_text(json.dumps([1, 2, 3]))
+    out = read_current(p, quarantine_corrupt=False)
+    assert out == DEFAULT_CURRENT
+    assert p.exists()
+
+
+def test_read_current_no_quarantine_for_schema_mismatch(tmp_path: Path) -> None:
+    p = tmp_path / "current.json"
+    p.write_text(json.dumps({"version": 123, "released_at": "x"}))
+    out = read_current(p, quarantine_corrupt=False)
+    assert out == DEFAULT_CURRENT
+    assert p.exists()
+
+
+# I-4: quarantine 名衝突回避 ------------------------------------------------
+
+def test_quarantine_name_collision_resistant(tmp_path: Path) -> None:
+    """I-4: 連続して corrupt read しても quarantine ファイル名が衝突しない。"""
+    p = tmp_path / "current.json"
+    quarantine_count = 5
+
+    for _ in range(quarantine_count):
+        p.write_bytes(b"{not json")
+        read_current(p)
+
+    quarantines = list(tmp_path.glob("current.json.corrupt-*"))
+    # microseconds + pid + token_hex で衝突は実用上ゼロ
+    assert len(quarantines) == quarantine_count, (
+        f"expected {quarantine_count} unique quarantines, got {len(quarantines)}: "
+        f"{[q.name for q in quarantines]}"
+    )
+
+
+# I-5: machine-specific path 隠蔽 -------------------------------------------
+
+def test_read_current_default_log_no_full_path(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """I-5: verbose=False (default) では full path をログに出さない。"""
+    import logging
+
+    p = tmp_path / "current.json"  # not exists
+    with caplog.at_level(logging.INFO, logger="wiseman_hub_launcher.current"):
+        read_current(p)
+    # full path は INFO ログに出ない
+    full_path_str = str(p)
+    for record in caplog.records:
+        assert full_path_str not in record.getMessage(), (
+            f"machine-specific path leaked: {record.getMessage()}"
+        )
+
+
+def test_read_current_verbose_log_includes_full_path(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """I-5: verbose=True なら full path を出す（debug 用途）。"""
+    import logging
+
+    p = tmp_path / "current.json"  # not exists
+    with caplog.at_level(logging.INFO, logger="wiseman_hub_launcher.current"):
+        read_current(p, verbose=True)
+    full_path_str = str(p)
+    found = any(full_path_str in record.getMessage() for record in caplog.records)
+    assert found, "verbose=True should include full path in INFO log"

@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import secrets
 import tempfile
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -49,32 +50,60 @@ manifest 側の current_version > 0.0.0 で必ず update 候補になる。
 """
 
 
-def _now_iso_utc() -> str:
-    """ISO8601 UTC タイムスタンプ（ファイル名 suffix 用、コロン除去）。"""
-    return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+def _now_iso_utc_microsec() -> str:
+    """ISO8601 UTC + microseconds（ファイル名 suffix 用、コロン除去、I-4 衝突回避）。"""
+    return datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
 
 
 def _quarantine_corrupt(path: Path, reason: str) -> None:
-    """破損 current.json を ``.corrupt-{ts}`` suffix にリネームして退避する。
+    """破損 current.json を ``.corrupt-{ts}-{pid}-{rand}`` suffix にリネームして退避する。
 
+    I-4 (codex review threadId 019dfce6) 反映:
+        - 秒精度の timestamp は同一秒に複数 corrupt が走ると衝突するため、
+          microseconds + pid + 4 桁 random suffix で衝突確率を実用上ゼロ化
     rename 失敗時はログのみ（read 側は DEFAULT に fallback するので致命ではない）。
     """
-    ts = _now_iso_utc()
-    quarantine = path.with_suffix(f"{path.suffix}.corrupt-{ts}")
+    ts = _now_iso_utc_microsec()
+    rand = secrets.token_hex(2)
+    pid = os.getpid()
+    quarantine = path.with_suffix(f"{path.suffix}.corrupt-{ts}-{pid}-{rand}")
     try:
         os.replace(path, quarantine)
-        logger.warning("current.json quarantined to %s (reason: %s)", quarantine.name, reason)
+        logger.warning(
+            "current.json quarantined to %s (reason: %s)",
+            quarantine.name,
+            reason,
+        )
     except OSError as e:
-        logger.warning("failed to quarantine corrupt current.json (%s): %s", reason, type(e).__name__)
+        logger.warning(
+            "failed to quarantine corrupt current.json (%s): %s",
+            reason,
+            type(e).__name__,
+        )
 
 
-def read_current(path: Path) -> Current:
+def read_current(
+    path: Path,
+    *,
+    quarantine_corrupt: bool = True,
+    verbose: bool = False,
+) -> Current:
     """current.json を読む。破損時は退避 + DEFAULT_CURRENT 返却。
 
     fail-fast はしない（launcher は起動を止めない方針）。すべて warning ログのみ。
+
+    Args:
+        path: current.json のパス
+        quarantine_corrupt: True なら破損ファイルを ``.corrupt-{ts}-{pid}-{rand}``
+            にリネーム退避。False なら退避せず warn のみ（I-3: dry-run 副作用ゼロ用）
+        verbose: True なら full path をログ表示。False なら machine-specific path を
+            隠蔽し、汎用 message のみ（I-5: PII / privacy 配慮）
     """
     if not path.exists():
-        logger.info("current.json not found at %s, using DEFAULT_CURRENT", path)
+        if verbose:
+            logger.info("current.json not found at %s, using DEFAULT_CURRENT", path)
+        else:
+            logger.info("current.json not found, using DEFAULT_CURRENT")
         return DEFAULT_CURRENT
 
     try:
@@ -86,17 +115,27 @@ def read_current(path: Path) -> Current:
     try:
         parsed = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as e:
-        _quarantine_corrupt(path, f"json-decode-{type(e).__name__}")
+        reason = f"json-decode-{type(e).__name__}"
+        if quarantine_corrupt:
+            _quarantine_corrupt(path, reason)
+        else:
+            logger.warning("current.json corrupt (%s), not quarantined (dry-run)", reason)
         return DEFAULT_CURRENT
 
     if not isinstance(parsed, dict):
-        _quarantine_corrupt(path, "not-a-dict")
+        if quarantine_corrupt:
+            _quarantine_corrupt(path, "not-a-dict")
+        else:
+            logger.warning("current.json not-a-dict, not quarantined (dry-run)")
         return DEFAULT_CURRENT
 
     version = parsed.get("version")
     released_at = parsed.get("released_at")
     if not isinstance(version, str) or not isinstance(released_at, str):
-        _quarantine_corrupt(path, "schema-mismatch")
+        if quarantine_corrupt:
+            _quarantine_corrupt(path, "schema-mismatch")
+        else:
+            logger.warning("current.json schema-mismatch, not quarantined (dry-run)")
         return DEFAULT_CURRENT
 
     return Current(version=version, released_at=released_at)

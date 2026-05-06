@@ -138,3 +138,56 @@ def test_run_dry_run_manifest_older_than_current(
         code = run_dry_run("https://example.com/manifest.json", cur_path)
     assert code == EXIT_OK
     assert any("older than current" in r.message for r in caplog.records)
+
+
+# C-1: HTTPS 入口検証 (CLI レベル) -----------------------------------------
+
+@pytest.mark.parametrize(
+    "bad_url",
+    [
+        "http://example.com/manifest.json",
+        "file:///etc/manifest.json",
+        "ftp://example.com/manifest.json",
+        "/local/manifest.json",
+    ],
+)
+def test_main_dry_run_rejects_non_https_manifest_url(tmp_path: Path, bad_url: str) -> None:
+    """C-1: --manifest-url が HTTPS 以外なら EXIT_CONFIG (manifest fetch には到達しない)。"""
+    with patch.object(launcher_main, "fetch_manifest") as fetch_mock:
+        code = main(
+            [
+                "--dry-run",
+                "--manifest-url",
+                bad_url,
+                "--current-path",
+                str(tmp_path / "current.json"),
+            ]
+        )
+    assert code == EXIT_CONFIG
+    fetch_mock.assert_not_called()  # fetch に渡さず即拒否
+
+
+# I-3: dry-run の副作用ゼロ -------------------------------------------------
+
+def test_dry_run_does_not_quarantine_corrupt_current(tmp_path: Path) -> None:
+    """I-3: dry-run では破損 current.json を rename しない（副作用ゼロ）。"""
+    cur_path = tmp_path / "current.json"
+    cur_path.write_bytes(b"{not json")  # 破損
+
+    with patch.object(launcher_main, "fetch_manifest", return_value=_good_manifest_bytes("1.0.0")):
+        code = main(
+            [
+                "--dry-run",
+                "--manifest-url",
+                "https://example.com/manifest.json",
+                "--current-path",
+                str(cur_path),
+            ]
+        )
+    # exit code は OK (DEFAULT_CURRENT で続行)
+    assert code == EXIT_OK
+    # 破損ファイルはそのまま残る (dry-run 副作用ゼロ)
+    assert cur_path.exists()
+    assert cur_path.read_bytes() == b"{not json"
+    # quarantine ファイルは作られない
+    assert not list(tmp_path.glob("current.json.corrupt-*"))

@@ -141,6 +141,58 @@ trade-off:
 
 参考: codex セカンドオピニオン threadId（PR-3 着手時）と本文書 §2 「launcher 自身の更新方針」
 
+##### 1.1.1 真正性ベースの supply-chain 防御（PR-3 codex review 反映）
+
+PR-3 のセカンドオピニオン（codex threadId 019dfce6）で追加判明した運用前提を明記する:
+
+public read を採用するということは、**秘匿** ではなく **真正性** で改竄から守る方針となる:
+
+- **SHA-256 単独では不十分**: manifest 改竄 + artifact 改竄を同時にされたら検知不能
+- **provenance 検証で以下を必ず pin する**（PR-6 で本実装）:
+  - `expected_repo` = "sasakisystem0801-source/wiseman-auto-sys"
+  - `expected_workflow_ref` = ".github/workflows/release.yml@refs/heads/main"
+  - `expected_commit_sha` = manifest.commit_sha と一致
+  - `expected_issuer` = "https://token.actions.githubusercontent.com"
+- これにより GitHub OIDC + provenance attestation で改竄経路を完全に封じる
+- PR-3 では `verify_provenance` の signature を上記 pin 引数で固定（PR-6 への breaking change を回避）
+
+##### 1.1.2 download tracking の制約
+
+public bucket では individual end-user の download log が GCS access log で取得困難:
+
+- 一般 public read の identity は粗い（IP / region のみ、user 識別不可）
+- 個別端末の配布確認は **別系統** で実施:
+  - `current.json` の version 情報 + 起動時の audit ping（PR-1 audit_uploader 経由）
+  - 業務責任者 PC のみが対象なので、別系統 telemetry の精度は粗くて十分
+
+#### 1.2 launcher 行数制約の運用定義（PR-3 codex review 反映）
+
+PR-3 着手時 codex review (threadId 019dfce6) で確定:
+
+300 LOC 制約は **runtime critical path** に対するもの。盲目的な行数維持で
+validation や error message を削るのは supply-chain 防御の毀損となるため、
+以下の運用定義に従う:
+
+| 区分 | 対象 | 上限 |
+|------|------|------|
+| **runtime critical path** (PR-3) | `__main__.py`, `manifest.py`, `checksum.py`, `current.py` の実コード | 400 LOC（pygount 計測、空行/コメント/docstring 除外） |
+| **runtime critical path** (PR-4 後) | 上記 + `updater.py`（download/spawn/rollback） | 600 LOC |
+| **対象外** | `__init__.py`（version 文字列のみ）、test files、PyInstaller spec | 制約なし |
+
+PR-3 codex review (threadId 019dfce6) 反映後の実測値: **389 LOC**（path traversal 防御強化、HTTPS pin、DoS cap、provenance signature 拡張等で +103 LOC）。当初目標 300 LOC は「validation を削れば達成可能」だが supply-chain 防御の毀損となるため、現実的上限を 400/600 に再定義した。
+
+緩和の根拠:
+
+- launcher 極小性の本質は「**stdlib only** + **`wiseman_hub.*` import 禁止** +
+  **依存ライブラリ重量ゼロ**」であり、行数自体ではない
+- 行数を盲目的に維持するために validation を削るのは supply-chain 防御の毀損
+- PR-4 後も runtime path package は **<500 LOC** 厳守、それを超えたらアーキテクチャ見直し
+
+行数監視:
+
+- 各 PR で `pygount src/wiseman_hub_launcher --format=summary` の値を PR body に記載
+- 500 LOC 超過時は「launcher が肥大化している signal」として ADR 化アラート
+
 #### 2. Bootstrapper / updater 分離（codex C-2）
 
 ```
