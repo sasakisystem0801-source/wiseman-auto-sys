@@ -1,4 +1,4 @@
-"""Tests for wiseman_hub_launcher.__main__ CLI entry (ADR-016 PR-3)。"""
+"""Tests for wiseman_hub_launcher.__main__ CLI entry (ADR-016 PR-3 / PR-4)。"""
 
 from __future__ import annotations
 
@@ -10,13 +10,26 @@ import pytest
 
 from wiseman_hub_launcher import __main__ as launcher_main
 from wiseman_hub_launcher.__main__ import (
+    EXIT_CHECKSUM_MISMATCH,
     EXIT_CONFIG,
+    EXIT_LOCK_HELD,
     EXIT_MANIFEST,
     EXIT_OK,
+    EXIT_ROLLBACK_UNAVAILABLE,
+    EXIT_SPAWN_FAILED_NO_ROLLBACK,
     main,
     run_dry_run,
 )
+from wiseman_hub_launcher.checksum import ChecksumError
 from wiseman_hub_launcher.manifest import ManifestError
+from wiseman_hub_launcher.updater import (
+    DownloadError,
+    LockHeldError,
+    PreflightError,
+    SpawnFailedNoRollbackError,
+    SpawnOutcome,
+    SpawnResult,
+)
 
 
 def _good_manifest_bytes(version: str = "1.2.3") -> bytes:
@@ -191,3 +204,401 @@ def test_dry_run_does_not_quarantine_corrupt_current(tmp_path: Path) -> None:
     assert cur_path.read_bytes() == b"{not json"
     # quarantine ファイルは作られない
     assert not list(tmp_path.glob("current.json.corrupt-*"))
+
+
+# PR-4: --update mode + supply-chain gate ---------------------------------------
+
+
+def _good_manifest_dict(version: str = "1.2.3") -> dict[str, object]:
+    return json.loads(_good_manifest_bytes(version).decode("utf-8"))
+
+
+def test_main_update_without_allow_insecure_fail_closed(tmp_path: Path) -> None:
+    """PR-4 C-3: --update のみでは EXIT_CONFIG (provenance 未実装、fail-closed)。"""
+    code = main(
+        [
+            "--update",
+            "--manifest-url",
+            "https://example.com/manifest.json",
+            "--home",
+            str(tmp_path),
+        ]
+    )
+    assert code == EXIT_CONFIG
+
+
+def test_main_update_with_allow_insecure_proceeds(tmp_path: Path) -> None:
+    """PR-4: --allow-insecure-checksum-only で gate bypass、update 実行。"""
+    cur_path = tmp_path / "current.json"
+    cur_path.write_text(
+        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
+    )
+    # 既存 binary を seed (preflight pass 用)
+    binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"existing")
+
+    with (
+        patch.object(
+            launcher_main,
+            "fetch_manifest",
+            return_value=_good_manifest_bytes("1.2.3"),
+        ),
+        patch.object(
+            launcher_main,
+            "update_and_spawn",
+            return_value=SpawnOutcome(result=SpawnResult.SUCCESS, returncode=None),
+        ),
+    ):
+        code = main(
+            [
+                "--update",
+                "--allow-insecure-checksum-only",
+                "--manifest-url",
+                "https://example.com/manifest.json",
+                "--home",
+                str(tmp_path),
+                "--monitor-timeout",
+                "0.05",
+            ]
+        )
+    assert code == EXIT_OK
+
+
+def test_main_update_no_spawn_returns_ok(tmp_path: Path) -> None:
+    """AC-6: --no-spawn で SUCCESS sentinel → EXIT_OK。"""
+    cur_path = tmp_path / "current.json"
+    cur_path.write_text(
+        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
+    )
+    binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"existing")
+
+    with (
+        patch.object(
+            launcher_main,
+            "fetch_manifest",
+            return_value=_good_manifest_bytes("1.5.0"),
+        ),
+        patch.object(
+            launcher_main,
+            "update_and_spawn",
+            return_value=SpawnOutcome(result=SpawnResult.SUCCESS, returncode=None),
+        ),
+    ):
+        code = main(
+            [
+                "--update",
+                "--no-spawn",
+                "--allow-insecure-checksum-only",
+                "--manifest-url",
+                "https://example.com/manifest.json",
+                "--home",
+                str(tmp_path),
+            ]
+        )
+    assert code == EXIT_OK
+
+
+def test_main_no_spawn_requires_update(tmp_path: Path) -> None:
+    """--no-spawn 単独 (--update なし) は EXIT_CONFIG。"""
+    code = main(["--no-spawn", "--home", str(tmp_path)])
+    assert code == EXIT_CONFIG
+
+
+def test_main_dry_run_and_update_mutex(tmp_path: Path) -> None:
+    """--dry-run + --update の同時指定は EXIT_CONFIG。"""
+    code = main(
+        [
+            "--dry-run",
+            "--update",
+            "--allow-insecure-checksum-only",
+            "--home",
+            str(tmp_path),
+        ]
+    )
+    assert code == EXIT_CONFIG
+
+
+def test_main_update_rejects_non_https(tmp_path: Path) -> None:
+    """--update でも --manifest-url が HTTPS 以外なら EXIT_CONFIG。"""
+    code = main(
+        [
+            "--update",
+            "--allow-insecure-checksum-only",
+            "--manifest-url",
+            "http://example.com/manifest.json",
+            "--home",
+            str(tmp_path),
+        ]
+    )
+    assert code == EXIT_CONFIG
+
+
+def test_main_update_lock_held_returns_8(tmp_path: Path) -> None:
+    """AC-12: 多重起動 (LockHeldError) → EXIT_LOCK_HELD (8)。"""
+    cur_path = tmp_path / "current.json"
+    cur_path.write_text(
+        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
+    )
+
+    with patch.object(
+        launcher_main,
+        "acquire_lock",
+        side_effect=LockHeldError("another launcher running"),
+    ):
+        code = main(
+            [
+                "--update",
+                "--allow-insecure-checksum-only",
+                "--manifest-url",
+                "https://example.com/manifest.json",
+                "--home",
+                str(tmp_path),
+            ]
+        )
+    assert code == EXIT_LOCK_HELD
+
+
+def test_main_update_preflight_failure_returns_6(tmp_path: Path) -> None:
+    """AC-13: preflight 失敗 → EXIT_ROLLBACK_UNAVAILABLE (6)。"""
+    cur_path = tmp_path / "current.json"
+    cur_path.write_text(
+        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
+    )
+    # versions/1.2.3/wiseman_hub.exe を seed しない → preflight 失敗
+
+    with (
+        patch.object(
+            launcher_main,
+            "fetch_manifest",
+            return_value=_good_manifest_bytes("1.5.0"),
+        ),
+        patch.object(launcher_main, "acquire_lock", return_value=99),
+        patch.object(launcher_main, "release_lock"),
+    ):
+        code = main(
+            [
+                "--update",
+                "--allow-insecure-checksum-only",
+                "--manifest-url",
+                "https://example.com/manifest.json",
+                "--home",
+                str(tmp_path),
+            ]
+        )
+    assert code == EXIT_ROLLBACK_UNAVAILABLE
+
+
+def test_main_update_checksum_mismatch_returns_5(tmp_path: Path) -> None:
+    """AC-2: ChecksumError → EXIT_CHECKSUM_MISMATCH (5)。"""
+    cur_path = tmp_path / "current.json"
+    cur_path.write_text(
+        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
+    )
+    binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"existing")
+
+    with (
+        patch.object(
+            launcher_main,
+            "fetch_manifest",
+            return_value=_good_manifest_bytes("1.5.0"),
+        ),
+        patch.object(
+            launcher_main,
+            "update_and_spawn",
+            side_effect=ChecksumError("mismatch"),
+        ),
+    ):
+        code = main(
+            [
+                "--update",
+                "--allow-insecure-checksum-only",
+                "--manifest-url",
+                "https://example.com/manifest.json",
+                "--home",
+                str(tmp_path),
+            ]
+        )
+    assert code == EXIT_CHECKSUM_MISMATCH
+
+
+def test_main_update_download_error_returns_3(tmp_path: Path) -> None:
+    """download error → EXIT_MANIFEST (3)。"""
+    cur_path = tmp_path / "current.json"
+    cur_path.write_text(
+        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
+    )
+    binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"existing")
+
+    with (
+        patch.object(
+            launcher_main,
+            "fetch_manifest",
+            return_value=_good_manifest_bytes("1.5.0"),
+        ),
+        patch.object(
+            launcher_main,
+            "update_and_spawn",
+            side_effect=DownloadError("network down"),
+        ),
+    ):
+        code = main(
+            [
+                "--update",
+                "--allow-insecure-checksum-only",
+                "--manifest-url",
+                "https://example.com/manifest.json",
+                "--home",
+                str(tmp_path),
+            ]
+        )
+    assert code == EXIT_MANIFEST
+
+
+def test_main_update_spawn_no_rollback_returns_7(tmp_path: Path) -> None:
+    """新版 + 旧版とも crash → EXIT_SPAWN_FAILED_NO_ROLLBACK (7)。"""
+    cur_path = tmp_path / "current.json"
+    cur_path.write_text(
+        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
+    )
+    binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"existing")
+
+    with (
+        patch.object(
+            launcher_main,
+            "fetch_manifest",
+            return_value=_good_manifest_bytes("1.5.0"),
+        ),
+        patch.object(
+            launcher_main,
+            "update_and_spawn",
+            side_effect=SpawnFailedNoRollbackError("both crashed"),
+        ),
+    ):
+        code = main(
+            [
+                "--update",
+                "--allow-insecure-checksum-only",
+                "--manifest-url",
+                "https://example.com/manifest.json",
+                "--home",
+                str(tmp_path),
+            ]
+        )
+    assert code == EXIT_SPAWN_FAILED_NO_ROLLBACK
+
+
+def test_main_update_internal_preflight_during_update_returns_6(tmp_path: Path) -> None:
+    """update 中の PreflightError (rollback 不能) → EXIT_ROLLBACK_UNAVAILABLE (6)。"""
+    cur_path = tmp_path / "current.json"
+    cur_path.write_text(
+        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
+    )
+    binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"existing")
+
+    with (
+        patch.object(
+            launcher_main,
+            "fetch_manifest",
+            return_value=_good_manifest_bytes("1.5.0"),
+        ),
+        patch.object(
+            launcher_main,
+            "update_and_spawn",
+            side_effect=PreflightError("rollback unavailable"),
+        ),
+    ):
+        code = main(
+            [
+                "--update",
+                "--allow-insecure-checksum-only",
+                "--manifest-url",
+                "https://example.com/manifest.json",
+                "--home",
+                str(tmp_path),
+            ]
+        )
+    assert code == EXIT_ROLLBACK_UNAVAILABLE
+
+
+def test_main_update_spawn_crash_only_no_rollback_returns_7(tmp_path: Path) -> None:
+    """spawn 結果が CRASH (rollback 経由しないテスト用パス) → EXIT_SPAWN_FAILED_NO_ROLLBACK。
+
+    update_and_spawn が CRASH outcome を直接返すケース (rollback 経由せず)。
+    """
+    cur_path = tmp_path / "current.json"
+    cur_path.write_text(
+        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
+    )
+    binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"existing")
+
+    with (
+        patch.object(
+            launcher_main,
+            "fetch_manifest",
+            return_value=_good_manifest_bytes("1.5.0"),
+        ),
+        patch.object(
+            launcher_main,
+            "update_and_spawn",
+            return_value=SpawnOutcome(result=SpawnResult.CRASH, returncode=1),
+        ),
+    ):
+        code = main(
+            [
+                "--update",
+                "--allow-insecure-checksum-only",
+                "--manifest-url",
+                "https://example.com/manifest.json",
+                "--home",
+                str(tmp_path),
+            ]
+        )
+    assert code == EXIT_SPAWN_FAILED_NO_ROLLBACK
+
+
+def test_main_update_ok_early_exit_returns_0(tmp_path: Path) -> None:
+    """OK_EARLY_EXIT (single-instance 等) → EXIT_OK (rollback しない)。"""
+    cur_path = tmp_path / "current.json"
+    cur_path.write_text(
+        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
+    )
+    binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"existing")
+
+    with (
+        patch.object(
+            launcher_main,
+            "fetch_manifest",
+            return_value=_good_manifest_bytes("1.5.0"),
+        ),
+        patch.object(
+            launcher_main,
+            "update_and_spawn",
+            return_value=SpawnOutcome(result=SpawnResult.OK_EARLY_EXIT, returncode=0),
+        ),
+    ):
+        code = main(
+            [
+                "--update",
+                "--allow-insecure-checksum-only",
+                "--manifest-url",
+                "https://example.com/manifest.json",
+                "--home",
+                str(tmp_path),
+            ]
+        )
+    assert code == EXIT_OK

@@ -1,14 +1,19 @@
-"""current.json atomic read/write + 破損時退避 (ADR-016 PR-3)。
+"""current.json atomic read/write + 破損時退避 (ADR-016 PR-3 / PR-4)。
 
-current.json schema:
+current.json schema (PR-4 で previous_version 追加):
     {
         "version": "1.2.3",                      (semver, 初期値 "0.0.0")
-        "released_at": "2026-05-06T13:00:00Z"    (ISO8601 UTC, 初期値 "")
+        "released_at": "2026-05-06T13:00:00Z",   (ISO8601 UTC, 初期値 "")
+        "previous_version": "1.2.2"              (semver or "", PR-4 で追加。
+                                                  rollback 先特定用、初期値 "")
     }
+
+PR-3 形式（previous_version なし）との後方互換: 欠落時は default "" で読み取り、
+schema mismatch / quarantine は発生しない (PR-4 codex Suggestion 1 反映)。
 
 破損ハンドリング方針:
     - 存在しない → DEFAULT_CURRENT を返す（初回起動時を想定）
-    - JSON 破損 / schema 不一致 → ``.corrupt-{ts}`` に退避してから DEFAULT
+    - JSON 破損 / schema 不一致 / semver 不正 → ``.corrupt-{ts}`` に退避してから DEFAULT
     - すべて warning ログ（fatal にしない、launcher は起動を止めない）
 
 atomic write 方針:
@@ -31,22 +36,31 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .manifest import is_simple_semver
+
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
 class Current:
-    """現在 active なバージョン情報。"""
+    """現在 active なバージョン情報。
+
+    PR-4 で `previous_version` 追加（rollback 先特定用、初期値 ""）。
+    `version` と `previous_version` は semver 形式 ("X.Y.Z") を要求する
+    （read_current で検証、不正なら quarantine）。
+    """
 
     version: str
     released_at: str
+    previous_version: str = ""
 
 
-DEFAULT_CURRENT = Current(version="0.0.0", released_at="")
+DEFAULT_CURRENT = Current(version="0.0.0", released_at="", previous_version="")
 """初回起動時 / 破損時の fallback。
 
 version="0.0.0" は manifest semver 比較で常に小さくなるため
 manifest 側の current_version > 0.0.0 で必ず update 候補になる。
+previous_version="" は「rollback 先なし」を明示（初回 update では rollback 不能）。
 """
 
 
@@ -131,14 +145,43 @@ def read_current(
 
     version = parsed.get("version")
     released_at = parsed.get("released_at")
-    if not isinstance(version, str) or not isinstance(released_at, str):
+    # PR-4: previous_version は任意 field（PR-3 形式との後方互換、欠落時 ""）
+    previous_version = parsed.get("previous_version", "")
+
+    if (
+        not isinstance(version, str)
+        or not isinstance(released_at, str)
+        or not isinstance(previous_version, str)
+    ):
         if quarantine_corrupt:
             _quarantine_corrupt(path, "schema-mismatch")
         else:
             logger.warning("current.json schema-mismatch, not quarantined (dry-run)")
         return DEFAULT_CURRENT
 
-    return Current(version=version, released_at=released_at)
+    # PR-4: semver 検証 (Suggestion 1 反映、rollback 先誤記の早期検知)
+    if not is_simple_semver(version):
+        if quarantine_corrupt:
+            _quarantine_corrupt(path, "version-not-semver")
+        else:
+            logger.warning("current.json version not semver, not quarantined (dry-run)")
+        return DEFAULT_CURRENT
+
+    # previous_version は "" (rollback 先なし) または semver
+    if previous_version != "" and not is_simple_semver(previous_version):
+        if quarantine_corrupt:
+            _quarantine_corrupt(path, "previous-version-not-semver")
+        else:
+            logger.warning(
+                "current.json previous_version not semver, not quarantined (dry-run)"
+            )
+        return DEFAULT_CURRENT
+
+    return Current(
+        version=version,
+        released_at=released_at,
+        previous_version=previous_version,
+    )
 
 
 def write_current_atomic(path: Path, current: Current) -> None:
