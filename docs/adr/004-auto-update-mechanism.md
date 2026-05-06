@@ -1,7 +1,12 @@
 # ADR-004: 自動更新メカニズムの設計
 
 ## ステータス
-Accepted (2026-03-22)
+Accepted (2026-03-22) — **Amended by [ADR-016](016-windows-appliance-and-mac-dev-flow.md) (2026-05-06)**
+
+> **更新履歴**: 本 ADR の高位決定（GCS manifest polling による自動更新）は維持されているが、
+> 実装設計（bucket 構成、bootstrapper 分離、checksum 単独 → checksum + provenance、
+> manifest schema、PII 保持設計、IAM 分離、GitHub Actions OIDC 連携等）は **ADR-016 で置換**された。
+> 新規実装は ADR-016 を参照すること。本 ADR は歴史的経緯と高位判断の根拠として残置する。
 
 ## コンテキスト
 クライアントPCのデスクトップアプリを、現場訪問なしに自動更新したい。更新失敗時のロールバックも必要。クライアントPCの管理者権限やITリテラシーに依存しない仕組みが望ましい。

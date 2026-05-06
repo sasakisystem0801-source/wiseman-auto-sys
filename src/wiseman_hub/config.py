@@ -69,10 +69,36 @@ class ReportTarget:
 
 @dataclass
 class GcpConfig:
+    """GCP 接続設定。
+
+    ADR-016 で bucket を data 用と release 用に分離する方針となったため、
+    ``data_bucket_name`` / ``release_bucket_name`` を新規追加した。
+    旧 ``bucket_name`` は backward compat 用に残置し、新フィールドが空の場合の
+    fallback として使われる（``effective_data_bucket`` / ``effective_release_bucket``
+    プロパティ経由）。
+
+    新規運用での推奨:
+        - ``data_bucket_name = "wiseman-hub-data-prod"``  (audit / cache)
+        - ``release_bucket_name = "wiseman-hub-release-prod"``  (exe / manifest / sbom)
+        - ``bucket_name`` は空のまま（旧 mapping_sync 等は backward compat で動く）
+    """
+
     project_id: str = ""
-    bucket_name: str = ""
+    bucket_name: str = ""  # backward compat: 旧 mapping_sync が直接参照
+    data_bucket_name: str = ""  # ADR-016: audit / cache 用
+    release_bucket_name: str = ""  # ADR-016: exe / manifest / sbom 用
     service_account_key_path: str = ""
     region: str = "asia-northeast1"
+
+    @property
+    def effective_data_bucket(self) -> str:
+        """data bucket 名（ADR-016 新フィールド優先、空なら旧 bucket_name）。"""
+        return self.data_bucket_name or self.bucket_name
+
+    @property
+    def effective_release_bucket(self) -> str:
+        """release bucket 名（ADR-016 新フィールド優先、空なら旧 bucket_name）。"""
+        return self.release_bucket_name or self.bucket_name
 
 
 @dataclass
