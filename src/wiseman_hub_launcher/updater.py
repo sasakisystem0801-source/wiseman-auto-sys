@@ -26,6 +26,7 @@ import os
 import ssl
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -46,6 +47,9 @@ _CHUNK = 1024 * 1024  # 1 MiB
 
 # C-2: lock file の stale 判定 (mtime > 1h で強制解除)
 LOCK_STALE_SEC = 3600
+# C-2 second-pass review (threadId 019dfd5d): heartbeat で長時間 download 中の
+# 自己 stale 化を防止 (60s 間隔で os.utime、stale 判定の 1/60)
+LOCK_HEARTBEAT_SEC = 60.0
 
 # D2': spawn 監視の default timeout (test では 0.05 等を渡す)
 DEFAULT_SPAWN_MONITOR_SEC = 30.0
@@ -128,6 +132,10 @@ def acquire_lock(lock_path: Path) -> int:
         )
         try:
             lock_path.unlink()
+        except FileNotFoundError:
+            # Suggestion 1 (threadId 019dfd5d): 並行 stale 削除で他 process が
+            # 先に unlink 済の場合は無視して acquire へ進む
+            pass
         except OSError as e:
             raise LockHeldError(
                 f"stale lock removal failed: {type(e).__name__}"
@@ -157,6 +165,56 @@ def release_lock(fd: int, lock_path: Path) -> None:
         lock_path.unlink(missing_ok=True)
     except OSError as e:
         logger.warning("lock release failed: %s", type(e).__name__)
+
+
+class LockHeartbeat:
+    """C-2 second-pass review (threadId 019dfd5d): lock 保持中の long-running
+    download で mtime を定期更新し、自己 stale 化 (LOCK_STALE_SEC 超で他 process に
+    「stale」扱いされる) を防ぐ daemon thread。
+
+    Usage:
+        hb = LockHeartbeat(lock_path)
+        hb.start()
+        try:
+            # long-running operation
+            ...
+        finally:
+            hb.stop()
+    """
+
+    def __init__(
+        self,
+        lock_path: Path,
+        interval_sec: float = LOCK_HEARTBEAT_SEC,
+    ) -> None:
+        self._path = lock_path
+        self._interval = interval_sec
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(
+            target=self._run, name="lock-heartbeat", daemon=True
+        )
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval):
+            try:
+                os.utime(self._path)
+            except OSError:
+                logger.warning(
+                    "lock heartbeat utime failed; lock may be considered stale"
+                )
+                break
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+            self._thread = None
 
 
 # C-4: preflight ---------------------------------------------------------------
@@ -195,12 +253,17 @@ def _open_https_get(url: str, *, timeout_sec: int) -> Any:  # noqa: ANN401
     Returns:
         urllib response (caller が close する)。
         型を Any にしているのは urllib の internal 型が安定 public でないため。
+
+    検証:
+        - 入力 URL が HTTPS
+        - redirect 後の最終 URL も HTTPS (I-2: downgrade redirect 防御、
+          codex review threadId 019dfd5d 反映)
     """
     if not isinstance(url, str) or not url.startswith("https://"):
         raise DownloadError("artifact URL must use HTTPS scheme")
     req = urllib.request.Request(url, method="GET")
     try:
-        return urllib.request.urlopen(req, timeout=timeout_sec)  # noqa: S310
+        resp = urllib.request.urlopen(req, timeout=timeout_sec)  # noqa: S310
     except urllib.error.HTTPError as e:
         raise DownloadError(f"artifact fetch HTTP error: {e.code}") from e
     except urllib.error.URLError as e:
@@ -215,6 +278,14 @@ def _open_https_get(url: str, *, timeout_sec: int) -> Any:  # noqa: ANN401
         raise DownloadError(
             f"artifact fetch network error: {type(e).__name__}"
         ) from e
+
+    # I-2: redirect 後の最終 URL も HTTPS (downgrade redirect 攻撃防御)
+    final_url = resp.geturl()
+    if not isinstance(final_url, str) or not final_url.startswith("https://"):
+        with contextlib.suppress(AttributeError, OSError):
+            resp.close()
+        raise DownloadError("artifact URL redirected to non-HTTPS scheme")
+    return resp
 
 
 def _read_to_temp_with_cap(resp: Any, fd: int) -> int:  # noqa: ANN401
@@ -264,15 +335,21 @@ def download_artifact(
         DownloadError: HTTPS / size cap / IO
         ChecksumError: SHA-256 不一致
     """
-    dest_dir.mkdir(parents=True, exist_ok=True)
     final_path = dest_dir / "wiseman_hub.exe"
-
-    fd, tmp_name = tempfile.mkstemp(prefix=".artifact.", suffix=".tmp", dir=str(dest_dir))
-    tmp_path = Path(tmp_name)
-    fd_owned = True
-
+    fd: int = -1
+    tmp_path: Path | None = None
+    fd_owned = False
     success = False
+
     try:
+        # I-3: mkdir / mkstemp も try 内に含めて IO error を DownloadError に正規化
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=".artifact.", suffix=".tmp", dir=str(dest_dir)
+        )
+        tmp_path = Path(tmp_name)
+        fd_owned = True
+
         resp = _open_https_get(artifact_url, timeout_sec=timeout_sec)
         try:
             try:
@@ -297,16 +374,24 @@ def download_artifact(
             )
 
         os.replace(tmp_path, final_path)
+        # I-4: 親 dir fsync (POSIX rename 永続化、電源断で current.json と
+        # exe directory entry の不整合を防止)。Windows では PermissionError 等で no-op
+        with contextlib.suppress(OSError):
+            dir_fd = os.open(str(dest_dir), os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
         success = True
     except OSError as e:
-        if not isinstance(e, (DownloadError, ChecksumError)):
-            raise DownloadError(f"artifact write error: {type(e).__name__}") from e
-        raise
+        # DownloadError / ChecksumError は OSError ではないので、ここに来るのは
+        # 純粋な OS IO error のみ
+        raise DownloadError(f"artifact write error: {type(e).__name__}") from e
     finally:
         if fd_owned:
             with contextlib.suppress(OSError):
                 os.close(fd)
-        if not success:
+        if not success and tmp_path is not None:
             with contextlib.suppress(OSError):
                 tmp_path.unlink(missing_ok=True)
 
@@ -412,6 +497,7 @@ def update_and_spawn(
     manifest: dict[str, object],
     home_dir: Path,
     *,
+    current_path: Path | None = None,
     monitor_timeout_sec: float = DEFAULT_SPAWN_MONITOR_SEC,
     no_spawn: bool = False,
 ) -> SpawnOutcome:
@@ -419,7 +505,10 @@ def update_and_spawn(
 
     Args:
         manifest: validate_manifest 通過後の dict
-        home_dir: $HOME/wiseman-hub (current.json + versions/ + lock の親)
+        home_dir: $HOME/wiseman-hub (versions/ の親、lock 場所)
+        current_path: current.json の path 上書き (I-1 second-pass: --current-path
+            指定時に preflight と update が別 file を見る不整合を防ぐ)。
+            None なら ``home_dir / "current.json"``
         monitor_timeout_sec: spawn_with_monitor の timeout (test では小さい値)
         no_spawn: True なら download + current.json 切替まで、spawn しない (AC-6)
 
@@ -429,7 +518,8 @@ def update_and_spawn(
     Raises:
         DownloadError / ChecksumError / PreflightError / SpawnFailedNoRollbackError
     """
-    current_path = home_dir / "current.json"
+    if current_path is None:
+        current_path = home_dir / "current.json"
     versions_dir = home_dir / "versions"
 
     cur = read_current(current_path)

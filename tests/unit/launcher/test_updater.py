@@ -34,6 +34,7 @@ from wiseman_hub_launcher.updater import (
     LOCK_STALE_SEC,
     MAX_ARTIFACT_BYTES,
     DownloadError,
+    LockHeartbeat,
     LockHeldError,
     PreflightError,
     SpawnFailedNoRollbackError,
@@ -116,6 +117,71 @@ def test_release_lock_idempotent(tmp_path: Path) -> None:
     # 二度呼んでも例外は飛ばない (lock 不在でも OK)
     release_lock(fd, lock)
     assert not lock.exists()
+
+
+# C-2 second-pass review (threadId 019dfd5d): LockHeartbeat -------------------
+
+
+def test_lock_heartbeat_updates_mtime(tmp_path: Path) -> None:
+    """C-2 second-pass: heartbeat が interval ごとに os.utime で mtime 更新。"""
+    lock = tmp_path / "launcher.lock"
+    lock.write_bytes(b"99999\n")
+    # 古い mtime にバックデート
+    old = time.time() - 100
+    os.utime(lock, (old, old))
+
+    hb = LockHeartbeat(lock, interval_sec=0.05)
+    hb.start()
+    time.sleep(0.18)  # 2-3 回の utime call が走る
+    hb.stop()
+
+    # mtime が old より十分新しくなっていること
+    final = lock.stat().st_mtime
+    assert final > old + 1.0
+
+
+def test_lock_heartbeat_stop_idempotent(tmp_path: Path) -> None:
+    """stop を 2 回呼んでも例外なし。"""
+    lock = tmp_path / "launcher.lock"
+    lock.write_bytes(b"x")
+    hb = LockHeartbeat(lock, interval_sec=10.0)
+    hb.start()
+    hb.stop()
+    hb.stop()  # no-op
+
+
+def test_lock_heartbeat_start_idempotent(tmp_path: Path) -> None:
+    """start を 2 回呼んでも 1 thread のみ起動。"""
+    lock = tmp_path / "launcher.lock"
+    lock.write_bytes(b"x")
+    hb = LockHeartbeat(lock, interval_sec=10.0)
+    hb.start()
+    thread1 = hb._thread  # noqa: SLF001 — test 観測のため
+    hb.start()  # 2 回目は no-op
+    assert hb._thread is thread1  # noqa: SLF001
+    hb.stop()
+
+
+def test_lock_heartbeat_stops_on_missing_lock(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """heartbeat 中に lock file が消えたら warn ログを出して thread が break する。"""
+    import logging  # noqa: PLC0415
+
+    lock = tmp_path / "launcher.lock"
+    lock.write_bytes(b"x")
+    hb = LockHeartbeat(lock, interval_sec=0.03)
+
+    with caplog.at_level(logging.WARNING, logger="wiseman_hub_launcher.updater"):
+        hb.start()
+        time.sleep(0.04)
+        lock.unlink()  # heartbeat 進行中に削除
+        time.sleep(0.20)  # 次の utime で OSError
+        hb.stop()
+
+    assert any(
+        "heartbeat utime failed" in r.message for r in caplog.records
+    )
 
 
 # C-4: preflight ---------------------------------------------------------------
@@ -212,10 +278,19 @@ def test_download_artifact_size_cap_content_length(tmp_path: Path) -> None:
         download_artifact("https://example.com/x.exe", dest, sha)
 
 
-def test_download_artifact_size_cap_chunked(tmp_path: Path) -> None:
-    """I-1: Content-Length が偽装でも chunked 累計で cap 超過時は中断。"""
-    # MAX_ARTIFACT_BYTES + 1 byte の payload を作る (test では小さく cap を mock)
-    payload = b"a" * (MAX_ARTIFACT_BYTES + 100)
+def test_download_artifact_size_cap_chunked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """I-1: Content-Length 偽装でも chunked 累計で cap 超過時は中断。
+
+    Important 5 (threadId 019dfd5d) 反映: 300MiB 確保は CI メモリを浪費するため
+    monkeypatch で cap を 1KiB に縮めて検証。
+    """
+    from wiseman_hub_launcher import updater as updater_mod  # noqa: PLC0415
+
+    monkeypatch.setattr(updater_mod, "MAX_ARTIFACT_BYTES", 1024)
+
+    payload = b"a" * 2048  # 2KiB > 1KiB cap
     sha = _sha256_hex(payload)
     dest = tmp_path / "versions" / "1.2.3"
 
@@ -249,6 +324,23 @@ def test_download_artifact_network_error(tmp_path: Path) -> None:
         side_effect=_raise_url_error,
     ), pytest.raises(DownloadError, match="URL error"):
         download_artifact("https://example.com/x.exe", dest, "0" * 64)
+
+
+def test_download_artifact_rejects_https_to_http_redirect(tmp_path: Path) -> None:
+    """I-2 second-pass (threadId 019dfd5d): redirect 後 URL が HTTPS でなければ
+    DownloadError ("non-HTTPS scheme")。manifest.py の redirect 防御と同等を artifact 側にも。
+    """
+    payload = b"x"
+    sha = _sha256_hex(payload)
+    dest = tmp_path / "versions" / "1.2.3"
+
+    resp = _make_response(payload)
+    resp.geturl = MagicMock(return_value="http://attacker.com/x.exe")
+
+    with patch(
+        "wiseman_hub_launcher.updater.urllib.request.urlopen", return_value=resp
+    ), pytest.raises(DownloadError, match="non-HTTPS"):
+        download_artifact("https://example.com/x.exe", dest, sha)
 
 
 # D2': spawn_with_monitor -----------------------------------------------------
@@ -418,6 +510,34 @@ def _good_manifest(version: str = "1.2.3", checksum: str | None = None) -> dict[
         "released_at": "2026-05-06T13:00:00Z",
         "provenance_url": f"versions/{version}/provenance.intoto.jsonl",
     }
+
+
+def test_update_and_spawn_uses_explicit_current_path(tmp_path: Path) -> None:
+    """I-1 second-pass (threadId 019dfd5d): current_path 引数で home_dir 外の
+    current.json を使うケース (canary/test override)。"""
+    custom_current = tmp_path / "elsewhere" / "custom_current.json"
+    custom_current.parent.mkdir()
+    write_current_atomic(
+        custom_current,
+        Current(version="1.2.3", released_at="x", previous_version=""),
+    )
+    _setup_versions(tmp_path, "1.2.3")
+
+    fake_proc = MagicMock()
+    import subprocess  # noqa: PLC0415
+
+    fake_proc.wait.side_effect = subprocess.TimeoutExpired(cmd="x", timeout=0.05)
+
+    with patch(
+        "wiseman_hub_launcher.updater.subprocess.Popen", return_value=fake_proc
+    ):
+        out = update_and_spawn(
+            _good_manifest("1.2.3"),
+            tmp_path,
+            current_path=custom_current,
+            monitor_timeout_sec=0.05,
+        )
+    assert out.result == SpawnResult.SUCCESS
 
 
 def test_update_and_spawn_same_version_skips_download(tmp_path: Path) -> None:

@@ -43,6 +43,7 @@ from .manifest import (
 )
 from .updater import (
     DownloadError,
+    LockHeartbeat,
     LockHeldError,
     PreflightError,
     SpawnFailedNoRollbackError,
@@ -125,9 +126,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--monitor-timeout",
-        type=float,
+        type=_positive_float,
         default=30.0,
-        help="spawn 監視 timeout 秒 (test 用、default 30.0)",
+        help="spawn 監視 timeout 秒 (正値、test 用、default 30.0)",
     )
     parser.add_argument("--verbose", action="store_true", help="DEBUG ログを出力")
     return parser
@@ -139,6 +140,17 @@ def _setup_logging(verbose: bool) -> None:
         level=level,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+
+
+def _positive_float(s: str) -> float:
+    """argparse type: 正値の float (Suggestion 2、threadId 019dfd5d)。"""
+    try:
+        v = float(s)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(f"not a float: {s!r}") from e
+    if v <= 0:
+        raise argparse.ArgumentTypeError(f"must be positive: {v}")
+    return v
 
 
 def _semver_tuple(s: str) -> tuple[int, int, int]:
@@ -255,6 +267,10 @@ def run_update(
         logger.error("lock held: %s", e)
         return EXIT_LOCK_HELD
 
+    # C-2 second-pass: heartbeat thread で stale 化を防止
+    heartbeat = LockHeartbeat(lock_path)
+    heartbeat.start()
+
     try:
         try:
             raw = fetch_manifest(manifest_url)
@@ -276,6 +292,7 @@ def run_update(
             outcome = update_and_spawn(
                 manifest,
                 home_dir,
+                current_path=current_path,  # I-1 second-pass: --current-path 引き継ぎ
                 monitor_timeout_sec=monitor_timeout_sec,
                 no_spawn=no_spawn,
             )
@@ -294,6 +311,7 @@ def run_update(
 
         return _spawn_outcome_to_exit(outcome.result)
     finally:
+        heartbeat.stop()
         release_lock(lock_fd, lock_path)
 
 

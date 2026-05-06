@@ -569,6 +569,36 @@ def test_main_update_spawn_crash_only_no_rollback_returns_7(tmp_path: Path) -> N
     assert code == EXIT_SPAWN_FAILED_NO_ROLLBACK
 
 
+def test_main_update_negative_monitor_timeout_rejected(tmp_path: Path) -> None:
+    """Suggestion 2 second-pass (threadId 019dfd5d): --monitor-timeout 0/負値は
+    argparse 拒否 (SystemExit code 2)。"""
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "--update",
+                "--allow-insecure-checksum-only",
+                "--monitor-timeout",
+                "0",
+                "--home",
+                str(tmp_path),
+            ]
+        )
+    assert exc.value.code == 2
+
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "--update",
+                "--allow-insecure-checksum-only",
+                "--monitor-timeout",
+                "-1.5",
+                "--home",
+                str(tmp_path),
+            ]
+        )
+    assert exc.value.code == 2
+
+
 def test_main_update_ok_early_exit_returns_0(tmp_path: Path) -> None:
     """OK_EARLY_EXIT (single-instance 等) → EXIT_OK (rollback しない)。"""
     cur_path = tmp_path / "current.json"
