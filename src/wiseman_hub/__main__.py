@@ -421,6 +421,19 @@ def main() -> None:
                     exc,
                 )
                 sys.exit(2)
+
+            # ADR-016 Phase 2: audit log の GCS upload を起動時 + 5 分間隔で実行。
+            # 起動条件未達（GCP 未設定 / SA キー不在 / log_dir 未設定）の場合は
+            # warning ログを出して thread を起動せず、ローカル append は継続する
+            # （audit 機能の degradation は許容、業務継続を優先）。
+            # 注: 現状 audit 書込みは Launcher 経路の checklist_c/b のみ。`--rpa`
+            # 経路に audit 書込みを追加する際は本 hook も `--rpa` 側に複製すること。
+            from wiseman_hub.cloud.audit_uploader import (
+                start_audit_uploader,
+                stop_audit_uploader,
+            )
+
+            audit_thread = start_audit_uploader(config.log_dir, config.gcp)
             # 設定コールバックで後から Launcher を参照する必要があるため、
             # クロージャで双方向バインディングする（Launcher インスタンス生成前に
             # コールバックを作る必要がある一方、コールバックは Launcher のメソッドを呼ぶ）。
@@ -458,7 +471,15 @@ def main() -> None:
                 ),
             )
             launcher_ref[0] = launcher
-            launcher.run()
+            try:
+                launcher.run()
+            finally:
+                # ADR-016 Phase 2: launcher 終了時に audit uploader を clean shutdown。
+                # daemon=True で道連れに殺されると 5 分間隔の最後の record を
+                # GCS に上げないまま死ぬため、明示的に signal を送って最終 flush させる。
+                if audit_thread is not None:
+                    stop_audit_uploader()
+                    audit_thread.join(timeout=10)
     except KeyboardInterrupt:
         logger.info("シャットダウン（Ctrl+C）")
         sys.exit(0)

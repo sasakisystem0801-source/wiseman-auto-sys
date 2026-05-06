@@ -69,10 +69,48 @@ class ReportTarget:
 
 @dataclass
 class GcpConfig:
+    """GCP 接続設定。
+
+    ADR-016 で bucket を data 用と release 用に分離する方針となったため、
+    ``data_bucket_name`` / ``release_bucket_name`` を新規追加した。
+    旧 ``bucket_name`` は backward compat 用に残置し、新フィールドが空の場合の
+    fallback として使われる（``effective_data_bucket`` / ``effective_release_bucket``
+    プロパティ経由）。
+
+    **現在の利用状況（重要、Phase 2 時点）:**
+        - ``audit_uploader`` (PR #198) は ``effective_data_bucket`` を経由するため、
+          ``data_bucket_name`` 設定後は新 bucket に向く
+        - **既存** ``cloud/mapping_sync.py`` / ``cloud/storage.py`` /
+          ``cloud/env_scanner.py`` は ``gcp.bucket_name`` を **直接参照中**。
+          これらの移行は ADR-016 Phase 4 以降の別 PR で実施する
+        - したがって本 Phase 2 では **``bucket_name`` を空にしてはいけない**。
+          単一 bucket 運用を続ける場合は ``bucket_name`` を残し、
+          ``data_bucket_name`` は未設定（fallback で同一 bucket）で OK
+        - ADR-016 Phase 4 以降で全モジュールを ``effective_*_bucket`` 経由に移行後、
+          初めて ``bucket_name`` を空にできる
+
+    **新規運用への移行ガイダンス（Phase 4 以降想定）:**
+        - ``data_bucket_name = "wiseman-hub-data-prod"``  (audit / cache)
+        - ``release_bucket_name = "wiseman-hub-release-prod"``  (exe / manifest / sbom)
+        - ``bucket_name = ""`` （全モジュールが ``effective_*_bucket`` に移行後のみ）
+    """
+
     project_id: str = ""
-    bucket_name: str = ""
+    bucket_name: str = ""  # backward compat: 旧 mapping_sync が直接参照
+    data_bucket_name: str = ""  # ADR-016: audit / cache 用
+    release_bucket_name: str = ""  # ADR-016: exe / manifest / sbom 用
     service_account_key_path: str = ""
     region: str = "asia-northeast1"
+
+    @property
+    def effective_data_bucket(self) -> str:
+        """data bucket 名（ADR-016 新フィールド優先、空なら旧 bucket_name）。"""
+        return self.data_bucket_name or self.bucket_name
+
+    @property
+    def effective_release_bucket(self) -> str:
+        """release bucket 名（ADR-016 新フィールド優先、空なら旧 bucket_name）。"""
+        return self.release_bucket_name or self.bucket_name
 
 
 @dataclass
