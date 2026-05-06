@@ -77,10 +77,22 @@ class GcpConfig:
     fallback として使われる（``effective_data_bucket`` / ``effective_release_bucket``
     プロパティ経由）。
 
-    新規運用での推奨:
+    **現在の利用状況（重要、Phase 2 時点）:**
+        - ``audit_uploader`` (PR #198) は ``effective_data_bucket`` を経由するため、
+          ``data_bucket_name`` 設定後は新 bucket に向く
+        - **既存** ``cloud/mapping_sync.py`` / ``cloud/storage.py`` /
+          ``cloud/env_scanner.py`` は ``gcp.bucket_name`` を **直接参照中**。
+          これらの移行は ADR-016 Phase 4 以降の別 PR で実施する
+        - したがって本 Phase 2 では **``bucket_name`` を空にしてはいけない**。
+          単一 bucket 運用を続ける場合は ``bucket_name`` を残し、
+          ``data_bucket_name`` は未設定（fallback で同一 bucket）で OK
+        - ADR-016 Phase 4 以降で全モジュールを ``effective_*_bucket`` 経由に移行後、
+          初めて ``bucket_name`` を空にできる
+
+    **新規運用への移行ガイダンス（Phase 4 以降想定）:**
         - ``data_bucket_name = "wiseman-hub-data-prod"``  (audit / cache)
         - ``release_bucket_name = "wiseman-hub-release-prod"``  (exe / manifest / sbom)
-        - ``bucket_name`` は空のまま（旧 mapping_sync 等は backward compat で動く）
+        - ``bucket_name = ""`` （全モジュールが ``effective_*_bucket`` に移行後のみ）
     """
 
     project_id: str = ""

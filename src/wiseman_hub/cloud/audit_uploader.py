@@ -29,7 +29,6 @@ import hashlib
 import logging
 import re
 import threading
-import time
 from pathlib import Path
 from typing import Any
 
@@ -84,9 +83,23 @@ def _client(gcp: GcpConfig) -> storage.Client:
     )
 
 
-def _content_hash(record_line: str) -> str:
-    """record JSONL 1 行から SHA-256 hex を計算（先頭 32 文字を返す）。
+def _normalize_line(raw: str) -> str:
+    """audit jsonl の 1 行を正規化する。
 
+    hash 計算と upload 内容の **両方でこの関数を必ず通す**ことで、二重正規化や
+    片側だけの変更による silent regression を防ぐ（review C-1 対策）。
+
+    正規化:
+        - splitlines() で \\n / \\r\\n は除去済の前提だが、防衛的に strip()
+        - BOM (U+FEFF) を除去（Windows メモ帳経由の編集対策）
+    """
+    return raw.strip().lstrip("﻿")
+
+
+def _content_hash(record_line: str) -> str:
+    """正規化済み record 1 行から SHA-256 hex を計算（先頭 32 文字を返す）。
+
+    呼び出し元は ``_normalize_line`` を先に通すこと（hash 一貫性のため）。
     完全な hash 衝突は天文学的確率なので 32 hex (128 bit) で実用上十分。
     object 名長を抑えて GCS 経由のリスト負荷を軽減する。
     """
@@ -103,22 +116,40 @@ def _read_uploaded_hashes(marker: Path) -> set[str]:
             for line in marker.read_text(encoding="utf-8").splitlines()
             if line.strip()
         }
-    except OSError as exc:
-        logger.warning("uploaded marker read failed: %s (%s)", marker.name, type(exc).__name__)
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.warning(
+            "uploaded marker read failed: %s (errno=%s, type=%s)",
+            marker.name,
+            getattr(exc, "errno", "n/a"),
+            type(exc).__name__,
+        )
         return set()
 
 
-def _append_uploaded_hash(marker: Path, content_hash: str) -> None:
-    """sidecar `.uploaded` に 1 hash を追記。"""
-    try:
-        with open(marker, "a", encoding="utf-8") as f:
-            f.write(content_hash + "\n")
-    except OSError as exc:
-        logger.warning(
-            "uploaded marker append failed: %s (%s)",
-            marker.name,
-            type(exc).__name__,
-        )
+# sidecar `.uploaded` ファイルの並行 append 排他（review S-1 対策、設計の一貫性のため）
+# 現状は単一 daemon thread のみが触るが、将来の多重起動に備えて Lock を明示。
+_MARKER_LOCK = threading.Lock()
+
+
+def _append_uploaded_hash(marker: Path, content_hash: str) -> bool:
+    """sidecar `.uploaded` に 1 hash を追記。
+
+    Returns:
+        True = 追記成功、False = OSError で失敗（呼び出し元で retry storm 防止判断）
+    """
+    with _MARKER_LOCK:
+        try:
+            with open(marker, "a", encoding="utf-8") as f:
+                f.write(content_hash + "\n")
+            return True
+        except OSError as exc:
+            logger.warning(
+                "uploaded marker append failed: %s (errno=%s, type=%s)",
+                marker.name,
+                getattr(exc, "errno", "n/a"),
+                type(exc).__name__,
+            )
+            return False
 
 
 def _gcs_object_name(kind: str, date_str: str, content_hash: str) -> str:
@@ -133,6 +164,9 @@ def _upload_one(
 ) -> bool:
     """単一 record を GCS に upload する。
 
+    呼び出し元の責任で ``record_line`` は ``_normalize_line`` 済であること。
+    本関数では追加正規化はしない（review C-1 対策、二重正規化禁止）。
+
     Returns:
         True = 新規 upload 成功、False = すでに存在（412 PreconditionFailed として治癒扱い）
 
@@ -145,14 +179,22 @@ def _upload_one(
         # （objectCreator + condition 環境では 412 で同名 object 上書きを拒否）。
         # 既存 object を「治癒」扱いにすることで idempotent retry を実現。
         blob.upload_from_string(
-            record_line.rstrip("\n"),
+            record_line,
             content_type="application/json; charset=utf-8",
             timeout=_GCS_TIMEOUT_SEC,
             if_generation_match=0,
         )
         return True
     except gcs_exc.PreconditionFailed:
-        # 既存 object と同名 → 既に upload 済 → 成功扱い
+        # 既存 object と同名 = 既に upload 済 → 成功扱い (idempotent retry)。
+        # review C-2 対策: bucket 取り違え / hash collision を運用者が検出できるよう
+        # warning ログを残す（content metadata 比較は将来 PR で追加検討）。
+        logger.warning(
+            "audit upload 412 PreconditionFailed (treated as already-uploaded): "
+            "object=%s, size=%d bytes",
+            object_name,
+            len(record_line.encode("utf-8")),
+        )
         return False
     except (gcs_exc.GoogleAPIError, OSError) as exc:
         raise AuditUploadError(f"upload failed: {type(exc).__name__}") from exc
@@ -191,17 +233,35 @@ def process_jsonl(
 
     uploaded = skipped = errors = 0
     try:
-        lines = jsonl_path.read_text(encoding="utf-8").splitlines()
-    except OSError as exc:
+        raw_text = jsonl_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        # review I-3: UnicodeDecodeError も catch して当該 file を skip。
+        # 1 file の不正 byte で他 file の処理を止めない。
         logger.warning(
-            "audit jsonl read failed: %s (%s)",
+            "audit jsonl read failed: %s (errno=%s, type=%s)",
             jsonl_path.name,
+            getattr(exc, "errno", "n/a"),
             type(exc).__name__,
         )
         return (0, 0, 0)
 
-    for line in lines:
-        line = line.strip()
+    # review C-1 (partial line risk) 対策:
+    # audit.py が append 中に process_jsonl が読むと、最終行が \n で終わって
+    # いない partial line である可能性がある。末尾 \n が無ければ最終行を
+    # 切り捨てて次回 scan に持ち越す（次回読込時には \n 完了してるはず）。
+    if raw_text and not raw_text.endswith("\n"):
+        # 末尾 \n が無い = まだ append 中 → 最終行を除外
+        idx = raw_text.rfind("\n")
+        if idx >= 0:
+            raw_text = raw_text[: idx + 1]
+        else:
+            # 1 行のみで未完成 → 全 skip
+            return (0, 0, 0)
+    lines = raw_text.splitlines()
+
+    for raw in lines:
+        # review C-1: hash 計算と upload 内容の一貫性のため _normalize_line を経由
+        line = _normalize_line(raw)
         if not line:
             continue
         h = _content_hash(line)
@@ -220,13 +280,22 @@ def process_jsonl(
             )
             errors += 1
             # ネットワーク系 error は break して次 scan で retry
-            # （途中まで sidecar 更新するのは OK）
+            # （途中まで sidecar 更新するのは OK、412 治癒で収束）
             break
         if is_new:
             uploaded += 1
         else:
             skipped += 1
-        _append_uploaded_hash(marker, h)
+        # review I-1 (sidecar OSError 永久 retry storm) 対策:
+        # sidecar 書込失敗時は当該 file の処理を中止して次 scan に委ねる
+        # （ただし次 scan でも同じ問題なら毎回 errors が増える、運用者が気づける）。
+        if not _append_uploaded_hash(marker, h):
+            errors += 1
+            logger.warning(
+                "sidecar write failed for %s, aborting file to avoid retry storm",
+                marker.name,
+            )
+            break
 
     return (uploaded, skipped, errors)
 
@@ -249,11 +318,15 @@ def scan_and_upload(
     """
     if not log_dir:
         return {"files": 0, "uploaded": 0, "skipped": 0, "errors": 0}
+
+    # review I-2 (early validation) 対策: audit dir 不存在でも GCP 設定不備は
+    # fail-fast で検出する。dir 不存在の早期 return より前に validate を呼ぶ。
+    _validate_gcp(gcp)
+
     audit_dir = Path(log_dir) / _AUDIT_SUBDIR
     if not audit_dir.exists():
         return {"files": 0, "uploaded": 0, "skipped": 0, "errors": 0}
 
-    _validate_gcp(gcp)
     cli = client or _client(gcp)
 
     total_uploaded = total_skipped = total_errors = 0
@@ -280,6 +353,22 @@ def scan_and_upload(
     }
 
 
+# review C-3 (clean shutdown) 対策: daemon thread を割り込み可能にする。
+# Event.wait は timeout 付きで割り込めるので time.sleep より優先。
+# module-level のため複数 launcher 起動時は最後の Event が共有される（現状は
+# launcher 単一起動前提なので問題なし）。
+_shutdown_event = threading.Event()
+
+
+def stop_audit_uploader() -> None:
+    """audit uploader daemon thread に shutdown signal を送る。
+
+    launcher 終了時 (Tk WM_DELETE_WINDOW callback 等) から呼び出すことで、
+    5 分 sleep を中断して即座に最終 flush + thread 終了させる。
+    """
+    _shutdown_event.set()
+
+
 def start_audit_uploader(
     log_dir: str,
     gcp: GcpConfig,
@@ -295,6 +384,12 @@ def start_audit_uploader(
 
     上記いずれかが満たされない場合は warning を出して thread を起動せず ``None`` を返す
     （audit ローカル書込は継続、GCS upload のみ無効）。
+
+    shutdown 経路:
+        - 通常: ``stop_audit_uploader()`` 呼び出しで Event がセットされ、
+          現在の sleep を中断して最終 flush 後 thread 終了
+        - 強制: daemon=True なので main thread 終了で道連れに殺される
+          （sleep 中の場合は最大 ``interval_sec`` 秒待ってから死亡）
 
     Args:
         log_dir: AppConfig.log_dir。
@@ -313,15 +408,27 @@ def start_audit_uploader(
         logger.warning("audit uploader disabled: log_dir not set")
         return None
 
+    # 多重 start_audit_uploader 防止 + 前回 stop_audit_uploader の Event を reset
+    _shutdown_event.clear()
+
     def _loop() -> None:
-        while True:
+        while not _shutdown_event.is_set():
             try:
                 scan_and_upload(log_dir, gcp)
             except AuditUploadConfigError as exc:
                 logger.warning("audit uploader config error: %s", exc)
             except Exception:  # noqa: BLE001  (daemon thread, never let it die)
                 logger.exception("audit uploader run failed")
-            time.sleep(interval_sec)
+            # Event.wait(timeout) は割り込み可能 sleep。
+            # True 返却 = stop signaled → 即座に loop 抜けて最終 flush へ。
+            if _shutdown_event.wait(timeout=interval_sec):
+                break
+        # 終了前に最後 1 回 flush（5 分間隔の最後の record を取りこぼさない）
+        try:
+            scan_and_upload(log_dir, gcp)
+            logger.info("audit uploader: final flush completed")
+        except Exception:  # noqa: BLE001
+            logger.exception("audit uploader: final flush failed")
 
     t = threading.Thread(target=_loop, name="audit_uploader", daemon=True)
     t.start()

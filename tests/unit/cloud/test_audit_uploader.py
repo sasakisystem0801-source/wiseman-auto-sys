@@ -13,9 +13,11 @@ from wiseman_hub.cloud.audit_uploader import (
     AuditUploadConfigError,
     _content_hash,
     _gcs_object_name,
+    _normalize_line,
     process_jsonl,
     scan_and_upload,
     start_audit_uploader,
+    stop_audit_uploader,
 )
 from wiseman_hub.config import GcpConfig
 
@@ -310,4 +312,130 @@ class TestStartAuditUploader:
         assert thread is not None
         assert thread.daemon
         assert thread.is_alive()
-        # daemon thread なのでテスト終了で自動的に die する
+        # クリーンアップ: 後続テストへの干渉を防ぐため shutdown
+        stop_audit_uploader()
+        thread.join(timeout=5)
+
+
+class TestNormalizeLine:
+    """review C-1 対策: hash 計算と upload の正規化責務集約。"""
+
+    def test_strips_whitespace(self) -> None:
+        assert _normalize_line("  {\"a\":1}  ") == '{"a":1}'
+
+    def test_strips_bom(self) -> None:
+        assert _normalize_line("﻿{\"a\":1}") == '{"a":1}'
+
+    def test_empty_after_strip(self) -> None:
+        assert _normalize_line("   \t\n  ") == ""
+
+    def test_preserves_internal_content(self) -> None:
+        assert _normalize_line('{"a": "  spaced  "}') == '{"a": "  spaced  "}'
+
+
+class TestPartialLineHandling:
+    """review C-1: audit.py が append 中の partial line を upload しない。"""
+
+    def test_skips_last_line_without_newline(
+        self, tmp_path: Path, gcp: GcpConfig
+    ) -> None:
+        """末尾 \\n が無い = まだ append 中 → 最終行を除外。"""
+        jsonl = tmp_path / "audit" / "c_placement_2026-05-06.jsonl"
+        jsonl.parent.mkdir(parents=True)
+        # 1 行目は完了、2 行目は途中（\n なし）
+        jsonl.write_text(
+            '{"complete": 1}\n{"incomplet',
+            encoding="utf-8",
+        )
+        client, blob = _make_mock_client()
+        uploaded, skipped, errors = process_jsonl(jsonl, gcp, client=client)
+        assert uploaded == 1  # 完了行のみ
+        assert errors == 0
+        assert blob.upload_from_string.call_count == 1
+
+    def test_processes_all_lines_when_complete(
+        self, tmp_path: Path, gcp: GcpConfig
+    ) -> None:
+        """末尾 \\n あり = 全行 append 完了 → 全 record 処理。"""
+        jsonl = tmp_path / "audit" / "c_placement_2026-05-06.jsonl"
+        jsonl.parent.mkdir(parents=True)
+        jsonl.write_text(
+            '{"a": 1}\n{"b": 2}\n',
+            encoding="utf-8",
+        )
+        client, _ = _make_mock_client()
+        uploaded, _, errors = process_jsonl(jsonl, gcp, client=client)
+        assert uploaded == 2
+        assert errors == 0
+
+    def test_single_partial_line_returns_zero(
+        self, tmp_path: Path, gcp: GcpConfig
+    ) -> None:
+        """1 行のみで未完成 → 全 skip（0,0,0）。"""
+        jsonl = tmp_path / "audit" / "c_placement_2026-05-06.jsonl"
+        jsonl.parent.mkdir(parents=True)
+        jsonl.write_text('{"unfinished":', encoding="utf-8")
+        client, blob = _make_mock_client()
+        result = process_jsonl(jsonl, gcp, client=client)
+        assert result == (0, 0, 0)
+        assert blob.upload_from_string.call_count == 0
+
+
+class TestUnicodeDecodeError:
+    """review I-3: 不正 byte の jsonl を skip して他 file の処理を止めない。"""
+
+    def test_invalid_utf8_returns_zero(
+        self, tmp_path: Path, gcp: GcpConfig
+    ) -> None:
+        jsonl = tmp_path / "audit" / "c_placement_2026-05-06.jsonl"
+        jsonl.parent.mkdir(parents=True)
+        # 不正 UTF-8 byte (0x80 単独)
+        jsonl.write_bytes(b"\x80\x81\n")
+        client, _ = _make_mock_client()
+        result = process_jsonl(jsonl, gcp, client=client)
+        assert result == (0, 0, 0)
+
+
+class TestSidecarFailureAbort:
+    """review I-1: sidecar 書込失敗時に file 処理を中止して retry storm を防ぐ。"""
+
+    def test_aborts_file_when_marker_write_fails(
+        self,
+        tmp_path: Path,
+        gcp: GcpConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        records = [{"a": 1}, {"b": 2}, {"c": 3}]
+        jsonl = _make_audit_file(tmp_path, "c_placement", "2026-05-06", records)
+        client, _ = _make_mock_client()
+
+        # _append_uploaded_hash を常に False (失敗) を返すよう mock
+        from wiseman_hub.cloud import audit_uploader
+
+        monkeypatch.setattr(
+            audit_uploader,
+            "_append_uploaded_hash",
+            lambda marker, h: False,
+        )
+
+        uploaded, skipped, errors = process_jsonl(jsonl, gcp, client=client)
+        # 1 件目を upload した後 sidecar 失敗 → break、残 2 件は次 scan
+        assert uploaded == 1
+        assert errors == 1
+
+
+class TestEarlyValidation:
+    """review I-2: audit dir 不存在でも GCP 設定不備は fail-fast で検出。"""
+
+    def test_validates_gcp_before_audit_dir_check(
+        self, tmp_path: Path, fake_sa_key: Path
+    ) -> None:
+        """audit dir が無くても、GCP 設定が壊れていれば error を投げる。"""
+        bad_gcp = GcpConfig(
+            project_id="",  # 不備
+            data_bucket_name="b",
+            service_account_key_path=str(fake_sa_key),
+        )
+        # audit/ は作らない → 旧実装なら early return で validate がスキップされた
+        with pytest.raises(AuditUploadConfigError, match="project_id"):
+            scan_and_upload(str(tmp_path), bad_gcp, client=MagicMock())
