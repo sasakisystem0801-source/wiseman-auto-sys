@@ -30,6 +30,12 @@ from wiseman_hub.cloud.sheets import (
     parse_sheet,
     select_c_rows,
 )
+from wiseman_hub.cloud.xlsx_path_cache_mirror import (
+    delete_entry as _mirror_delete_entry,
+)
+from wiseman_hub.cloud.xlsx_path_cache_mirror import (
+    upload_entry as _mirror_upload_entry,
+)
 from wiseman_hub.config import AppConfig, save_config
 from wiseman_hub.pdf.checklist_c import (
     CPlacementResult,
@@ -404,15 +410,30 @@ class ChecklistCDialog:
             return
         del cache[key]
         # 永続化
+        save_ok = False
         if self._config_path is not None:
             try:
                 save_config(self._config, self._config_path)
+                save_ok = True
             except OSError as exc:
                 logger.warning("save_config failed after cache clear: %s", type(exc).__name__)
                 messagebox.showwarning(
                     "キャッシュ削除済（永続化失敗）",
                     f"メモリ上の cache は削除しましたが TOML 保存に失敗: {type(exc).__name__}",
                     parent=self._top,
+                )
+        # ADR-016 PR-2: GCS に tombstone を mirror（warn-only、UI に messagebox 出さない）
+        # save_config 成功時のみ mirror（TOML と GCS のズレを最小化）
+        if save_ok and self._config_path is not None:
+            try:
+                _mirror_delete_entry(
+                    key,
+                    self._config.gcp,
+                    config_path=self._config_path,
+                )
+            except Exception:  # noqa: BLE001  (warn-only, never block UI)
+                logger.warning(
+                    "xlsx_path_cache mirror delete hook failed (non-fatal)"
                 )
         # 当該行を再 plan して NEEDS_REVIEW に戻す
         new_results = plan_c_placement(
@@ -495,8 +516,10 @@ class ChecklistCDialog:
             if year is not None and month is not None:
                 key = cache_key(r.row.staff, year, month)
                 self._config.checklist.xlsx_path_cache[key] = str(selected)
+                save_ok = False
                 try:
                     save_config(self._config, self._config_path)
+                    save_ok = True
                 except OSError as exc:
                     logger.warning("save_config failed: %s", type(exc).__name__)
                     messagebox.showwarning(
@@ -504,6 +527,21 @@ class ChecklistCDialog:
                         f"選択は反映しますが永続化に失敗: {type(exc).__name__}",
                         parent=self._top,
                     )
+                # ADR-016 PR-2: GCS への mirror（warn-only、UI に messagebox 出さない）
+                # save_config 成功時のみ mirror（TOML 永続化失敗時は GCS とのズレを
+                # 残さないため skip）
+                if save_ok:
+                    try:
+                        _mirror_upload_entry(
+                            key,
+                            str(selected),
+                            self._config.gcp,
+                            config_path=self._config_path,
+                        )
+                    except Exception:  # noqa: BLE001  (warn-only, never block UI)
+                        logger.warning(
+                            "xlsx_path_cache mirror upload hook failed (non-fatal)"
+                        )
 
         if r.status == CPlacementStatus.PENDING:
             self._status_var.set(f"{r.row.name}: 選択完了 → 実行待ち")
