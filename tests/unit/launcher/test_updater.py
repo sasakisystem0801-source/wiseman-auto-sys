@@ -29,22 +29,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
-@contextlib.contextmanager
-def _bypass_provenance() -> Iterator[None]:
-    """PR-6a: update_and_spawn 系テストで provenance verify 経路を完全 mock。
-
-    既存 test (PR-4 由来) の SHA-256 / spawn / rollback 挙動を維持しつつ、
-    本 PR-6a で追加された provenance download / claims verify / canonical URL
-    検証を bypass。provenance 検証本体の test は test_provenance.py で追加。
-    """
-    with (
-        patch("wiseman_hub_launcher.updater.verify_provenance"),
-        patch("wiseman_hub_launcher.updater.download_provenance"),
-        patch("wiseman_hub_launcher.updater.validate_canonical_provenance_url"),
-    ):
-        yield
-
 from wiseman_hub_launcher.checksum import ChecksumError
 from wiseman_hub_launcher.current import Current, write_current_atomic
 from wiseman_hub_launcher.updater import (
@@ -66,6 +50,22 @@ from wiseman_hub_launcher.updater import (
     spawn_with_monitor,
     update_and_spawn,
 )
+
+
+@contextlib.contextmanager
+def _bypass_provenance() -> Iterator[None]:
+    """PR-6a: update_and_spawn 系テストで provenance verify 経路を完全 mock。
+
+    既存 test (PR-4 由来) の SHA-256 / spawn / rollback 挙動を維持しつつ、
+    本 PR-6a で追加された provenance download / claims verify / canonical URL
+    検証を bypass。provenance 検証本体の test は test_provenance.py で追加。
+    """
+    with (
+        patch("wiseman_hub_launcher.updater.verify_provenance"),
+        patch("wiseman_hub_launcher.updater.download_provenance"),
+        patch("wiseman_hub_launcher.updater.validate_canonical_provenance_url"),
+    ):
+        yield
 
 # helpers ----------------------------------------------------------------------
 
