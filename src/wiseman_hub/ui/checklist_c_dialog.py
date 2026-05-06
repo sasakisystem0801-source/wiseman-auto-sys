@@ -31,10 +31,10 @@ from wiseman_hub.cloud.sheets import (
     select_c_rows,
 )
 from wiseman_hub.cloud.xlsx_path_cache_mirror import (
-    delete_entry as _mirror_delete_entry,
+    delete_entry_async as _mirror_delete_entry_async,
 )
 from wiseman_hub.cloud.xlsx_path_cache_mirror import (
-    upload_entry as _mirror_upload_entry,
+    upload_entry_async as _mirror_upload_entry_async,
 )
 from wiseman_hub.config import AppConfig, save_config
 from wiseman_hub.pdf.checklist_c import (
@@ -424,16 +424,17 @@ class ChecklistCDialog:
                 )
         # ADR-016 PR-2: GCS に tombstone を mirror（warn-only、UI に messagebox 出さない）
         # save_config 成功時のみ mirror（TOML と GCS のズレを最小化）
+        # C-1 (codex review threadId 019dfceb): daemon thread で非同期化、UI を blocking しない
         if save_ok and self._config_path is not None:
             try:
-                _mirror_delete_entry(
+                _mirror_delete_entry_async(
                     key,
                     self._config.gcp,
                     config_path=self._config_path,
                 )
             except Exception:  # noqa: BLE001  (warn-only, never block UI)
                 logger.warning(
-                    "xlsx_path_cache mirror delete hook failed (non-fatal)"
+                    "xlsx_path_cache mirror delete async spawn failed (non-fatal)"
                 )
         # 当該行を再 plan して NEEDS_REVIEW に戻す
         new_results = plan_c_placement(
@@ -530,9 +531,10 @@ class ChecklistCDialog:
                 # ADR-016 PR-2: GCS への mirror（warn-only、UI に messagebox 出さない）
                 # save_config 成功時のみ mirror（TOML 永続化失敗時は GCS とのズレを
                 # 残さないため skip）
+                # C-1 (codex review threadId 019dfceb): daemon thread で非同期化、UI freeze 回避
                 if save_ok:
                     try:
-                        _mirror_upload_entry(
+                        _mirror_upload_entry_async(
                             key,
                             str(selected),
                             self._config.gcp,
@@ -540,7 +542,7 @@ class ChecklistCDialog:
                         )
                     except Exception:  # noqa: BLE001  (warn-only, never block UI)
                         logger.warning(
-                            "xlsx_path_cache mirror upload hook failed (non-fatal)"
+                            "xlsx_path_cache mirror upload async spawn failed (non-fatal)"
                         )
 
         if r.status == CPlacementStatus.PENDING:

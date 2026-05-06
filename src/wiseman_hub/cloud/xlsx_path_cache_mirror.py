@@ -41,15 +41,25 @@ object schema (tombstone, 削除時):
       にすることで、過去履歴（generation 経由）と削除事実を両立。Bucket lifecycle
       で後から物理削除可能
     - **machine_id**: hostname/HW ID の代わりに UUIDv4 を ``~/wiseman-hub/machine_id``
-      に永続化（PII 配慮、ADR-016 PII 5 年保持と整合）
+      に永続化（PII 配慮、ADR-016 PII 5 年保持と整合）。ファイル作成は
+      ``open(..., "x")`` atomic create で並行 race 回避（codex I-2 反映）
     - **base_config_sha256**: save_config 後の TOML bytes 全体の hash。これにより
       「どの config 状態で書かれた entry か」を識別でき、巻き戻し時の差分検出が可能
 
-並列 upload の race:
-    本モジュールは per-key per-object のため、異なる key は完全独立。同一 key への
-    並列 upload は GCS の last-writer-wins で自然解決（content hash 一致なら
-    冪等、不一致なら新しい方が残る）。プロセス内競合は呼出側（UI）が逐次的に
-    呼ぶため発生しない。
+並列 upload と整合性 (codex review threadId 019dfceb 反映):
+    本モジュールは per-key per-object で異なる key は完全独立。**同一 key への
+    並列 upload には順序保証なし**。GCS は last-writer-wins だが「最後に完了した
+    upload」が勝つだけで「最後にユーザーが確定した操作」が勝つ保証ではない。
+    例: PC A で delete tombstone を投げる→ PC B で alive 再 upload → B が先に完了
+    し A が後で完了すると、ローカルは alive で GCS は tombstone になる。
+
+    **復旧時の真実は local TOML (``xlsx_path_cache``) であり、GCS は monitor +
+    recovery hint**。Mac CLI / 復旧スクリプトは GCS を無条件採用せず、
+    ``base_config_sha256`` と local TOML を比較して stale mirror を検出すること。
+
+    ローカル UI の write/delete hook 内では、cache write/delete は同一スレッド内で
+    逐次呼ばれるため、単一 PC 内の race は無い（C-1 反映で daemon thread 化したが
+    ThreadPoolExecutor max_workers=1 で順序維持する設計、UI 側で実装）。
 """
 
 from __future__ import annotations
@@ -58,7 +68,9 @@ import datetime as _dt
 import hashlib
 import json
 import logging
+import threading
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 from google.api_core import exceptions as gcs_exc
@@ -77,23 +89,36 @@ class XlsxPathCacheMirrorError(Exception):
     """GCS API / ネットワーク / 認証エラーを統合（呼出側は warn-only で扱う）。"""
 
 
+def _str_or_empty(value: object) -> str:
+    """value を安全に str 化（None / 非 str は空文字列に正規化、I-4 反映）。
+
+    GcpConfig の field は dataclass で str 型注釈だが、TOML 経由 / dict 直渡し
+    で None や非 str が混入し得るため `.strip()` AttributeError を防ぐ。
+    """
+    if isinstance(value, str):
+        return value
+    return ""
+
+
 def _validate_gcp(gcp: GcpConfig) -> list[str]:
     """GcpConfig の必須項目を検証して missing field 名のリストを返す。
 
     audit_uploader._validate_gcp と異なり、本モジュールは「失敗しても warn-only」
     の運用のため、raise せず list を返す。呼出側が空 list なら proceed する。
+
+    I-4 反映: None / 非 str 混入で AttributeError しないよう ``_str_or_empty`` 経由で
+    防御。``GcpConfig()`` デフォルト・空文字・空 dict 直渡しすべて safe に no-op 判定。
     """
     missing: list[str] = []
-    if not gcp.project_id.strip():
+    if not _str_or_empty(getattr(gcp, "project_id", None)).strip():
         missing.append("project_id")
-    if not gcp.effective_data_bucket.strip():
+    if not _str_or_empty(getattr(gcp, "effective_data_bucket", None)).strip():
         missing.append("data_bucket_name (or bucket_name)")
-    if not gcp.service_account_key_path.strip():
+    sa_key_path = _str_or_empty(getattr(gcp, "service_account_key_path", None)).strip()
+    if not sa_key_path:
         missing.append("service_account_key_path")
-    if not missing:
-        sa_path = Path(gcp.service_account_key_path)
-        if not sa_path.exists():
-            missing.append("service_account_key_path (file not found)")
+    elif not Path(sa_key_path).exists():
+        missing.append("service_account_key_path (file not found)")
     return missing
 
 
@@ -104,26 +129,85 @@ def _client(gcp: GcpConfig) -> storage.Client:
     )
 
 
+def _validate_uuid_str(s: str) -> bool:
+    """文字列が UUIDv4 として parse 可能か判定 (I-3 反映)。"""
+    try:
+        uuid.UUID(s)
+    except (ValueError, TypeError, AttributeError):
+        return False
+    return True
+
+
+def _quarantine_invalid_machine_id(reason: str) -> None:
+    """不正な machine_id ファイルを ``.invalid-{ts}`` 退避する (I-3 反映)。
+
+    rename 失敗は warn のみ（regenerate 経路で同名 file を上書きするため致命ではない）。
+    """
+    ts = _dt.datetime.now(tz=_dt.UTC).strftime("%Y%m%dT%H%M%S.%fZ")
+    backup = _MACHINE_ID_PATH.with_name(_MACHINE_ID_PATH.name + f".invalid-{ts}")
+    try:
+        _MACHINE_ID_PATH.rename(backup)
+        logger.warning(
+            "machine_id quarantined (reason=%s) -> %s",
+            reason,
+            backup.name,
+        )
+    except OSError as exc:
+        logger.warning(
+            "machine_id quarantine failed (reason=%s, type=%s)",
+            reason,
+            type(exc).__name__,
+        )
+
+
 def get_or_create_machine_id() -> str:
     """``~/wiseman-hub/machine_id`` から machine_id を読み出し、なければ UUIDv4 を生成。
 
     冪等: 同一 PC で複数回呼ばれても同じ ID が返る（再起動間で安定）。
-    読み取り失敗時は ephemeral UUID を返し、warn ログを残す（運用継続優先）。
+
+    並行 race 回避 (I-2 反映):
+        ``open(path, "x")`` で atomic create する。既存ファイルがあれば
+        FileExistsError を catch して reread することで、2 process 同時起動でも
+        どちらかの UUID に collapse する。
+
+    形式検証 (I-3 反映):
+        既存ファイルの内容が UUIDv4 として parse 不能なら ``.invalid-{ts}`` 退避
+        + 新規生成。空文字も同様。
+
+    読み取り / 書き込み失敗時は ephemeral UUID を返し、warn ログを残す（運用継続優先）。
 
     PII 配慮:
         hostname / MAC アドレス / Windows machine GUID は使わず、必ず UUIDv4 を
         新規生成する（ADR-016 PII 5 年保持と整合）。
     """
     try:
+        # 既存読込
         if _MACHINE_ID_PATH.exists():
             content = _MACHINE_ID_PATH.read_text(encoding="utf-8").strip()
-            if content:
+            if content and _validate_uuid_str(content):
                 return content
-        # 新規生成 + 永続化
-        new_id = str(uuid.uuid4())
+            # 不正 / 空 → 退避 + regenerate
+            reason = "empty" if not content else "invalid-uuid-format"
+            _quarantine_invalid_machine_id(reason)
+
+        # 新規生成 + atomic create (FileExistsError で並行 race 解決)
         _MACHINE_ID_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _MACHINE_ID_PATH.write_text(new_id + "\n", encoding="utf-8")
-        return new_id
+        new_id = str(uuid.uuid4())
+        try:
+            with open(_MACHINE_ID_PATH, "x", encoding="utf-8") as f:
+                f.write(new_id + "\n")
+            return new_id
+        except FileExistsError:
+            # 並行 process が先に作った → reread して collapse
+            content = _MACHINE_ID_PATH.read_text(encoding="utf-8").strip()
+            if content and _validate_uuid_str(content):
+                return content
+            # reread しても不正 → ephemeral fallback
+            logger.warning(
+                "machine_id concurrent create succeeded but content invalid; "
+                "using ephemeral UUID for this session"
+            )
+            return str(uuid.uuid4())
     except OSError as exc:
         # 書き込み失敗 → ephemeral UUID を返す（次回起動時に再試行）
         logger.warning(
@@ -293,6 +377,16 @@ def delete_entry(
         - bucket lifecycle で N 日後に物理削除する運用が可能
         - Mac CLI の ``--include-deleted`` で監査可能
 
+    復旧時の重要な制約 (codex review I-5 反映):
+        delete は「local TOML 保存後 → tombstone を GCS に投げる」順序であり、
+        mirror が warn-only で失敗しても TOML 永続化は成功している。よって:
+
+        - **local TOML が真実、GCS は monitor + recovery hint** として扱う
+        - 復旧時、GCS で alive entry が見つかっても **無条件採用してはいけない**:
+          local TOML に同 key が無ければ既に削除済（GCS が古い alive を保持）
+        - ``base_config_sha256`` を local TOML と比較し、差分があれば stale mirror
+          として扱う（write-back 復元 PR で実装予定）
+
     Returns:
         True = upload 成功、False = 設定不足 / API エラー
     """
@@ -350,6 +444,89 @@ def fetch_one(
     return parsed
 
 
+# C-1 反映: UI thread から呼ばれる write/delete hook を非同期化。
+# Tk UI thread を 30 秒 timeout でブロックすると現場運用が破綻するため、
+# daemon thread に upload/delete を投げ、UI 側は即時継続する。
+# warn-only 仕様のため worker 内で全例外を catch、UI に messagebox を出さない。
+
+
+def _async_run(
+    target_label: str,
+    fn: Callable[..., object],
+    *args: object,
+    **kwargs: object,
+) -> threading.Thread:
+    """fn を daemon thread で起動し、例外は warn ログに吸収する (C-1)。"""
+
+    def _worker() -> None:
+        try:
+            fn(*args, **kwargs)
+        except Exception as exc:  # noqa: BLE001 — worker 内吸収必須
+            logger.warning(
+                "xlsx_path_cache mirror async %s failed (non-fatal): %s",
+                target_label,
+                type(exc).__name__,
+            )
+
+    t = threading.Thread(
+        target=_worker,
+        name=f"xlsx-path-cache-mirror-{target_label}",
+        daemon=True,
+    )
+    t.start()
+    return t
+
+
+def upload_entry_async(
+    key: str,
+    xlsx_path: str,
+    gcp: GcpConfig,
+    *,
+    config_path: Path,
+    client: storage.Client | None = None,
+) -> threading.Thread:
+    """C-1: ``upload_entry`` を daemon thread で実行（UI thread を blocking しない）。
+
+    Returns:
+        起動された Thread オブジェクト（呼出側はテスト時に join 可能）。
+        通常運用では呼出側が結果を待つ必要はない（warn-only）。
+
+    上位の write/delete hook 配置点（ui/checklist_c_dialog.py）から本 async 版を
+    呼ぶことで、GCP 遅延 / 認証詰まり / ネット不調による Tk UI freeze を回避する。
+    """
+    return _async_run(
+        "upload",
+        upload_entry,
+        key,
+        xlsx_path,
+        gcp,
+        config_path=config_path,
+        client=client,
+    )
+
+
+def delete_entry_async(
+    key: str,
+    gcp: GcpConfig,
+    *,
+    config_path: Path,
+    client: storage.Client | None = None,
+) -> threading.Thread:
+    """C-1: ``delete_entry`` を daemon thread で実行（UI thread を blocking しない）。
+
+    Returns:
+        起動された Thread オブジェクト（呼出側はテスト時に join 可能）。
+    """
+    return _async_run(
+        "delete",
+        delete_entry,
+        key,
+        gcp,
+        config_path=config_path,
+        client=client,
+    )
+
+
 def fetch_all(
     gcp: GcpConfig,
     *,
@@ -365,14 +542,39 @@ def fetch_all(
         本関数は read-only で副作用なし。list_blobs と download の間に
         別 PC が upload しても snapshot として取得される（古い generation を
         読む可能性はあるが、Mac CLI 用途では許容）。
+
+    Note (codex I-1 反映): エラー伝播が必要な CLI 用途では
+    ``fetch_all_with_errors()`` を使うこと。本関数は warn-only fallback で
+    空 list を返すため、CLI exit code を network 失敗で 3 にするには errors を
+    別に取得する必要がある。
     """
+    entries, _errors = fetch_all_with_errors(gcp, client=client)
+    return entries
+
+
+def fetch_all_with_errors(
+    gcp: GcpConfig,
+    *,
+    client: storage.Client | None = None,
+) -> tuple[list[dict[str, str]], list[Exception]]:
+    """``cache/xlsx_path/`` 配下の全 entry を取得し、エラーも併せて返す (I-1)。
+
+    Returns:
+        (entries, errors) のタプル:
+            - entries: パース成功した entry の list
+            - errors: download / parse / list_blobs で発生した例外のリスト
+
+    呼出側 (Mac CLI など) は errors の非空を検知して exit code を区別できる。
+    GCP 設定不足は errors に ``XlsxPathCacheMirrorError`` を入れて返す。
+    """
+    errors: list[Exception] = []
     missing = _validate_gcp(gcp)
     if missing:
-        logger.warning(
-            "xlsx_path_cache fetch_all skipped (gcp config missing): %s",
-            ", ".join(missing),
-        )
-        return []
+        msg = "gcp config missing: " + ", ".join(missing)
+        logger.warning("xlsx_path_cache fetch_all skipped (%s)", msg)
+        errors.append(XlsxPathCacheMirrorError(msg))
+        return ([], errors)
+
     results: list[dict[str, str]] = []
     try:
         cli = client or _client(gcp)
@@ -389,6 +591,7 @@ def fetch_all(
                     getattr(blob, "name", "?"),
                     type(exc).__name__,
                 )
+                errors.append(exc)
                 continue
             try:
                 parsed = json.loads(data.decode("utf-8"))
@@ -398,6 +601,7 @@ def fetch_all(
                     getattr(blob, "name", "?"),
                     type(exc).__name__,
                 )
+                errors.append(exc)
                 continue
             if isinstance(parsed, dict):
                 results.append(parsed)
@@ -406,5 +610,6 @@ def fetch_all(
             "xlsx_path_cache fetch_all list_blobs failed: type=%s",
             type(exc).__name__,
         )
-        return results  # 部分結果を返す（list 中断時の partial を許容）
-    return results
+        errors.append(exc)
+        return (results, errors)  # 部分結果 + エラーを返す（partial を許容）
+    return (results, errors)

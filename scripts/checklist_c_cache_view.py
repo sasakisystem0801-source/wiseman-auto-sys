@@ -37,7 +37,7 @@ from pathlib import Path
 
 from wiseman_hub.cloud.xlsx_path_cache_mirror import (
     _validate_gcp,
-    fetch_all,
+    fetch_all_with_errors,
     fetch_one,
 )
 from wiseman_hub.config import load_config
@@ -62,6 +62,9 @@ def _validate_key(key: str) -> bool:
 
     `staff` は normalize_lookup_key 経由で全角空白等を含み得るため、空文字以外なら
     許容する（厳密な担当者名検証は config/default.toml と突き合わせる別 CLI の仕事）。
+
+    Nit-1 (codex review threadId 019dfceb): year は 2000-2100 範囲に制限
+    （typo / format 違反の早期検出、運用上 2026-2100 のみ実用）。
     """
     parts = key.split(":")
     if len(parts) != 3:
@@ -70,20 +73,31 @@ def _validate_key(key: str) -> bool:
     if not staff:
         return False
     try:
-        int(year_s)
+        y = int(year_s)
         m = int(month_s)
     except ValueError:
+        return False
+    if not (2000 <= y <= 2100):
         return False
     return 1 <= m <= 12
 
 
 def _parse_iso_utc(ts: str) -> _dt.datetime | None:
-    """ISO8601 文字列を datetime にパース。失敗時 None。"""
+    """ISO8601 文字列を datetime にパース。失敗時 None。
+
+    I-6 (codex review threadId 019dfceb) 反映: naive datetime（TZ 情報なし）
+    が混入した場合は UTC 扱いで aware 化する。これにより
+    ``datetime.now(tz=UTC) - parsed`` で TypeError が出ない。
+    """
     try:
         # Python 3.11+ では `+00:00` / `Z` 両方に対応（fromisoformat は 3.11 で改善済）
-        return _dt.datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except ValueError:
+        parsed = _dt.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except (ValueError, TypeError, AttributeError):
         return None
+    # naive → UTC aware に正規化（I-6 反映）
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=_dt.UTC)
+    return parsed
 
 
 def _format_age_days(generated_at: str | None) -> str:
@@ -221,10 +235,21 @@ def main() -> int:
         return 0
 
     # --all
-    entries = fetch_all(config.gcp)
+    # I-1 (codex review threadId 019dfceb): fetch_all_with_errors で network/API
+    # 失敗を exit code 3 に反映する（旧 fetch_all は warn-only で空 list 返却し
+    # CLI が常に 0 を返していた）
+    entries, errors = fetch_all_with_errors(config.gcp)
+    if errors:
+        print(
+            f"ERROR: GCS fetch_all で {len(errors)} 件の失敗 "
+            f"({type(errors[0]).__name__}: {errors[0]})",
+            file=sys.stderr,
+        )
+        # entries が部分結果で残っていても、network 失敗は明示的に exit 3
+        return 3
     if not entries:
-        # GCS が空 or fetch 失敗（後者は logger.warning に出る）
-        print("entries: 0 (GCS 上に entry なし、または fetch 失敗)")
+        # GCS が空（fetch 自体は成功）
+        print("entries: 0 (GCS 上に entry なし)")
         return 0
 
     if not args.include_deleted:

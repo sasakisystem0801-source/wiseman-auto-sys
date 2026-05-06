@@ -99,7 +99,7 @@ class TestCacheClearMenu:
             ), patch(
                 "wiseman_hub.ui.checklist_c_dialog.save_config"
             ) as mock_save, patch(
-                "wiseman_hub.ui.checklist_c_dialog._mirror_delete_entry"
+                "wiseman_hub.ui.checklist_c_dialog._mirror_delete_entry_async"
             ) as mock_mirror_del:
                 dlg._clear_cache_for_row(0)
             assert "宮下:2026:3" not in cfg.checklist.xlsx_path_cache
@@ -180,7 +180,7 @@ class TestCacheClearMenu:
             ), patch(
                 "wiseman_hub.ui.checklist_c_dialog.messagebox.showwarning"
             ) as mock_warn, patch(
-                "wiseman_hub.ui.checklist_c_dialog._mirror_delete_entry"
+                "wiseman_hub.ui.checklist_c_dialog._mirror_delete_entry_async"
             ) as mock_mirror_del:
                 dlg._clear_cache_for_row(0)
             # in-memory は消えている
@@ -206,7 +206,7 @@ class TestCacheClearMenu:
             ), patch(
                 "wiseman_hub.ui.checklist_c_dialog.save_config"
             ), patch(
-                "wiseman_hub.ui.checklist_c_dialog._mirror_delete_entry",
+                "wiseman_hub.ui.checklist_c_dialog._mirror_delete_entry_async",
                 side_effect=RuntimeError("network down"),
             ):
                 # 例外を吸収（warn-only）して UI 側は完遂する

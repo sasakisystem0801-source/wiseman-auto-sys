@@ -144,6 +144,105 @@ class TestMachineId:
         #    実装は「空でなければ既存値を返す」。空文字なら新規生成 + 書込
         assert fake_machine_id.read_text(encoding="utf-8").strip() == mid
 
+    # I-3 (codex review threadId 019dfceb): machine_id 形式検証
+    def test_invalid_uuid_format_quarantines_and_regenerates(
+        self, fake_machine_id: Path
+    ) -> None:
+        """既存 machine_id ファイルが UUID として parse 不能なら退避 + 再生成。"""
+        fake_machine_id.parent.mkdir(parents=True, exist_ok=True)
+        fake_machine_id.write_text("not-a-valid-uuid\n", encoding="utf-8")
+
+        mid = get_or_create_machine_id()
+        # 新規 UUID が生成されている
+        assert len(mid) == 36
+        assert mid.count("-") == 4
+        # 不正ファイルが退避されている
+        invalid_files = list(fake_machine_id.parent.glob("machine_id.invalid-*"))
+        assert len(invalid_files) == 1
+        assert invalid_files[0].read_text(encoding="utf-8") == "not-a-valid-uuid\n"
+
+    def test_partial_uuid_format_quarantines(
+        self, fake_machine_id: Path
+    ) -> None:
+        """途中で切れた UUID 文字列（実装ミスの典型）も退避対象。"""
+        fake_machine_id.parent.mkdir(parents=True, exist_ok=True)
+        fake_machine_id.write_text("550e8400-e29b-41d4-a716", encoding="utf-8")
+
+        mid = get_or_create_machine_id()
+        assert len(mid) == 36
+        invalid_files = list(fake_machine_id.parent.glob("machine_id.invalid-*"))
+        assert len(invalid_files) == 1
+
+    # I-2 (codex review threadId 019dfceb): 並行生成 race
+    def test_concurrent_read_existing_returns_same_uuid(
+        self, fake_machine_id: Path
+    ) -> None:
+        """既存 valid UUID ファイル + 並行 read で全 thread が同 UUID を返す。
+
+        実運用での主要 race scenario: launcher + app の同時起動で同じ UUID を読む。
+        """
+        import threading
+
+        # 事前に valid UUID を書く
+        fake_machine_id.parent.mkdir(parents=True, exist_ok=True)
+        fake_machine_id.write_text(
+            "550e8400-e29b-41d4-a716-446655440000\n", encoding="utf-8"
+        )
+
+        results: list[str] = []
+        results_lock = threading.Lock()
+
+        def _worker() -> None:
+            mid = get_or_create_machine_id()
+            with results_lock:
+                results.append(mid)
+
+        threads = [threading.Thread(target=_worker) for _ in range(20)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5.0)
+
+        # 全 thread が同 UUID を返す（既存 valid file からの read のみ、書込なし）
+        assert len(results) == 20
+        assert all(r == "550e8400-e29b-41d4-a716-446655440000" for r in results)
+
+    def test_concurrent_create_eventually_writes_file(
+        self, fake_machine_id: Path
+    ) -> None:
+        """ファイル無しから並行起動 → 最終的にファイルが残り valid UUID を含む。
+
+        並行 race の race window では ephemeral UUID が一部 thread から返ることが
+        あり得るが、最終的にファイルが書かれていて valid UUID 内容であることを
+        確認する。完全な collapse を保証するのは過剰要件（実運用では順次起動）。
+        """
+        import threading
+
+        assert not fake_machine_id.exists()
+
+        def _worker() -> None:
+            get_or_create_machine_id()
+
+        threads = [threading.Thread(target=_worker) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5.0)
+
+        # ファイルが存在し、内容が valid UUID
+        assert fake_machine_id.exists()
+        content = fake_machine_id.read_text(encoding="utf-8").strip()
+        import uuid as _uuid
+
+        try:
+            _uuid.UUID(content)
+        except ValueError:
+            pytest.fail(f"machine_id file content is not a valid UUID: {content!r}")
+
+        # 後続呼出は必ず file 内容を返す（race window 終了後）
+        mid = get_or_create_machine_id()
+        assert mid == content
+
 
 class TestComputeBaseConfigSha256:
     def test_deterministic(self, tmp_path: Path) -> None:
@@ -515,3 +614,126 @@ class TestParallelUploadRace:
         assert ok2 is True
         # mutable overwrite なので 2 回目は同じ object 名に書き直す
         assert blob.upload_from_string.call_count == 2
+
+    # Sug-1 (codex review threadId 019dfceb): tombstone 復活シナリオの命名明示
+    def test_tombstone_revives_on_reupload(
+        self,
+        gcp: GcpConfig,
+        fake_config: Path,
+        fake_machine_id: Path,
+    ) -> None:
+        """tombstone 後に同 key で再 upload すると alive に戻る（mutable mirror 仕様）。
+
+        UI で「キャッシュ削除→新しい xlsx を選択」フローの GCS 側挙動を検証。
+        last-writer-wins なので、再 upload した alive payload が tombstone を
+        覆い得る。
+        """
+        from wiseman_hub.cloud.xlsx_path_cache_mirror import delete_entry
+
+        client, _, blob = _make_mock_client()
+        # 1) alive upload
+        upload_entry(
+            "宮下:2026:3", "first.xlsx", gcp,
+            config_path=fake_config, client=client,
+        )
+        # 2) delete (tombstone 上書き)
+        delete_entry(
+            "宮下:2026:3", gcp,
+            config_path=fake_config, client=client,
+        )
+        # 3) alive 再 upload (tombstone 復活)
+        upload_entry(
+            "宮下:2026:3", "second.xlsx", gcp,
+            config_path=fake_config, client=client,
+        )
+        # 3 回呼ばれ、すべて同一 object に書き込まれている
+        assert blob.upload_from_string.call_count == 3
+
+
+# I-4 (codex review threadId 019dfceb): GCP 未設定時の None / 空 dict 防御
+class TestValidateGcpDefensive:
+    """GcpConfig に None / 空文字 / 非 str が混入しても AttributeError しない。"""
+
+    def test_none_strings_treated_as_missing(self) -> None:
+        """各 field が None でも AttributeError ではなく missing list に入る。"""
+        from wiseman_hub.cloud.xlsx_path_cache_mirror import _validate_gcp
+
+        class _BrokenGcp:
+            project_id = None
+            effective_data_bucket = None
+            service_account_key_path = None
+
+        missing = _validate_gcp(_BrokenGcp())  # type: ignore[arg-type]
+        assert "project_id" in missing
+        assert "service_account_key_path" in missing
+        # data_bucket か bucket_name どちらかの判定が入る
+        assert any("bucket" in m for m in missing)
+
+    def test_default_gcp_config_no_attribute_error(self) -> None:
+        """素の GcpConfig() (全 field 空) でも例外なく missing 判定。"""
+        from wiseman_hub.cloud.xlsx_path_cache_mirror import _validate_gcp
+
+        gcp = GcpConfig()  # 全 field 空文字 default
+        missing = _validate_gcp(gcp)
+        assert len(missing) >= 3  # project_id, bucket, sa_key
+
+    def test_whitespace_only_strings_treated_as_missing(self) -> None:
+        """全 field が空白文字のみでも missing 判定。"""
+        from wiseman_hub.cloud.xlsx_path_cache_mirror import _validate_gcp
+
+        gcp = GcpConfig(
+            project_id="   ",
+            data_bucket_name="\t",
+            service_account_key_path=" ",
+        )
+        missing = _validate_gcp(gcp)
+        assert len(missing) >= 3
+
+
+# I-1 (codex review threadId 019dfceb): fetch_all_with_errors の error 伝播
+class TestFetchAllWithErrors:
+    def test_returns_empty_with_no_errors_when_bucket_empty(
+        self, gcp: GcpConfig
+    ) -> None:
+        """空 bucket: errors=[], entries=[] を返す（CLI で exit 0 にできる）。"""
+        from wiseman_hub.cloud.xlsx_path_cache_mirror import fetch_all_with_errors
+
+        client, _, _ = _make_mock_client()
+        client.list_blobs = MagicMock(return_value=iter([]))
+        entries, errors = fetch_all_with_errors(gcp, client=client)
+        assert entries == []
+        assert errors == []
+
+    def test_returns_error_when_gcp_config_missing(self) -> None:
+        """GCP 未設定: errors に XlsxPathCacheMirrorError が入る。"""
+        from wiseman_hub.cloud.xlsx_path_cache_mirror import (
+            XlsxPathCacheMirrorError,
+            fetch_all_with_errors,
+        )
+
+        gcp = GcpConfig()  # 未設定
+        entries, errors = fetch_all_with_errors(gcp)
+        assert entries == []
+        assert len(errors) == 1
+        assert isinstance(errors[0], XlsxPathCacheMirrorError)
+
+    def test_propagates_blob_download_error(
+        self, gcp: GcpConfig
+    ) -> None:
+        """blob download 失敗が errors に伝播する（CLI exit 3 用）。"""
+        from google.api_core import exceptions as gcs_exc
+
+        from wiseman_hub.cloud.xlsx_path_cache_mirror import fetch_all_with_errors
+
+        client, _, _ = _make_mock_client()
+        bad_blob = MagicMock()
+        bad_blob.name = "cache/xlsx_path/abc.json"
+        bad_blob.download_as_bytes = MagicMock(
+            side_effect=gcs_exc.ServiceUnavailable("503")
+        )
+        client.list_blobs = MagicMock(return_value=iter([bad_blob]))
+
+        entries, errors = fetch_all_with_errors(gcp, client=client)
+        assert entries == []
+        assert len(errors) == 1
+        assert isinstance(errors[0], gcs_exc.ServiceUnavailable)
