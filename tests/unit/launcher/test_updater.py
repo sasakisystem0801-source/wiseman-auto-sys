@@ -15,12 +15,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import io
 import json
 import os
 import time
 import urllib.error
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -48,6 +50,22 @@ from wiseman_hub_launcher.updater import (
     spawn_with_monitor,
     update_and_spawn,
 )
+
+
+@contextlib.contextmanager
+def _bypass_provenance() -> Iterator[None]:
+    """PR-6a: update_and_spawn 系テストで provenance verify 経路を完全 mock。
+
+    既存 test (PR-4 由来) の SHA-256 / spawn / rollback 挙動を維持しつつ、
+    本 PR-6a で追加された provenance download / claims verify / canonical URL
+    検証を bypass。provenance 検証本体の test は test_provenance.py で追加。
+    """
+    with (
+        patch("wiseman_hub_launcher.updater.verify_provenance"),
+        patch("wiseman_hub_launcher.updater.download_provenance"),
+        patch("wiseman_hub_launcher.updater.validate_canonical_provenance_url"),
+    ):
+        yield
 
 # helpers ----------------------------------------------------------------------
 
@@ -208,7 +226,7 @@ def test_lock_heartbeat_retries_transient_oserror(
             raise OSError(13, "AV holding")  # PermissionError-ish
         real_utime(p, *args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr("wiseman_hub_launcher.updater.os.utime", _flaky_utime)
+    monkeypatch.setattr("wiseman_hub_launcher._runtime.lock.os.utime", _flaky_utime)
 
     hb = LockHeartbeat(lock, interval_sec=0.02)
     with caplog.at_level(logging.WARNING, logger="wiseman_hub_launcher.updater"):
@@ -263,7 +281,7 @@ def test_download_artifact_basic(tmp_path: Path) -> None:
     dest = tmp_path / "versions" / "1.2.3"
 
     with patch(
-        "wiseman_hub_launcher.updater._open_https_get",
+        "wiseman_hub_launcher._supply_chain.download._open_https_get",
         return_value=_make_response(payload),
     ):
         out = download_artifact(
@@ -280,7 +298,7 @@ def test_download_artifact_creates_dest_dir(tmp_path: Path) -> None:
     assert not dest.exists()
 
     with patch(
-        "wiseman_hub_launcher.updater._open_https_get",
+        "wiseman_hub_launcher._supply_chain.download._open_https_get",
         return_value=_make_response(payload),
     ):
         download_artifact("https://example.com/x.exe", dest, sha)
@@ -294,7 +312,7 @@ def test_download_artifact_sha256_mismatch(tmp_path: Path) -> None:
     dest = tmp_path / "versions" / "1.2.3"
 
     with patch(
-        "wiseman_hub_launcher.updater._open_https_get",
+        "wiseman_hub_launcher._supply_chain.download._open_https_get",
         return_value=_make_response(payload),
     ), pytest.raises(ChecksumError, match="SHA-256 mismatch"):
         download_artifact("https://example.com/x.exe", dest, wrong_sha)
@@ -314,7 +332,7 @@ def test_download_artifact_size_cap_content_length(tmp_path: Path) -> None:
 
     big = str(MAX_ARTIFACT_BYTES + 1)
     with patch(
-        "wiseman_hub_launcher.updater._open_https_get",
+        "wiseman_hub_launcher._supply_chain.download._open_https_get",
         return_value=_make_response(payload, content_length=big),
     ), pytest.raises(DownloadError, match="Content-Length"):
         download_artifact("https://example.com/x.exe", dest, sha)
@@ -327,10 +345,13 @@ def test_download_artifact_size_cap_chunked(
 
     Important 5 (threadId 019dfd5d) 反映: 300MiB 確保は CI メモリを浪費するため
     monkeypatch で cap を 1KiB に縮めて検証。
-    """
-    from wiseman_hub_launcher import updater as updater_mod  # noqa: PLC0415
 
-    monkeypatch.setattr(updater_mod, "MAX_ARTIFACT_BYTES", 1024)
+    PR-6a: download_artifact が _supply_chain.download.MAX_ARTIFACT_BYTES を参照するので、
+    そちらを monkeypatch する (updater.py 側の re-export 値だけ変えても効かない)。
+    """
+    monkeypatch.setattr(
+        "wiseman_hub_launcher._supply_chain.download.MAX_ARTIFACT_BYTES", 1024
+    )
 
     payload = b"a" * 2048  # 2KiB > 1KiB cap
     sha = _sha256_hex(payload)
@@ -339,7 +360,7 @@ def test_download_artifact_size_cap_chunked(
     # Content-Length を 0 に偽装、chunked cap で検知させる
     resp = _make_response(payload, content_length="0")
     with patch(
-        "wiseman_hub_launcher.updater._open_https_get", return_value=resp
+        "wiseman_hub_launcher._supply_chain.download._open_https_get", return_value=resp
     ), pytest.raises(DownloadError, match="exceeds"):
         download_artifact("https://example.com/x.exe", dest, sha)
 
@@ -362,7 +383,7 @@ def test_download_artifact_network_error(tmp_path: Path) -> None:
         raise urllib.error.URLError("connection refused")
 
     with patch(
-        "wiseman_hub_launcher.updater.urllib.request.urlopen",
+        "wiseman_hub_launcher._supply_chain.download.urllib.request.urlopen",
         side_effect=_raise_url_error,
     ), pytest.raises(DownloadError, match="URL error"):
         download_artifact("https://example.com/x.exe", dest, "0" * 64)
@@ -380,7 +401,7 @@ def test_download_artifact_rejects_https_to_http_redirect(tmp_path: Path) -> Non
     resp.geturl = MagicMock(return_value="http://attacker.com/x.exe")
 
     with patch(
-        "wiseman_hub_launcher.updater.urllib.request.urlopen", return_value=resp
+        "wiseman_hub_launcher._supply_chain.download.urllib.request.urlopen", return_value=resp
     ), pytest.raises(DownloadError, match="non-HTTPS"):
         download_artifact("https://example.com/x.exe", dest, sha)
 
@@ -396,7 +417,7 @@ def test_download_artifact_accepts_https_to_https_redirect(tmp_path: Path) -> No
     resp.geturl = MagicMock(return_value="https://cdn.example.com/redirected/x.exe")
 
     with patch(
-        "wiseman_hub_launcher.updater.urllib.request.urlopen", return_value=resp
+        "wiseman_hub_launcher._supply_chain.download.urllib.request.urlopen", return_value=resp
     ):
         out = download_artifact("https://example.com/x.exe", dest, sha)
     assert out == dest / "wiseman_hub.exe"
@@ -414,7 +435,7 @@ def test_download_artifact_via_real_open_https_get_path(tmp_path: Path) -> None:
     resp.geturl = MagicMock(return_value="https://example.com/x.exe")
 
     with patch(
-        "wiseman_hub_launcher.updater.urllib.request.urlopen", return_value=resp
+        "wiseman_hub_launcher._supply_chain.download.urllib.request.urlopen", return_value=resp
     ):
         out = download_artifact("https://example.com/x.exe", dest, sha)
     assert out.read_bytes() == payload
@@ -436,7 +457,7 @@ def test_spawn_with_monitor_success_long_running(tmp_path: Path) -> None:
     binary.write_bytes(b"fake")
 
     with patch(
-        "wiseman_hub_launcher.updater.subprocess.Popen", return_value=fake_proc
+        "wiseman_hub_launcher._runtime.spawn.subprocess.Popen", return_value=fake_proc
     ):
         out = spawn_with_monitor(binary, monitor_timeout_sec=0.05)
     assert out.result == SpawnResult.SUCCESS
@@ -452,7 +473,7 @@ def test_spawn_with_monitor_early_zero_exit_no_rollback(tmp_path: Path) -> None:
     binary.write_bytes(b"fake")
 
     with patch(
-        "wiseman_hub_launcher.updater.subprocess.Popen", return_value=fake_proc
+        "wiseman_hub_launcher._runtime.spawn.subprocess.Popen", return_value=fake_proc
     ):
         out = spawn_with_monitor(binary, monitor_timeout_sec=0.05)
     assert out.result == SpawnResult.OK_EARLY_EXIT
@@ -468,7 +489,7 @@ def test_spawn_with_monitor_crash(tmp_path: Path) -> None:
     binary.write_bytes(b"fake")
 
     with patch(
-        "wiseman_hub_launcher.updater.subprocess.Popen", return_value=fake_proc
+        "wiseman_hub_launcher._runtime.spawn.subprocess.Popen", return_value=fake_proc
     ):
         out = spawn_with_monitor(binary, monitor_timeout_sec=0.05)
     assert out.result == SpawnResult.CRASH
@@ -480,7 +501,7 @@ def test_spawn_with_monitor_os_error(tmp_path: Path) -> None:
     binary = tmp_path / "missing.exe"
 
     with patch(
-        "wiseman_hub_launcher.updater.subprocess.Popen",
+        "wiseman_hub_launcher._runtime.spawn.subprocess.Popen",
         side_effect=OSError("no such file"),
     ):
         out = spawn_with_monitor(binary, monitor_timeout_sec=0.05)
@@ -516,7 +537,7 @@ def test_rollback_to_previous_basic(tmp_path: Path) -> None:
     fake_proc.wait.side_effect = subprocess.TimeoutExpired(cmd="x", timeout=0.05)
 
     with patch(
-        "wiseman_hub_launcher.updater.subprocess.Popen", return_value=fake_proc
+        "wiseman_hub_launcher._runtime.spawn.subprocess.Popen", return_value=fake_proc
     ):
         out = rollback_to_previous(cur_path, versions_dir, monitor_timeout_sec=0.05)
     assert out.result == SpawnResult.SUCCESS
@@ -587,7 +608,11 @@ def _good_manifest(version: str = "1.2.3", checksum: str | None = None) -> dict[
         "commit_sha": "f976b44",
         "built_at": "2026-05-06T12:00:00Z",
         "released_at": "2026-05-06T13:00:00Z",
-        "provenance_url": f"versions/{version}/provenance.intoto.jsonl",
+        # PR-6a (T0 Explore + codex C-1): canonical = download_url + ".sigstore.json"
+        "provenance_url": f"versions/{version}/wiseman_hub.exe.sigstore.json",
+        # PR-6a: expected_repo / expected_workflow_ref 必須化
+        "expected_repo": "sasakisystem0801-source/wiseman-auto-sys",
+        "expected_workflow_ref": f".github/workflows/release.yml@refs/tags/v{version}",
     }
 
 
@@ -607,8 +632,8 @@ def test_update_and_spawn_uses_explicit_current_path(tmp_path: Path) -> None:
 
     fake_proc.wait.side_effect = subprocess.TimeoutExpired(cmd="x", timeout=0.05)
 
-    with patch(
-        "wiseman_hub_launcher.updater.subprocess.Popen", return_value=fake_proc
+    with _bypass_provenance(), patch(
+        "wiseman_hub_launcher._runtime.spawn.subprocess.Popen", return_value=fake_proc
     ):
         out = update_and_spawn(
             _good_manifest("1.2.3"),
@@ -632,8 +657,8 @@ def test_update_and_spawn_same_version_skips_download(tmp_path: Path) -> None:
 
     fake_proc.wait.side_effect = subprocess.TimeoutExpired(cmd="x", timeout=0.05)
 
-    with patch(
-        "wiseman_hub_launcher.updater.subprocess.Popen", return_value=fake_proc
+    with _bypass_provenance(), patch(
+        "wiseman_hub_launcher._runtime.spawn.subprocess.Popen", return_value=fake_proc
     ), patch("wiseman_hub_launcher.updater.download_artifact") as dl:
         out = update_and_spawn(
             _good_manifest("1.2.3"), tmp_path, monitor_timeout_sec=0.05
@@ -651,11 +676,11 @@ def test_update_and_spawn_no_spawn_returns_success(tmp_path: Path) -> None:
         cur_path, Current(version="1.0.0", released_at="x", previous_version="")
     )
 
-    with patch(
-        "wiseman_hub_launcher.updater._open_https_get",
+    with _bypass_provenance(), patch(
+        "wiseman_hub_launcher._supply_chain.download._open_https_get",
         return_value=_make_response(payload),
     ), patch(
-        "wiseman_hub_launcher.updater.subprocess.Popen"
+        "wiseman_hub_launcher._runtime.spawn.subprocess.Popen"
     ) as popen_mock:
         out = update_and_spawn(
             _good_manifest("1.2.3", sha),
@@ -687,11 +712,11 @@ def test_update_and_spawn_full_flow_success(tmp_path: Path) -> None:
 
     fake_proc.wait.side_effect = subprocess.TimeoutExpired(cmd="x", timeout=0.05)
 
-    with patch(
-        "wiseman_hub_launcher.updater._open_https_get",
+    with _bypass_provenance(), patch(
+        "wiseman_hub_launcher._supply_chain.download._open_https_get",
         return_value=_make_response(payload),
     ), patch(
-        "wiseman_hub_launcher.updater.subprocess.Popen", return_value=fake_proc
+        "wiseman_hub_launcher._runtime.spawn.subprocess.Popen", return_value=fake_proc
     ):
         out = update_and_spawn(
             _good_manifest("1.2.3", sha), tmp_path, monitor_timeout_sec=0.05
@@ -712,8 +737,8 @@ def test_update_and_spawn_checksum_mismatch_no_switch(tmp_path: Path) -> None:
         cur_path, Current(version="1.0.0", released_at="x", previous_version="")
     )
 
-    with patch(
-        "wiseman_hub_launcher.updater._open_https_get",
+    with _bypass_provenance(), patch(
+        "wiseman_hub_launcher._supply_chain.download._open_https_get",
         return_value=_make_response(payload),
     ), pytest.raises(ChecksumError):
         update_and_spawn(
@@ -747,11 +772,11 @@ def test_update_and_spawn_crash_then_rollback_success(tmp_path: Path) -> None:
     )
 
     popen_calls = [fake_proc_crash, fake_proc_rollback]
-    with patch(
-        "wiseman_hub_launcher.updater._open_https_get",
+    with _bypass_provenance(), patch(
+        "wiseman_hub_launcher._supply_chain.download._open_https_get",
         return_value=_make_response(payload),
     ), patch(
-        "wiseman_hub_launcher.updater.subprocess.Popen",
+        "wiseman_hub_launcher._runtime.spawn.subprocess.Popen",
         side_effect=lambda *a, **kw: popen_calls.pop(0),  # noqa: ARG005
     ):
         out = update_and_spawn(
@@ -781,11 +806,11 @@ def test_update_and_spawn_crash_then_rollback_also_crashes(tmp_path: Path) -> No
     fake_old.wait.return_value = 9
     popen_calls = [fake_new, fake_old]
 
-    with patch(
-        "wiseman_hub_launcher.updater._open_https_get",
+    with _bypass_provenance(), patch(
+        "wiseman_hub_launcher._supply_chain.download._open_https_get",
         return_value=_make_response(payload),
     ), patch(
-        "wiseman_hub_launcher.updater.subprocess.Popen",
+        "wiseman_hub_launcher._runtime.spawn.subprocess.Popen",
         side_effect=lambda *a, **kw: popen_calls.pop(0),  # noqa: ARG005
     ), pytest.raises(SpawnFailedNoRollbackError, match="both new"):
         update_and_spawn(
@@ -810,11 +835,11 @@ def test_update_and_spawn_crash_with_no_previous_raises_preflight(
     fake_new = MagicMock()
     fake_new.wait.return_value = 1  # 新版 crash
 
-    with patch(
-        "wiseman_hub_launcher.updater._open_https_get",
+    with _bypass_provenance(), patch(
+        "wiseman_hub_launcher._supply_chain.download._open_https_get",
         return_value=_make_response(payload),
     ), patch(
-        "wiseman_hub_launcher.updater.subprocess.Popen", return_value=fake_new
+        "wiseman_hub_launcher._runtime.spawn.subprocess.Popen", return_value=fake_new
     ), pytest.raises(PreflightError, match="rollback unavailable"):
         update_and_spawn(
             _good_manifest("1.2.3", sha), tmp_path, monitor_timeout_sec=0.05

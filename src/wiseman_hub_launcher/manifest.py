@@ -1,18 +1,26 @@
-"""manifest.json fetch + parse + schema 検証 (ADR-016 PR-3)。
+"""manifest.json fetch + parse + schema 検証 (ADR-016 PR-3 / PR-6a)。
 
-manifest schema (ADR-004 v2 / ADR-016 §3 参照):
+manifest schema (ADR-004 v2 / ADR-016 §3 参照、PR-6a で expected_* 追加):
     {
         "current_version": "1.2.3",
         "minimum_version": "1.0.0",
         "download_url": "versions/1.2.3/wiseman_hub.exe",
-        "checksum_sha256": "abc123...",                  (64 lowercase hex)
-        "commit_sha": "f976b44...",                      (7-40 lowercase hex)
-        "built_at": "2026-05-06T12:00:00Z",              (ISO8601 UTC)
+        "checksum_sha256": "abc123...",                          (64 lowercase hex)
+        "commit_sha": "f976b44...",                              (7-40 lowercase hex)
+        "built_at": "2026-05-06T12:00:00Z",                      (ISO8601 UTC)
         "released_at": "2026-05-06T13:00:00Z",
-        "provenance_url": "versions/1.2.3/provenance.intoto.jsonl",
-        "release_notes": "...",                          (任意、最大 4096)
-        "force_update": false                            (任意、bool)
+        "provenance_url": "versions/1.2.3/wiseman_hub.exe.sigstore.json",  (PR-6a)
+        "expected_repo": "sasakisystem0801-source/wiseman-auto-sys",       (PR-6a)
+        "expected_workflow_ref":                                            (PR-6a)
+            ".github/workflows/release.yml@refs/tags/v1.2.3",
+        "release_notes": "...",                                  (任意、最大 4096)
+        "force_update": false                                    (任意、bool)
     }
+
+PR-6a (codex review threadId 019dfd9e I-2):
+    expected_repo / expected_workflow_ref は表示/監査用に manifest にも記録するが、
+    信頼根は launcher 埋め込み constant (`_supply_chain/policy.py` の
+    LAUNCHER_EXPECTED_REPO 等)。両者の一致は `_supply_chain/provenance.py` で二重検証。
 
 セキュリティ方針 (codex review threadId 019dfce6 反映):
     - manifest URL は **HTTPS 固定**（http/file/path scheme は ManifestError）
@@ -28,6 +36,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import ssl
 import urllib.error
 import urllib.request
@@ -44,6 +53,15 @@ _REQUIRED_FIELDS: tuple[str, ...] = (
     "built_at",
     "released_at",
     "provenance_url",
+    "expected_repo",  # PR-6a (codex I-2: 表示/監査用、信頼根は launcher 埋め込み)
+    "expected_workflow_ref",  # PR-6a
+)
+
+# PR-6a: expected_repo の形式 ("owner/repo"、各 segment は GitHub の規則準拠)
+_GITHUB_OWNER_REPO_RE = re.compile(r"^[A-Za-z0-9._-]{1,39}/[A-Za-z0-9._-]{1,100}$")
+# PR-6a: expected_workflow_ref の形式 (release.yml@refs/tags/vX.Y.Z 等)
+_WORKFLOW_REF_RE = re.compile(
+    r"^\.github/workflows/[A-Za-z0-9._-]+\.ya?ml@refs/(tags|heads)/[A-Za-z0-9._/-]+$"
 )
 
 _HEX_LOWER = frozenset("0123456789abcdef")
@@ -293,6 +311,21 @@ def validate_manifest(manifest: dict[str, object]) -> None:
         url_val = manifest[url_field]
         assert isinstance(url_val, str)  # noqa: S101
         _validate_relative_path(url_val, field=url_field)
+
+    # PR-6a: expected_repo / expected_workflow_ref を形式検証 (信頼根ではなく表示用)
+    repo_val = manifest["expected_repo"]
+    assert isinstance(repo_val, str)  # noqa: S101
+    if not _GITHUB_OWNER_REPO_RE.match(repo_val):
+        raise ManifestError(
+            f"expected_repo must be 'owner/repo' format: {repo_val!r}"
+        )
+
+    wf_val = manifest["expected_workflow_ref"]
+    assert isinstance(wf_val, str)  # noqa: S101
+    if not _WORKFLOW_REF_RE.match(wf_val):
+        raise ManifestError(
+            f"expected_workflow_ref format invalid: {wf_val!r}"
+        )
 
     # 任意 field: force_update (bool), release_notes (str + 長さ)
     if "force_update" in manifest and not isinstance(manifest["force_update"], bool):

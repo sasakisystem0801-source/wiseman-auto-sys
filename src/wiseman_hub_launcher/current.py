@@ -52,13 +52,31 @@ class Current:
     """現在 active なバージョン情報。
 
     PR-4 で `previous_version` 追加（rollback 先特定用、初期値 ""）。
-    `version` と `previous_version` は semver 形式 ("X.Y.Z") を要求する
-    （read_current で検証、不正なら quarantine）。
+    PR-6a (codex review_team type-design Important): __post_init__ で semver invariant
+    を強制。read_current 経由でなく直接生成された場合も不正値を弾く。
+
+    `version` と `previous_version` は semver 形式 ("X.Y.Z") を要求する。
+    `previous_version` は "" (rollback 先なし) も許容。
     """
 
     version: str
     released_at: str
     previous_version: str = ""
+
+    def __post_init__(self) -> None:
+        # version は常に semver
+        if not is_simple_semver(self.version):
+            raise ValueError(
+                f"Current.version must be semver, got {self.version!r}"
+            )
+        # previous_version は "" or semver
+        if self.previous_version != "" and not is_simple_semver(self.previous_version):
+            raise ValueError(
+                f"Current.previous_version must be '' or semver, "
+                f"got {self.previous_version!r}"
+            )
+        # released_at は str (空文字も許容、ISO8601 形式は read_current で検証)
+        # 型アノテーションで str 強制済、追加検証なし
 
 
 DEFAULT_CURRENT = Current(version="0.0.0", released_at="", previous_version="")
