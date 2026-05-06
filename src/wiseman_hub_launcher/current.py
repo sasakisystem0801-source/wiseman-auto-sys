@@ -16,6 +16,12 @@ schema mismatch / quarantine は発生しない (PR-4 codex Suggestion 1 反映)
     - JSON 破損 / schema 不一致 / semver 不正 → ``.corrupt-{ts}`` に退避してから DEFAULT
     - すべて warning ログ（fatal にしない、launcher は起動を止めない）
 
+strict_read=True (review_team A2 second-pass、silent-failure I6 反映):
+    - 存在しない → DEFAULT_CURRENT (genuine first install を許容)
+    - read OSError / JSON 破損 / schema 不一致 / semver 不正 → CurrentReadError raise
+    - run_update は本フラグを使用、Windows AV 等の transient 失敗を「first install」と
+      誤認して silent に rollback 不能化することを防止
+
 atomic write 方針:
     - 同一ディレクトリに tempfile 作成 → fsync → os.replace
     - 親ディレクトリも fsync (POSIX rename の永続化)
@@ -64,6 +70,15 @@ previous_version="" は「rollback 先なし」を明示（初回 update では 
 """
 
 
+class CurrentReadError(Exception):
+    """current.json の read 失敗 / 破損 / schema 不一致 (review_team A2 second-pass)。
+
+    strict_read=True 時のみ raise。透過的な fallback (DEFAULT_CURRENT) で
+    silent に rollback 能力を喪失するのを防止する。file 不在 (genuine first install)
+    では raise しない。
+    """
+
+
 def _now_iso_utc_microsec() -> str:
     """ISO8601 UTC + microseconds（ファイル名 suffix 用、コロン除去、I-4 衝突回避）。"""
     return datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
@@ -96,22 +111,51 @@ def _quarantine_corrupt(path: Path, reason: str) -> None:
         )
 
 
+def _fail_or_default(
+    path: Path,
+    reason: str,
+    *,
+    strict_read: bool,
+    quarantine_corrupt: bool,
+    dry_run_msg: str,
+) -> Current:
+    """破損 / 不正時の dispatcher。
+
+    - strict_read=True: CurrentReadError raise (rollback 能力喪失を防止)
+    - strict_read=False + quarantine_corrupt=True: 退避 + DEFAULT
+    - strict_read=False + quarantine_corrupt=False: log warn のみ + DEFAULT (dry-run)
+    """
+    if strict_read:
+        raise CurrentReadError(f"current.json {reason}")
+    if quarantine_corrupt:
+        _quarantine_corrupt(path, reason)
+    else:
+        logger.warning("current.json %s, not quarantined (dry-run)", dry_run_msg)
+    return DEFAULT_CURRENT
+
+
 def read_current(
     path: Path,
     *,
     quarantine_corrupt: bool = True,
     verbose: bool = False,
+    strict_read: bool = False,
 ) -> Current:
-    """current.json を読む。破損時は退避 + DEFAULT_CURRENT 返却。
-
-    fail-fast はしない（launcher は起動を止めない方針）。すべて warning ログのみ。
+    """current.json を読む。破損時は退避 + DEFAULT_CURRENT 返却 (strict_read=False)。
 
     Args:
         path: current.json のパス
         quarantine_corrupt: True なら破損ファイルを ``.corrupt-{ts}-{pid}-{rand}``
-            にリネーム退避。False なら退避せず warn のみ（I-3: dry-run 副作用ゼロ用）
+            にリネーム退避。False なら退避せず warn のみ（dry-run 副作用ゼロ用）
         verbose: True なら full path をログ表示。False なら machine-specific path を
-            隠蔽し、汎用 message のみ（I-5: PII / privacy 配慮）
+            隠蔽し、汎用 message のみ（PII / privacy 配慮）
+        strict_read: True なら read OSError / 破損 / schema 不一致で CurrentReadError
+            raise (review_team A2 second-pass、silent-failure I6 反映)。file 不在は
+            raise しない (genuine first install を許容)。run_update が使用、
+            Windows AV 等の transient ロックを silent に「first install」と誤認させない
+
+    Raises:
+        CurrentReadError: strict_read=True 時の read 失敗 / 破損 / schema / semver 不正
     """
     if not path.exists():
         if verbose:
@@ -123,59 +167,66 @@ def read_current(
     try:
         raw = path.read_bytes()
     except OSError as e:
-        logger.warning("current.json read error: %s", type(e).__name__)
+        if strict_read:
+            raise CurrentReadError(
+                f"current.json read error: {type(e).__name__}: "
+                f"errno={e.errno} filename={e.filename!r}"
+            ) from e
+        logger.warning(
+            "current.json read error: %s errno=%s", type(e).__name__, e.errno
+        )
         return DEFAULT_CURRENT
 
     try:
         parsed = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as e:
-        reason = f"json-decode-{type(e).__name__}"
-        if quarantine_corrupt:
-            _quarantine_corrupt(path, reason)
-        else:
-            logger.warning("current.json corrupt (%s), not quarantined (dry-run)", reason)
-        return DEFAULT_CURRENT
+        return _fail_or_default(
+            path,
+            f"json-decode-{type(e).__name__}",
+            strict_read=strict_read,
+            quarantine_corrupt=quarantine_corrupt,
+            dry_run_msg=f"corrupt ({type(e).__name__})",
+        )
 
     if not isinstance(parsed, dict):
-        if quarantine_corrupt:
-            _quarantine_corrupt(path, "not-a-dict")
-        else:
-            logger.warning("current.json not-a-dict, not quarantined (dry-run)")
-        return DEFAULT_CURRENT
+        return _fail_or_default(
+            path, "not-a-dict",
+            strict_read=strict_read,
+            quarantine_corrupt=quarantine_corrupt,
+            dry_run_msg="not-a-dict",
+        )
 
     version = parsed.get("version")
     released_at = parsed.get("released_at")
-    # PR-4: previous_version は任意 field（PR-3 形式との後方互換、欠落時 ""）
-    previous_version = parsed.get("previous_version", "")
+    previous_version = parsed.get("previous_version", "")  # PR-3 後方互換
 
     if (
         not isinstance(version, str)
         or not isinstance(released_at, str)
         or not isinstance(previous_version, str)
     ):
-        if quarantine_corrupt:
-            _quarantine_corrupt(path, "schema-mismatch")
-        else:
-            logger.warning("current.json schema-mismatch, not quarantined (dry-run)")
-        return DEFAULT_CURRENT
+        return _fail_or_default(
+            path, "schema-mismatch",
+            strict_read=strict_read,
+            quarantine_corrupt=quarantine_corrupt,
+            dry_run_msg="schema-mismatch",
+        )
 
-    # PR-4: semver 検証 (Suggestion 1 反映、rollback 先誤記の早期検知)
     if not is_simple_semver(version):
-        if quarantine_corrupt:
-            _quarantine_corrupt(path, "version-not-semver")
-        else:
-            logger.warning("current.json version not semver, not quarantined (dry-run)")
-        return DEFAULT_CURRENT
+        return _fail_or_default(
+            path, "version-not-semver",
+            strict_read=strict_read,
+            quarantine_corrupt=quarantine_corrupt,
+            dry_run_msg="version not semver",
+        )
 
-    # previous_version は "" (rollback 先なし) または semver
     if previous_version != "" and not is_simple_semver(previous_version):
-        if quarantine_corrupt:
-            _quarantine_corrupt(path, "previous-version-not-semver")
-        else:
-            logger.warning(
-                "current.json previous_version not semver, not quarantined (dry-run)"
-            )
-        return DEFAULT_CURRENT
+        return _fail_or_default(
+            path, "previous-version-not-semver",
+            strict_read=strict_read,
+            quarantine_corrupt=quarantine_corrupt,
+            dry_run_msg="previous_version not semver",
+        )
 
     return Current(
         version=version,

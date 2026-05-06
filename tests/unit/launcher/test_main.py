@@ -21,6 +21,7 @@ from wiseman_hub_launcher.__main__ import (
     run_dry_run,
 )
 from wiseman_hub_launcher.checksum import ChecksumError
+from wiseman_hub_launcher.current import CurrentReadError
 from wiseman_hub_launcher.manifest import ManifestError
 from wiseman_hub_launcher.updater import (
     DownloadError,
@@ -597,6 +598,112 @@ def test_main_update_negative_monitor_timeout_rejected(tmp_path: Path) -> None:
             ]
         )
     assert exc.value.code == 2
+
+
+def test_main_update_current_read_error_returns_6(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A2 second-pass: read_current で OSError → CurrentReadError → exit 6
+    (silent に DEFAULT_CURRENT に fallback して rollback 能力喪失するのを防止)。"""
+    cur_path = tmp_path / "current.json"
+    cur_path.write_text(
+        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
+    )
+
+    # read_current を CurrentReadError raise に差し替え
+    def _raise_read_error(*args: object, **kwargs: object) -> None:
+        raise CurrentReadError("simulated AV lock")
+
+    monkeypatch.setattr(launcher_main, "read_current", _raise_read_error)
+    with patch.object(
+        launcher_main, "fetch_manifest", return_value=_good_manifest_bytes("1.5.0")
+    ):
+        code = main(
+            [
+                "--update",
+                "--allow-insecure-checksum-only",
+                "--manifest-url",
+                "https://example.com/manifest.json",
+                "--home",
+                str(tmp_path),
+            ]
+        )
+    assert code == EXIT_ROLLBACK_UNAVAILABLE
+
+
+def test_main_update_unexpected_error_returns_4(tmp_path: Path) -> None:
+    """B3: 想定外 RuntimeError は top-level safety net で EXIT_UNEXPECTED (4)。"""
+    cur_path = tmp_path / "current.json"
+    cur_path.write_text(
+        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
+    )
+    binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"existing")
+
+    with (
+        patch.object(
+            launcher_main,
+            "fetch_manifest",
+            return_value=_good_manifest_bytes("1.5.0"),
+        ),
+        patch.object(
+            launcher_main,
+            "update_and_spawn",
+            side_effect=RuntimeError("oops, unexpected"),
+        ),
+    ):
+        code = main(
+            [
+                "--update",
+                "--allow-insecure-checksum-only",
+                "--manifest-url",
+                "https://example.com/manifest.json",
+                "--home",
+                str(tmp_path),
+            ]
+        )
+    assert code == 4  # EXIT_UNEXPECTED
+
+
+def test_main_update_download_error_leaves_current_unchanged(
+    tmp_path: Path,
+) -> None:
+    """B2: download_artifact 失敗時、current.json は新版に切り替わらない (atomicity)。"""
+    cur_path = tmp_path / "current.json"
+    initial_payload = json.dumps(
+        {"version": "1.2.3", "released_at": "x", "previous_version": ""}
+    )
+    cur_path.write_text(initial_payload)
+    binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"existing")
+
+    with (
+        patch.object(
+            launcher_main,
+            "fetch_manifest",
+            return_value=_good_manifest_bytes("1.5.0"),
+        ),
+        patch.object(
+            launcher_main,
+            "update_and_spawn",
+            side_effect=DownloadError("simulated network drop"),
+        ),
+    ):
+        code = main(
+            [
+                "--update",
+                "--allow-insecure-checksum-only",
+                "--manifest-url",
+                "https://example.com/manifest.json",
+                "--home",
+                str(tmp_path),
+            ]
+        )
+    assert code == EXIT_MANIFEST  # 3
+    # current.json は元のまま (新版に切り替わっていない)
+    assert cur_path.read_text() == initial_payload
 
 
 def test_main_update_ok_early_exit_returns_0(tmp_path: Path) -> None:

@@ -165,7 +165,8 @@ def test_lock_heartbeat_start_idempotent(tmp_path: Path) -> None:
 def test_lock_heartbeat_stops_on_missing_lock(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """heartbeat 中に lock file が消えたら warn ログを出して thread が break する。"""
+    """heartbeat 中に lock file が消えたら error ログを出して thread が break する
+    (review_team A1 second-pass: FileNotFoundError は致命的、即 break)。"""
     import logging  # noqa: PLC0415
 
     lock = tmp_path / "launcher.lock"
@@ -176,11 +177,52 @@ def test_lock_heartbeat_stops_on_missing_lock(
         hb.start()
         time.sleep(0.04)
         lock.unlink()  # heartbeat 進行中に削除
-        time.sleep(0.20)  # 次の utime で OSError
+        time.sleep(0.20)  # 次の utime で FileNotFoundError
         hb.stop()
 
     assert any(
-        "heartbeat utime failed" in r.message for r in caplog.records
+        "lock file disappeared during heartbeat" in r.message
+        for r in caplog.records
+    )
+
+
+def test_lock_heartbeat_retries_transient_oserror(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A1 second-pass: 連続 OSError 3 回まで retry、3 回目で break。
+
+    transient な AV / NAS blip は MAX_FAILURES (=3) 回まで heartbeat 継続。
+    """
+    import logging  # noqa: PLC0415
+
+    lock = tmp_path / "launcher.lock"
+    lock.write_bytes(b"x")
+
+    call_count = {"n": 0}
+    real_utime = os.utime
+
+    def _flaky_utime(p: object, *args: object, **kwargs: object) -> None:
+        call_count["n"] += 1
+        # 1, 2, 3 回目で連続 OSError → 3 回目で break (max_failures=3)
+        if call_count["n"] <= 3:
+            raise OSError(13, "AV holding")  # PermissionError-ish
+        real_utime(p, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("wiseman_hub_launcher.updater.os.utime", _flaky_utime)
+
+    hb = LockHeartbeat(lock, interval_sec=0.02)
+    with caplog.at_level(logging.WARNING, logger="wiseman_hub_launcher.updater"):
+        hb.start()
+        time.sleep(0.20)  # 2-3 失敗で break
+        hb.stop()
+
+    # transient retry warn が少なくとも 1 回 log されている
+    assert any(
+        "transient failure" in r.message for r in caplog.records
+    )
+    # 3 回失敗で break (consecutively) が log されている
+    assert any(
+        "consecutively" in r.message for r in caplog.records
     )
 
 
@@ -341,6 +383,43 @@ def test_download_artifact_rejects_https_to_http_redirect(tmp_path: Path) -> Non
         "wiseman_hub_launcher.updater.urllib.request.urlopen", return_value=resp
     ), pytest.raises(DownloadError, match="non-HTTPS"):
         download_artifact("https://example.com/x.exe", dest, sha)
+
+
+def test_download_artifact_accepts_https_to_https_redirect(tmp_path: Path) -> None:
+    """B1/C2 second-pass (threadId pr-test-analyzer): https → https の正当な
+    redirect (例: GCS CDN) は許容、download 成功する。"""
+    payload = b"redirected binary"
+    sha = _sha256_hex(payload)
+    dest = tmp_path / "versions" / "1.2.3"
+
+    resp = _make_response(payload)
+    resp.geturl = MagicMock(return_value="https://cdn.example.com/redirected/x.exe")
+
+    with patch(
+        "wiseman_hub_launcher.updater.urllib.request.urlopen", return_value=resp
+    ):
+        out = download_artifact("https://example.com/x.exe", dest, sha)
+    assert out == dest / "wiseman_hub.exe"
+    assert out.read_bytes() == payload
+
+
+def test_download_artifact_via_real_open_https_get_path(tmp_path: Path) -> None:
+    """B1 second-pass: happy path で _open_https_get (HTTPS 検証 + redirect 検証 +
+    例外正規化) を bypass せずに実呼び出し、SUCCESS path を end-to-end で検証。"""
+    payload = b"binary via real _open_https_get"
+    sha = _sha256_hex(payload)
+    dest = tmp_path / "versions" / "1.2.3"
+
+    resp = _make_response(payload)
+    resp.geturl = MagicMock(return_value="https://example.com/x.exe")
+
+    with patch(
+        "wiseman_hub_launcher.updater.urllib.request.urlopen", return_value=resp
+    ):
+        out = download_artifact("https://example.com/x.exe", dest, sha)
+    assert out.read_bytes() == payload
+    # _open_https_get が close() を呼んだことを検証 (cleanup 動作確認)
+    assert resp.close.called
 
 
 # D2': spawn_with_monitor -----------------------------------------------------

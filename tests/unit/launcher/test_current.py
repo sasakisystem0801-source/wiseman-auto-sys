@@ -10,6 +10,7 @@ import pytest
 from wiseman_hub_launcher.current import (
     DEFAULT_CURRENT,
     Current,
+    CurrentReadError,
     read_current,
     write_current_atomic,
 )
@@ -268,6 +269,68 @@ def test_write_current_atomic_default_previous_version(tmp_path: Path) -> None:
 
     parsed = json.loads(p.read_text())
     assert parsed["previous_version"] == ""
+
+
+# review_team A2 second-pass (silent-failure I6): strict_read 引数 -----------
+
+
+def test_read_current_strict_read_does_not_raise_on_missing(tmp_path: Path) -> None:
+    """A2 second-pass: file 不在は genuine first install なので raise しない。"""
+    out = read_current(tmp_path / "current.json", strict_read=True)
+    assert out == DEFAULT_CURRENT
+
+
+def test_read_current_strict_read_raises_on_io_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A2 second-pass: read_bytes で OSError なら CurrentReadError raise
+    (Windows AV transient ロックで silent に「first install」と誤認させない)。"""
+    p = tmp_path / "current.json"
+    p.write_text(json.dumps({"version": "1.2.3", "released_at": "x"}))
+
+    def _raise_oserror(self: Path) -> bytes:  # noqa: ARG001
+        raise PermissionError(13, "Permission denied", str(p))
+
+    monkeypatch.setattr(Path, "read_bytes", _raise_oserror)
+    with pytest.raises(CurrentReadError, match="read error"):
+        read_current(p, strict_read=True)
+
+
+def test_read_current_strict_read_raises_on_corrupt_json(tmp_path: Path) -> None:
+    """A2 second-pass: 破損 JSON は CurrentReadError raise (silent fallback しない)。"""
+    p = tmp_path / "current.json"
+    p.write_bytes(b"{not json")
+    with pytest.raises(CurrentReadError, match="json-decode"):
+        read_current(p, strict_read=True)
+
+
+def test_read_current_strict_read_raises_on_schema_mismatch(tmp_path: Path) -> None:
+    """A2 second-pass: schema 不一致は CurrentReadError raise。"""
+    p = tmp_path / "current.json"
+    p.write_text(json.dumps({"version": 123, "released_at": "x"}))  # version int
+    with pytest.raises(CurrentReadError, match="schema-mismatch"):
+        read_current(p, strict_read=True)
+
+
+def test_read_current_strict_read_raises_on_invalid_semver(tmp_path: Path) -> None:
+    """A2 second-pass: semver 不正は CurrentReadError raise。"""
+    p = tmp_path / "current.json"
+    p.write_text(json.dumps({"version": "not-semver", "released_at": ""}))
+    with pytest.raises(CurrentReadError, match="version-not-semver"):
+        read_current(p, strict_read=True)
+
+
+def test_read_current_strict_read_does_not_quarantine(tmp_path: Path) -> None:
+    """strict_read=True で raise する場合、quarantine も dry-run silent fallback も
+    行わず即 raise する。"""
+    p = tmp_path / "current.json"
+    p.write_bytes(b"{not json")
+    with pytest.raises(CurrentReadError):
+        read_current(p, strict_read=True)
+    # 元 file がそのまま残る (quarantine されていない)
+    assert p.exists()
+    assert p.read_bytes() == b"{not json"
+    assert not list(tmp_path.glob("current.json.corrupt-*"))
 
 
 # I-3: dry-run 副作用ゼロ ---------------------------------------------------

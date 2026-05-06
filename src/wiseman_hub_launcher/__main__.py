@@ -34,7 +34,7 @@ from pathlib import Path
 
 from . import __version__
 from .checksum import ChecksumError
-from .current import read_current
+from .current import CurrentReadError, read_current
 from .manifest import (
     ManifestError,
     fetch_manifest,
@@ -267,51 +267,62 @@ def run_update(
         logger.error("lock held: %s", e)
         return EXIT_LOCK_HELD
 
-    # C-2 second-pass: heartbeat thread で stale 化を防止
-    heartbeat = LockHeartbeat(lock_path)
-    heartbeat.start()
-
+    # review_team A4 second-pass: heartbeat.start() の RuntimeError 等で lock fd が
+    # leak しないよう、acquire 直後から release を保証する try/finally で全体を包む
     try:
+        # heartbeat thread で stale 化を防止
+        heartbeat = LockHeartbeat(lock_path)
+        heartbeat.start()
         try:
-            raw = fetch_manifest(manifest_url)
-            manifest = parse_manifest(raw)
-            validate_manifest(manifest)
-        except ManifestError as e:
-            logger.error("manifest error: %s", e)
-            return EXIT_MANIFEST
+            try:
+                raw = fetch_manifest(manifest_url)
+                manifest = parse_manifest(raw)
+                validate_manifest(manifest)
+            except ManifestError as e:
+                logger.error("manifest error: %s", e)
+                return EXIT_MANIFEST
 
-        cur = read_current(current_path)
-        versions_dir = home_dir / "versions"
-        try:
-            preflight(cur, versions_dir)
-        except PreflightError as e:
-            logger.error("preflight failed: %s", e)
-            return EXIT_ROLLBACK_UNAVAILABLE
+            # review_team A2 second-pass: strict_read=True で OSError / 破損を
+            # silent fallback させず明示エラー (Windows AV transient lock 等で
+            # rollback 能力を喪失するシナリオを防止)
+            try:
+                cur = read_current(current_path, strict_read=True)
+            except CurrentReadError as e:
+                logger.error("current.json read failed: %s", e)
+                return EXIT_ROLLBACK_UNAVAILABLE
 
-        try:
-            outcome = update_and_spawn(
-                manifest,
-                home_dir,
-                current_path=current_path,  # I-1 second-pass: --current-path 引き継ぎ
-                monitor_timeout_sec=monitor_timeout_sec,
-                no_spawn=no_spawn,
-            )
-        except ChecksumError as e:
-            logger.error("checksum mismatch: %s", e)
-            return EXIT_CHECKSUM_MISMATCH
-        except DownloadError as e:
-            logger.error("download error: %s", e)
-            return EXIT_MANIFEST
-        except PreflightError as e:
-            logger.error("preflight failed during update: %s", e)
-            return EXIT_ROLLBACK_UNAVAILABLE
-        except SpawnFailedNoRollbackError as e:
-            logger.error("spawn failed and rollback failed: %s", e)
-            return EXIT_SPAWN_FAILED_NO_ROLLBACK
+            versions_dir = home_dir / "versions"
+            try:
+                preflight(cur, versions_dir)
+            except PreflightError as e:
+                logger.error("preflight failed: %s", e)
+                return EXIT_ROLLBACK_UNAVAILABLE
 
-        return _spawn_outcome_to_exit(outcome.result)
+            try:
+                outcome = update_and_spawn(
+                    manifest,
+                    home_dir,
+                    current_path=current_path,
+                    monitor_timeout_sec=monitor_timeout_sec,
+                    no_spawn=no_spawn,
+                )
+            except ChecksumError as e:
+                logger.error("checksum mismatch: %s", e)
+                return EXIT_CHECKSUM_MISMATCH
+            except DownloadError as e:
+                logger.error("download error: %s", e)
+                return EXIT_MANIFEST
+            except PreflightError as e:
+                logger.error("preflight failed during update: %s", e)
+                return EXIT_ROLLBACK_UNAVAILABLE
+            except SpawnFailedNoRollbackError as e:
+                logger.error("spawn failed and rollback failed: %s", e)
+                return EXIT_SPAWN_FAILED_NO_ROLLBACK
+
+            return _spawn_outcome_to_exit(outcome.result)
+        finally:
+            heartbeat.stop()
     finally:
-        heartbeat.stop()
         release_lock(lock_fd, lock_path)
 
 

@@ -1,12 +1,16 @@
 """updater.py — wiseman_hub バイナリの download / spawn / rollback (ADR-016 PR-4)。
 
-PR-4 で実装 (codex review threadId 019dfd43 反映後):
-    - acquire_lock / release_lock: 多重起動排他 (C-2)
-    - preflight: versions/{current.version}/wiseman_hub.exe 存在確認 (C-4)
-    - download_artifact: HTTPS chunked + size cap + SHA-256 + atomic place (D3', I-1, I-2)
-    - spawn_with_monitor: subprocess.Popen + timeout injection (D2', I-5)
-    - rollback_to_previous: 旧版 spawn + 同じ monitor (I-3, I-4)
+PR-4 で実装 (codex review threadId 019dfd43 計画 + 019dfd5d PR 段階反映後):
+    - acquire_lock / release_lock: 多重起動排他
+    - LockHeartbeat: long-running download での自己 stale 化防止 + 連続失敗 retry
+    - preflight: versions/{current.version}/wiseman_hub.exe 存在確認
+    - download_artifact: HTTPS chunked + size cap + SHA-256 + atomic place + dir fsync
+    - spawn_with_monitor: subprocess.Popen + timeout injection (4 状態判定)
+    - rollback_to_previous: 旧版 spawn + 同 monitor 経由 (CRASH/OS_ERROR は exit 7)
     - update_and_spawn: 主フロー (manifest → download → switch → spawn → rollback)
+
+DN/IN コードは review thread 内の項番。本ファイルでは抽象 prose を優先し、
+複数 review pass で同一番号が衝突する場合は意味で記述する (review_team 6 件並列の I-1)。
 
 設計判断 (impl-plan で codex 承認済):
     - returncode != 0 のみ rollback、returncode == 0 早期終了は OK_EARLY_EXIT (D2')
@@ -201,14 +205,41 @@ class LockHeartbeat:
         self._thread.start()
 
     def _run(self) -> None:
+        # review_team A1 second-pass (silent-failure C3): 1 回の OSError で break
+        # すると lock が stale 化し、並行 update で current.json + binary 破壊リスク。
+        # transient (AV / NAS blip) は MAX_FAILURES まで retry、致命的 (file 消失)
+        # は即 break。
+        max_failures = 3
+        consecutive_failures = 0
         while not self._stop.wait(self._interval):
             try:
                 os.utime(self._path)
-            except OSError:
-                logger.warning(
-                    "lock heartbeat utime failed; lock may be considered stale"
+                consecutive_failures = 0
+            except FileNotFoundError as e:
+                logger.error(
+                    "lock file disappeared during heartbeat (%s); aborting",
+                    type(e).__name__,
                 )
                 break
+            except OSError as e:
+                consecutive_failures += 1
+                if consecutive_failures >= max_failures:
+                    logger.error(
+                        "lock heartbeat failed %d/%d consecutively (%s errno=%s); "
+                        "aborting heartbeat — lock will become stale",
+                        consecutive_failures,
+                        max_failures,
+                        type(e).__name__,
+                        e.errno,
+                    )
+                    break
+                logger.warning(
+                    "lock heartbeat utime transient failure (%d/%d): %s errno=%s",
+                    consecutive_failures,
+                    max_failures,
+                    type(e).__name__,
+                    e.errno,
+                )
 
     def stop(self) -> None:
         self._stop.set()
@@ -342,7 +373,7 @@ def download_artifact(
     success = False
 
     try:
-        # I-3: mkdir / mkstemp も try 内に含めて IO error を DownloadError に正規化
+        # mkdir / mkstemp も try 内に含めて IO error を DownloadError に正規化
         dest_dir.mkdir(parents=True, exist_ok=True)
         fd, tmp_name = tempfile.mkstemp(
             prefix=".artifact.", suffix=".tmp", dir=str(dest_dir)
@@ -362,8 +393,12 @@ def download_artifact(
                     f"{MAX_ARTIFACT_BYTES} bytes"
                 )
 
+            # review_team I-1 (code-reviewer A3 second-pass): _read_to_temp_with_cap が
+            # 内部で os.fdopen(fd, "wb") + with で fd ownership を取り、with exit / 例外
+            # 時に fd を close する。size cap raise 時 fd_owned=False の到達前に例外が
+            # 走るため、ownership 移譲を呼び出し前に確定させて double-close を回避。
+            fd_owned = False
             _read_to_temp_with_cap(resp, fd)
-            fd_owned = False  # _read_to_temp_with_cap が fd を close した
         finally:
             with contextlib.suppress(AttributeError, OSError):
                 resp.close()
@@ -374,19 +409,29 @@ def download_artifact(
             )
 
         os.replace(tmp_path, final_path)
-        # I-4: 親 dir fsync (POSIX rename 永続化、電源断で current.json と
+        # 親 dir fsync (POSIX rename 永続化、電源断で current.json と
         # exe directory entry の不整合を防止)。Windows では PermissionError 等で no-op
-        with contextlib.suppress(OSError):
+        try:
             dir_fd = os.open(str(dest_dir), os.O_RDONLY)
+        except OSError as e:
+            logger.debug("dir fsync skipped (open): %s", type(e).__name__)
+        else:
             try:
                 os.fsync(dir_fd)
+            except OSError as e:
+                logger.debug("dir fsync failed (expected on Windows): %s", type(e).__name__)
             finally:
-                os.close(dir_fd)
+                with contextlib.suppress(OSError):
+                    os.close(dir_fd)
         success = True
     except OSError as e:
-        # DownloadError / ChecksumError は OSError ではないので、ここに来るのは
-        # 純粋な OS IO error のみ
-        raise DownloadError(f"artifact write error: {type(e).__name__}") from e
+        # review_team A5 second-pass: errno / winerror / filename を含めて Windows AV /
+        # NAS / sharing violation 等を debug 可能にする
+        raise DownloadError(
+            f"artifact write error: {type(e).__name__}: "
+            f"errno={e.errno} winerror={getattr(e, 'winerror', None)} "
+            f"filename={e.filename!r}: {e}"
+        ) from e
     finally:
         if fd_owned:
             with contextlib.suppress(OSError):
@@ -452,7 +497,7 @@ def rollback_to_previous(
     *,
     monitor_timeout_sec: float = DEFAULT_SPAWN_MONITOR_SEC,
 ) -> SpawnOutcome:
-    """current.json の previous_version で旧版 spawn (I-3, I-4)。
+    """current.json の previous_version で旧版 spawn。
 
     手順:
         1. current.json を読む
@@ -505,9 +550,10 @@ def update_and_spawn(
 
     Args:
         manifest: validate_manifest 通過後の dict
-        home_dir: $HOME/wiseman-hub (versions/ の親、lock 場所)
-        current_path: current.json の path 上書き (I-1 second-pass: --current-path
-            指定時に preflight と update が別 file を見る不整合を防ぐ)。
+        home_dir: $HOME/wiseman-hub (versions/ ディレクトリの親)。
+            lock file は本関数では扱わない (caller の run_update が acquire/release)
+        current_path: current.json の path 上書き (canary/test override で
+            preflight と update が別 file を見る不整合を防ぐ)。
             None なら ``home_dir / "current.json"``
         monitor_timeout_sec: spawn_with_monitor の timeout (test では小さい値)
         no_spawn: True なら download + current.json 切替まで、spawn しない (AC-6)
