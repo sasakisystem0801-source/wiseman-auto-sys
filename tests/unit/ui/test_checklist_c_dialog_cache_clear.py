@@ -98,10 +98,17 @@ class TestCacheClearMenu:
                 return_value=True,
             ), patch(
                 "wiseman_hub.ui.checklist_c_dialog.save_config"
-            ) as mock_save:
+            ) as mock_save, patch(
+                "wiseman_hub.ui.checklist_c_dialog._mirror_delete_entry_async"
+            ) as mock_mirror_del:
                 dlg._clear_cache_for_row(0)
             assert "宮下:2026:3" not in cfg.checklist.xlsx_path_cache
             mock_save.assert_called_once()
+            # ADR-016 PR-2: GCS mirror delete hook が呼ばれる
+            mock_mirror_del.assert_called_once()
+            call_kwargs = mock_mirror_del.call_args.kwargs
+            assert mock_mirror_del.call_args.args[0] == "宮下:2026:3"
+            assert "config_path" in call_kwargs
             # 行が NEEDS_REVIEW （またはそれに近い未確定状態）に戻ること
             new_status = dlg._results[0].status
             assert new_status != CPlacementStatus.PENDING
@@ -172,12 +179,40 @@ class TestCacheClearMenu:
                 side_effect=OSError("disk full"),
             ), patch(
                 "wiseman_hub.ui.checklist_c_dialog.messagebox.showwarning"
-            ) as mock_warn:
+            ) as mock_warn, patch(
+                "wiseman_hub.ui.checklist_c_dialog._mirror_delete_entry_async"
+            ) as mock_mirror_del:
                 dlg._clear_cache_for_row(0)
             # in-memory は消えている
             assert "宮下:2026:3" not in cfg.checklist.xlsx_path_cache
             # warning が出ている
             mock_warn.assert_called_once()
+            # ADR-016 PR-2: save_config 失敗時は GCS mirror も呼ばれない
+            # （TOML と GCS のズレを最小化）
+            mock_mirror_del.assert_not_called()
+        finally:
+            root.destroy()
+
+    def test_clear_cache_mirror_failure_does_not_break_ui(
+        self, tmp_path: Path
+    ) -> None:
+        """GCS mirror が例外を投げても UI 側の cache 削除は完遂する（warn-only）。"""
+        root = tk.Tk()
+        try:
+            dlg, cfg = self._make_dialog(root, tmp_path)
+            with patch(
+                "wiseman_hub.ui.checklist_c_dialog.messagebox.askyesno",
+                return_value=True,
+            ), patch(
+                "wiseman_hub.ui.checklist_c_dialog.save_config"
+            ), patch(
+                "wiseman_hub.ui.checklist_c_dialog._mirror_delete_entry_async",
+                side_effect=RuntimeError("network down"),
+            ):
+                # 例外を吸収（warn-only）して UI 側は完遂する
+                dlg._clear_cache_for_row(0)
+            # cache は削除済（mirror 失敗は影響しない）
+            assert "宮下:2026:3" not in cfg.checklist.xlsx_path_cache
         finally:
             root.destroy()
 

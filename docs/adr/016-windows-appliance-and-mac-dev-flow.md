@@ -303,6 +303,26 @@ audit log の volume 試算: 配置 60 件/月 × 12 ヶ月 × 5 年 ≈ 3,600 r
 - ADR-007 で確認済の通り、audit 上の PII は介護現場運用で日常的に出現するため
   業務監査として GCS 保持は許容（ismap 内で完結する限り）
 
+##### 4.1 machine_id の PII 取扱（PR-2 codex review 反映）
+
+PR-2 (`xlsx_path_cache_mirror`) で導入した machine_id（`~/wiseman-hub/machine_id`
+に永続化される UUIDv4）は、持続的識別子であり広義の個人データに該当する。
+取扱は以下:
+
+- **生成方針**: hostname / MAC アドレス / Windows machine GUID を使わず
+  必ず UUIDv4 を新規生成（無関連識別子の原則）
+- **保持期間**: audit / cache の payload に含まれる machine_id は、bucket
+  lifecycle と同じ保持期間で自動削除（audit 5 年 / cache 90 日）
+- **link 切れ性**: machine_id 自体は HW ID / hostname / username を含まないため、
+  PC 入替で link が完全に切れる（new UUID 生成、旧 UUID は audit log のみに残る）
+- **実質紐付け**: 業務責任者 PC は **1 台運用前提** のため、machine_id は実質的に
+  「業務責任者本人」に紐づく。これは audit log の他フィールド（利用者名等）と
+  同等の取扱となる
+- **race 安全性**: ファイル作成は `open(path, "x")` atomic create + FileExistsError
+  reread で並行起動 race を解決
+- **format 検証**: 既存ファイルの内容を `uuid.UUID()` で parse 検証、不正なら
+  `.invalid-{ts}` 退避 + 再生成
+
 #### 5. spool + retry（codex Nice-to-have 1）
 
 audit upload は GCP 障害時に業務を止めない:
