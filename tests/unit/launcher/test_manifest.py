@@ -27,7 +27,11 @@ def _good_manifest() -> dict[str, object]:
         "commit_sha": "f976b44",
         "built_at": "2026-05-06T12:00:00Z",
         "released_at": "2026-05-06T13:00:00Z",
-        "provenance_url": "versions/1.2.3/provenance.intoto.jsonl",
+        # PR-6a: extension は .sigstore.json (T0 Explore 結果反映、Sigstore Bundle が default)
+        "provenance_url": "versions/1.2.3/wiseman_hub.exe.sigstore.json",
+        # PR-6a: expected_repo / expected_workflow_ref 必須化
+        "expected_repo": "sasakisystem0801-source/wiseman-auto-sys",
+        "expected_workflow_ref": ".github/workflows/release.yml@refs/tags/v1.2.3",
         "release_notes": "first release",
         "force_update": False,
     }
@@ -89,6 +93,8 @@ def test_validate_manifest_normal() -> None:
         "built_at",
         "released_at",
         "provenance_url",
+        "expected_repo",  # PR-6a
+        "expected_workflow_ref",  # PR-6a
     ],
 )
 def test_validate_manifest_missing_required(missing_field: str) -> None:
