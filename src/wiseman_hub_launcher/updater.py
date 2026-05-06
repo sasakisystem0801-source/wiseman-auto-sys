@@ -215,8 +215,13 @@ def _download_with_provenance(
 
     artifact_url = RELEASE_BUCKET_BASE + download_url
     provenance_url = RELEASE_BUCKET_BASE + provenance_url_rel
-    # C-1: manifest 由来の provenance_url が canonical derived URL と一致必須
-    validate_canonical_provenance_url(provenance_url, artifact_url)
+    # C-1: manifest 由来の provenance_url が canonical derived URL と一致必須。
+    # C10 (silent-failure / type-design): policy.py が ValueError raise するのを
+    # ProvenanceError 階層に統合 (Current invariant 等の他 ValueError と混同回避)
+    try:
+        validate_canonical_provenance_url(provenance_url, artifact_url)
+    except ValueError as e:
+        raise ProvenanceError(f"canonical provenance URL validation failed: {e}") from e
 
     artifact_path = download_artifact(artifact_url, new_dir, checksum, timeout_sec=60)
     provenance_path = download_provenance(provenance_url, new_dir, timeout_sec=30)
@@ -294,6 +299,14 @@ def update_and_spawn(
     logger.info("switched current.json to version %s", new_ver)
 
     if no_spawn:
+        # silent-failure HIGH 5 反映: download + 切替まで完了で spawn skip した事実を
+        # 必ず log。caller の run_update も SUCCESS で exit 0 になるため、ログなしだと
+        # 「実機の wiseman_hub.exe が起動したか / no-spawn で停止したか」区別不能
+        logger.info(
+            "no-spawn requested: download + current.json switch completed for version=%s, "
+            "spawn intentionally skipped (caller will exit 0 without launching binary)",
+            new_ver,
+        )
         return SpawnOutcome.success()
 
     outcome = spawn_with_monitor(new_binary, monitor_timeout_sec=monitor_timeout_sec)

@@ -334,10 +334,10 @@ def run_update(  # noqa: PLR0911 — explicit exit code mapping
             except DownloadError as e:
                 logger.error("download error: %s", e)
                 return EXIT_MANIFEST
-            except ValueError as e:
-                # canonical URL validation failure
-                logger.error("provenance URL validation failed: %s", e)
-                return EXIT_PROVENANCE
+            # C10 (silent-failure / type-design): canonical URL validation の ValueError は
+            # updater.py で ProvenanceError に wrap 済。ここで except ValueError を持つと
+            # Current invariant / SpawnOutcome invariant 違反 (= coding bug) も
+            # EXIT_PROVENANCE に化けるので持たない (top-level safety net で EXIT_UNEXPECTED)
             except PreflightError as e:
                 logger.error("preflight failed during update: %s", e)
                 return EXIT_ROLLBACK_UNAVAILABLE

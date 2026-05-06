@@ -260,8 +260,9 @@ def test_main_update_without_test_bypass_reaches_provenance_stub(
             ]
         )
     # flag なし + env なしで verify_provenance が provenance file の parse 実行 →
-    # parse 失敗 (binary を渡したので) または signature stub 到達 → 9 か他コード
-    assert code in (EXIT_PROVENANCE, EXIT_PROVENANCE)
+    # parse 失敗 (binary を渡したので) または signature stub 到達 → EXIT_PROVENANCE
+    # I1 (pr-test-analyzer Important): tautology 修正、`==` で strict 比較
+    assert code == EXIT_PROVENANCE
 
 
 # PR-6a NEW: 二重 gate (CLI flag + env var AND) -----------------------------------

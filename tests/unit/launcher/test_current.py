@@ -424,3 +424,41 @@ def test_read_current_verbose_log_includes_full_path(
     full_path_str = str(p)
     found = any(full_path_str in record.getMessage() for record in caplog.records)
     assert found, "verbose=True should include full path in INFO log"
+
+
+# C6 (pr-test-analyzer Critical): Current.__post_init__ semver invariant の直接 test
+
+
+def test_current_post_init_rejects_invalid_version_semver() -> None:
+    """C6: Current 直接生成時に version が semver でないと ValueError raise。"""
+    with pytest.raises(ValueError, match="Current.version must be semver"):
+        Current(version="not-semver", released_at="x", previous_version="")
+
+
+def test_current_post_init_rejects_invalid_previous_version_semver() -> None:
+    """C6: previous_version が "" でも semver でもないと ValueError raise。"""
+    with pytest.raises(ValueError, match="Current.previous_version"):
+        Current(version="1.2.3", released_at="x", previous_version="garbage")
+
+
+def test_current_post_init_accepts_empty_previous_version() -> None:
+    """C6: previous_version="" は rollback 先なしの正規状態として accept。"""
+    cur = Current(version="1.2.3", released_at="x", previous_version="")
+    assert cur.previous_version == ""
+
+
+def test_current_post_init_accepts_valid_semver_pair() -> None:
+    """C6: version + previous_version とも valid semver なら accept。"""
+    cur = Current(version="2.0.0", released_at="x", previous_version="1.2.3")
+    assert cur.version == "2.0.0"
+    assert cur.previous_version == "1.2.3"
+
+
+@pytest.mark.parametrize(
+    "bad_version",
+    ["", "1", "1.2", "1.2.3.4", "v1.2.3", "1.2.x", "01.2.3"],
+)
+def test_current_post_init_rejects_various_non_semver(bad_version: str) -> None:
+    """C6: 各種 non-semver で ValueError raise (空 / 段不足 / leading zero 等)。"""
+    with pytest.raises(ValueError, match="Current.version"):
+        Current(version=bad_version, released_at="x", previous_version="")

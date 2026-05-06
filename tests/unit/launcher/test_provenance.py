@@ -288,9 +288,27 @@ def test_verify_claims_workflow_ref_full_match() -> None:
 
 
 def test_verify_claims_repo_mismatch() -> None:
-    """異なる repo の attestation → ProvenanceError。"""
+    """異なる repo の attestation → ProvenanceError (C8: urlparse strict 比較)。"""
     stmt = _good_statement(repo="https://github.com/attacker/forked-repo")
-    with pytest.raises(ProvenanceError, match="repository mismatch"):
+    with pytest.raises(ProvenanceError, match="must be https://github.com"):
+        verify_statement_claims(stmt, expected_sha256=_VALID_SHA)
+
+
+def test_verify_claims_repo_path_traversal_blocked() -> None:
+    """C8 (PR codex I-1): suffix だけ一致する偽 host を urlparse で reject。"""
+    stmt = _good_statement(
+        repo="https://evil.example/x/sasakisystem0801-source/wiseman-auto-sys"
+    )
+    with pytest.raises(ProvenanceError, match="must be https://github.com"):
+        verify_statement_claims(stmt, expected_sha256=_VALID_SHA)
+
+
+def test_verify_claims_repo_http_scheme_blocked() -> None:
+    """C8: HTTPS でない URL も urlparse で reject。"""
+    stmt = _good_statement(
+        repo="http://github.com/sasakisystem0801-source/wiseman-auto-sys"
+    )
+    with pytest.raises(ProvenanceError, match="must be https://github.com"):
         verify_statement_claims(stmt, expected_sha256=_VALID_SHA)
 
 

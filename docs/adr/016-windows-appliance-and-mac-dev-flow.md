@@ -181,7 +181,7 @@ metric 再設計** で対応する。
 |------|------|---------------------|
 | **launcher core** | `__main__.py`, `manifest.py`, `checksum.py`, `current.py`, `updater.py` (orchestration only) | **900 LOC** (実測 711) |
 | **`_runtime/` subpackage** | `lock.py` + `spawn.py` + `__init__.py` (lock + heartbeat + spawn + SpawnOutcome) | **250 LOC** (実測 189) |
-| **`_supply_chain/` subpackage** | `download.py` + `provenance.py` + `policy.py` + `__init__.py` (artifact download + claims verify + canonical URL policy) | **380 LOC** (実測 372、計画 350 → 380 fine-tuning) |
+| **`_supply_chain/` subpackage** | `download.py` + `provenance.py` + `policy.py` + `__init__.py` (artifact download + claims verify + canonical URL policy) | **410 LOC** (実測 408、計画 350 → 380 → 410、PR-6a 内で 2 段階 fine-tuning) |
 | **各 module 単体** | 上記すべて | **270 LOC** (実測最大 270 = `__main__.py`) |
 | **対象外** | `__init__.py` (version 文字列のみ)、test files、PyInstaller spec | 制約なし |
 
@@ -192,16 +192,21 @@ metric 再設計** で対応する。
 | PR-3 | 400 | 389 | path traversal 防御 + HTTPS pin + DoS cap |
 | PR-4 計画段階 | 700 | 782 | C-1/C-2/C-4/I-1/I-2/I-3/I-5 反映 |
 | PR-4 PR 段階 | 800 | 842 | lock heartbeat + canary current_path + redirect 検証 + dir fsync |
-| **PR-6a** | **3 階層に再設計**（合算 1530 LOC、core 900 + `_runtime/` 250 + `_supply_chain/` 380） | **1272** | provenance 本実装 + module 分割 + 二重 gate + LockHeartbeat ctx mgr |
+| **PR-6a step 1** | 3 階層初期設計（合算 1530 LOC、core 900 + `_runtime/` 250 + `_supply_chain/` 380） | 1272 | provenance 本実装 + module 分割 + 二重 gate + LockHeartbeat ctx mgr |
+| **PR-6a step 3** (PR review 反映後) | `_supply_chain/` 380 → **410 LOC** に fine-tuning（合算 1560） | **1321** | Critical 10 件反映 (urlparse 厳格化 + DSSE payloadType + bypass log + subject malformed fail-fast 等) |
 
 ##### 制約再設計の根拠（codex C-3 反映、Session 47 末「再緩和不可」と整合）
 
 - **単純再緩和の禁止**: 900 LOC 合算で再緩和は Session 47 末方針との正面衝突 → governance 破り
 - **責務分割後の対称構造**: `_runtime/` (process 制御) と `_supply_chain/` (真正性検証) を
   独立 subpackage 化し、それぞれに独立した上限を設定。core は orchestration のみに専念
-- **fine-tuning vs 再緩和の境界**: `_supply_chain/` 制約を計画 350 → 380 に微調整したのは、
-  provenance 検証本実装で 22 LOC 超過した実測値に応じた **責務分割後の初期 sizing 補正**であり、
-  「validation 削減サイン」ではない (codex への合意点)
+- **fine-tuning vs 再緩和の境界**: `_supply_chain/` 制約を 350 → 380 → 410 に 2 段階 fine-tuning。
+  - **350 → 380** (step 1): provenance 検証本実装で 22 LOC 超過した実測値に応じた**責務分割後の初期 sizing 補正**
+  - **380 → 410** (step 3): PR review 反映で Critical 10 件追加 (urlparse 厳格化 / DSSE payloadType 検証 /
+    bypass log 強化 / subject malformed fail-fast 等)、いずれも **security gain** に対応した自然な増加であり
+    「validation 削減サイン」ではない (codex C-3 への合意点)
+  - 今後 PR-7 で 410 LOC を超えそうなら **`_supply_chain/sigstore.py` 切り出しを強制** (Session 47 末
+    「再緩和不可」精神の継承、責務分割を fine-tuning の上限とする)
 
 ##### Stop-the-line 条件 (PR-6a で追加、codex Important I-1 反映)
 
@@ -214,11 +219,17 @@ PR-6a は signature 検証 stub のため、本番配布 artifact では `--allo
 - **業務全件配置 (Phase 7) 禁止**: `--allow-test-unsigned-provenance` flag が launcher CLI から
   削除されない限り Phase 7 着手禁止 (canary 検証で削除確認後のみ)
 
+##### 計測法 (C9 反映、code-reviewer の rating 92 指摘)
+
+LOC 値は **`uvx pygount` の `Code` 列**（空行 / コメント / docstring を **除外**した実コード行数）。
+ファイル全体の `wc -l` 値とは大きく乖離する（PR-6a 末で `wc -l` 合算 ~2000 vs `Code` 合算 1281）。
+PR body / ADR の数値は常に `Code` 列で記載し、混同を避けるため計測コマンドを併記する。
+
 ##### 行数監視
 
-- 各 PR で `uvx pygount src/wiseman_hub_launcher --format=summary` (合算) と
-  `uvx pygount src/wiseman_hub_launcher/{_runtime,_supply_chain} --format=summary` (subpackage
-  個別) を PR body に記載
+- 各 PR で以下 2 つを PR body に記載:
+  - 合算: `uvx pygount src/wiseman_hub_launcher --format=summary` の `Code` 列
+  - subpackage 個別: `uvx pygount src/wiseman_hub_launcher/{_runtime,_supply_chain} --format=summary` の `Code` 列
 - いずれかの上限超過時は「責務分割後の構造から逸脱している signal」として module 再分割
   (例: `_supply_chain/sigstore.py` 切り出し) を強制 (再緩和不可)
 

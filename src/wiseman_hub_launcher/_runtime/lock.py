@@ -83,8 +83,15 @@ def acquire_lock(lock_path: Path) -> int:
 
     try:
         os.write(fd, f"{os.getpid()}\n".encode())
-    except OSError:
-        logger.warning("lock pid write failed (non-fatal)")
+    except OSError as e:
+        # silent-failure HIGH 4 反映: errno を log に残して debugging 可能化
+        # (pid write 失敗は lock 取得自体は成功なので非 fatal、ただし「誰が lock を
+        # 握っているか」の特定が困難になるため errno は必須)
+        logger.warning(
+            "lock pid write failed (non-fatal): %s errno=%s",
+            type(e).__name__,
+            e.errno,
+        )
     return fd
 
 

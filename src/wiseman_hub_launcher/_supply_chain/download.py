@@ -105,17 +105,35 @@ def _atomic_place(
     呼び出し側が success フラグ管理 + 例外時の cleanup を担当する。
     """
     os.replace(tmp_path, final_path)
-    # 親 dir fsync (POSIX rename 永続化、電源断で current.json と
-    # exe directory entry の不整合を防止)。Windows では PermissionError 等で no-op
+    # 親 dir fsync (POSIX rename 永続化、電源断で current.json と exe directory entry の
+    # 不整合を防止)。silent-failure HIGH 3 反映: Windows のみ debug suppress、
+    # POSIX (mac/Linux/NAS) では warning ログで errno を残し、ENOSPC/EIO/EROFS 等の
+    # 書込み完全性 failure を debug 可能化。
+    import sys  # noqa: PLC0415
     try:
         dir_fd = os.open(str(dest_dir), os.O_RDONLY)
     except OSError as e:
-        logger.debug("dir fsync skipped (open): %s", type(e).__name__)
+        if sys.platform == "win32":
+            logger.debug("dir fsync skipped on Windows (open): %s", type(e).__name__)
+        else:
+            logger.warning(
+                "dir fsync open failed: %s errno=%s filename=%s",
+                type(e).__name__,
+                e.errno,
+                e.filename,
+            )
         return
     try:
         os.fsync(dir_fd)
     except OSError as e:
-        logger.debug("dir fsync failed (expected on Windows): %s", type(e).__name__)
+        if sys.platform == "win32":
+            logger.debug("dir fsync skipped on Windows: %s", type(e).__name__)
+        else:
+            logger.warning(
+                "dir fsync failed: %s errno=%s",
+                type(e).__name__,
+                e.errno,
+            )
     finally:
         with contextlib.suppress(OSError):
             os.close(dir_fd)
