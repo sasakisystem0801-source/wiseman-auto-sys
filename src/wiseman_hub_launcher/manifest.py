@@ -72,11 +72,14 @@ def _is_commit_sha_hex(s: str) -> bool:
     return all(c in _HEX_LOWER for c in s)
 
 
-def _is_simple_semver(s: str) -> bool:
+def is_simple_semver(s: str) -> bool:
     """``major.minor.patch`` のみ許容（pre-release / build metadata は PR-4 で拡張）。
 
     各 part は 1 文字以上の digit、leading zero は拒否（"01.2.3" 等を拒否、Sug-2）。
     ただし "0" 単独は許容（"0.1.2" 等の major=0 は正当）。
+
+    PR-4 で current.py からも reuse するため public（PR-3 では `_is_simple_semver`、
+    PR-4 codex Suggestion 1 反映で rename）。
     """
     parts = s.split(".")
     if len(parts) != 3:
@@ -277,7 +280,7 @@ def validate_manifest(manifest: dict[str, object]) -> None:
     for ver_field in ("current_version", "minimum_version"):
         ver = manifest[ver_field]
         assert isinstance(ver, str)  # noqa: S101
-        if not _is_simple_semver(ver):
+        if not is_simple_semver(ver):
             raise ManifestError(f"{ver_field} must be semver (major.minor.patch): {ver!r}")
 
     for ts_field in ("built_at", "released_at"):

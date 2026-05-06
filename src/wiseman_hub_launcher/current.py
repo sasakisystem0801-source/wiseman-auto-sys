@@ -1,15 +1,26 @@
-"""current.json atomic read/write + 破損時退避 (ADR-016 PR-3)。
+"""current.json atomic read/write + 破損時退避 (ADR-016 PR-3 / PR-4)。
 
-current.json schema:
+current.json schema (PR-4 で previous_version 追加):
     {
         "version": "1.2.3",                      (semver, 初期値 "0.0.0")
-        "released_at": "2026-05-06T13:00:00Z"    (ISO8601 UTC, 初期値 "")
+        "released_at": "2026-05-06T13:00:00Z",   (ISO8601 UTC, 初期値 "")
+        "previous_version": "1.2.2"              (semver or "", PR-4 で追加。
+                                                  rollback 先特定用、初期値 "")
     }
+
+PR-3 形式（previous_version なし）との後方互換: 欠落時は default "" で読み取り、
+schema mismatch / quarantine は発生しない (PR-4 codex Suggestion 1 反映)。
 
 破損ハンドリング方針:
     - 存在しない → DEFAULT_CURRENT を返す（初回起動時を想定）
-    - JSON 破損 / schema 不一致 → ``.corrupt-{ts}`` に退避してから DEFAULT
+    - JSON 破損 / schema 不一致 / semver 不正 → ``.corrupt-{ts}`` に退避してから DEFAULT
     - すべて warning ログ（fatal にしない、launcher は起動を止めない）
+
+strict_read=True (review_team A2 second-pass、silent-failure I6 反映):
+    - 存在しない → DEFAULT_CURRENT (genuine first install を許容)
+    - read OSError / JSON 破損 / schema 不一致 / semver 不正 → CurrentReadError raise
+    - run_update は本フラグを使用、Windows AV 等の transient 失敗を「first install」と
+      誤認して silent に rollback 不能化することを防止
 
 atomic write 方針:
     - 同一ディレクトリに tempfile 作成 → fsync → os.replace
@@ -31,23 +42,41 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .manifest import is_simple_semver
+
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
 class Current:
-    """現在 active なバージョン情報。"""
+    """現在 active なバージョン情報。
+
+    PR-4 で `previous_version` 追加（rollback 先特定用、初期値 ""）。
+    `version` と `previous_version` は semver 形式 ("X.Y.Z") を要求する
+    （read_current で検証、不正なら quarantine）。
+    """
 
     version: str
     released_at: str
+    previous_version: str = ""
 
 
-DEFAULT_CURRENT = Current(version="0.0.0", released_at="")
+DEFAULT_CURRENT = Current(version="0.0.0", released_at="", previous_version="")
 """初回起動時 / 破損時の fallback。
 
 version="0.0.0" は manifest semver 比較で常に小さくなるため
 manifest 側の current_version > 0.0.0 で必ず update 候補になる。
+previous_version="" は「rollback 先なし」を明示（初回 update では rollback 不能）。
 """
+
+
+class CurrentReadError(Exception):
+    """current.json の read 失敗 / 破損 / schema 不一致 (review_team A2 second-pass)。
+
+    strict_read=True 時のみ raise。透過的な fallback (DEFAULT_CURRENT) で
+    silent に rollback 能力を喪失するのを防止する。file 不在 (genuine first install)
+    では raise しない。
+    """
 
 
 def _now_iso_utc_microsec() -> str:
@@ -82,22 +111,51 @@ def _quarantine_corrupt(path: Path, reason: str) -> None:
         )
 
 
+def _fail_or_default(
+    path: Path,
+    reason: str,
+    *,
+    strict_read: bool,
+    quarantine_corrupt: bool,
+    dry_run_msg: str,
+) -> Current:
+    """破損 / 不正時の dispatcher。
+
+    - strict_read=True: CurrentReadError raise (rollback 能力喪失を防止)
+    - strict_read=False + quarantine_corrupt=True: 退避 + DEFAULT
+    - strict_read=False + quarantine_corrupt=False: log warn のみ + DEFAULT (dry-run)
+    """
+    if strict_read:
+        raise CurrentReadError(f"current.json {reason}")
+    if quarantine_corrupt:
+        _quarantine_corrupt(path, reason)
+    else:
+        logger.warning("current.json %s, not quarantined (dry-run)", dry_run_msg)
+    return DEFAULT_CURRENT
+
+
 def read_current(
     path: Path,
     *,
     quarantine_corrupt: bool = True,
     verbose: bool = False,
+    strict_read: bool = False,
 ) -> Current:
-    """current.json を読む。破損時は退避 + DEFAULT_CURRENT 返却。
-
-    fail-fast はしない（launcher は起動を止めない方針）。すべて warning ログのみ。
+    """current.json を読む。破損時は退避 + DEFAULT_CURRENT 返却 (strict_read=False)。
 
     Args:
         path: current.json のパス
         quarantine_corrupt: True なら破損ファイルを ``.corrupt-{ts}-{pid}-{rand}``
-            にリネーム退避。False なら退避せず warn のみ（I-3: dry-run 副作用ゼロ用）
+            にリネーム退避。False なら退避せず warn のみ（dry-run 副作用ゼロ用）
         verbose: True なら full path をログ表示。False なら machine-specific path を
-            隠蔽し、汎用 message のみ（I-5: PII / privacy 配慮）
+            隠蔽し、汎用 message のみ（PII / privacy 配慮）
+        strict_read: True なら read OSError / 破損 / schema 不一致で CurrentReadError
+            raise (review_team A2 second-pass、silent-failure I6 反映)。file 不在は
+            raise しない (genuine first install を許容)。run_update が使用、
+            Windows AV 等の transient ロックを silent に「first install」と誤認させない
+
+    Raises:
+        CurrentReadError: strict_read=True 時の read 失敗 / 破損 / schema / semver 不正
     """
     if not path.exists():
         if verbose:
@@ -109,36 +167,72 @@ def read_current(
     try:
         raw = path.read_bytes()
     except OSError as e:
-        logger.warning("current.json read error: %s", type(e).__name__)
+        if strict_read:
+            raise CurrentReadError(
+                f"current.json read error: {type(e).__name__}: "
+                f"errno={e.errno} filename={e.filename!r}"
+            ) from e
+        logger.warning(
+            "current.json read error: %s errno=%s", type(e).__name__, e.errno
+        )
         return DEFAULT_CURRENT
 
     try:
         parsed = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as e:
-        reason = f"json-decode-{type(e).__name__}"
-        if quarantine_corrupt:
-            _quarantine_corrupt(path, reason)
-        else:
-            logger.warning("current.json corrupt (%s), not quarantined (dry-run)", reason)
-        return DEFAULT_CURRENT
+        return _fail_or_default(
+            path,
+            f"json-decode-{type(e).__name__}",
+            strict_read=strict_read,
+            quarantine_corrupt=quarantine_corrupt,
+            dry_run_msg=f"corrupt ({type(e).__name__})",
+        )
 
     if not isinstance(parsed, dict):
-        if quarantine_corrupt:
-            _quarantine_corrupt(path, "not-a-dict")
-        else:
-            logger.warning("current.json not-a-dict, not quarantined (dry-run)")
-        return DEFAULT_CURRENT
+        return _fail_or_default(
+            path, "not-a-dict",
+            strict_read=strict_read,
+            quarantine_corrupt=quarantine_corrupt,
+            dry_run_msg="not-a-dict",
+        )
 
     version = parsed.get("version")
     released_at = parsed.get("released_at")
-    if not isinstance(version, str) or not isinstance(released_at, str):
-        if quarantine_corrupt:
-            _quarantine_corrupt(path, "schema-mismatch")
-        else:
-            logger.warning("current.json schema-mismatch, not quarantined (dry-run)")
-        return DEFAULT_CURRENT
+    previous_version = parsed.get("previous_version", "")  # PR-3 後方互換
 
-    return Current(version=version, released_at=released_at)
+    if (
+        not isinstance(version, str)
+        or not isinstance(released_at, str)
+        or not isinstance(previous_version, str)
+    ):
+        return _fail_or_default(
+            path, "schema-mismatch",
+            strict_read=strict_read,
+            quarantine_corrupt=quarantine_corrupt,
+            dry_run_msg="schema-mismatch",
+        )
+
+    if not is_simple_semver(version):
+        return _fail_or_default(
+            path, "version-not-semver",
+            strict_read=strict_read,
+            quarantine_corrupt=quarantine_corrupt,
+            dry_run_msg="version not semver",
+        )
+
+    if previous_version != "" and not is_simple_semver(previous_version):
+        return _fail_or_default(
+            path, "previous-version-not-semver",
+            strict_read=strict_read,
+            quarantine_corrupt=quarantine_corrupt,
+            dry_run_msg="previous_version not semver",
+        )
+
+    return Current(
+        version=version,
+        released_at=released_at,
+        previous_version=previous_version,
+    )
 
 
 def write_current_atomic(path: Path, current: Current) -> None:
