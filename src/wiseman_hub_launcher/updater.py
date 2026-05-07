@@ -43,7 +43,7 @@ from ._supply_chain import (
 )
 from .checksum import ChecksumError, verify_sha256
 from .current import DEFAULT_CURRENT, Current, read_current, write_current_atomic
-from .manifest import ManifestData, is_simple_semver
+from .manifest import ManifestData, Sha256Hex, is_simple_semver
 
 logger = logging.getLogger(__name__)
 
@@ -200,7 +200,10 @@ def _download_with_provenance(
         DownloadError / ChecksumError / ProvenanceError
     """
     download_url = manifest["download_url"]
-    checksum = manifest["checksum_sha256"]
+    # Issue #209 PR1: ManifestData["checksum_sha256"] は Sha256Hex NewType として narrow 済。
+    # 局所変数も Sha256Hex で受けることで、PR2 で download_artifact / verify_provenance の
+    # signature を Sha256Hex に切り替えた際の type propagation が痛みなく成立する。
+    checksum: Sha256Hex = manifest["checksum_sha256"]
     provenance_url_rel = manifest["provenance_url"]
     expected_version = manifest["current_version"]
 

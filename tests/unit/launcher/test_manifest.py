@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import ssl
+from typing import assert_type
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,6 +13,7 @@ from wiseman_hub_launcher.manifest import (
     MAX_MANIFEST_BYTES,
     ManifestError,
     ManifestPathTraversalError,
+    Sha256Hex,
     fetch_manifest,
     parse_manifest,
     validate_manifest,
@@ -75,6 +77,42 @@ def test_validate_manifest_returns_typeddict_without_optional_fields() -> None:
     # NotRequired field は不在
     assert "release_notes" not in result
     assert "force_update" not in result
+
+
+def test_validate_manifest_narrows_checksum_sha256_to_sha256hex() -> None:
+    """Issue #209 PR1: validate_manifest が checksum_sha256 を Sha256Hex NewType に narrow。
+
+    `assert_type` は mypy 用の static type assertion (runtime no-op)。本テストの主目的は
+    mypy run 時の型契約 lock-in: 将来 ManifestData["checksum_sha256"] を str に戻す
+    regression を type check で検出する。runtime では Sha256Hex が str sub-type なので
+    値比較は通常の str 同等で行う。
+    """
+    m = _good_manifest()
+    result = validate_manifest(m)
+    # mypy: result["checksum_sha256"] は Sha256Hex として narrow される
+    assert_type(result["checksum_sha256"], Sha256Hex)
+    # runtime: NewType は identity cast なので値は str と同一
+    assert result["checksum_sha256"] == "a" * 64
+    # NewType は呼ぶと str を返すだけ (no validation)
+    converted = Sha256Hex("b" * 64)
+    assert converted == "b" * 64
+
+
+def test_validate_manifest_narrows_sbom_sha256_to_sha256hex_when_present() -> None:
+    """Issue #209 PR1: sbom_sha256 が present の場合も Sha256Hex narrow される。
+
+    sbom_sha256 は NotRequired なので presence で narrow が動作することを直接検証。
+    """
+    m = _good_manifest()
+    m["sbom_url"] = "versions/1.2.3/wiseman_hub.sbom.json"
+    m["sbom_sha256"] = "c" * 64
+    result = validate_manifest(m)
+    # narrow を確認するためには NotRequired field を取り出して局所変数で受ける必要あり
+    sbom_sha = result.get("sbom_sha256")
+    assert sbom_sha is not None
+    assert sbom_sha == "c" * 64
+    # mypy: sbom_sha は Sha256Hex | None として narrow (assert で None を弾いた後 Sha256Hex)
+    assert_type(sbom_sha, Sha256Hex)
 
 
 def _make_fake_resp(
@@ -146,7 +184,7 @@ def test_validate_manifest_missing_required(missing_field: str) -> None:
 
 def test_validate_manifest_field_not_string() -> None:
     m = _good_manifest()
-    m["current_version"] = 123  # type: ignore[assignment]
+    m["current_version"] = 123
     with pytest.raises(ManifestError, match="must be string"):
         validate_manifest(m)
 
@@ -296,7 +334,7 @@ def test_validate_manifest_sbom_sha_only_rejected() -> None:
 def test_validate_manifest_sbom_url_non_string() -> None:
     """sbom_url が str 以外 → ManifestError。"""
     m = _good_manifest()
-    m["sbom_url"] = 123  # type: ignore[typeddict-item]
+    m["sbom_url"] = 123
     m["sbom_sha256"] = "0" * 64
     with pytest.raises(ManifestError, match="sbom_url must be string"):
         validate_manifest(m)
