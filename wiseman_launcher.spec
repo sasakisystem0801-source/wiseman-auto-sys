@@ -83,8 +83,12 @@ a = Analysis(
         "google.auth",
         "google.oauth2",
         # "requests" は sigstore-python 推移依存のため excludes から削除 (PR-6 後半)
+        # "tomli" は setuptools が vendored alias で追加するため excludes すると
+        # PyInstaller の `setuptools.pre_safe_import_module` hook で
+        # `Target module "tomli" already imported as ExcludedModule` ValueError を起こす。
+        # sigstore-python が setuptools を推移引きするため、launcher.spec では tomli を
+        # excludes に入れない (Issue #217、build-windows-smoke 失敗の root cause)。
         "tomlkit",
-        "tomli",
         "pywinauto",
         "pyautogui",
         "pystray",
