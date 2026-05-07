@@ -895,15 +895,15 @@ def test_update_and_spawn_invokes_verify_provenance(tmp_path: Path) -> None:
             _good_manifest("1.2.3", sha),
             tmp_path,
             monitor_timeout_sec=0.05,
-            allow_unsigned_provenance=False,
         )
 
     # AC4: update_and_spawn から verify_provenance が確かに呼ばれた
     assert mock_verify.call_count == 1
-    # 呼出引数: artifact_path / provenance_path / expected_sha256 / allow_unsigned
+    # 呼出引数: artifact_path / provenance_path / expected_sha256 / expected_version
+    # PR-6 後半: bypass 引数完全削除、signature 検証は sigstore-python 委譲で default 有効
     call = mock_verify.call_args
     assert call.kwargs.get("expected_sha256") == sha
-    assert call.kwargs.get("allow_unsigned") is False
+    assert call.kwargs.get("expected_version") == "1.2.3"
 
 
 def test_update_and_spawn_full_flow_success(tmp_path: Path) -> None:

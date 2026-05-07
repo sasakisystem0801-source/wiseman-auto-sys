@@ -1,11 +1,14 @@
-"""supply-chain policy: canonical URL derivation + 信頼根 constants (ADR-016 PR-6a)。
+"""supply-chain policy: canonical URL derivation + 信頼根 constants (ADR-016 PR-6a / PR-6 後半)。
 
 codex review threadId 019dfd9e:
     - C-1: provenance_url を manifest の信頼入力にせず、canonical derived URL と
       一致必須 (HTTPS + release-prod prefix allowlist + path traversal 禁止)
     - I-2: expected_repo / expected_workflow_ref は launcher 埋め込み constant、
       manifest 値は表示/監査用のみ (二重検証)
-    - C-2: --allow-test-unsigned-provenance は環境変数との AND 条件で本番 PC 拒否
+
+PR-6 後半: bypass 経路完全削除に伴い `is_test_bypass_authorized` / `_TEST_BYPASS_ENV_VAR`
+を削除。`_BUILD_FLAVOR_ENV_VAR` / `is_production_build` は build flavor 識別 (canary 検出等)
+の用途で残置 (bypass とは独立)。signature 検証は sigstore-python 委譲で default 有効。
 """
 
 from __future__ import annotations
@@ -29,12 +32,9 @@ LAUNCHER_EXPECTED_WORKFLOW_REF_PATTERN = re.compile(
 )
 """workflow ref の許容 pattern。release.yml + tags/vX.Y.Z 形式のみ許可。"""
 
-# Q1-A 修正版 + T0 Explore 結果反映: actions/attest v4 の default 出力は Sigstore
-# Bundle JSON、拡張子 .sigstore.json (PR-6a 計画書補正)
+# actions/attest-build-provenance@v2 の default 出力は Sigstore Bundle JSON、拡張子 .sigstore.json
 PROVENANCE_URL_SUFFIX = ".sigstore.json"
 
-# C-2 二重 gate (本番 PC 配布での誤用防止)
-_TEST_BYPASS_ENV_VAR = "WISEMAN_ALLOW_UNSIGNED_PROVENANCE_FOR_TESTS"
 _BUILD_FLAVOR_ENV_VAR = "WISEMAN_BUILD_FLAVOR"
 
 
@@ -90,15 +90,3 @@ def is_production_build() -> bool:
     実行時 env で判定する (PR-6 後半 release workflow で hardcode 化予定)。
     """
     return os.environ.get(_BUILD_FLAVOR_ENV_VAR, "") == "production"
-
-
-def is_test_bypass_authorized() -> bool:
-    """C-2: --allow-test-unsigned-provenance + 環境変数の AND 条件で bypass 許可。
-
-    環境変数 WISEMAN_ALLOW_UNSIGNED_PROVENANCE_FOR_TESTS=1 が設定されている場合のみ
-    True。CLI flag だけでは bypass 不可 (本番 PC 配布で flag を渡されても拒否)。
-
-    Returns:
-        True なら CLI flag 併用で signature 検証を skip 可能。
-    """
-    return os.environ.get(_TEST_BYPASS_ENV_VAR, "") == "1"

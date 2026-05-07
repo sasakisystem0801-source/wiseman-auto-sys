@@ -1,15 +1,10 @@
-"""Tests for wiseman_hub_launcher._supply_chain.provenance (ADR-016 PR-6a)。
+"""Tests for wiseman_hub_launcher._supply_chain.provenance (ADR-016 PR-6a / PR-6 後半)。
 
-AC-2 / AC-3 検証:
+AC-2 / AC-3 / AC4 検証:
     - 3 形式 parse: Sigstore Bundle v0.3 / DSSE envelope / plain JSON statement
     - claims verify: subject digest + name + multi-subject 一意性 + predicateType +
       workflow ref + repo + builder id allowlist
-    - signature 検証は stub (allow_unsigned + env var AND で bypass)
-
-T0 Explore agent 結果反映:
-    - default 形式 = Sigstore Bundle v0.3 (mediaType: vnd.dev.sigstore.bundle)
-    - subject = 1 件が標準、multi-subject は invariant で raise
-    - builder id = "https://github.com/actions/runner@" prefix match
+    - signature 検証は sigstore-python 委譲 (PR-6 後半、verify_dsse_bundle を mock)
 """
 
 from __future__ import annotations
@@ -17,16 +12,17 @@ from __future__ import annotations
 import base64
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from wiseman_hub_launcher._supply_chain.provenance import (
     ProvenanceError,
-    ProvenanceUnavailable,
     extract_statement,
     verify_provenance,
     verify_statement_claims,
 )
+from wiseman_hub_launcher._supply_chain.sigstore import SigstoreVerifyError
 
 # Test fixtures ----------------------------------------------------------------
 
@@ -417,66 +413,122 @@ def test_verify_claims_uppercase_digest_rejected() -> None:
         verify_statement_claims(stmt, expected_sha256=_VALID_SHA)
 
 
-# verify_provenance E2E (signature stub bypass logic) --------------------------
+# verify_provenance E2E (PR-6 後半: sigstore-python verify_dsse 委譲) --------------
+
+_PROVENANCE_MOD = "wiseman_hub_launcher._supply_chain.provenance.verify_dsse_bundle"
 
 
-def test_verify_provenance_stub_raises_without_bypass(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """allow_unsigned=False または env var なし → ProvenanceUnavailable。"""
-    monkeypatch.delenv("WISEMAN_ALLOW_UNSIGNED_PROVENANCE_FOR_TESTS", raising=False)
+def test_verify_provenance_signature_pass(tmp_path: Path) -> None:
+    """sigstore mock pass + claims pass → return None (二段検証成功)。"""
     art = tmp_path / "wiseman_hub.exe"
     art.write_bytes(b"x")
-    prov = _write_provenance(tmp_path, _good_statement())
-    with pytest.raises(ProvenanceUnavailable, match="signature verification"):
-        verify_provenance(art, prov, expected_sha256=_VALID_SHA, allow_unsigned=False)
+    prov = tmp_path / "wiseman_hub.exe.sigstore.json"
+    prov.write_text("{}", encoding="utf-8")
+    statement = _good_statement()
+
+    with patch(_PROVENANCE_MOD, return_value=statement) as mock_verify:
+        verify_provenance(
+            art, prov,
+            expected_sha256=_VALID_SHA,
+            expected_version="1.2.3",
+        )
+    assert mock_verify.call_count == 1
+    # AC4: identity が完全一致 (refs/tags/v{version}) で組み立てられる
+    kwargs = mock_verify.call_args.kwargs
+    assert kwargs["expected_identity"] == (
+        "https://github.com/sasakisystem0801-source/wiseman-auto-sys"
+        "/.github/workflows/release.yml@refs/tags/v1.2.3"
+    )
 
 
-def test_verify_provenance_stub_raises_with_flag_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_verify_provenance_signature_fail_wraps_to_provenance_error(
+    tmp_path: Path,
 ) -> None:
-    """allow_unsigned=True だけでは bypass されず、env なしで stub raise (C-2 二重 gate)。"""
-    monkeypatch.delenv("WISEMAN_ALLOW_UNSIGNED_PROVENANCE_FOR_TESTS", raising=False)
+    """sigstore mock raise SigstoreVerifyError → ProvenanceError に wrap。"""
     art = tmp_path / "wiseman_hub.exe"
     art.write_bytes(b"x")
-    prov = _write_provenance(tmp_path, _good_statement())
-    with pytest.raises(ProvenanceUnavailable):
-        verify_provenance(art, prov, expected_sha256=_VALID_SHA, allow_unsigned=True)
+    prov = tmp_path / "wiseman_hub.exe.sigstore.json"
+    prov.write_text("{}", encoding="utf-8")
+
+    with (
+        patch(_PROVENANCE_MOD, side_effect=SigstoreVerifyError("cert chain broken")),
+        pytest.raises(ProvenanceError, match="signature verify failed"),
+    ):
+        verify_provenance(
+            art, prov,
+            expected_sha256=_VALID_SHA,
+            expected_version="1.2.3",
+        )
 
 
-def test_verify_provenance_stub_raises_with_env_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_verify_provenance_claims_fail_after_signature(
+    tmp_path: Path,
 ) -> None:
-    """env var だけでは bypass されず、CLI flag なしで stub raise (C-2 二重 gate)。"""
-    monkeypatch.setenv("WISEMAN_ALLOW_UNSIGNED_PROVENANCE_FOR_TESTS", "1")
+    """signature pass + claims fail (subject digest 不一致) → ProvenanceError raise。
+
+    sigstore mock が claims 不一致な statement を返す → claims verify 段で raise。
+    """
     art = tmp_path / "wiseman_hub.exe"
     art.write_bytes(b"x")
-    prov = _write_provenance(tmp_path, _good_statement())
-    with pytest.raises(ProvenanceUnavailable):
-        verify_provenance(art, prov, expected_sha256=_VALID_SHA, allow_unsigned=False)
+    prov = tmp_path / "wiseman_hub.exe.sigstore.json"
+    prov.write_text("{}", encoding="utf-8")
+    bad_stmt = _good_statement(sha256="b" * 64)
+
+    with (
+        patch(_PROVENANCE_MOD, return_value=bad_stmt),
+        pytest.raises(ProvenanceError, match="subject digest"),
+    ):
+        verify_provenance(
+            art, prov,
+            expected_sha256=_VALID_SHA,
+            expected_version="1.2.3",
+        )
 
 
-def test_verify_provenance_bypass_with_both(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """allow_unsigned=True + env var=1 の AND 条件で bypass、claims pass なら return None。"""
-    monkeypatch.setenv("WISEMAN_ALLOW_UNSIGNED_PROVENANCE_FOR_TESTS", "1")
+def test_verify_provenance_identity_uses_manifest_version(tmp_path: Path) -> None:
+    """異なる version (例 2.5.7) でも refs/tags/v{version} 完全一致が組み立てられる (AC4)。"""
     art = tmp_path / "wiseman_hub.exe"
     art.write_bytes(b"x")
-    prov = _write_provenance(tmp_path, _good_statement())
-    # claims valid + bypass authorized → return None (例外なし)
-    verify_provenance(art, prov, expected_sha256=_VALID_SHA, allow_unsigned=True)
+    prov = tmp_path / "wiseman_hub.exe.sigstore.json"
+    prov.write_text("{}", encoding="utf-8")
+    statement = _good_statement()
+
+    with patch(_PROVENANCE_MOD, return_value=statement) as mock_verify:
+        verify_provenance(
+            art, prov,
+            expected_sha256=_VALID_SHA,
+            expected_version="2.5.7",
+        )
+    kwargs = mock_verify.call_args.kwargs
+    assert kwargs["expected_identity"].endswith("@refs/tags/v2.5.7")
 
 
-def test_verify_provenance_claims_fail_before_signature_check(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+# PR-6 後半 type-design 反映: expected_version の semver 形式検証 ---------------
+
+
+@pytest.mark.parametrize(
+    "bad_version",
+    [
+        "1.2",            # 不完全 (semver 3 要素必須)
+        "1.2.3-rc1",      # rc/canary は本 PR 非対応
+        "1.2.3.4",        # 余分な segment
+        "v1.2.3",         # v prefix 不可 (caller が strip 済前提)
+        "1.2.3 --evil",   # control / 余分文字
+        "../etc/passwd",  # path injection
+        "",               # 空
+    ],
+)
+def test_verify_provenance_rejects_malformed_version(
+    tmp_path: Path, bad_version: str
 ) -> None:
-    """claims 不一致は bypass の有無に関わらず ProvenanceError raise (signature stub に到達しない)。"""
-    monkeypatch.setenv("WISEMAN_ALLOW_UNSIGNED_PROVENANCE_FOR_TESTS", "1")
+    """expected_version が semver X.Y.Z でない → ProvenanceError (identity URI 改竄防止)。"""
     art = tmp_path / "wiseman_hub.exe"
     art.write_bytes(b"x")
-    # subject digest 不一致 statement
-    stmt = _good_statement(sha256="b" * 64)
-    prov = _write_provenance(tmp_path, stmt)
-    with pytest.raises(ProvenanceError, match="subject digest"):
-        verify_provenance(art, prov, expected_sha256=_VALID_SHA, allow_unsigned=True)
+    prov = tmp_path / "wiseman_hub.exe.sigstore.json"
+    prov.write_text("{}", encoding="utf-8")
+    with pytest.raises(ProvenanceError, match="expected_version must be semver"):
+        verify_provenance(
+            art, prov,
+            expected_sha256=_VALID_SHA,
+            expected_version=bad_version,
+        )

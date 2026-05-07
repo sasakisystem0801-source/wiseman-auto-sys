@@ -1,22 +1,20 @@
-"""SLSA Provenance v1.0 statement parse + claims verify (ADR-016 PR-6a)。
+"""SLSA Provenance v1.0 signature verify + statement claims verify (ADR-016 PR-6 後半)。
 
-codex T0 Explore 調査結果反映:
-    - default 形式 = Sigstore Bundle v0.3 JSON (mediaType: vnd.dev.sigstore.bundle)
-    - DSSE envelope (payloadType + payload + signatures): actions/attest v1 互換
-    - plain JSON statement (`_type` + `subject` + `predicate`): 一部 CI で使用
-
-PR-6a スコープ (Q2-C):
-    - 3 形式判定 + statement 抽出 (extract_statement)
+PR-6a で実装済 (本 module):
+    - 3 形式 (Sigstore Bundle / DSSE envelope / plain JSON Statement) 判定 + statement 抽出
     - claims verify: subject digest / subject name / predicateType / workflow ref /
       repository / builder id allowlist (verify_statement_claims、SLSA v1.0
       §5.1 subject / §6 buildDefinition / §7.2 builder)
-    - signature 検証は **stub interface のみ** (verify_provenance 内で
-      ``ProvenanceUnavailable`` raise、`--allow-test-unsigned-provenance` +
-      環境変数 ``WISEMAN_ALLOW_UNSIGNED_PROVENANCE_FOR_TESTS=1`` の AND 条件で bypass 可)
 
-PR-6 後半 (codex C-2 反映で予定):
-    - sigstore-python 依存追加 + Sigstore Bundle 検証本実装
-    - signature stub を本実装に置換、`--allow-test-unsigned-provenance` 削除
+PR-6 後半 (本 PR で追加):
+    - signature 検証本実装: ``sigstore-python`` の ``Verifier.verify_dsse`` に委譲
+      (``_supply_chain/sigstore.py`` 経由、ADR-016 §1.1.3 stdlib only 例外)
+    - identity matching は完全一致 (codex C2 反映): manifest の current_version を
+      caller (updater.py) が ``expected_version`` として渡し、本 module の
+      ``verify_provenance`` 内で ``refs/tags/v{version}`` + 完全 identity URI を
+      ``build_expected_identity`` で組み立てる
+    - bypass 経路 (``--allow-test-unsigned-provenance`` flag +
+      ``WISEMAN_ALLOW_UNSIGNED_PROVENANCE_FOR_TESTS`` env) を完全削除
 """
 
 from __future__ import annotations
@@ -32,7 +30,11 @@ from urllib.parse import urlparse
 from .policy import (
     LAUNCHER_EXPECTED_REPO,
     LAUNCHER_EXPECTED_WORKFLOW_REF_PATTERN,
-    is_test_bypass_authorized,
+)
+from .sigstore import (
+    SigstoreVerifyError,
+    build_expected_identity,
+    verify_dsse_bundle,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,16 +62,7 @@ _DSSE_PAYLOAD_TYPE_INTOTO = "application/vnd.in-toto+json"
 
 
 class ProvenanceError(Exception):
-    """provenance 検証関連の失敗 (parse / schema / claims 不一致)。"""
-
-
-class ProvenanceUnavailable(ProvenanceError):
-    """signature 検証 stub の bypass 未認可 (PR-6 後半で本実装)。
-
-    PR-6a では `--allow-test-unsigned-provenance` (CLI flag) +
-    ``WISEMAN_ALLOW_UNSIGNED_PROVENANCE_FOR_TESTS=1`` (env var) の AND 条件
-    のみで bypass。それ以外の組合せで raise。
-    """
+    """provenance 検証関連の失敗 (parse / schema / claims 不一致 / signature 不正)。"""
 
 
 def _detect_format(obj: dict[str, Any]) -> str:
@@ -349,58 +342,72 @@ def verify_statement_claims(
     _verify_builder(predicate)
 
 
+_SEMVER_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+
+
 def verify_provenance(
     artifact_path: Path,
     provenance_path: Path,
     *,
     expected_sha256: str,
+    expected_version: str,
     expected_subject_name: str = "wiseman_hub.exe",
-    allow_unsigned: bool = False,
 ) -> None:
-    """artifact + provenance を検証する (PR-6a 高水準 API)。
+    """artifact + provenance を検証する (PR-6 後半: signature 検証本実装)。
 
     手順:
-        1. extract_statement: provenance file から SLSA Statement dict 抽出
-        2. verify_statement_claims: claims (subject / predicateType / workflow / builder) 検証
-        3. signature stub: bypass 認可なら ERROR ログ + return、未認可なら raise
+        1. ``sigstore.verify_dsse_bundle``: Sigstore Bundle v0.3 を ``Verifier.verify_dsse``
+           で検証 (cert chain + Rekor inclusion proof + identity 完全一致)。戻り値は
+           DSSE payload を decode した SLSA Statement dict
+        2. ``verify_statement_claims``: 返ってきた statement に対して claims 検証
+           (subject digest + name + predicateType + workflow ref + repo + builder id)
+
+    identity の組み立て (codex C2 完全一致):
+        ``https://github.com/{LAUNCHER_EXPECTED_REPO}/.github/workflows/release.yml@refs/tags/v{expected_version}``
+        manifest の current_version を caller (updater.py) が ``expected_version`` として渡す。
 
     Args:
-        artifact_path: download 済 artifact path (verify_sha256 を別途呼ぶ前提、
-            本関数では未検証)
-        provenance_path: download 済 provenance path
+        artifact_path: download 済 artifact path (sha256 検証は別途 ``checksum.verify_sha256`` で実施)
+        provenance_path: download 済 ``.sigstore.json`` Bundle file path
         expected_sha256: manifest.checksum_sha256 (lowercase 64 hex)
-        expected_subject_name: 期待 subject name (default: "wiseman_hub.exe")
-        allow_unsigned: True かつ環境変数 ``WISEMAN_ALLOW_UNSIGNED_PROVENANCE_FOR_TESTS=1``
-            の AND 条件で signature 検証 stub を bypass。AND 不成立で
-            ``ProvenanceUnavailable`` raise (本番 PC では env 不在で必ず fail-close)。
+        expected_version: manifest.current_version (例: ``"1.2.3"``)。
+            ``refs/tags/v{expected_version}`` の組み立てに使用
+        expected_subject_name: 期待 subject name (default: ``"wiseman_hub.exe"``)
 
     Raises:
-        ProvenanceError: claims 不一致 / parse 失敗 (allow_unsigned に関わらず)
-        ProvenanceUnavailable: signature stub 段に到達かつ
-            (allow_unsigned=False) または (env var 未設定) のとき raise
-            (allow_unsigned=True かつ env var=1 の AND 条件のみ bypass)
+        ProvenanceError: signature 検証失敗 (``SigstoreVerifyError`` を wrap) または
+            claims 不一致 / parse 失敗
     """
-    statement = extract_statement(provenance_path)
+    # type-design 反映: caller 経路によらず expected_version の形式を保証。
+    # validate_manifest の semver check を経由しない直接呼出 (test/script) でも、
+    # identity URI 改竄 (control char / `..` injection 等) を fail-fast で防ぐ。
+    if not _SEMVER_RE.match(expected_version):
+        raise ProvenanceError(
+            f"expected_version must be semver X.Y.Z, got {expected_version!r}"
+        )
+    expected_identity = build_expected_identity(
+        repo=LAUNCHER_EXPECTED_REPO,
+        workflow_path=".github/workflows/release.yml",
+        ref=f"refs/tags/v{expected_version}",
+    )
+
+    try:
+        statement = verify_dsse_bundle(
+            bundle_path=provenance_path,
+            expected_identity=expected_identity,
+        )
+    except SigstoreVerifyError as e:
+        raise ProvenanceError(f"signature verify failed: {e}") from e
+
     verify_statement_claims(
         statement,
         expected_sha256=expected_sha256,
         expected_subject_name=expected_subject_name,
     )
-
-    if not (allow_unsigned and is_test_bypass_authorized()):
-        raise ProvenanceUnavailable(
-            "signature verification not implemented yet "
-            "(PR-6 後半 sigstore-python 統合で本実装、stub 到達時は CLI flag + env var "
-            "AND の bypass 認可必要)"
-        )
-    # C2 (silent-failure-hunter): bypass の事実を ERROR ログで強制可視化、
-    # version / sha256 / subject 含む構造化 log で運用 triage 可能化。
-    # 「production fail-closed の最後の砦が warning ログ 1 行」状態を解消。
-    logger.error(
-        "PROVENANCE SIGNATURE VERIFICATION SKIPPED (test bypass authorized): "
-        "artifact=%s sha256=%s subject=%s. "
-        "MUST NOT be used on production PCs (PR-6 後半 sigstore 統合で flag 削除予定)",
+    logger.info(
+        "provenance verified: artifact=%s sha256=%s subject=%s identity=%s",
         artifact_path.name,
         expected_sha256[:16],
         expected_subject_name,
+        expected_identity,
     )

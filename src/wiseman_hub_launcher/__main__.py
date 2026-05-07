@@ -1,4 +1,4 @@
-"""wiseman_launcher CLI entry point (ADR-016 PR-3 / PR-4 / PR-6a)。
+"""wiseman_launcher CLI entry point (ADR-016 PR-3 / PR-4 / PR-6a / PR-6 後半)。
 
 PR-3 で実装済 mode:
     --dry-run            : manifest fetch + validate のみ（download/spawn なし）
@@ -13,21 +13,21 @@ PR-4 で追加:
     --home PATH          : $HOME/wiseman-hub の上書き (test/canary 用)
     --monitor-timeout SEC: spawn 監視 timeout 上書き (test 高速化)
 
-PR-6a で変更 (codex review threadId 019dfd9e 反映):
-    `--allow-insecure-checksum-only` 削除 → `--allow-test-unsigned-provenance` に置換。
-    本番 PC 配布での誤用防止のため、本 flag 単独では bypass されず、環境変数
-    `WISEMAN_ALLOW_UNSIGNED_PROVENANCE_FOR_TESTS=1` との **AND 条件** を要求 (C-2 二重 gate)。
+PR-6 後半で削除 (本格 fail-closed):
+    `--allow-test-unsigned-provenance` flag + `WISEMAN_ALLOW_UNSIGNED_PROVENANCE_FOR_TESTS`
+    環境変数を完全削除。signature 検証は sigstore-python に委譲して default 有効、
+    bypass 経路は存在しない (本番 PC + test 環境共に同一 path で fail-closed)。
 
 exit code:
     0  成功 (SUCCESS / OK_EARLY_EXIT、--dry-run / --no-spawn 完了)
-    2  CONFIG (argparse / HTTPS pre-check / mode 不正 / fail-closed gate)
+    2  CONFIG (argparse / HTTPS pre-check / mode 不正)
     3  MANIFEST / network / artifact size error
     4  UNEXPECTED
     5  CHECKSUM_MISMATCH (PR-4)
     6  ROLLBACK_UNAVAILABLE / preflight 失敗 (PR-4)
     7  SPAWN_FAILED_NO_ROLLBACK (新版 + 旧版とも spawn 失敗、PR-4)
     8  LOCK_HELD (多重起動、PR-4)
-    9  PROVENANCE (PR-6a: claims 不一致 / signature stub 到達)
+    9  PROVENANCE (signature 失敗 + claims 不一致 + canonical URL 違反、PR-6a + PR-6 後半)
 """
 
 from __future__ import annotations
@@ -45,8 +45,6 @@ from ._runtime import (
 )
 from ._supply_chain import (
     ProvenanceError,
-    ProvenanceUnavailable,
-    is_test_bypass_authorized,
 )
 from .checksum import ChecksumError
 from .current import CurrentReadError, read_current
@@ -79,7 +77,7 @@ EXIT_CHECKSUM_MISMATCH = 5
 EXIT_ROLLBACK_UNAVAILABLE = 6
 EXIT_SPAWN_FAILED_NO_ROLLBACK = 7
 EXIT_LOCK_HELD = 8
-EXIT_PROVENANCE = 9  # PR-6a (codex I-5 反映: 6 と分離)
+EXIT_PROVENANCE = 9  # PR-6a (codex I-5 反映: 6 と分離)、PR-6 後半で signature 失敗も統合
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -102,25 +100,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--update",
         action="store_true",
         help=(
-            "実 download + provenance verify + current.json 切替 + spawn + rollback "
-            "(PR-6a、--allow-test-unsigned-provenance + 環境変数 AND で signature stub bypass、"
-            "PR-6 後半で sigstore 本実装後に flag 除去)"
+            "実 download + provenance verify + current.json 切替 + spawn + rollback。"
+            "PR-6 後半: signature 検証は sigstore-python 委譲で default 有効、bypass 経路なし"
         ),
     )
     parser.add_argument(
         "--no-spawn",
         action="store_true",
         help="--update と併用: download + 切替まで、spawn しない (PR-4)",
-    )
-    parser.add_argument(
-        "--allow-test-unsigned-provenance",
-        action="store_true",
-        help=(
-            "PR-6a の signature 検証 stub を bypass (claims verify は default で実施)。"
-            "本フラグ単独では bypass されず、環境変数 "
-            "WISEMAN_ALLOW_UNSIGNED_PROVENANCE_FOR_TESTS=1 との AND 条件で許可 (C-2 二重 gate)。"
-            "本番配布禁止、test/canary 限定 (PR-6 後半で除去)"
-        ),
     )
     parser.add_argument(
         "--manifest-url",
@@ -247,35 +234,23 @@ def run_update(  # noqa: PLR0911 — explicit exit code mapping
     *,
     no_spawn: bool,
     monitor_timeout_sec: float,
-    allow_unsigned_provenance: bool,
 ) -> int:
-    """update mode の主処理 (PR-4 / PR-6a)。
+    """update mode の主処理 (PR-4 / PR-6a / PR-6 後半)。
 
     Flow:
-        1. supply-chain gate: allow_unsigned_provenance + 環境変数 AND で bypass、
-           それ以外は signature stub 経路で fail (PR-6 後半で sigstore 本実装後に解除)
-        2. lock 取得 (多重起動排他) + heartbeat
-        3. manifest fetch + validate
-        4. current.json 読み (strict_read=True で silent fallback 排除)
-        5. preflight (現行版 binary 存在確認)
-        6. update_and_spawn (download + provenance verify + switch + spawn + rollback)
-        7. lock 解放 (finally)
+        1. lock 取得 (多重起動排他) + heartbeat
+        2. manifest fetch + validate
+        3. current.json 読み (strict_read=True で silent fallback 排除)
+        4. preflight (現行版 binary 存在確認)
+        5. update_and_spawn (download + signature/claims verify + switch + spawn + rollback)
+        6. lock 解放 (finally)
 
-    PR-6a (codex C-2): allow_unsigned_provenance=True かつ環境変数なしの場合は
-    update_and_spawn 内 verify_provenance が ProvenanceUnavailable raise して exit 9。
-    本番配布の wiseman_launcher.exe では env 不在で必ず fail-close。
+    PR-6 後半: signature 検証は sigstore-python に委譲して default 有効。bypass 経路 +
+    flag + env 完全削除、本番 PC + test 環境ともに同一 path で fail-closed。
     """
     if not manifest_url.startswith("https://"):
         logger.error("--manifest-url must use HTTPS scheme")
         return EXIT_CONFIG
-
-    # C-2 二重 gate の事前情報ログ (debug 用、本判定は verify_provenance 内で実行)
-    if allow_unsigned_provenance and not is_test_bypass_authorized():
-        logger.warning(
-            "--allow-test-unsigned-provenance ignored: "
-            "WISEMAN_ALLOW_UNSIGNED_PROVENANCE_FOR_TESTS=1 not set "
-            "(production fail-closed, signature stub will reject)"
-        )
 
     home_dir.mkdir(parents=True, exist_ok=True)
     lock_path = home_dir / "launcher.lock"
@@ -318,16 +293,13 @@ def run_update(  # noqa: PLR0911 — explicit exit code mapping
                     current_path=current_path,
                     monitor_timeout_sec=monitor_timeout_sec,
                     no_spawn=no_spawn,
-                    allow_unsigned_provenance=allow_unsigned_provenance,
                 )
             except ChecksumError as e:
                 logger.error("checksum mismatch: %s", e)
                 return EXIT_CHECKSUM_MISMATCH
-            except ProvenanceUnavailable as e:
-                logger.error("provenance signature verification stub reached: %s", e)
-                return EXIT_PROVENANCE
             except ProvenanceError as e:
-                logger.error("provenance claims mismatch: %s", e)
+                # PR-6 後半: signature 失敗 + claims 不一致 + canonical URL 違反を統合
+                logger.error("provenance verification failed: %s", e)
                 return EXIT_PROVENANCE
             except DownloadError as e:
                 logger.error("download error: %s", e)
@@ -378,7 +350,6 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911 — top-level d
                 current_path,
                 no_spawn=args.no_spawn,
                 monitor_timeout_sec=args.monitor_timeout,
-                allow_unsigned_provenance=args.allow_test_unsigned_provenance,
             )
         except Exception:  # noqa: BLE001 — top-level safety net
             logger.exception("unexpected error in update")

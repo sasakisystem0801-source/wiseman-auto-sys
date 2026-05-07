@@ -1,15 +1,16 @@
-"""supply_chain subpackage — download + provenance + policy (ADR-016 PR-6a)。
+"""supply_chain subpackage — download + provenance + policy + sigstore (ADR-016 PR-6 後半)。
 
-constraint: ADR-016 §1.2 で `_supply_chain/` ≤ 350 LOC。
+constraint: ADR-016 §1.2 で `_supply_chain/` ≤ 415 LOC。
 
-PR-6a で実装:
-    - download.py: artifact + provenance file の atomic download (PR-4 から移動)
+PR-6a で実装済:
+    - download.py: artifact + provenance file の atomic download
     - policy.py: canonical URL derivation + LAUNCHER_EXPECTED_REPO 等の信頼根
-    - provenance.py: SLSA v1.0 statement parse (Sigstore Bundle / DSSE / plain JSON)
+    - provenance.py: SLSA v1.0 statement parse + claims verify
+    - _http.py: HTTPS GET 共通 helper (PR-7 で DRY 化)
 
-PR-6 後半で:
-    - sigstore-python 依存追加 + signature verifier 本実装
-    - `--allow-test-unsigned-provenance` 削除
+PR-6 後半で追加 (本 PR):
+    - sigstore.py: sigstore-python 委譲の signature 検証 (ADR-016 §1.1.3 stdlib 例外)
+    - provenance.verify_provenance: signature 検証本実装、bypass 経路完全削除
 """
 
 from __future__ import annotations
@@ -27,15 +28,18 @@ from .policy import (
     RELEASE_BUCKET_BASE,
     derive_canonical_provenance_url,
     is_production_build,
-    is_test_bypass_authorized,
     validate_canonical_provenance_url,
 )
 from .provenance import (
     ProvenanceError,
-    ProvenanceUnavailable,
     extract_statement,
     verify_provenance,
     verify_statement_claims,
+)
+from .sigstore import (
+    SigstoreVerifyError,
+    build_expected_identity,
+    verify_dsse_bundle,
 )
 
 __all__ = [
@@ -46,14 +50,15 @@ __all__ = [
     "RELEASE_BUCKET_BASE",
     "DownloadError",
     "ProvenanceError",
-    "ProvenanceUnavailable",
+    "SigstoreVerifyError",
+    "build_expected_identity",
     "derive_canonical_provenance_url",
     "download_artifact",
     "download_provenance",
     "extract_statement",
     "is_production_build",
-    "is_test_bypass_authorized",
     "validate_canonical_provenance_url",
+    "verify_dsse_bundle",
     "verify_provenance",
     "verify_statement_claims",
 ]

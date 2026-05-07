@@ -62,6 +62,9 @@ class ManifestData(TypedDict):
     provenance_url: str
     expected_repo: str
     expected_workflow_ref: str
+    # PR-6 後半 (codex S1 反映): SBOM 改竄検出用、sbom_url + sbom_sha256 はペアで present。
+    sbom_url: NotRequired[str]
+    sbom_sha256: NotRequired[str]
     release_notes: NotRequired[str]
     force_update: NotRequired[bool]
 
@@ -297,6 +300,24 @@ def validate_manifest(manifest: dict[str, object]) -> ManifestData:
             raise ManifestError(
                 f"release_notes exceeds {MAX_RELEASE_NOTES_LEN} chars (got {len(notes)})"
             )
+    # PR-6 後半 (codex Suggestion S1 + type-design 反映): SBOM 改竄検出のため manifest に
+    # 含める。両 field は **ペアで present でなければならない** (片方だけは illegal state)。
+    # 本 PR では field 追加 + 検証のみ、launcher 側の SBOM download / sha256 比較は後続 PR。
+    has_sbom_url = "sbom_url" in manifest
+    has_sbom_sha = "sbom_sha256" in manifest
+    if has_sbom_url != has_sbom_sha:
+        raise ManifestError(
+            "sbom_url and sbom_sha256 must both be present or both absent "
+            f"(got sbom_url={has_sbom_url}, sbom_sha256={has_sbom_sha})"
+        )
+    if has_sbom_url and not isinstance(manifest["sbom_url"], str):
+        raise ManifestError("sbom_url must be string when present")
+    if has_sbom_sha:
+        sbom_sha = manifest["sbom_sha256"]
+        if not isinstance(sbom_sha, str):
+            raise ManifestError("sbom_sha256 must be string when present")
+        if not _is_sha256_lower_hex(sbom_sha):
+            raise ManifestError("sbom_sha256 must be 64 lowercase hex characters")
 
     # ここまでで全必須 field が str、任意 field が型適合と確定 → cast で TypedDict narrow。
     # 以後の field-specific 検証は narrow 済の validated を参照することで
