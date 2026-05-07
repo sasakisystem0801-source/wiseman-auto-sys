@@ -23,6 +23,7 @@ from wiseman_hub_launcher._supply_chain.provenance import (
     verify_statement_claims,
 )
 from wiseman_hub_launcher._supply_chain.sigstore import SigstoreVerifyError
+from wiseman_hub_launcher.manifest import Sha256Hex, make_sha256hex
 
 # Test fixtures ----------------------------------------------------------------
 
@@ -32,7 +33,10 @@ _VALID_BUILDER_ID = "https://github.com/actions/runner@v2.300.0"
 _VALID_REPO_URL = "https://github.com/sasakisystem0801-source/wiseman-auto-sys"
 _VALID_WORKFLOW_PATH = ".github/workflows/release.yml"
 _VALID_WORKFLOW_REF = "refs/tags/v1.2.3"
-_VALID_SHA = "a" * 64
+# Issue #209 PR2: Sha256Hex narrow + make_sha256hex validating constructor を exercise。
+# `_VALID_SHA: Sha256Hex` で test fixture を NewType narrow し、verify_provenance /
+# verify_statement_claims / _verify_subject の Sha256Hex signature に直接渡せる。
+_VALID_SHA: Sha256Hex = make_sha256hex("a" * 64)
 
 
 def _good_statement(

@@ -10,11 +10,17 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .._runtime._atomic_io import atomic_replace_and_fsync_dir
 from ..checksum import ChecksumError, verify_sha256
 from ._http import open_https_get
+
+if TYPE_CHECKING:
+    # Issue #209 PR2: 型注釈のみ import で circular import 回避 (runtime overhead ゼロ)。
+    # download.py は manifest.py から Sha256Hex 値を貰うが、_download_with_atomic_place 等
+    # の関数本体内で Sha256Hex(...) を呼ぶことはなく、注釈のみ参照。
+    from ..manifest import Sha256Hex
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +64,7 @@ def _download_with_atomic_place(
     *,
     cap_bytes: int,
     timeout_sec: int,
-    expected_sha256: str | None,
+    expected_sha256: Sha256Hex | None,
     label: str = "artifact",
 ) -> Path:
     """URL から download し atomic 配置する共通実装。
@@ -146,7 +152,7 @@ def _download_with_atomic_place(
 def download_artifact(
     artifact_url: str,
     dest_dir: Path,
-    expected_sha256: str,
+    expected_sha256: Sha256Hex,
     *,
     timeout_sec: int = 60,
 ) -> Path:

@@ -24,7 +24,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from .policy import (
@@ -36,6 +36,12 @@ from .sigstore import (
     build_expected_identity,
     verify_dsse_bundle,
 )
+
+if TYPE_CHECKING:
+    # Issue #209 PR2: 型注釈のみ import (runtime overhead ゼロ、circular 回避)。
+    # provenance.py は manifest.py から Sha256Hex 値を貰うが、関数本体内で
+    # Sha256Hex(...) を呼ばず、注釈と sha == expected_sha256 比較 (str sub-type) のみ。
+    from ..manifest import Sha256Hex
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +184,7 @@ def extract_statement(provenance_path: Path) -> dict[str, Any]:
 
 def _verify_subject(
     statement: dict[str, Any],
-    expected_sha256: str,
+    expected_sha256: Sha256Hex,
     expected_subject_name: str,
 ) -> None:
     """subject[] が期待 digest + name と一意に一致 (SLSA v1.0 §5.1、S-2 invariant)。
@@ -309,7 +315,7 @@ def _verify_builder(predicate: dict[str, Any]) -> None:
 def verify_statement_claims(
     statement: dict[str, Any],
     *,
-    expected_sha256: str,
+    expected_sha256: Sha256Hex,
     expected_subject_name: str = "wiseman_hub.exe",
 ) -> None:
     """SLSA statement claims (signature 以外) を検証する (PR-6a)。
@@ -349,7 +355,7 @@ def verify_provenance(
     artifact_path: Path,
     provenance_path: Path,
     *,
-    expected_sha256: str,
+    expected_sha256: Sha256Hex,
     expected_version: str,
     expected_subject_name: str = "wiseman_hub.exe",
 ) -> None:

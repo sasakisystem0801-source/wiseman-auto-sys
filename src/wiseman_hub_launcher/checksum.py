@@ -12,6 +12,13 @@ from __future__ import annotations
 import hashlib
 import hmac
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Issue #209 PR2: Sha256Hex を型注釈のみ import (runtime overhead ゼロ、circular 回避)。
+    # checksum.py は stdlib only を維持、manifest.py は _supply_chain._http に依存するが
+    # runtime には呼ばれない (verify_sha256 は引数注釈のみで Sha256Hex(...) 呼出なし)。
+    from .manifest import Sha256Hex
 
 # 大きな exe を 1 MiB ずつ chunked read する（PyInstaller onefile は数十 MB）
 _CHUNK = 1024 * 1024
@@ -21,7 +28,7 @@ class ChecksumError(Exception):
     """SHA-256 検証関連の失敗（一致しない、format 不正、file 不在等）。"""
 
 
-def verify_sha256(local_file: Path, expected_hex: str) -> bool:
+def verify_sha256(local_file: Path, expected_hex: Sha256Hex) -> bool:
     """``local_file`` の SHA-256 を計算し ``expected_hex`` と一致比較する。
 
     比較は ``hmac.compare_digest`` で定数時間（timing attack 耐性、
