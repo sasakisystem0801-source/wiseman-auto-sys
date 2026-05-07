@@ -32,6 +32,7 @@ import pytest
 
 from wiseman_hub_launcher.checksum import ChecksumError
 from wiseman_hub_launcher.current import Current, write_current_atomic
+from wiseman_hub_launcher.manifest import Sha256Hex, make_sha256hex
 from wiseman_hub_launcher.updater import (
     DEFAULT_SPAWN_MONITOR_SEC,
     LOCK_STALE_SEC,
@@ -85,8 +86,9 @@ def _make_response(payload: bytes, content_length: str | None = None) -> MagicMo
     return resp
 
 
-def _sha256_hex(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+def _sha256_hex(data: bytes) -> Sha256Hex:
+    """Issue #209 PR2: Sha256Hex narrow + validating constructor を test fixture で exercise。"""
+    return make_sha256hex(hashlib.sha256(data).hexdigest())
 
 
 # C-2: lock --------------------------------------------------------------------
@@ -309,7 +311,7 @@ def test_download_artifact_creates_dest_dir(tmp_path: Path) -> None:
 def test_download_artifact_sha256_mismatch(tmp_path: Path) -> None:
     """AC-2: SHA-256 不一致で ChecksumError、temp 削除、final 不在。"""
     payload = b"binary content"
-    wrong_sha = "0" * 64
+    wrong_sha = make_sha256hex("0" * 64)
     dest = tmp_path / "versions" / "1.2.3"
 
     with patch(
@@ -373,7 +375,7 @@ def test_download_artifact_size_cap_chunked(
 def test_download_artifact_https_required(tmp_path: Path) -> None:
     dest = tmp_path / "versions" / "1.2.3"
     with pytest.raises(DownloadError, match="HTTPS"):
-        download_artifact("http://example.com/x.exe", dest, "0" * 64)
+        download_artifact("http://example.com/x.exe", dest, make_sha256hex("0" * 64))
 
 
 def test_download_artifact_network_error(tmp_path: Path) -> None:
@@ -387,7 +389,7 @@ def test_download_artifact_network_error(tmp_path: Path) -> None:
         "wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen",
         side_effect=_raise_url_error,
     ), pytest.raises(DownloadError, match="URL error"):
-        download_artifact("https://example.com/x.exe", dest, "0" * 64)
+        download_artifact("https://example.com/x.exe", dest, make_sha256hex("0" * 64))
 
 
 def test_download_artifact_rejects_https_to_http_redirect(tmp_path: Path) -> None:
@@ -717,7 +719,7 @@ def test_update_and_spawn_emits_phase_log_failure_fingerprint(
     )
     # checksum 不一致を発生させる payload
     payload = b"new binary"
-    wrong_sha = "0" * 64
+    wrong_sha = make_sha256hex("0" * 64)
 
     caplog.set_level("INFO", logger="wiseman_hub_launcher.updater")
     with (
@@ -838,7 +840,7 @@ def test_download_error_message_categorized_by_actual_exception(
         "wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen",
         side_effect=urlopen_side_effect,
     ), pytest.raises(DownloadError) as exc_info:
-        download_artifact("https://example.invalid/x.exe", tmp_path, "0" * 64, timeout_sec=1)
+        download_artifact("https://example.invalid/x.exe", tmp_path, make_sha256hex("0" * 64), timeout_sec=1)
 
     assert expected_substr in str(exc_info.value)
 
@@ -857,7 +859,7 @@ def test_download_error_size_cap_message_categorized(tmp_path: Path) -> None:
         "wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen",
         return_value=resp,
     ), pytest.raises(DownloadError, match="exceeds"):
-        download_artifact("https://example.invalid/x.exe", tmp_path, "0" * 64, timeout_sec=1)
+        download_artifact("https://example.invalid/x.exe", tmp_path, make_sha256hex("0" * 64), timeout_sec=1)
 
 
 def test_update_and_spawn_invokes_verify_provenance(tmp_path: Path) -> None:
@@ -939,7 +941,7 @@ def test_update_and_spawn_full_flow_success(tmp_path: Path) -> None:
 def test_update_and_spawn_checksum_mismatch_no_switch(tmp_path: Path) -> None:
     """AC-2: SHA-256 不一致 → ChecksumError、current.json 切替なし。"""
     payload = b"new binary"
-    wrong_sha = "0" * 64
+    wrong_sha = make_sha256hex("0" * 64)
     cur_path = tmp_path / "current.json"
     write_current_atomic(
         cur_path, Current(version="1.0.0", released_at="x", previous_version="")

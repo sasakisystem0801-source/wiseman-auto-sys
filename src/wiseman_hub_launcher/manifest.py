@@ -52,6 +52,24 @@ logger = logging.getLogger(__name__)
 Sha256Hex = NewType("Sha256Hex", str)
 
 
+def make_sha256hex(value: str) -> Sha256Hex:
+    """形式検証付き Sha256Hex constructor (Issue #209 PR2 review Suggestion 反映)。
+
+    `Sha256Hex(value)` 直接呼出は runtime validation ゼロ (NewType の identity cast)
+    のため、validate_manifest 経由ではない外部 source (test fixture / CLI tool / PR2 で
+    sigstore boundary から戻った str 等) を Sha256Hex 化する際は本 constructor 経由を強制し、
+    "anyone can mint a Sha256Hex with no validation" の安全弁を提供する。
+
+    Raises:
+        ManifestError: value が 64 lowercase hex でない場合
+    """
+    if not _is_sha256_lower_hex(value):
+        raise ManifestError(
+            f"Sha256Hex must be 64 lowercase hex characters (got len={len(value)})"
+        )
+    return Sha256Hex(value)
+
+
 class ManifestData(TypedDict):
     """validate_manifest 通過後の manifest schema (PR-7、type narrow 用)。
 
