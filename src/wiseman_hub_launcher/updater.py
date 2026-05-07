@@ -14,6 +14,7 @@ subpackage を import する。
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
@@ -43,13 +44,23 @@ from ._supply_chain import (
 )
 from .checksum import ChecksumError, verify_sha256
 from .current import DEFAULT_CURRENT, Current, read_current, write_current_atomic
-from .manifest import is_simple_semver
+from .manifest import ManifestData, is_simple_semver
 
 logger = logging.getLogger(__name__)
 
 
 class UpdaterError(Exception):
     """updater 経路の base exception (PR-6a で他例外は subpackage に移動)。"""
+
+
+def _phase_log(phase: str, **fields: object) -> None:
+    """update_and_spawn 各 phase で構造化 JSON 1 行 log を出す (PR-7 AC5)。
+
+    silent-failure 残対応: 失敗時の triage で「どこで止まったか」を機械可読化。
+    field 値は str 化してログ集約 / grep 可能な形に正規化する。
+    """
+    payload = {"phase": phase, **{k: str(v) for k, v in fields.items()}}
+    logger.info("launcher_phase %s", json.dumps(payload, ensure_ascii=False))
 
 
 class PreflightError(UpdaterError):
@@ -193,25 +204,27 @@ def _verify_provenance_for_artifact(
 
 
 def _download_with_provenance(
-    manifest: dict[str, object],
+    manifest: ManifestData,
     new_dir: Path,
     *,
     allow_unsigned: bool,
 ) -> tuple[Path, Path]:
     """artifact + provenance を download し canonical URL 検証 + verify_provenance。
 
+    Args:
+        manifest: validate_manifest 通過後の ManifestData (PR-7 で TypedDict 化)
+        new_dir: 新版 artifact の配置 dir
+        allow_unsigned: 二重 gate の片側 (PR-6a)、env も AND で必要
+
     Returns:
         (artifact_path, provenance_path)
 
     Raises:
-        DownloadError / ChecksumError / ProvenanceError / ProvenanceUnavailable / ValueError
+        DownloadError / ChecksumError / ProvenanceError / ProvenanceUnavailable
     """
     download_url = manifest["download_url"]
     checksum = manifest["checksum_sha256"]
     provenance_url_rel = manifest["provenance_url"]
-    assert isinstance(download_url, str)  # noqa: S101 — manifest validated upstream
-    assert isinstance(checksum, str)  # noqa: S101
-    assert isinstance(provenance_url_rel, str)  # noqa: S101
 
     artifact_url = RELEASE_BUCKET_BASE + download_url
     provenance_url = RELEASE_BUCKET_BASE + provenance_url_rel
@@ -234,7 +247,7 @@ def _download_with_provenance(
 
 
 def update_and_spawn(
-    manifest: dict[str, object],
+    manifest: ManifestData,
     home_dir: Path,
     *,
     current_path: Path | None = None,
@@ -245,7 +258,8 @@ def update_and_spawn(
     """主フロー: manifest から決まる新版を download → verify → switch → spawn → rollback。
 
     Args:
-        manifest: validate_manifest 通過後の dict (PR-6a 拡張 schema 含む)
+        manifest: validate_manifest 通過後の ManifestData (PR-7 で TypedDict 化、
+            PR-6a 拡張 schema 含む)
         home_dir: $HOME/wiseman-hub (versions/ ディレクトリの親)。
             lock file は本関数では扱わない (caller の run_update が acquire/release)
         current_path: current.json の path 上書き (canary/test override で
@@ -272,31 +286,59 @@ def update_and_spawn(
 
     new_ver = manifest["current_version"]
     released_at = manifest["released_at"]
-    assert isinstance(new_ver, str)  # noqa: S101 — manifest validated upstream
-    assert isinstance(released_at, str)  # noqa: S101
+    _phase_log("read_current", current_version=cur.version, target_version=new_ver)
 
     if cur.version == new_ver:
         logger.info("already at version %s, skipping download", new_ver)
+        _phase_log("already_up_to_date", version=new_ver)
         if no_spawn:
             return SpawnOutcome.success()
         existing = versions_dir / cur.version / "wiseman_hub.exe"
         if not existing.is_file():
+            # PR-7 review C-2 反映: 失敗 phase fingerprint で triage 可能化
+            _phase_log("preflight_existing_missing", version=cur.version, expected=existing.name)
             raise PreflightError(f"binary missing for current version: {existing.name}")
         return spawn_with_monitor(existing, monitor_timeout_sec=monitor_timeout_sec)
 
     new_dir = versions_dir / new_ver
-    new_binary, _provenance_path = _download_with_provenance(
-        manifest, new_dir, allow_unsigned=allow_unsigned_provenance
-    )
+    _phase_log("download_start", new_version=new_ver, dest=str(new_dir))
+    try:
+        new_binary, _provenance_path = _download_with_provenance(
+            manifest, new_dir, allow_unsigned=allow_unsigned_provenance
+        )
+    except (DownloadError, ChecksumError, ProvenanceError, ProvenanceUnavailable) as e:
+        # PR-7 review C-2 反映: download 経路の失敗 phase fingerprint
+        # (DownloadError = network/size/IO、ChecksumError = SHA-256 mismatch、
+        # ProvenanceError = claims、ProvenanceUnavailable = signature stub)
+        _phase_log(
+            "download_failed",
+            new_version=new_ver,
+            error_class=type(e).__name__,
+            message=str(e)[:200],
+        )
+        raise
     logger.info("downloaded version %s to %s", new_ver, new_binary.name)
+    _phase_log("download_complete", new_version=new_ver)
 
     new_current = Current(
         version=new_ver,
         released_at=released_at,
         previous_version=cur.version if cur.version != DEFAULT_CURRENT.version else "",
     )
-    write_current_atomic(current_path, new_current)
+    try:
+        write_current_atomic(current_path, new_current)
+    except OSError as e:
+        # PR-7 review C-2 反映: current.json 切替失敗 phase fingerprint
+        # (ENOSPC / EROFS / FileNotFoundError 等。raise させて上位で EXIT_UNEXPECTED)
+        _phase_log(
+            "current_switch_failed",
+            new_version=new_ver,
+            error_class=type(e).__name__,
+            errno=e.errno,
+        )
+        raise
     logger.info("switched current.json to version %s", new_ver)
+    _phase_log("current_switched", new_version=new_ver, previous_version=cur.version)
 
     if no_spawn:
         # silent-failure HIGH 5 反映: download + 切替まで完了で spawn skip した事実を
@@ -309,18 +351,34 @@ def update_and_spawn(
         )
         return SpawnOutcome.success()
 
+    _phase_log("spawn_start", new_version=new_ver, binary=new_binary.name)
     outcome = spawn_with_monitor(new_binary, monitor_timeout_sec=monitor_timeout_sec)
 
     if not outcome.is_rollback_candidate():
+        _phase_log("spawn_complete", new_version=new_ver, result=outcome.result.value)
         return outcome
 
     logger.warning("new version spawn failed (%s), rolling back", outcome.result.value)
+    _phase_log("rollback_start", failed_version=new_ver, result=outcome.result.value)
     rollback_outcome = rollback_to_previous(
         current_path, versions_dir, monitor_timeout_sec=monitor_timeout_sec
     )
     if not rollback_outcome.is_rollback_candidate():
+        # PR-7 review C-2 反映: rollback 成功 fingerprint
+        _phase_log(
+            "rollback_complete",
+            failed_version=new_ver,
+            rollback_result=rollback_outcome.result.value,
+        )
         return rollback_outcome
 
+    # PR-7 review C-2 反映: rollback も失敗した致命状態 fingerprint
+    _phase_log(
+        "rollback_failed",
+        failed_version=new_ver,
+        rollback_result=rollback_outcome.result.value,
+        rollback_returncode=rollback_outcome.returncode,
+    )
     raise SpawnFailedNoRollbackError(
         f"both new ({outcome.returncode}) and previous "
         f"({rollback_outcome.returncode}) versions failed to spawn"

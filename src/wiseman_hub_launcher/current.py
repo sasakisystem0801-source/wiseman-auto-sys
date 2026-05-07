@@ -42,6 +42,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ._runtime._atomic_io import atomic_replace_and_fsync_dir
 from .manifest import is_simple_semver
 
 logger = logging.getLogger(__name__)
@@ -259,8 +260,10 @@ def write_current_atomic(path: Path, current: Current) -> None:
     手順:
         1. 同ディレクトリに tempfile 作成
         2. JSON write → flush → fsync
-        3. os.replace で target を差替（同一 FS で atomic 保証）
-        4. 親ディレクトリを fsync（POSIX rename 永続化、Windows では no-op だがエラーにしない）
+        3. atomic_replace_and_fsync_dir で os.replace + 親 dir fsync を実施
+           (`_runtime/_atomic_io.py` に共通化、PR-7 review I-3 反映で docstring 同期)。
+           dir fsync は POSIX のみ意味あり、Windows では debug ログで suppress、
+           POSIX では errno 付き warning ログで ENOSPC/EIO/EROFS を可視化。
 
     親ディレクトリは事前に存在している必要がある。
     """
@@ -279,7 +282,8 @@ def write_current_atomic(path: Path, current: Current) -> None:
             f.write(payload)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp_path, path)
+        # atomic replace + 親 dir fsync を共通 helper に集約 (PR-7 タスク B)
+        atomic_replace_and_fsync_dir(tmp_path, path, parent)
         success = True
     finally:
         if not success:
@@ -287,16 +291,3 @@ def write_current_atomic(path: Path, current: Current) -> None:
                 tmp_path.unlink(missing_ok=True)
             except OSError as e:
                 logger.warning("failed to clean up tmp file: %s", type(e).__name__)
-
-    # 親ディレクトリ fsync (POSIX のみ意味あり、Windows では PermissionError 等で no-op)
-    try:
-        dir_fd = os.open(str(parent), os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(dir_fd)
-    except OSError:
-        # Windows では directory fsync 不可、無視
-        pass
-    finally:
-        os.close(dir_fd)

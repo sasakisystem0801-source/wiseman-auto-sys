@@ -370,6 +370,53 @@ def test_verify_claims_builder_missing() -> None:
         verify_statement_claims(stmt, expected_sha256=_VALID_SHA)
 
 
+# PR-7 タスク D: predicate malformed shape + uppercase digest edge -----------------
+
+
+def test_verify_claims_predicate_not_dict() -> None:
+    """statement["predicate"] が dict でない場合 ProvenanceError (PR-7 AC4)。"""
+    stmt = _good_statement()
+    stmt["predicate"] = "not a dict"
+    with pytest.raises(ProvenanceError, match="statement.predicate must be object"):
+        verify_statement_claims(stmt, expected_sha256=_VALID_SHA)
+
+
+def test_verify_claims_buildDefinition_not_dict() -> None:
+    """predicate["buildDefinition"] が dict でない場合 ProvenanceError (PR-7 AC4)。"""
+    stmt = _good_statement()
+    stmt["predicate"]["buildDefinition"] = "not a dict"
+    with pytest.raises(ProvenanceError, match="predicate.buildDefinition must be object"):
+        verify_statement_claims(stmt, expected_sha256=_VALID_SHA)
+
+
+def test_verify_claims_runDetails_not_dict() -> None:
+    """predicate["runDetails"] が dict でない場合 ProvenanceError (PR-7 AC4)。"""
+    stmt = _good_statement()
+    stmt["predicate"]["runDetails"] = "not a dict"
+    with pytest.raises(ProvenanceError, match="predicate.runDetails must be object"):
+        verify_statement_claims(stmt, expected_sha256=_VALID_SHA)
+
+
+def test_verify_claims_builder_not_dict() -> None:
+    """predicate["runDetails"]["builder"] が dict でない場合 ProvenanceError (PR-7 AC4)。"""
+    stmt = _good_statement()
+    stmt["predicate"]["runDetails"]["builder"] = "not a dict"
+    with pytest.raises(ProvenanceError, match="runDetails.builder must be object"):
+        verify_statement_claims(stmt, expected_sha256=_VALID_SHA)
+
+
+def test_verify_claims_uppercase_digest_rejected() -> None:
+    """subject.digest.sha256 が大文字混在の場合 ProvenanceError (PR-7、silent accept 防止)。
+
+    manifest の checksum_sha256 は lowercase 64 hex を強制 (manifest.py validation)。
+    provenance subject digest との照合は strict equality (PR-6a Critical fix で
+    .lower() を削除)、大文字混在 digest は manifest との不一致として拒否される。
+    """
+    stmt = _good_statement(sha256=_VALID_SHA.upper())
+    with pytest.raises(ProvenanceError, match="subject digest"):
+        verify_statement_claims(stmt, expected_sha256=_VALID_SHA)
+
+
 # verify_provenance E2E (signature stub bypass logic) --------------------------
 
 

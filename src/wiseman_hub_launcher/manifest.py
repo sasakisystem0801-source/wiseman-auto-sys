@@ -37,11 +37,34 @@ from __future__ import annotations
 import json
 import logging
 import re
-import ssl
-import urllib.error
-import urllib.request
+from typing import NotRequired, TypedDict, cast
+
+from ._supply_chain._http import https_get_bounded
 
 logger = logging.getLogger(__name__)
+
+
+class ManifestData(TypedDict):
+    """validate_manifest 通過後の manifest schema (PR-7、type narrow 用)。
+
+    必須 field は all str、任意 field は NotRequired で表現。
+    呼び出し側は `validated["checksum_sha256"]` 等で直接 str narrow され、
+    `assert isinstance(..., str)` が不要になる (PR-7 AC3)。
+    """
+
+    current_version: str
+    minimum_version: str
+    download_url: str
+    checksum_sha256: str
+    commit_sha: str
+    built_at: str
+    released_at: str
+    provenance_url: str
+    expected_repo: str
+    expected_workflow_ref: str
+    release_notes: NotRequired[str]
+    force_update: NotRequired[bool]
+
 
 # 必須 field（schema 不一致は fail-fast）
 _REQUIRED_FIELDS: tuple[str, ...] = (
@@ -150,52 +173,25 @@ def _ensure_https(url: str, *, label: str = "manifest URL") -> None:
 
 
 def fetch_manifest(manifest_url: str, *, timeout_sec: int = 30) -> bytes:
-    """HTTPS GET で manifest を fetch する（stdlib urllib.request のみ）。
+    """HTTPS GET で manifest を fetch する（PR-7 で _http.https_get_bounded に共通化）。
 
     auth は不要（release-prod bucket は public read 前提、ADR-016 §1.1）。
-    HTTP error / timeout / network / SSL error はすべて ManifestError に正規化する。
-
-    検証:
-        - 入力 URL が HTTPS（C-1）
-        - redirect 後の最終 URL も HTTPS（http への downgrade 攻撃防御）
-        - response body は MAX_MANIFEST_BYTES 以内（I-1: DoS 防御）
+    HTTPS pin / redirect downgrade 防御 / DoS cap / 6 系統例外正規化は
+    `_supply_chain._http.https_get_bounded` 側で実装。本関数は ManifestError
+    label と上限値を渡すだけの薄い wrapper。
 
     Raises:
-        ManifestError: 上記検証失敗、HTTP error、timeout、URL/SSL/socket error、200 以外、size 超過
+        ManifestError: HTTPS scheme / HTTP error / timeout / SSL / network / 200 以外 /
+            MAX_MANIFEST_BYTES 超過のいずれか
     """
     _ensure_https(manifest_url, label="manifest URL")
-    req = urllib.request.Request(manifest_url, method="GET")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout_sec) as resp:  # noqa: S310
-            # redirect 後の最終 URL も HTTPS であることを検証（C-1: redirect downgrade 防御）
-            final_url = resp.geturl()
-            if not final_url.startswith("https://"):
-                raise ManifestError("manifest URL redirected to non-HTTPS scheme")
-
-            status = getattr(resp, "status", 200)
-            if status != 200:
-                raise ManifestError(f"manifest fetch returned non-200 status: {status}")
-
-            # I-1: response 上限を超えるかを `MAX+1` まで読んで判定
-            body = resp.read(MAX_MANIFEST_BYTES + 1)
-            if len(body) > MAX_MANIFEST_BYTES:
-                raise ManifestError(
-                    f"manifest body exceeds {MAX_MANIFEST_BYTES} bytes (DoS guard)"
-                )
-            return bytes(body)
-    except urllib.error.HTTPError as e:
-        raise ManifestError(f"manifest fetch HTTP error: {e.code}") from e
-    except urllib.error.URLError as e:
-        # timeout は URLError(reason=socket.timeout(...)) として来る
-        raise ManifestError(f"manifest fetch URL error: {type(e.reason).__name__}") from e
-    except TimeoutError as e:
-        # Python 3.10+ では socket.timeout は TimeoutError の alias
-        raise ManifestError("manifest fetch timed out") from e
-    except ssl.SSLError as e:
-        raise ManifestError(f"manifest fetch SSL error: {type(e).__name__}") from e
-    except (ConnectionError, OSError) as e:
-        # ConnectionRefusedError, ConnectionResetError, BrokenPipeError 等を包括
-        raise ManifestError(f"manifest fetch network error: {type(e).__name__}") from e
+    return https_get_bounded(
+        manifest_url,
+        timeout_sec=timeout_sec,
+        max_bytes=MAX_MANIFEST_BYTES,
+        error_class=ManifestError,
+        label="manifest",
+    )
 
 
 def parse_manifest(raw: bytes) -> dict[str, object]:
@@ -263,8 +259,8 @@ def _validate_relative_path(value: str, *, field: str) -> None:
             )
 
 
-def validate_manifest(manifest: dict[str, object]) -> None:
-    """manifest schema を fail-fast で検証する (codex Sug-1 で field 拡張)。
+def validate_manifest(manifest: dict[str, object]) -> ManifestData:
+    """manifest schema を fail-fast で検証し、ManifestData として narrow 返却する (PR-7)。
 
     検証項目:
         - 必須 field が全て存在し str である
@@ -274,6 +270,11 @@ def validate_manifest(manifest: dict[str, object]) -> None:
         - built_at / released_at が ISO8601 UTC Z 形式
         - download_url / provenance_url が GCS bucket 内相対 path（path traversal 防御）
         - 任意 field: force_update が bool、release_notes が str + 長さ上限
+
+    Returns:
+        ManifestData: 全必須 field が str narrow 済の TypedDict (cast 経由)。
+            呼び出し側は ``validated["checksum_sha256"]`` 等で直接 str として
+            type narrow され、isinstance assert が不要 (PR-7 AC3)。
 
     Raises:
         ManifestError: 必須欠落、型不一致、checksum/semver/datetime/commit_sha 形式不正
@@ -285,49 +286,7 @@ def validate_manifest(manifest: dict[str, object]) -> None:
         if not isinstance(manifest[field], str):
             raise ManifestError(f"manifest field '{field}' must be string")
 
-    checksum = manifest["checksum_sha256"]
-    assert isinstance(checksum, str)  # noqa: S101 — 直前で isinstance 検証済み、mypy narrow
-    if not _is_sha256_lower_hex(checksum):
-        raise ManifestError("checksum_sha256 must be 64 lowercase hex characters")
-
-    commit_sha = manifest["commit_sha"]
-    assert isinstance(commit_sha, str)  # noqa: S101
-    if not _is_commit_sha_hex(commit_sha):
-        raise ManifestError("commit_sha must be 7-40 lowercase hex characters")
-
-    for ver_field in ("current_version", "minimum_version"):
-        ver = manifest[ver_field]
-        assert isinstance(ver, str)  # noqa: S101
-        if not is_simple_semver(ver):
-            raise ManifestError(f"{ver_field} must be semver (major.minor.patch): {ver!r}")
-
-    for ts_field in ("built_at", "released_at"):
-        ts = manifest[ts_field]
-        assert isinstance(ts, str)  # noqa: S101
-        if not _is_iso8601_utc_z(ts):
-            raise ManifestError(f"{ts_field} must be ISO8601 UTC (Z or +00:00): {ts!r}")
-
-    for url_field in ("download_url", "provenance_url"):
-        url_val = manifest[url_field]
-        assert isinstance(url_val, str)  # noqa: S101
-        _validate_relative_path(url_val, field=url_field)
-
-    # PR-6a: expected_repo / expected_workflow_ref を形式検証 (信頼根ではなく表示用)
-    repo_val = manifest["expected_repo"]
-    assert isinstance(repo_val, str)  # noqa: S101
-    if not _GITHUB_OWNER_REPO_RE.match(repo_val):
-        raise ManifestError(
-            f"expected_repo must be 'owner/repo' format: {repo_val!r}"
-        )
-
-    wf_val = manifest["expected_workflow_ref"]
-    assert isinstance(wf_val, str)  # noqa: S101
-    if not _WORKFLOW_REF_RE.match(wf_val):
-        raise ManifestError(
-            f"expected_workflow_ref format invalid: {wf_val!r}"
-        )
-
-    # 任意 field: force_update (bool), release_notes (str + 長さ)
+    # 任意 field の型検証 (cast 前に isinstance 検証で narrow 不要にする)
     if "force_update" in manifest and not isinstance(manifest["force_update"], bool):
         raise ManifestError("force_update must be bool when present")
     if "release_notes" in manifest:
@@ -338,3 +297,40 @@ def validate_manifest(manifest: dict[str, object]) -> None:
             raise ManifestError(
                 f"release_notes exceeds {MAX_RELEASE_NOTES_LEN} chars (got {len(notes)})"
             )
+
+    # ここまでで全必須 field が str、任意 field が型適合と確定 → cast で TypedDict narrow。
+    # 以後の field-specific 検証は narrow 済の validated を参照することで
+    # `assert isinstance(..., str)  # noqa: S101` 系を全廃 (AC3、PR-7 review I-5 反映で件数表記削除)
+    validated = cast(ManifestData, manifest)
+
+    if not _is_sha256_lower_hex(validated["checksum_sha256"]):
+        raise ManifestError("checksum_sha256 must be 64 lowercase hex characters")
+
+    if not _is_commit_sha_hex(validated["commit_sha"]):
+        raise ManifestError("commit_sha must be 7-40 lowercase hex characters")
+
+    for ver_field in ("current_version", "minimum_version"):
+        ver = validated[ver_field]
+        if not is_simple_semver(ver):
+            raise ManifestError(f"{ver_field} must be semver (major.minor.patch): {ver!r}")
+
+    for ts_field in ("built_at", "released_at"):
+        ts = validated[ts_field]
+        if not _is_iso8601_utc_z(ts):
+            raise ManifestError(f"{ts_field} must be ISO8601 UTC (Z or +00:00): {ts!r}")
+
+    for url_field in ("download_url", "provenance_url"):
+        _validate_relative_path(validated[url_field], field=url_field)
+
+    # PR-6a: expected_repo / expected_workflow_ref を形式検証 (信頼根ではなく表示用)
+    if not _GITHUB_OWNER_REPO_RE.match(validated["expected_repo"]):
+        raise ManifestError(
+            f"expected_repo must be 'owner/repo' format: {validated['expected_repo']!r}"
+        )
+
+    if not _WORKFLOW_REF_RE.match(validated["expected_workflow_ref"]):
+        raise ManifestError(
+            f"expected_workflow_ref format invalid: {validated['expected_workflow_ref']!r}"
+        )
+
+    return validated

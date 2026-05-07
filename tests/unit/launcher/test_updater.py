@@ -20,6 +20,7 @@ import hashlib
 import io
 import json
 import os
+import ssl
 import time
 import urllib.error
 from collections.abc import Iterator
@@ -281,7 +282,7 @@ def test_download_artifact_basic(tmp_path: Path) -> None:
     dest = tmp_path / "versions" / "1.2.3"
 
     with patch(
-        "wiseman_hub_launcher._supply_chain.download._open_https_get",
+        "wiseman_hub_launcher._supply_chain.download.open_https_get",
         return_value=_make_response(payload),
     ):
         out = download_artifact(
@@ -298,7 +299,7 @@ def test_download_artifact_creates_dest_dir(tmp_path: Path) -> None:
     assert not dest.exists()
 
     with patch(
-        "wiseman_hub_launcher._supply_chain.download._open_https_get",
+        "wiseman_hub_launcher._supply_chain.download.open_https_get",
         return_value=_make_response(payload),
     ):
         download_artifact("https://example.com/x.exe", dest, sha)
@@ -312,7 +313,7 @@ def test_download_artifact_sha256_mismatch(tmp_path: Path) -> None:
     dest = tmp_path / "versions" / "1.2.3"
 
     with patch(
-        "wiseman_hub_launcher._supply_chain.download._open_https_get",
+        "wiseman_hub_launcher._supply_chain.download.open_https_get",
         return_value=_make_response(payload),
     ), pytest.raises(ChecksumError, match="SHA-256 mismatch"):
         download_artifact("https://example.com/x.exe", dest, wrong_sha)
@@ -332,7 +333,7 @@ def test_download_artifact_size_cap_content_length(tmp_path: Path) -> None:
 
     big = str(MAX_ARTIFACT_BYTES + 1)
     with patch(
-        "wiseman_hub_launcher._supply_chain.download._open_https_get",
+        "wiseman_hub_launcher._supply_chain.download.open_https_get",
         return_value=_make_response(payload, content_length=big),
     ), pytest.raises(DownloadError, match="Content-Length"):
         download_artifact("https://example.com/x.exe", dest, sha)
@@ -360,7 +361,7 @@ def test_download_artifact_size_cap_chunked(
     # Content-Length を 0 に偽装、chunked cap で検知させる
     resp = _make_response(payload, content_length="0")
     with patch(
-        "wiseman_hub_launcher._supply_chain.download._open_https_get", return_value=resp
+        "wiseman_hub_launcher._supply_chain.download.open_https_get", return_value=resp
     ), pytest.raises(DownloadError, match="exceeds"):
         download_artifact("https://example.com/x.exe", dest, sha)
 
@@ -383,7 +384,7 @@ def test_download_artifact_network_error(tmp_path: Path) -> None:
         raise urllib.error.URLError("connection refused")
 
     with patch(
-        "wiseman_hub_launcher._supply_chain.download.urllib.request.urlopen",
+        "wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen",
         side_effect=_raise_url_error,
     ), pytest.raises(DownloadError, match="URL error"):
         download_artifact("https://example.com/x.exe", dest, "0" * 64)
@@ -401,7 +402,7 @@ def test_download_artifact_rejects_https_to_http_redirect(tmp_path: Path) -> Non
     resp.geturl = MagicMock(return_value="http://attacker.com/x.exe")
 
     with patch(
-        "wiseman_hub_launcher._supply_chain.download.urllib.request.urlopen", return_value=resp
+        "wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen", return_value=resp
     ), pytest.raises(DownloadError, match="non-HTTPS"):
         download_artifact("https://example.com/x.exe", dest, sha)
 
@@ -417,17 +418,21 @@ def test_download_artifact_accepts_https_to_https_redirect(tmp_path: Path) -> No
     resp.geturl = MagicMock(return_value="https://cdn.example.com/redirected/x.exe")
 
     with patch(
-        "wiseman_hub_launcher._supply_chain.download.urllib.request.urlopen", return_value=resp
+        "wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen", return_value=resp
     ):
         out = download_artifact("https://example.com/x.exe", dest, sha)
     assert out == dest / "wiseman_hub.exe"
     assert out.read_bytes() == payload
 
 
-def test_download_artifact_via_real_open_https_get_path(tmp_path: Path) -> None:
-    """B1 second-pass: happy path で _open_https_get (HTTPS 検証 + redirect 検証 +
-    例外正規化) を bypass せずに実呼び出し、SUCCESS path を end-to-end で検証。"""
-    payload = b"binary via real _open_https_get"
+def test_download_artifact_via_real_https_helper_path(tmp_path: Path) -> None:
+    """B1 second-pass: happy path で open_https_get (HTTPS 検証 + redirect 検証 +
+    例外正規化) を bypass せずに実呼び出し、SUCCESS path を end-to-end で検証。
+
+    PR-7 で _open_https_get (private) → _supply_chain._http.open_https_get (public helper)
+    に rename + module 移動。test 名と docstring も新名に同期 (review I-4 反映)。
+    """
+    payload = b"binary via real https helper"
     sha = _sha256_hex(payload)
     dest = tmp_path / "versions" / "1.2.3"
 
@@ -435,11 +440,11 @@ def test_download_artifact_via_real_open_https_get_path(tmp_path: Path) -> None:
     resp.geturl = MagicMock(return_value="https://example.com/x.exe")
 
     with patch(
-        "wiseman_hub_launcher._supply_chain.download.urllib.request.urlopen", return_value=resp
+        "wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen", return_value=resp
     ):
         out = download_artifact("https://example.com/x.exe", dest, sha)
     assert out.read_bytes() == payload
-    # _open_https_get が close() を呼んだことを検証 (cleanup 動作確認)
+    # open_https_get が close() を呼んだことを検証 (cleanup 動作確認)
     assert resp.close.called
 
 
@@ -677,7 +682,7 @@ def test_update_and_spawn_no_spawn_returns_success(tmp_path: Path) -> None:
     )
 
     with _bypass_provenance(), patch(
-        "wiseman_hub_launcher._supply_chain.download._open_https_get",
+        "wiseman_hub_launcher._supply_chain.download.open_https_get",
         return_value=_make_response(payload),
     ), patch(
         "wiseman_hub_launcher._runtime.spawn.subprocess.Popen"
@@ -698,6 +703,209 @@ def test_update_and_spawn_no_spawn_returns_success(tmp_path: Path) -> None:
     assert (tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe").exists()
 
 
+def test_update_and_spawn_emits_phase_log_failure_fingerprint(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """PR-7 review C-2 反映: download 失敗時に download_failed fingerprint が出る。
+
+    silent-failure-hunter Critical C-2: success path のみ phase log 出力では
+    triage で「どこで止まったか」が不明。失敗 phase でも fingerprint 必須。
+    """
+    cur_path = tmp_path / "current.json"
+    write_current_atomic(
+        cur_path, Current(version="1.0.0", released_at="x", previous_version="")
+    )
+    # checksum 不一致を発生させる payload
+    payload = b"new binary"
+    wrong_sha = "0" * 64
+
+    caplog.set_level("INFO", logger="wiseman_hub_launcher.updater")
+    with (
+        _bypass_provenance(),
+        patch(
+            "wiseman_hub_launcher._supply_chain.download.open_https_get",
+            return_value=_make_response(payload),
+        ),
+        pytest.raises(ChecksumError),
+    ):
+        update_and_spawn(
+            _good_manifest("1.2.3", wrong_sha), tmp_path, monitor_timeout_sec=0.05
+        )
+
+    phase_logs = [r.message for r in caplog.records if "launcher_phase" in r.message]
+    # download_start 後に download_failed が必ず出る
+    assert any('"phase": "download_start"' in m for m in phase_logs)
+    assert any(
+        '"phase": "download_failed"' in m and '"error_class": "ChecksumError"' in m
+        for m in phase_logs
+    ), f"missing download_failed fingerprint with ChecksumError (records: {phase_logs!r})"
+    # download_complete は出ない (失敗のため)
+    assert not any('"phase": "download_complete"' in m for m in phase_logs)
+
+
+def test_update_and_spawn_emits_phase_log_fingerprints(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """PR-7 AC5: update_and_spawn 各 phase で構造化 JSON 1 行 log が出る。
+
+    silent-failure 残対応: 失敗時に「どこで止まったか」を機械可読化。
+    expected phase: read_current / download_start / download_complete /
+    current_switched / spawn_start / spawn_complete (or rollback_start)。
+    """
+    payload = b"new binary for log fingerprint test"
+    sha = _sha256_hex(payload)
+    cur_path = tmp_path / "current.json"
+    write_current_atomic(
+        cur_path, Current(version="1.0.0", released_at="x", previous_version="")
+    )
+
+    fake_proc = MagicMock()
+    import subprocess  # noqa: PLC0415
+
+    fake_proc.wait.side_effect = subprocess.TimeoutExpired(cmd="x", timeout=0.05)
+
+    caplog.set_level("INFO", logger="wiseman_hub_launcher.updater")
+    with _bypass_provenance(), patch(
+        "wiseman_hub_launcher._supply_chain.download.open_https_get",
+        return_value=_make_response(payload),
+    ), patch(
+        "wiseman_hub_launcher._runtime.spawn.subprocess.Popen", return_value=fake_proc
+    ):
+        update_and_spawn(
+            _good_manifest("1.2.3", sha), tmp_path, monitor_timeout_sec=0.05
+        )
+
+    phase_logs = [r.message for r in caplog.records if "launcher_phase" in r.message]
+    expected_phases = (
+        "read_current",
+        "download_start",
+        "download_complete",
+        "current_switched",
+        "spawn_start",
+        "spawn_complete",
+    )
+    for expected in expected_phases:
+        # JSON 1 行に phase=<name> を含む
+        assert any(
+            f'"phase": "{expected}"' in m for m in phase_logs
+        ), f"missing phase log: {expected} (records: {phase_logs!r})"
+    # version も log に乗ること (triage 用)
+    assert any('"new_version": "1.2.3"' in m for m in phase_logs)
+
+
+@pytest.mark.parametrize(
+    ("urlopen_side_effect", "expected_substr"),
+    [
+        # PR-7 review C-3 反映: tautology から実装の例外マッピング検証へ。
+        # _supply_chain/_http.py:50-72 の 6 系統 except が DownloadError 文字列に
+        # 「kind を区別する固有 prefix」を載せていることを実 raise で検証。
+        # 1. HTTPError → "fetch HTTP error: <code>"
+        (
+            urllib.error.HTTPError(
+                url="https://x", code=503, msg="Service Unavailable", hdrs=None, fp=None  # type: ignore[arg-type]
+            ),
+            "fetch HTTP error: 503",
+        ),
+        # 2. URLError(ConnectionRefusedError) → "fetch URL error: <reason class>"
+        (
+            urllib.error.URLError(reason=ConnectionRefusedError("conn refused")),
+            "fetch URL error: ConnectionRefusedError",
+        ),
+        # 3. TimeoutError → "fetch timed out"
+        (TimeoutError("timed out"), "fetch timed out"),
+        # 4. SSLError → "fetch SSL error: <type name>"
+        (ssl.SSLError("CERTIFICATE_VERIFY_FAILED"), "fetch SSL error: SSLError"),
+        # 5. ConnectionError → "fetch network error: <type name>"
+        (
+            ConnectionResetError("conn reset"),
+            "fetch network error: ConnectionResetError",
+        ),
+    ],
+)
+def test_download_error_message_categorized_by_actual_exception(
+    tmp_path: Path,
+    urlopen_side_effect: BaseException,
+    expected_substr: str,
+) -> None:
+    """PR-7 AC6 + review C-3 反映: DownloadError message で網羅的に kind 区別可能。
+
+    実際に urlopen が各種例外を raise したときに、_supply_chain/_http.py の
+    open_https_get() を経由して DownloadError として正規化され、message text に
+    triage 用の固有 prefix が乗ることを検証。前バージョンは DownloadError(s)
+    round-trip だけ検証する tautology だったので、本 PR で実装挙動検証に変更。
+    """
+    with patch(
+        "wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen",
+        side_effect=urlopen_side_effect,
+    ), pytest.raises(DownloadError) as exc_info:
+        download_artifact("https://example.invalid/x.exe", tmp_path, "0" * 64, timeout_sec=1)
+
+    assert expected_substr in str(exc_info.value)
+
+
+def test_download_error_size_cap_message_categorized(tmp_path: Path) -> None:
+    """PR-7 AC6: artifact body size cap 超過時の message に 'exceeds' prefix。"""
+    # 1 MiB chunked stream で MAX_ARTIFACT_BYTES (300 MiB) を超えるシナリオは
+    # test 時間がかかるので、Content-Length header で先制 reject される経路を検証。
+    resp = MagicMock()
+    resp.read = MagicMock(return_value=b"")
+    resp.headers = {"Content-Length": str(MAX_ARTIFACT_BYTES + 1)}
+    resp.close = MagicMock()
+    resp.geturl = MagicMock(return_value="https://example.invalid/x.exe")
+
+    with patch(
+        "wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen",
+        return_value=resp,
+    ), pytest.raises(DownloadError, match="exceeds"):
+        download_artifact("https://example.invalid/x.exe", tmp_path, "0" * 64, timeout_sec=1)
+
+
+def test_update_and_spawn_invokes_verify_provenance(tmp_path: Path) -> None:
+    """PR-7 AC4: update_and_spawn が verify_provenance を実際に呼ぶことを確認 (integration)。
+
+    既存 test は _bypass_provenance で 3 関数を patch するだけで、updater が
+    本当に verify_provenance を呼んでいるか保証していなかった。本 test は
+    download/canonical URL は bypass、verify_provenance のみ spy で呼出回数 + 引数を検証。
+    """
+    payload = b"new binary for integration test"
+    sha = _sha256_hex(payload)
+    cur_path = tmp_path / "current.json"
+    write_current_atomic(
+        cur_path, Current(version="1.0.0", released_at="x", previous_version="")
+    )
+
+    fake_proc = MagicMock()
+    import subprocess  # noqa: PLC0415
+
+    fake_proc.wait.side_effect = subprocess.TimeoutExpired(cmd="x", timeout=0.05)
+
+    with patch(
+        "wiseman_hub_launcher.updater.verify_provenance"
+    ) as mock_verify, patch(
+        "wiseman_hub_launcher.updater.download_provenance"
+    ), patch(
+        "wiseman_hub_launcher.updater.validate_canonical_provenance_url"
+    ), patch(
+        "wiseman_hub_launcher._supply_chain.download.open_https_get",
+        return_value=_make_response(payload),
+    ), patch(
+        "wiseman_hub_launcher._runtime.spawn.subprocess.Popen", return_value=fake_proc
+    ):
+        update_and_spawn(
+            _good_manifest("1.2.3", sha),
+            tmp_path,
+            monitor_timeout_sec=0.05,
+            allow_unsigned_provenance=False,
+        )
+
+    # AC4: update_and_spawn から verify_provenance が確かに呼ばれた
+    assert mock_verify.call_count == 1
+    # 呼出引数: artifact_path / provenance_path / expected_sha256 / allow_unsigned
+    call = mock_verify.call_args
+    assert call.kwargs.get("expected_sha256") == sha
+    assert call.kwargs.get("allow_unsigned") is False
+
+
 def test_update_and_spawn_full_flow_success(tmp_path: Path) -> None:
     """AC-1: download → switch → spawn 30s 経過 → SUCCESS。"""
     payload = b"new binary"
@@ -713,7 +921,7 @@ def test_update_and_spawn_full_flow_success(tmp_path: Path) -> None:
     fake_proc.wait.side_effect = subprocess.TimeoutExpired(cmd="x", timeout=0.05)
 
     with _bypass_provenance(), patch(
-        "wiseman_hub_launcher._supply_chain.download._open_https_get",
+        "wiseman_hub_launcher._supply_chain.download.open_https_get",
         return_value=_make_response(payload),
     ), patch(
         "wiseman_hub_launcher._runtime.spawn.subprocess.Popen", return_value=fake_proc
@@ -738,7 +946,7 @@ def test_update_and_spawn_checksum_mismatch_no_switch(tmp_path: Path) -> None:
     )
 
     with _bypass_provenance(), patch(
-        "wiseman_hub_launcher._supply_chain.download._open_https_get",
+        "wiseman_hub_launcher._supply_chain.download.open_https_get",
         return_value=_make_response(payload),
     ), pytest.raises(ChecksumError):
         update_and_spawn(
@@ -773,7 +981,7 @@ def test_update_and_spawn_crash_then_rollback_success(tmp_path: Path) -> None:
 
     popen_calls = [fake_proc_crash, fake_proc_rollback]
     with _bypass_provenance(), patch(
-        "wiseman_hub_launcher._supply_chain.download._open_https_get",
+        "wiseman_hub_launcher._supply_chain.download.open_https_get",
         return_value=_make_response(payload),
     ), patch(
         "wiseman_hub_launcher._runtime.spawn.subprocess.Popen",
@@ -807,7 +1015,7 @@ def test_update_and_spawn_crash_then_rollback_also_crashes(tmp_path: Path) -> No
     popen_calls = [fake_new, fake_old]
 
     with _bypass_provenance(), patch(
-        "wiseman_hub_launcher._supply_chain.download._open_https_get",
+        "wiseman_hub_launcher._supply_chain.download.open_https_get",
         return_value=_make_response(payload),
     ), patch(
         "wiseman_hub_launcher._runtime.spawn.subprocess.Popen",
@@ -836,7 +1044,7 @@ def test_update_and_spawn_crash_with_no_previous_raises_preflight(
     fake_new.wait.return_value = 1  # 新版 crash
 
     with _bypass_provenance(), patch(
-        "wiseman_hub_launcher._supply_chain.download._open_https_get",
+        "wiseman_hub_launcher._supply_chain.download.open_https_get",
         return_value=_make_response(payload),
     ), patch(
         "wiseman_hub_launcher._runtime.spawn.subprocess.Popen", return_value=fake_new
