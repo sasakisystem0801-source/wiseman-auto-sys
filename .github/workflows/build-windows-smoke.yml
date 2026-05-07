@@ -1,7 +1,10 @@
 name: Build Windows Smoke
 
-# PyInstaller で wiseman_hub.exe を Windows runner でビルドし、
-# `--smoke-test` 引数で hidden imports / DLL 解決を検証する（Issue #80）。
+# PyInstaller で wiseman_hub.exe / wiseman_launcher.exe を Windows runner でビルドし、
+# 各 spec の hidden imports / DLL 解決を smoke 検証する。
+#   - wiseman_hub.exe: --smoke-test 引数 (Issue #80)
+#   - wiseman_launcher.exe: --version 引数 (Issue #217、PR-6 後半で
+#     sigstore + tuf + cryptography 推移依存を hidden imports に追加)
 #
 # 既存の test-windows-integration.yml は WinForms mock + pytest 用で責務が異なる。
 # 本ワークフローはビルド検証 + smoke 専用に分離している。
@@ -103,5 +106,80 @@ jobs:
         with:
           name: wiseman_hub-exe-${{ github.sha }}
           path: dist/wiseman_hub.exe
+          retention-days: 7
+          if-no-files-found: error
+
+      # ----- wiseman_launcher.exe build + smoke (Issue #217) -----
+      # PR-6 後半で sigstore-python + tuf + cryptography を hidden imports に追加した
+      # ため、launcher.spec の build を tag push (release.yml) 待ちにすると、minor
+      # upgrade で推移依存が増えても release 直前まで気づけない。日常 PR / main push
+      # で常時 build + smoke を回し、bundle 解決失敗を早期検出する。
+      #
+      # PyInstaller --clean は build/ のみ消すので dist\wiseman_hub.exe は保持される。
+      - name: Build wiseman_launcher.exe (PyInstaller)
+        run: uv run pyinstaller wiseman_launcher.spec --clean --noconfirm
+
+      - name: Verify launcher exe exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist\wiseman_launcher.exe")) {
+            Write-Host "===== dist\ contents ====="
+            Get-ChildItem dist\ -ErrorAction Continue | Format-Table
+            Write-Host "===== PyInstaller warn-files (launcher) ====="
+            Get-ChildItem build\wiseman_launcher\warn-*.txt -ErrorAction Continue | ForEach-Object {
+              Write-Host "--- $($_.FullName) ---"
+              Get-Content $_.FullName
+            }
+            Write-Error "dist\wiseman_launcher.exe was not produced by PyInstaller"
+            exit 1
+          }
+          $size = (Get-Item "dist\wiseman_launcher.exe").Length
+          Write-Host "wiseman_launcher.exe size: $size bytes"
+
+      # `--version` は argparse の action="version" で stdout に "wiseman_launcher X.Y.Z"
+      # を書いて exit 0。これで __main__ → _supply_chain → sigstore.py の import チェーン
+      # が全開通し、PyInstaller bundle が sigstore-python + tuf + cryptography 推移依存を
+      # 解決できていることが検証される。
+      - name: Run launcher smoke test (--version, hidden imports / sigstore bundle)
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath "dist\wiseman_launcher.exe" `
+            -ArgumentList "--version" `
+            -NoNewWindow `
+            -Wait `
+            -PassThru `
+            -RedirectStandardOutput "launcher-stdout.log" `
+            -RedirectStandardError "launcher-stderr.log"
+
+          Write-Host "===== launcher process state ====="
+          Write-Host "ExitCode: $($process.ExitCode)"
+          Write-Host "HasExited: $($process.HasExited)"
+
+          Write-Host "===== launcher stdout ====="
+          if (Test-Path "launcher-stdout.log") {
+            Get-Content "launcher-stdout.log"
+          } else {
+            Write-Warning "launcher-stdout.log was not created (exe likely failed to launch)"
+          }
+
+          Write-Host "===== launcher stderr ====="
+          if (Test-Path "launcher-stderr.log") {
+            Get-Content "launcher-stderr.log"
+          } else {
+            Write-Warning "launcher-stderr.log was not created (exe likely failed to launch)"
+          }
+
+          if ($process.ExitCode -ne 0) {
+            Write-Error "launcher smoke test failed with exit code $($process.ExitCode)"
+            exit $process.ExitCode
+          }
+          Write-Host "launcher smoke test passed (exit 0)"
+
+      - name: Upload launcher exe artifact (success only)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wiseman_launcher-exe-${{ github.sha }}
+          path: dist/wiseman_launcher.exe
           retention-days: 7
           if-no-files-found: error
