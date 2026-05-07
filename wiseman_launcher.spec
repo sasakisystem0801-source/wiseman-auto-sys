@@ -32,6 +32,27 @@ ROOT = Path(SPECPATH)  # noqa: F821 — SPECPATH は PyInstaller が spec 実行
 block_cipher = None
 
 
+# PR-6 後半: sigstore-python と TUF の hidden imports を明示。
+# PyInstaller の static analysis では `__import__` 経由の動的 import が拾えない。
+# `--collect-all` で全 submodule を含める方が安全だが、明示 hiddenimports + excludes
+# 削除で十分動作することを smoke build で確認した上で採用する。
+_SIGSTORE_HIDDEN = [
+    "sigstore",
+    "sigstore.models",
+    "sigstore.verify",
+    "sigstore.verify.policy",
+    "sigstore.verify.verifier",
+    "sigstore.oidc",
+    "sigstore_protobuf_specs",
+    "sigstore_rekor_types",
+    "tuf",
+    "tuf.ngclient",
+    "securesystemslib",
+    "cryptography",
+    "cryptography.hazmat",
+    "cryptography.x509",
+]
+
 a = Analysis(
     [str(ROOT / "src" / "wiseman_hub_launcher" / "__main__.py")],
     pathex=[str(ROOT / "src")],
@@ -42,6 +63,8 @@ a = Analysis(
         # 抜けるケースが報告されているため明示する（最小限の補強）。
         "urllib.request",
         "urllib.error",
+        # PR-6 後半: sigstore-python 統合 (ADR-016 §1.1.3 stdlib only 例外)
+        *_SIGSTORE_HIDDEN,
     ],
     hookspath=[],
     hooksconfig={},
@@ -51,13 +74,15 @@ a = Analysis(
         "pytest",
         "mypy",
         "ruff",
-        # ★重量依存の混入防止: stdlib only を逸脱したら build を fail させる目的で
-        # excludes に挙げる（ADR-016 PR-3 の AC #7 を bundle レベルでも担保）
+        # ★重量依存の混入防止: stdlib only + sigstore 例外 (§1.1.3) を逸脱したら build を fail
+        # させる目的で excludes に挙げる（ADR-016 PR-3 の AC #7 を bundle レベルでも担保）。
+        # PR-6 後半で sigstore + 推移依存 (cryptography / requests / tuf 等) が許可された
+        # ため、これらを excludes から **除外** する (= sigstore に必要な dep は通す)。
         "google",
         "google.cloud",
         "google.auth",
         "google.oauth2",
-        "requests",
+        # "requests" は sigstore-python 推移依存のため excludes から削除 (PR-6 後半)
         "tomlkit",
         "tomli",
         "pywinauto",

@@ -218,18 +218,30 @@ def _good_manifest_dict(version: str = "1.2.3") -> dict[str, object]:
     return json.loads(_good_manifest_bytes(version).decode("utf-8"))
 
 
-def test_main_update_without_test_bypass_reaches_provenance_stub(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """PR-6a C-2: --allow-test-unsigned-provenance flag なし + env var なしの状態で
-    --update を実行すると、provenance verify が default で実施され signature stub に
-    到達して EXIT_PROVENANCE (9)。EXIT_CONFIG (PR-4) ではない (CONFIG fail-closed は除去)。
+def test_main_update_unknown_flag_rejected(tmp_path: Path) -> None:
+    """PR-6 後半: --allow-test-unsigned-provenance flag は完全削除済 → argparse SystemExit(2)。
 
-    本番 PC では環境変数なしのため、CLI flag が無い限り stub bypass されない。
+    本番配布時に誤って flag を渡されても本格 fail-closed (AC5)。
     """
-    # env var を必ず unset (test fixture leak 防止)
-    monkeypatch.delenv("WISEMAN_ALLOW_UNSIGNED_PROVENANCE_FOR_TESTS", raising=False)
+    with pytest.raises(SystemExit) as excinfo:
+        main(
+            [
+                "--update",
+                "--allow-test-unsigned-provenance",  # PR-6 後半で削除済 flag
+                "--manifest-url",
+                "https://example.com/manifest.json",
+                "--home",
+                str(tmp_path),
+            ]
+        )
+    assert excinfo.value.code == 2
 
+
+def test_main_update_provenance_failure_returns_9(tmp_path: Path) -> None:
+    """PR-6 後半: signature 検証失敗 → ProvenanceError → EXIT_PROVENANCE (9)。
+
+    update_and_spawn 内 verify_provenance が ProvenanceError raise する状況を模擬。
+    """
     cur_path = tmp_path / "current.json"
     cur_path.write_text(
         json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
@@ -238,15 +250,17 @@ def test_main_update_without_test_bypass_reaches_provenance_stub(
     binary.parent.mkdir(parents=True)
     binary.write_bytes(b"existing")
 
-    # canonical URL 検証 + download_provenance を mock 化、verify_provenance のみ通常呼出
+    from wiseman_hub_launcher._supply_chain import ProvenanceError  # noqa: PLC0415
+
     with (
         patch.object(
             launcher_main, "fetch_manifest",
             return_value=_good_manifest_bytes("2.0.0"),
         ),
-        patch("wiseman_hub_launcher.updater.download_artifact", return_value=binary),
-        patch("wiseman_hub_launcher.updater.download_provenance", return_value=binary),
-        patch("wiseman_hub_launcher.updater.validate_canonical_provenance_url"),
+        patch.object(
+            launcher_main, "update_and_spawn",
+            side_effect=ProvenanceError("signature verify failed: cert chain broken"),
+        ),
     ):
         code = main(
             [
@@ -259,60 +273,11 @@ def test_main_update_without_test_bypass_reaches_provenance_stub(
                 "0.05",
             ]
         )
-    # flag なし + env なしで verify_provenance が provenance file の parse 実行 →
-    # parse 失敗 (binary を渡したので) または signature stub 到達 → EXIT_PROVENANCE
-    # I1 (pr-test-analyzer Important): tautology 修正、`==` で strict 比較
     assert code == EXIT_PROVENANCE
 
 
-# PR-6a NEW: 二重 gate (CLI flag + env var AND) -----------------------------------
-
-
-def test_main_update_test_bypass_requires_env_var(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """C-2 二重 gate: --allow-test-unsigned-provenance だけ + env var なしで実行すると、
-    signature stub 経路で EXIT_PROVENANCE。env var ありなら bypass で進行。
-    本番 PC では env が設定されないので CLI flag を渡されても fail-close する。
-    """
-    monkeypatch.delenv("WISEMAN_ALLOW_UNSIGNED_PROVENANCE_FOR_TESTS", raising=False)
-
-    cur_path = tmp_path / "current.json"
-    cur_path.write_text(
-        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
-    )
-    binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
-    binary.parent.mkdir(parents=True)
-    binary.write_bytes(b"existing")
-
-    with (
-        patch.object(
-            launcher_main, "fetch_manifest",
-            return_value=_good_manifest_bytes("2.0.0"),
-        ),
-        patch("wiseman_hub_launcher.updater.download_artifact", return_value=binary),
-        patch("wiseman_hub_launcher.updater.download_provenance", return_value=binary),
-        patch("wiseman_hub_launcher.updater.validate_canonical_provenance_url"),
-    ):
-        code = main(
-            [
-                "--update",
-                "--allow-test-unsigned-provenance",
-                "--manifest-url",
-                "https://example.com/manifest.json",
-                "--home",
-                str(tmp_path),
-                "--monitor-timeout",
-                "0.05",
-            ]
-        )
-    # CLI flag だけでは bypass されず、provenance verify が parse でも stub でも
-    # ProvenanceError 系で fail → EXIT_PROVENANCE
-    assert code == EXIT_PROVENANCE
-
-
-def test_main_update_with_allow_insecure_proceeds(tmp_path: Path) -> None:
-    """PR-4: --allow-test-unsigned-provenance で gate bypass、update 実行。"""
+def test_main_update_signature_verify_pass_proceeds(tmp_path: Path) -> None:
+    """PR-6 後半: signature 検証 pass → update 実行 (bypass 経路なし)。"""
     cur_path = tmp_path / "current.json"
     cur_path.write_text(
         json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
@@ -337,7 +302,6 @@ def test_main_update_with_allow_insecure_proceeds(tmp_path: Path) -> None:
         code = main(
             [
                 "--update",
-                "--allow-test-unsigned-provenance",
                 "--manifest-url",
                 "https://example.com/manifest.json",
                 "--home",
@@ -375,7 +339,6 @@ def test_main_update_no_spawn_returns_ok(tmp_path: Path) -> None:
             [
                 "--update",
                 "--no-spawn",
-                "--allow-test-unsigned-provenance",
                 "--manifest-url",
                 "https://example.com/manifest.json",
                 "--home",
@@ -397,7 +360,6 @@ def test_main_dry_run_and_update_mutex(tmp_path: Path) -> None:
         [
             "--dry-run",
             "--update",
-            "--allow-test-unsigned-provenance",
             "--home",
             str(tmp_path),
         ]
@@ -410,7 +372,6 @@ def test_main_update_rejects_non_https(tmp_path: Path) -> None:
     code = main(
         [
             "--update",
-            "--allow-test-unsigned-provenance",
             "--manifest-url",
             "http://example.com/manifest.json",
             "--home",
@@ -435,7 +396,6 @@ def test_main_update_lock_held_returns_8(tmp_path: Path) -> None:
         code = main(
             [
                 "--update",
-                "--allow-test-unsigned-provenance",
                 "--manifest-url",
                 "https://example.com/manifest.json",
                 "--home",
@@ -465,7 +425,6 @@ def test_main_update_preflight_failure_returns_6(tmp_path: Path) -> None:
         code = main(
             [
                 "--update",
-                "--allow-test-unsigned-provenance",
                 "--manifest-url",
                 "https://example.com/manifest.json",
                 "--home",
@@ -500,7 +459,6 @@ def test_main_update_checksum_mismatch_returns_5(tmp_path: Path) -> None:
         code = main(
             [
                 "--update",
-                "--allow-test-unsigned-provenance",
                 "--manifest-url",
                 "https://example.com/manifest.json",
                 "--home",
@@ -535,7 +493,6 @@ def test_main_update_download_error_returns_3(tmp_path: Path) -> None:
         code = main(
             [
                 "--update",
-                "--allow-test-unsigned-provenance",
                 "--manifest-url",
                 "https://example.com/manifest.json",
                 "--home",
@@ -570,7 +527,6 @@ def test_main_update_spawn_no_rollback_returns_7(tmp_path: Path) -> None:
         code = main(
             [
                 "--update",
-                "--allow-test-unsigned-provenance",
                 "--manifest-url",
                 "https://example.com/manifest.json",
                 "--home",
@@ -605,7 +561,6 @@ def test_main_update_internal_preflight_during_update_returns_6(tmp_path: Path) 
         code = main(
             [
                 "--update",
-                "--allow-test-unsigned-provenance",
                 "--manifest-url",
                 "https://example.com/manifest.json",
                 "--home",
@@ -643,7 +598,6 @@ def test_main_update_spawn_crash_only_no_rollback_returns_7(tmp_path: Path) -> N
         code = main(
             [
                 "--update",
-                "--allow-test-unsigned-provenance",
                 "--manifest-url",
                 "https://example.com/manifest.json",
                 "--home",
@@ -660,7 +614,6 @@ def test_main_update_negative_monitor_timeout_rejected(tmp_path: Path) -> None:
         main(
             [
                 "--update",
-                "--allow-test-unsigned-provenance",
                 "--monitor-timeout",
                 "0",
                 "--home",
@@ -673,7 +626,6 @@ def test_main_update_negative_monitor_timeout_rejected(tmp_path: Path) -> None:
         main(
             [
                 "--update",
-                "--allow-test-unsigned-provenance",
                 "--monitor-timeout",
                 "-1.5",
                 "--home",
@@ -704,7 +656,6 @@ def test_main_update_current_read_error_returns_6(
         code = main(
             [
                 "--update",
-                "--allow-test-unsigned-provenance",
                 "--manifest-url",
                 "https://example.com/manifest.json",
                 "--home",
@@ -739,7 +690,6 @@ def test_main_update_unexpected_error_returns_4(tmp_path: Path) -> None:
         code = main(
             [
                 "--update",
-                "--allow-test-unsigned-provenance",
                 "--manifest-url",
                 "https://example.com/manifest.json",
                 "--home",
@@ -777,7 +727,6 @@ def test_main_update_download_error_leaves_current_unchanged(
         code = main(
             [
                 "--update",
-                "--allow-test-unsigned-provenance",
                 "--manifest-url",
                 "https://example.com/manifest.json",
                 "--home",
@@ -814,7 +763,6 @@ def test_main_update_ok_early_exit_returns_0(tmp_path: Path) -> None:
         code = main(
             [
                 "--update",
-                "--allow-test-unsigned-provenance",
                 "--manifest-url",
                 "https://example.com/manifest.json",
                 "--home",

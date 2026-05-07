@@ -1,0 +1,203 @@
+name: Release
+
+# tag push (^v[0-9]+\.[0-9]+\.[0-9]+$ 厳密形式) で発火、業務責任者 PC への配布パイプライン。
+# - PyInstaller build (windows-latest)
+# - sha256 + cyclonedx SBOM
+# - actions/attest-build-provenance@v2 で provenance.sigstore.json 生成 (Sigstore Bundle v0.3)
+# - WIF 経由で gs://wiseman-hub-release-prod/versions/X.Y.Z/ に upload
+# - manifest.json atomic 生成 + upload
+#
+# セキュリティ方針:
+#   - long-lived JSON SA key 不使用、OIDC token は GitHub が管理
+#   - tag のみ発火、PR / push branches では発火しない (ADR-016 §3)
+#   - rc/canary tag は本 workflow で拒否、別 workflow に分離 (Phase 6 で再評価)
+#   - workflow_dispatch で dry_run mode (no GCS upload, no attest, no manifest) を提供
+#   - 全ての untrusted な context expression (${{ }}) は env: 経由で受け、
+#     shell script 内では env var として参照する (script injection 防御)
+#
+# 関連 ADR-016:
+#   §1.1 release-prod public read 前提
+#   §1.1.3 sigstore-python 例外
+#   §3 manifest schema
+#   §4 Phase 7 hard dependency 全達成
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run mode (no GCS upload, no attest, no manifest)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write       # OIDC token for WIF (google-github-actions/auth + sigstore attest)
+  attestations: write   # actions/attest-build-provenance@v2
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.tag_check.outputs.version }}
+      do_upload: ${{ steps.tag_check.outputs.do_upload }}
+
+    steps:
+      - name: Verify stable tag (rc/canary 拒否)
+        id: tag_check
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          DISPATCH_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            tag="$REF_NAME"
+            if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Tag $tag is not stable (^v[0-9]+\.[0-9]+\.[0-9]+$ 必須). rc/canary は別 workflow で扱う"
+              exit 1
+            fi
+            echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+            echo "do_upload=true" >> "$GITHUB_OUTPUT"
+          else
+            # workflow_dispatch
+            echo "version=0.0.0-dryrun" >> "$GITHUB_OUTPUT"
+            if [[ "$DISPATCH_DRY_RUN" == "true" ]]; then
+              echo "do_upload=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "do_upload=true" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies (frozen lock)
+        run: uv sync --extra dev --frozen
+
+      - name: Build wiseman_hub.exe (PyInstaller)
+        run: uv run pyinstaller wiseman_hub.spec --clean --noconfirm
+
+      - name: Verify exe exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist\wiseman_hub.exe")) {
+            Write-Host "===== dist\ contents ====="
+            Get-ChildItem dist\ -ErrorAction Continue | Format-Table
+            Write-Error "dist\wiseman_hub.exe was not produced"
+            exit 1
+          }
+          $size = (Get-Item "dist\wiseman_hub.exe").Length
+          Write-Host "wiseman_hub.exe size: $size bytes"
+
+      - name: Generate exe sha256
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash -Path "dist\wiseman_hub.exe" -Algorithm SHA256).Hash.ToLower()
+          [System.IO.File]::WriteAllText("dist\wiseman_hub.exe.sha256", $hash)
+          Write-Host "exe sha256: $hash"
+
+      - name: Generate SBOM (CycloneDX)
+        run: uv run cyclonedx-py environment --output-file dist/sbom.json
+
+      - name: Generate SBOM sha256
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash -Path "dist\sbom.json" -Algorithm SHA256).Hash.ToLower()
+          [System.IO.File]::WriteAllText("dist\sbom.json.sha256", $hash)
+          Write-Host "sbom sha256: $hash"
+
+      - name: Generate build provenance attestation (Sigstore Bundle v0.3)
+        if: steps.tag_check.outputs.do_upload == 'true'
+        id: attest
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'dist/wiseman_hub.exe'
+
+      - name: Copy attestation bundle to dist/
+        if: steps.attest.outcome == 'success'
+        shell: pwsh
+        env:
+          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          Copy-Item "$env:BUNDLE_PATH" "dist\wiseman_hub.exe.sigstore.json"
+          Get-Item "dist\wiseman_hub.exe.sigstore.json" | Format-List Name, Length
+
+      - name: Authenticate to GCP (Workload Identity Federation)
+        if: steps.tag_check.outputs.do_upload == 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_RELEASE_SA }}
+
+      - name: Set up gcloud CLI
+        if: steps.tag_check.outputs.do_upload == 'true'
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Upload artifacts to GCS (versions/X.Y.Z/)
+        if: steps.tag_check.outputs.do_upload == 'true'
+        shell: pwsh
+        env:
+          BUCKET: ${{ vars.GCP_RELEASE_BUCKET }}
+          VERSION: ${{ steps.tag_check.outputs.version }}
+        run: |
+          $base = "gs://$env:BUCKET/versions/$env:VERSION"
+          gcloud storage cp dist/wiseman_hub.exe "$base/wiseman_hub.exe"
+          gcloud storage cp dist/wiseman_hub.exe.sha256 "$base/wiseman_hub.exe.sha256"
+          gcloud storage cp dist/sbom.json "$base/sbom.json"
+          gcloud storage cp dist/sbom.json.sha256 "$base/sbom.json.sha256"
+          gcloud storage cp dist/wiseman_hub.exe.sigstore.json "$base/wiseman_hub.exe.sigstore.json"
+
+      - name: Generate manifest.json (only on tag push, not dry_run)
+        if: github.event_name == 'push'
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.tag_check.outputs.version }}
+          COMMIT_SHA: ${{ github.sha }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          uv run python scripts/release/generate_manifest.py `
+            --version "$env:VERSION" `
+            --commit-sha "$env:COMMIT_SHA" `
+            --tag "$env:REF_NAME" `
+            --output dist/manifest.json
+          Get-Content dist/manifest.json
+
+      - name: Upload manifest.json to GCS root
+        if: github.event_name == 'push'
+        shell: pwsh
+        env:
+          BUCKET: ${{ vars.GCP_RELEASE_BUCKET }}
+        run: gcloud storage cp dist/manifest.json "gs://$env:BUCKET/manifest.json" --cache-control="no-cache, max-age=0"
+
+      - name: Upload artifacts to GitHub (always, for triage)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ github.ref_name }}-${{ github.sha }}
+          path: |
+            dist/wiseman_hub.exe
+            dist/wiseman_hub.exe.sha256
+            dist/sbom.json
+            dist/sbom.json.sha256
+            dist/wiseman_hub.exe.sigstore.json
+            dist/manifest.json
+          retention-days: 14
+          if-no-files-found: warn

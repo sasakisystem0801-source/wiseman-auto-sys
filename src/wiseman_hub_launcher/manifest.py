@@ -297,6 +297,16 @@ def validate_manifest(manifest: dict[str, object]) -> ManifestData:
             raise ManifestError(
                 f"release_notes exceeds {MAX_RELEASE_NOTES_LEN} chars (got {len(notes)})"
             )
+    # PR-6 後半 (codex Suggestion S1): SBOM 改竄検出のため manifest に含める。
+    # 本 PR で field 追加のみ、launcher 側の SBOM download / 検証は後続 PR で実装。
+    if "sbom_url" in manifest and not isinstance(manifest["sbom_url"], str):
+        raise ManifestError("sbom_url must be string when present")
+    if "sbom_sha256" in manifest:
+        sbom_sha = manifest["sbom_sha256"]
+        if not isinstance(sbom_sha, str):
+            raise ManifestError("sbom_sha256 must be string when present")
+        if not _is_sha256_lower_hex(sbom_sha):
+            raise ManifestError("sbom_sha256 must be 64 lowercase hex characters")
 
     # ここまでで全必須 field が str、任意 field が型適合と確定 → cast で TypedDict narrow。
     # 以後の field-specific 検証は narrow 済の validated を参照することで

@@ -15,7 +15,6 @@ from wiseman_hub_launcher._supply_chain.policy import (
     RELEASE_BUCKET_BASE,
     derive_canonical_provenance_url,
     is_production_build,
-    is_test_bypass_authorized,
     validate_canonical_provenance_url,
 )
 
@@ -98,33 +97,6 @@ def test_validate_canonical_rejects_arbitrary_path_in_bucket() -> None:
     bad = RELEASE_BUCKET_BASE + "evil/anywhere.sigstore.json"
     with pytest.raises(ValueError, match="does not match canonical"):
         validate_canonical_provenance_url(bad, art)
-
-
-# is_test_bypass_authorized (C-2 二重 gate の env var 評価) -----------------------
-
-
-def test_is_test_bypass_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    """env var 未設定 → False (本番 PC の default 状態)。"""
-    monkeypatch.delenv("WISEMAN_ALLOW_UNSIGNED_PROVENANCE_FOR_TESTS", raising=False)
-    assert is_test_bypass_authorized() is False
-
-
-def test_is_test_bypass_value_one(monkeypatch: pytest.MonkeyPatch) -> None:
-    """env var=1 → True (test/dev 環境のみ)。"""
-    monkeypatch.setenv("WISEMAN_ALLOW_UNSIGNED_PROVENANCE_FOR_TESTS", "1")
-    assert is_test_bypass_authorized() is True
-
-
-@pytest.mark.parametrize(
-    "value",
-    ["true", "yes", "0", "TRUE", " 1", "1 ", "", "false"],
-)
-def test_is_test_bypass_other_values(
-    monkeypatch: pytest.MonkeyPatch, value: str
-) -> None:
-    """env var=1 以外の値 → False (誤設定で本番 PC が緩むのを防止)。"""
-    monkeypatch.setenv("WISEMAN_ALLOW_UNSIGNED_PROVENANCE_FOR_TESTS", value)
-    assert is_test_bypass_authorized() is False
 
 
 # is_production_build ---------------------------------------------------------
