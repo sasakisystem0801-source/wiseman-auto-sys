@@ -15,6 +15,7 @@ from wiseman_hub_launcher.manifest import (
     ManifestPathTraversalError,
     Sha256Hex,
     fetch_manifest,
+    make_sha256hex,
     parse_manifest,
     validate_manifest,
 )
@@ -113,6 +114,67 @@ def test_validate_manifest_narrows_sbom_sha256_to_sha256hex_when_present() -> No
     assert sbom_sha == "c" * 64
     # mypy: sbom_sha は Sha256Hex | None として narrow (assert で None を弾いた後 Sha256Hex)
     assert_type(sbom_sha, Sha256Hex)
+
+
+# make_sha256hex direct tests (Issue #209 PR2 review I-1 反映) -----------------------
+
+def test_make_sha256hex_returns_sha256hex_for_valid() -> None:
+    """Issue #209 PR2 review I-1: 64 lowercase hex の正常系で Sha256Hex narrow + 値 identity。
+
+    NewType は identity cast なので runtime 値は str と同一。mypy 戻り値型を
+    assert_type で lock-in (CI mypy step `mypy tests/unit/launcher/test_manifest.py` 経由)。
+    """
+    result = make_sha256hex("a" * 64)
+    assert result == "a" * 64
+    assert_type(result, Sha256Hex)
+    # 全 hex chars (0-9, a-f) を含む現実的な値も accept
+    real_like = "0123456789abcdef" * 4
+    assert make_sha256hex(real_like) == real_like
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [
+        "",                # empty
+        "a" * 63,          # too short
+        "a" * 65,          # too long
+        "A" * 64,          # all uppercase
+        "Aa" * 32,         # mixed case
+        "g" * 64,          # non-hex char (g)
+        "z" * 64,          # non-hex char (z)
+        " " + "a" * 63,    # leading whitespace
+        "a" * 63 + " ",    # trailing whitespace
+        "a" * 32 + " " + "a" * 31,  # internal whitespace
+    ],
+)
+def test_make_sha256hex_rejects_invalid_format(bad_value: str) -> None:
+    """Issue #209 PR2 review I-1: 形式不正値は ManifestError raise (lowercase / 64 hex 強制)。
+
+    境界値 (63/65 chars) と異常系 (uppercase / non-hex / whitespace) を網羅。
+    エラー message に "64 lowercase hex" を含むこと (caller の部分一致依存を担保)。
+    """
+    with pytest.raises(ManifestError, match="64 lowercase hex"):
+        make_sha256hex(bad_value)
+
+
+@pytest.mark.parametrize(
+    "non_str_value",
+    [
+        None,
+        123,
+        b"a" * 64,         # bytes (not str)
+        ["a"] * 64,        # list
+        {"a": 64},         # dict
+    ],
+)
+def test_make_sha256hex_rejects_non_str(non_str_value: object) -> None:
+    """Issue #209 PR2 review I-3: 非 str (None / int / bytes 等) は TypeError ではなく
+    ManifestError として一本化 (docstring 契約 "Raises: ManifestError" を厳守)。
+
+    caller は ManifestError のみ catch すれば form/type 両方の不正を捕捉可能。
+    """
+    with pytest.raises(ManifestError, match="must be str"):
+        make_sha256hex(non_str_value)
 
 
 def _make_fake_resp(

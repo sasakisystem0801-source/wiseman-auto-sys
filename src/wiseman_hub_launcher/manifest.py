@@ -56,13 +56,26 @@ def make_sha256hex(value: str) -> Sha256Hex:
     """形式検証付き Sha256Hex constructor (Issue #209 PR2 review Suggestion 反映)。
 
     `Sha256Hex(value)` 直接呼出は runtime validation ゼロ (NewType の identity cast)
-    のため、validate_manifest 経由ではない外部 source (test fixture / CLI tool / PR2 で
-    sigstore boundary から戻った str 等) を Sha256Hex 化する際は本 constructor 経由を強制し、
+    のため、外部 source (test fixture / CLI tool / sigstore boundary から戻った str 等)
+    を Sha256Hex 化する際は本 constructor 経由を強制し、
     "anyone can mint a Sha256Hex with no validation" の安全弁を提供する。
 
+    本 PR2 では `validate_manifest` 内も本 helper 経由に統一 (review I-2 反映、
+    "production の唯一の mint 場所が直接呼出を維持する矛盾" を解消)。
+
+    Args:
+        value: 64 lowercase hex (a-f, 0-9) の str。uppercase / 非 hex / 長さ不一致は reject。
+
     Raises:
-        ManifestError: value が 64 lowercase hex でない場合
+        ManifestError: value が str でない (None / int 等)、または 64 lowercase hex でない場合
     """
+    # I-3 反映: docstring 契約 (Raises ManifestError) を厳守、None/int 等の型違反も
+    # `TypeError` ではなく `ManifestError` として一本化する。caller (test fixture / 将来の
+    # CLI tool) は ManifestError のみ catch すれば form/type 両方の不正を捕捉可能。
+    if not isinstance(value, str):
+        raise ManifestError(
+            f"Sha256Hex must be str, got {type(value).__name__}"
+        )
     if not _is_sha256_lower_hex(value):
         raise ManifestError(
             f"Sha256Hex must be 64 lowercase hex characters (got len={len(value)})"
@@ -383,10 +396,13 @@ def validate_manifest(manifest: dict[str, object]) -> ManifestData:
 
     # Issue #209 PR1: Sha256Hex NewType narrow (mypy 上のみ、runtime は str 不変)。
     # 形式検証 (`_is_sha256_lower_hex`) PASS 後にここで narrow を確定させる。
-    # caller (updater.py / 後続 PR2 で checksum.py / _supply_chain/* も) は Sha256Hex 受け、
+    # caller (updater.py / checksum.py / _supply_chain/*) は Sha256Hex 受け、
     # commit_sha / version 等との取り違えを mypy が compile-time 検出可能。
-    validated["checksum_sha256"] = Sha256Hex(validated["checksum_sha256"])
+    # PR2 review I-2 反映: production の唯一の mint 場所も `make_sha256hex` 経由に統一
+    # (直前で `_is_sha256_lower_hex` 検証済みなので冗長な再検証だが、`Sha256Hex(...)`
+    # 直接呼出を `manifest.py` 内に残すと "安全弁" 表現と矛盾するため統一)。
+    validated["checksum_sha256"] = make_sha256hex(validated["checksum_sha256"])
     if "sbom_sha256" in validated:
-        validated["sbom_sha256"] = Sha256Hex(validated["sbom_sha256"])
+        validated["sbom_sha256"] = make_sha256hex(validated["sbom_sha256"])
 
     return validated
