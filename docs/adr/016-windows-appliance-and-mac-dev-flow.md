@@ -175,10 +175,13 @@ supply-chain 防御の本丸であり stdlib only では実装不可なため。
 **配布サイズ影響**: PyInstaller bundle が +20-30 MB 程度増加。本田様 PC 1 台運用で
 無視可能。
 
-**TUF trusted root の運用**:
-- `Verifier.production()` 内で Sigstore TUF repository から root metadata を online refresh
-- offline 時 / refresh 失敗時は同梱 cache (sigstore-python 公式 root) で fallback
-- cache 期限切れ + offline で fail-close (起動拒否)
+**TUF trusted root の運用** (codex C3 + comment-analyzer 指摘反映):
+- `Verifier.production()` は内部で TUF root の online refresh を試行する (sigstore-python 3.x default)
+- refresh 失敗時の挙動 (cache 利用 / fail-close) は sigstore-python のバージョン依存。
+  契約として cache fallback が保証されているわけではない
+- 本 launcher では `Verifier.production()` 失敗を `SigstoreVerifyError` に wrap して fail-close
+  (操作員が時計 / network 接続性を確認、ADR §2.1 Phase 7 hard dependency)
+- 2030-12-31 以降は system clock sanity check で起動拒否 (本 appliance サポート期限)
 
 **system clock sanity check** (`_supply_chain/sigstore.py` の `_verify_system_clock`):
 - launcher 起動時に system clock が UTC 基準で 2026-01-01〜2030-12-31 の範囲か検証

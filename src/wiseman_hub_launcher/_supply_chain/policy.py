@@ -6,8 +6,9 @@ codex review threadId 019dfd9e:
     - I-2: expected_repo / expected_workflow_ref は launcher 埋め込み constant、
       manifest 値は表示/監査用のみ (二重検証)
 
-PR-6 後半: bypass 経路完全削除に伴い `is_test_bypass_authorized` / `_TEST_BYPASS_ENV_VAR` /
-`_BUILD_FLAVOR_ENV_VAR` を削除。signature 検証は sigstore-python 委譲で default 有効。
+PR-6 後半: bypass 経路完全削除に伴い `is_test_bypass_authorized` / `_TEST_BYPASS_ENV_VAR`
+を削除。`_BUILD_FLAVOR_ENV_VAR` / `is_production_build` は build flavor 識別 (canary 検出等)
+の用途で残置 (bypass とは独立)。signature 検証は sigstore-python 委譲で default 有効。
 """
 
 from __future__ import annotations

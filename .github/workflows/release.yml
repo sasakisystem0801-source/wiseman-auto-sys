@@ -56,8 +56,9 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
-          DISPATCH_DRY_RUN: ${{ inputs.dry_run }}
         run: |
+          # PR codex I1 反映: workflow_dispatch では do_upload=true を許可しない
+          # (release-prod bucket への汚染経路を完全に塞ぐ)。dry_run mode は build + smoke の検証のみ。
           if [[ "$EVENT_NAME" == "push" ]]; then
             tag="$REF_NAME"
             if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -67,13 +68,10 @@ jobs:
             echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
             echo "do_upload=true" >> "$GITHUB_OUTPUT"
           else
-            # workflow_dispatch
+            # workflow_dispatch: 常に dry_run 同等扱い (do_upload=false)。
+            # 本番 release は tag push のみ。
             echo "version=0.0.0-dryrun" >> "$GITHUB_OUTPUT"
-            if [[ "$DISPATCH_DRY_RUN" == "true" ]]; then
-              echo "do_upload=false" >> "$GITHUB_OUTPUT"
-            else
-              echo "do_upload=true" >> "$GITHUB_OUTPUT"
-            fi
+            echo "do_upload=false" >> "$GITHUB_OUTPUT"
           fi
 
       - uses: actions/checkout@v4
@@ -132,7 +130,7 @@ jobs:
           subject-path: 'dist/wiseman_hub.exe'
 
       - name: Copy attestation bundle to dist/
-        if: steps.attest.outcome == 'success'
+        if: steps.tag_check.outputs.do_upload == 'true' && steps.attest.outcome == 'success'
         shell: pwsh
         env:
           BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
@@ -140,19 +138,22 @@ jobs:
           Copy-Item "$env:BUNDLE_PATH" "dist\wiseman_hub.exe.sigstore.json"
           Get-Item "dist\wiseman_hub.exe.sigstore.json" | Format-List Name, Length
 
+      # silent-failure I7 反映: attest 失敗時に GCS upload を skip して partial release
+      # (exe + sha256 だけ upload、provenance なし) を防ぐ。upload 系 step は全て
+      # `steps.attest.outcome == 'success'` も AND 条件にする。
       - name: Authenticate to GCP (Workload Identity Federation)
-        if: steps.tag_check.outputs.do_upload == 'true'
+        if: steps.tag_check.outputs.do_upload == 'true' && steps.attest.outcome == 'success'
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_RELEASE_SA }}
 
       - name: Set up gcloud CLI
-        if: steps.tag_check.outputs.do_upload == 'true'
+        if: steps.tag_check.outputs.do_upload == 'true' && steps.attest.outcome == 'success'
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Upload artifacts to GCS (versions/X.Y.Z/)
-        if: steps.tag_check.outputs.do_upload == 'true'
+        if: steps.tag_check.outputs.do_upload == 'true' && steps.attest.outcome == 'success'
         shell: pwsh
         env:
           BUCKET: ${{ vars.GCP_RELEASE_BUCKET }}
@@ -165,8 +166,8 @@ jobs:
           gcloud storage cp dist/sbom.json.sha256 "$base/sbom.json.sha256"
           gcloud storage cp dist/wiseman_hub.exe.sigstore.json "$base/wiseman_hub.exe.sigstore.json"
 
-      - name: Generate manifest.json (only on tag push, not dry_run)
-        if: github.event_name == 'push'
+      - name: Generate manifest.json (only on tag push + attest success)
+        if: github.event_name == 'push' && steps.attest.outcome == 'success'
         shell: pwsh
         env:
           VERSION: ${{ steps.tag_check.outputs.version }}
@@ -180,12 +181,26 @@ jobs:
             --output dist/manifest.json
           Get-Content dist/manifest.json
 
-      - name: Upload manifest.json to GCS root
-        if: github.event_name == 'push'
+      - name: Upload manifest.json to GCS root (atomic switch to new version)
+        if: github.event_name == 'push' && steps.attest.outcome == 'success'
         shell: pwsh
         env:
           BUCKET: ${{ vars.GCP_RELEASE_BUCKET }}
         run: gcloud storage cp dist/manifest.json "gs://$env:BUCKET/manifest.json" --cache-control="no-cache, max-age=0"
+
+      # silent-failure I8 反映: manifest.json upload 失敗 = stale manifest が新版を指さない状態
+      # (versions/X.Y.Z/ だけ upload + manifest 旧版継続)。launchers は旧版継続なので致命的では
+      # ないが、release が半端な状態であることを workflow の最終 status で明示する。
+      - name: Surface partial release on failure
+        if: failure() && steps.tag_check.outputs.do_upload == 'true'
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.tag_check.outputs.version }}
+        run: |
+          Write-Host "::error::PARTIAL RELEASE state detected for version=$env:VERSION."
+          Write-Host "::error::manifest.json may not point to the new version. Check GCS bucket"
+          Write-Host "::error::and re-run release workflow with the same tag if needed."
+          exit 1
 
       - name: Upload artifacts to GitHub (always, for triage)
         if: always()

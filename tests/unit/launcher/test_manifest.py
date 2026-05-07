@@ -254,6 +254,63 @@ def test_validate_manifest_optional_fields_omitted() -> None:
     validate_manifest(m)  # should not raise
 
 
+# PR-6 後半: sbom_url / sbom_sha256 (任意 field, codex S1 反映) -----------------
+
+
+def test_validate_manifest_sbom_pair_present() -> None:
+    """sbom_url + sbom_sha256 両方 present + 形式 OK → no raise (TypedDict narrow も成功)。"""
+    m = _good_manifest()
+    m["sbom_url"] = "versions/1.2.3/sbom.json"
+    m["sbom_sha256"] = "0" * 64  # 64 lowercase hex
+    validated = validate_manifest(m)
+    assert validated["sbom_url"] == "versions/1.2.3/sbom.json"
+    assert validated["sbom_sha256"] == "0" * 64
+
+
+def test_validate_manifest_sbom_pair_absent() -> None:
+    """両方欠落 → no raise (任意 field の after-compat)。"""
+    m = _good_manifest()
+    m.pop("sbom_url", None)
+    m.pop("sbom_sha256", None)
+    validate_manifest(m)
+
+
+def test_validate_manifest_sbom_url_only_rejected() -> None:
+    """sbom_url だけ present (sbom_sha256 不在) → ManifestError (pairing invariant)。"""
+    m = _good_manifest()
+    m["sbom_url"] = "versions/1.2.3/sbom.json"
+    m.pop("sbom_sha256", None)
+    with pytest.raises(ManifestError, match="sbom_url and sbom_sha256 must both be present"):
+        validate_manifest(m)
+
+
+def test_validate_manifest_sbom_sha_only_rejected() -> None:
+    """sbom_sha256 だけ present (sbom_url 不在) → ManifestError (pairing invariant)。"""
+    m = _good_manifest()
+    m["sbom_sha256"] = "0" * 64
+    m.pop("sbom_url", None)
+    with pytest.raises(ManifestError, match="sbom_url and sbom_sha256 must both be present"):
+        validate_manifest(m)
+
+
+def test_validate_manifest_sbom_url_non_string() -> None:
+    """sbom_url が str 以外 → ManifestError。"""
+    m = _good_manifest()
+    m["sbom_url"] = 123  # type: ignore[typeddict-item]
+    m["sbom_sha256"] = "0" * 64
+    with pytest.raises(ManifestError, match="sbom_url must be string"):
+        validate_manifest(m)
+
+
+def test_validate_manifest_sbom_sha256_uppercase_rejected() -> None:
+    """sbom_sha256 が大文字混在 → ManifestError (checksum_sha256 と同様 lowercase 強制)。"""
+    m = _good_manifest()
+    m["sbom_url"] = "versions/1.2.3/sbom.json"
+    m["sbom_sha256"] = "ABCDEF" + "0" * 58  # 大文字混在
+    with pytest.raises(ManifestError, match="sbom_sha256 must be 64 lowercase hex"):
+        validate_manifest(m)
+
+
 # Path traversal defenses (C-2 強化版) -------------------------------------
 
 @pytest.mark.parametrize(

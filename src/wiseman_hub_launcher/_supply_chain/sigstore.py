@@ -11,12 +11,15 @@ ADR-016 §1.1.3 (新設):
 
 設計方針:
     - **identity matching は完全一致** (codex C2 反映): manifest の current_version と
-      tag を組み合わせた expected_identity URI を caller (provenance.py) が組み立てて渡す。
-      wildcard / prefix match は使わない。
-    - **system clock sanity check**: TUF root / cert validity と整合させるため起動時に
-      ±2 hour 範囲で UTC clock を確認 (codex C3 反映)
-    - **TUF trusted root の運用**: ``Verifier.production()`` 内部で online refresh +
-      同梱 cache fallback (sigstore-python が公式 TUF root を内蔵)
+      tag を組み合わせた expected_identity URI を caller (provenance.verify_provenance) が
+      ``build_expected_identity`` で組み立てて渡す。wildcard / prefix match は使わない。
+    - **system clock sanity check**: 起動時に UTC clock が **2026-01-01〜2030-12-31** の
+      絶対範囲内であることを確認 (codex C3 反映)。範囲外は ``SigstoreVerifyError`` raise。
+      2030 上限は本 appliance のサポート期限と整合 — 期限到来前に再検討必須 (TODO)。
+    - **TUF trusted root の運用**: ``Verifier.production()`` 内部で TUF root の online
+      refresh を試行する。sigstore-python 3.x の default 動作で、refresh 失敗時の挙動
+      (offline cache 利用 / fail-close) はバージョン依存。本 launcher では失敗を
+      ``SigstoreVerifyError`` に wrap して fail-close (操作員が clock / network を確認)。
     - **戻り値**: DSSE payload を decode した SLSA Statement dict。claims 検証は
       呼出側 (provenance.verify_statement_claims) に委譲する二段構成 (codex C1 反映)
 """
@@ -37,6 +40,8 @@ class SigstoreVerifyError(Exception):
 
 
 _CLOCK_LOWER_BOUND = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
+# TODO(2030-12-31 expiry): 本 appliance のサポート期限。期限到来前に再検討必須。
+# 期限超過で launcher 起動拒否 (signature 改竄ではなく時計範囲外として fail-close)。
 _CLOCK_UPPER_BOUND = dt.datetime(2030, 12, 31, tzinfo=dt.UTC)
 _DSSE_PAYLOAD_TYPE_INTOTO = "application/vnd.in-toto+json"
 _DEFAULT_GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com"

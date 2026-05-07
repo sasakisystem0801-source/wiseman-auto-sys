@@ -501,3 +501,34 @@ def test_verify_provenance_identity_uses_manifest_version(tmp_path: Path) -> Non
         )
     kwargs = mock_verify.call_args.kwargs
     assert kwargs["expected_identity"].endswith("@refs/tags/v2.5.7")
+
+
+# PR-6 後半 type-design 反映: expected_version の semver 形式検証 ---------------
+
+
+@pytest.mark.parametrize(
+    "bad_version",
+    [
+        "1.2",            # 不完全 (semver 3 要素必須)
+        "1.2.3-rc1",      # rc/canary は本 PR 非対応
+        "1.2.3.4",        # 余分な segment
+        "v1.2.3",         # v prefix 不可 (caller が strip 済前提)
+        "1.2.3 --evil",   # control / 余分文字
+        "../etc/passwd",  # path injection
+        "",               # 空
+    ],
+)
+def test_verify_provenance_rejects_malformed_version(
+    tmp_path: Path, bad_version: str
+) -> None:
+    """expected_version が semver X.Y.Z でない → ProvenanceError (identity URI 改竄防止)。"""
+    art = tmp_path / "wiseman_hub.exe"
+    art.write_bytes(b"x")
+    prov = tmp_path / "wiseman_hub.exe.sigstore.json"
+    prov.write_text("{}", encoding="utf-8")
+    with pytest.raises(ProvenanceError, match="expected_version must be semver"):
+        verify_provenance(
+            art, prov,
+            expected_sha256=_VALID_SHA,
+            expected_version=bad_version,
+        )

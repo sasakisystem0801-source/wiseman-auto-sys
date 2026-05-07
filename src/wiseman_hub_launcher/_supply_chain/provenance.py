@@ -9,11 +9,12 @@ PR-6a で実装済 (本 module):
 PR-6 後半 (本 PR で追加):
     - signature 検証本実装: ``sigstore-python`` の ``Verifier.verify_dsse`` に委譲
       (``_supply_chain/sigstore.py`` 経由、ADR-016 §1.1.3 stdlib only 例外)
-    - identity matching は完全一致 (codex C2 反映): manifest の current_version から
-      ``refs/tags/v{version}`` を caller (updater.py) が組み立てて渡す
-    - bypass 経路 (``--allow-test-unsigned-provenance`` flag + ``WISEMAN_ALLOW_UNSIGNED_PROVENANCE_FOR_TESTS`` env) は
-      段階的 fail-closed の最終段階として **本 PR 末で完全削除**。中間 commit では
-      残したまま signature 検証 path を追加する (codex I6 順序問題対応)
+    - identity matching は完全一致 (codex C2 反映): manifest の current_version を
+      caller (updater.py) が ``expected_version`` として渡し、本 module の
+      ``verify_provenance`` 内で ``refs/tags/v{version}`` + 完全 identity URI を
+      ``build_expected_identity`` で組み立てる
+    - bypass 経路 (``--allow-test-unsigned-provenance`` flag +
+      ``WISEMAN_ALLOW_UNSIGNED_PROVENANCE_FOR_TESTS`` env) を完全削除
 """
 
 from __future__ import annotations
@@ -341,6 +342,9 @@ def verify_statement_claims(
     _verify_builder(predicate)
 
 
+_SEMVER_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+
+
 def verify_provenance(
     artifact_path: Path,
     provenance_path: Path,
@@ -374,6 +378,13 @@ def verify_provenance(
         ProvenanceError: signature 検証失敗 (``SigstoreVerifyError`` を wrap) または
             claims 不一致 / parse 失敗
     """
+    # type-design 反映: caller 経路によらず expected_version の形式を保証。
+    # validate_manifest の semver check を経由しない直接呼出 (test/script) でも、
+    # identity URI 改竄 (control char / `..` injection 等) を fail-fast で防ぐ。
+    if not _SEMVER_RE.match(expected_version):
+        raise ProvenanceError(
+            f"expected_version must be semver X.Y.Z, got {expected_version!r}"
+        )
     expected_identity = build_expected_identity(
         repo=LAUNCHER_EXPECTED_REPO,
         workflow_path=".github/workflows/release.yml",
