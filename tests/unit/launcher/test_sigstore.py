@@ -70,9 +70,19 @@ def test_verify_system_clock_below_lower_bound(monkeypatch: pytest.MonkeyPatch) 
         sigstore_mod._verify_system_clock()
 
 
+def test_verify_system_clock_at_upper_bound(monkeypatch: pytest.MonkeyPatch) -> None:
+    """now=2030-12-31T00:00:00Z (上限ちょうど) → 例外なし (`<=` 比較の inclusive 確認)。"""
+    _patch_now(monkeypatch, dt.datetime(2030, 12, 31, 0, 0, 0, tzinfo=dt.UTC))
+    sigstore_mod._verify_system_clock()
+
+
 def test_verify_system_clock_above_upper_bound(monkeypatch: pytest.MonkeyPatch) -> None:
-    """now=2031-01-01 (上限超) → SigstoreVerifyError (TODO 2030-12-31 期限超過)。"""
-    _patch_now(monkeypatch, dt.datetime(2031, 1, 1, 0, 0, 1, tzinfo=dt.UTC))
+    """now=2030-12-31T00:00:01Z (上限ちょうど + 1 秒) → SigstoreVerifyError。
+
+    code-reviewer I-1 反映: 下限側 ±1秒境界と対称にするため、上限+1日 (2031-01-01) ではなく
+    上限+1秒で「ぎりぎり外」を test。`<=` を `<` にダウングレードする regression を検出可能。
+    """
+    _patch_now(monkeypatch, dt.datetime(2030, 12, 31, 0, 0, 1, tzinfo=dt.UTC))
     with pytest.raises(SigstoreVerifyError, match="clock out of expected range"):
         sigstore_mod._verify_system_clock()
 
@@ -93,6 +103,37 @@ def test_load_bundle_malformed_json(tmp_path: Path) -> None:
     bad.write_text("not-a-json{", encoding="utf-8")
     with pytest.raises(SigstoreVerifyError, match="bundle parse failed|bundle read failed"):
         sigstore_mod._load_bundle(bad)
+
+
+# sigstore-python 不在時の ImportError wrap (ADR-016 §1.1.3、各 helper 共通) ---
+
+
+@pytest.mark.parametrize(
+    ("invoke", "module_to_break"),
+    [
+        (lambda: sigstore_mod._load_bundle(Path("/tmp/dummy.sigstore.json")), "sigstore.models"),
+        (
+            lambda: sigstore_mod._build_identity_policy(
+                expected_identity="x", expected_issuer="y"
+            ),
+            "sigstore.verify.policy",
+        ),
+        (lambda: sigstore_mod._build_verifier(), "sigstore.verify"),
+    ],
+    ids=["_load_bundle", "_build_identity_policy", "_build_verifier"],
+)
+def test_helpers_wrap_sigstore_import_error(invoke: Any, module_to_break: str) -> None:
+    """sigstore-python 未 install → SigstoreVerifyError("sigstore-python not installed")。
+
+    ADR-016 §1.1.3 の launcher runtime stdlib only 例外として `sigstore` のみ許可
+    という制約を test レベルで pin する。3 helpers 全てに共通の ImportError wrap
+    パターンを 1 parametrize で gate。
+    """
+    with (
+        patch.dict("sys.modules", {module_to_break: None}),
+        pytest.raises(SigstoreVerifyError, match="sigstore-python not installed"),
+    ):
+        invoke()
 
 
 # _build_verifier -------------------------------------------------------------
@@ -153,6 +194,84 @@ def test_verify_dsse_bundle_rejects_non_bytes_payload(
         patch.object(sigstore_mod, "_build_identity_policy", return_value=MagicMock()),
         patch.object(sigstore_mod, "_build_verifier", return_value=fake_verifier),
         pytest.raises(SigstoreVerifyError, match="must return bytes payload"),
+    ):
+        verify_dsse_bundle(
+            bundle_path=_make_fake_bundle_path(tmp_path),
+            expected_identity="https://github.com/x/y/.github/workflows/release.yml@refs/tags/v1.2.3",
+        )
+
+
+def test_verify_dsse_bundle_wraps_verifier_runtime_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`verify_dsse` の generic Exception (cert chain / Rekor 失敗等) → SigstoreVerifyError wrap。
+
+    pr-test-analyzer I-1 反映: signature 検証本丸の fail-close path。
+    `sigstore.errors.VerificationError` / RuntimeError / ValueError 等を一律 wrap する
+    line 138 の `except Exception` の動作を gate。
+    """
+    _patch_now(monkeypatch, dt.datetime(2027, 1, 1, tzinfo=dt.UTC))
+    fake_verifier = MagicMock()
+    fake_verifier.verify_dsse.side_effect = RuntimeError("cert chain mismatch")
+    with (
+        patch.object(sigstore_mod, "_load_bundle", return_value=MagicMock()),
+        patch.object(sigstore_mod, "_build_identity_policy", return_value=MagicMock()),
+        patch.object(sigstore_mod, "_build_verifier", return_value=fake_verifier),
+        pytest.raises(SigstoreVerifyError, match=r"verify_dsse failed.*RuntimeError"),
+    ):
+        verify_dsse_bundle(
+            bundle_path=_make_fake_bundle_path(tmp_path),
+            expected_identity="https://github.com/x/y/.github/workflows/release.yml@refs/tags/v1.2.3",
+        )
+
+
+def test_verify_dsse_bundle_passes_through_sigstore_verify_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`verify_dsse` が SigstoreVerifyError raise → 二重 wrap せず原例外を re-raise。
+
+    line 136-137 の `except SigstoreVerifyError: raise` が正しく動作することを gate。
+    将来 line 136 を削除すると "verify_dsse failed: SigstoreVerifyError: ..." の
+    二重 wrap になり original message が埋もれるため、message 一致で検出可能。
+    """
+    _patch_now(monkeypatch, dt.datetime(2027, 1, 1, tzinfo=dt.UTC))
+    fake_verifier = MagicMock()
+    fake_verifier.verify_dsse.side_effect = SigstoreVerifyError("rekor proof invalid")
+    with (
+        patch.object(sigstore_mod, "_load_bundle", return_value=MagicMock()),
+        patch.object(sigstore_mod, "_build_identity_policy", return_value=MagicMock()),
+        patch.object(sigstore_mod, "_build_verifier", return_value=fake_verifier),
+        pytest.raises(SigstoreVerifyError, match=r"^rekor proof invalid$"),
+    ):
+        verify_dsse_bundle(
+            bundle_path=_make_fake_bundle_path(tmp_path),
+            expected_identity="https://github.com/x/y/.github/workflows/release.yml@refs/tags/v1.2.3",
+        )
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_inner"),
+    [
+        (b"\xff\xfe\xfd", "UnicodeDecodeError"),
+        (b"not-a-json", "JSONDecodeError"),
+    ],
+    ids=["non_utf8", "non_json"],
+)
+def test_verify_dsse_bundle_rejects_undecodable_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    payload: bytes,
+    expected_inner: str,
+) -> None:
+    """payload bytes が UTF-8 不正 / JSON 不正 → SigstoreVerifyError wrap (line 153-158)。"""
+    _patch_now(monkeypatch, dt.datetime(2027, 1, 1, tzinfo=dt.UTC))
+    fake_verifier = MagicMock()
+    fake_verifier.verify_dsse.return_value = (_DSSE_INTOTO, payload)
+    with (
+        patch.object(sigstore_mod, "_load_bundle", return_value=MagicMock()),
+        patch.object(sigstore_mod, "_build_identity_policy", return_value=MagicMock()),
+        patch.object(sigstore_mod, "_build_verifier", return_value=fake_verifier),
+        pytest.raises(SigstoreVerifyError, match=f"DSSE payload JSON parse failed.*{expected_inner}"),
     ):
         verify_dsse_bundle(
             bundle_path=_make_fake_bundle_path(tmp_path),
