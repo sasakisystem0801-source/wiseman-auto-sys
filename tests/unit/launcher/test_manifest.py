@@ -299,7 +299,7 @@ def test_validate_manifest_max_path_len_boundary() -> None:
 
 def test_fetch_manifest_http_200() -> None:
     fake_resp = _make_fake_resp(b'{"hello":"world"}')
-    with patch("wiseman_hub_launcher.manifest.urllib.request.urlopen", return_value=fake_resp):
+    with patch("wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen", return_value=fake_resp):
         out = fetch_manifest("https://example.com/manifest.json")
     assert out == b'{"hello":"world"}'
 
@@ -315,7 +315,7 @@ def test_fetch_manifest_http_error() -> None:
         fp=None,
     )
     with (
-        patch("wiseman_hub_launcher.manifest.urllib.request.urlopen", side_effect=err),
+        patch("wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen", side_effect=err),
         pytest.raises(ManifestError, match="HTTP error: 404"),
     ):
         fetch_manifest("https://example.com/manifest.json")
@@ -326,7 +326,7 @@ def test_fetch_manifest_url_error() -> None:
 
     err = urllib.error.URLError(reason=ConnectionRefusedError("conn refused"))
     with (
-        patch("wiseman_hub_launcher.manifest.urllib.request.urlopen", side_effect=err),
+        patch("wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen", side_effect=err),
         pytest.raises(ManifestError, match="URL error"),
     ):
         fetch_manifest("https://example.com/manifest.json")
@@ -335,7 +335,7 @@ def test_fetch_manifest_url_error() -> None:
 def test_fetch_manifest_timeout() -> None:
     with (
         patch(
-            "wiseman_hub_launcher.manifest.urllib.request.urlopen",
+            "wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen",
             side_effect=TimeoutError("timed out"),
         ),
         pytest.raises(ManifestError, match="timed out"),
@@ -346,7 +346,7 @@ def test_fetch_manifest_timeout() -> None:
 def test_fetch_manifest_non_200_status() -> None:
     fake_resp = _make_fake_resp(b"", status=204)
     with (
-        patch("wiseman_hub_launcher.manifest.urllib.request.urlopen", return_value=fake_resp),
+        patch("wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen", return_value=fake_resp),
         pytest.raises(ManifestError, match="non-200"),
     ):
         fetch_manifest("https://example.com/manifest.json")
@@ -368,7 +368,7 @@ def test_fetch_manifest_non_200_status() -> None:
 def test_fetch_manifest_rejects_non_https(bad_url: str) -> None:
     """C-1: HTTPS 以外の入力 URL は ManifestError で拒否（urlopen に渡さない）。"""
     with (
-        patch("wiseman_hub_launcher.manifest.urllib.request.urlopen") as urlopen_mock,
+        patch("wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen") as urlopen_mock,
         pytest.raises(ManifestError, match="HTTPS"),
     ):
         fetch_manifest(bad_url)
@@ -382,7 +382,7 @@ def test_fetch_manifest_rejects_redirect_to_http() -> None:
         final_url="http://evil.example.com/manifest.json",  # downgrade redirect
     )
     with (
-        patch("wiseman_hub_launcher.manifest.urllib.request.urlopen", return_value=fake_resp),
+        patch("wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen", return_value=fake_resp),
         pytest.raises(ManifestError, match="non-HTTPS"),
     ):
         fetch_manifest("https://example.com/manifest.json")
@@ -395,7 +395,7 @@ def test_fetch_manifest_rejects_oversized_response() -> None:
     oversized = b"x" * (MAX_MANIFEST_BYTES + 1)
     fake_resp = _make_fake_resp(oversized)
     with (
-        patch("wiseman_hub_launcher.manifest.urllib.request.urlopen", return_value=fake_resp),
+        patch("wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen", return_value=fake_resp),
         pytest.raises(ManifestError, match="exceeds.*bytes"),
     ):
         fetch_manifest("https://example.com/manifest.json")
@@ -405,7 +405,7 @@ def test_fetch_manifest_at_max_size_ok() -> None:
     """I-1: ちょうど 1 MiB は OK（boundary）。"""
     at_max = b"x" * MAX_MANIFEST_BYTES
     fake_resp = _make_fake_resp(at_max)
-    with patch("wiseman_hub_launcher.manifest.urllib.request.urlopen", return_value=fake_resp):
+    with patch("wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen", return_value=fake_resp):
         out = fetch_manifest("https://example.com/manifest.json")
     assert len(out) == MAX_MANIFEST_BYTES
 
@@ -416,7 +416,7 @@ def test_fetch_manifest_ssl_error() -> None:
     """I-2: ssl.SSLError は ManifestError に正規化。"""
     err = ssl.SSLError("bad cert")
     with (
-        patch("wiseman_hub_launcher.manifest.urllib.request.urlopen", side_effect=err),
+        patch("wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen", side_effect=err),
         pytest.raises(ManifestError, match="SSL error"),
     ):
         fetch_manifest("https://example.com/manifest.json")
@@ -427,7 +427,7 @@ def test_fetch_manifest_socket_timeout() -> None:
     # socket.timeout は Python 3.10+ で TimeoutError alias、I-2 の意図は同じ
     with (
         patch(
-            "wiseman_hub_launcher.manifest.urllib.request.urlopen",
+            "wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen",
             side_effect=TimeoutError("sock timeout"),
         ),
         pytest.raises(ManifestError, match="timed out"),
@@ -439,7 +439,7 @@ def test_fetch_manifest_connection_refused() -> None:
     """I-2: ConnectionRefusedError は ManifestError に正規化。"""
     err = ConnectionRefusedError("refused")
     with (
-        patch("wiseman_hub_launcher.manifest.urllib.request.urlopen", side_effect=err),
+        patch("wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen", side_effect=err),
         pytest.raises(ManifestError, match="network error"),
     ):
         fetch_manifest("https://example.com/manifest.json")

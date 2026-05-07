@@ -202,16 +202,14 @@ def run_dry_run(manifest_url: str, current_path: Path, *, verbose: bool = False)
         return EXIT_MANIFEST
 
     try:
-        manifest = parse_manifest(raw)
-        validate_manifest(manifest)
+        parsed = parse_manifest(raw)
+        validated = validate_manifest(parsed)
     except ManifestError as e:
         logger.error("manifest validation failed: %s", e)
         return EXIT_MANIFEST
 
-    new_version = manifest["current_version"]
-    download_url = manifest["download_url"]
-    assert isinstance(new_version, str)  # noqa: S101 — validate_manifest で str 検証済
-    assert isinstance(download_url, str)  # noqa: S101
+    new_version = validated["current_version"]
+    download_url = validated["download_url"]
 
     cur_t = _semver_tuple(current.version)
     new_t = _semver_tuple(new_version)
@@ -294,8 +292,8 @@ def run_update(  # noqa: PLR0911 — explicit exit code mapping
         with LockHeartbeat(lock_path):
             try:
                 raw = fetch_manifest(manifest_url)
-                manifest = parse_manifest(raw)
-                validate_manifest(manifest)
+                parsed = parse_manifest(raw)
+                validated = validate_manifest(parsed)
             except ManifestError as e:
                 logger.error("manifest error: %s", e)
                 return EXIT_MANIFEST
@@ -315,7 +313,7 @@ def run_update(  # noqa: PLR0911 — explicit exit code mapping
 
             try:
                 outcome = update_and_spawn(
-                    manifest,
+                    validated,
                     home_dir,
                     current_path=current_path,
                     monitor_timeout_sec=monitor_timeout_sec,

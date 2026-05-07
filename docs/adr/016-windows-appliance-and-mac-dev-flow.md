@@ -181,7 +181,7 @@ metric 再設計** で対応する。
 |------|------|---------------------|
 | **launcher core** | `__main__.py`, `manifest.py`, `checksum.py`, `current.py`, `updater.py` (orchestration only) | **900 LOC** (実測 711) |
 | **`_runtime/` subpackage** | `lock.py` + `spawn.py` + `__init__.py` (lock + heartbeat + spawn + SpawnOutcome) | **250 LOC** (実測 189) |
-| **`_supply_chain/` subpackage** | `download.py` + `provenance.py` + `policy.py` + `__init__.py` (artifact download + claims verify + canonical URL policy) | **410 LOC** (実測 408、計画 350 → 380 → 410、PR-6a 内で 2 段階 fine-tuning) |
+| **`_supply_chain/` subpackage** | `download.py` + `provenance.py` + `policy.py` + `_http.py` + `__init__.py` (artifact download + claims verify + canonical URL policy + HTTPS GET helper) | **415 LOC** (実測 411、計画 350 → 380 → 410 → 415、PR-6a 内で 2 段階 + PR-7 で 1 段階 fine-tuning) |
 | **各 module 単体** | 上記すべて | **270 LOC** (実測最大 270 = `__main__.py`) |
 | **対象外** | `__init__.py` (version 文字列のみ)、test files、PyInstaller spec | 制約なし |
 
@@ -194,18 +194,40 @@ metric 再設計** で対応する。
 | PR-4 PR 段階 | 800 | 842 | lock heartbeat + canary current_path + redirect 検証 + dir fsync |
 | **PR-6a step 1** | 3 階層初期設計（合算 1530 LOC、core 900 + `_runtime/` 250 + `_supply_chain/` 380） | 1272 | provenance 本実装 + module 分割 + 二重 gate + LockHeartbeat ctx mgr |
 | **PR-6a step 3** (PR review 反映後) | `_supply_chain/` 380 → **410 LOC** に fine-tuning（合算 1560） | **1321** | Critical 10 件反映 (urlparse 厳格化 + DSSE payloadType + bypass log + subject malformed fail-fast 等) |
+| **PR-7** | 上限変更なし、DRY 化 + TypedDict + 新規 helper 2 件 | (実測時に追記) | HTTPS GET helper (`_supply_chain/_http.py`) + atomic write helper (`_runtime/_atomic_io.py`) DRY 化、ManifestData TypedDict narrow、predicate malformed/uppercase digest/integration test、phase log fingerprint、`_supply_chain/sigstore.py` 切り出し計画明示 |
+
+##### PR-6 後半に向けた `_supply_chain/sigstore.py` 切り出し計画 (PR-7 AC7、本セッションで合意)
+
+PR-6 後半で sigstore-python を依存追加し signature verification 本実装を行う際、
+`_supply_chain/provenance.py` (PR-6a 末で 406 LOC) に signature 検証ロジックを追加すると
+410 LOC 制約を突破するため、**事前に `_supply_chain/sigstore.py` を切り出す**:
+
+| 切り出し対象 | 行数見積 | 配置先 |
+|------------|---------|-------|
+| Sigstore Bundle parse + cert chain validation + Rekor inclusion proof | +50 LOC | `_supply_chain/sigstore.py` (新規) |
+| `verify_signature(...)` API + sigstore-python 経由の cosign-compatible 検証 | +30 LOC | 同上 |
+| `verify_provenance` 内の bypass / signature 呼び分けロジック | (既存) | `provenance.py` 維持 |
+
+これにより `_supply_chain/` の 410 LOC 制約を維持しつつ、PR-6 後半で
+`--allow-test-unsigned-provenance` flag + `WISEMAN_ALLOW_UNSIGNED_PROVENANCE_FOR_TESTS` 環境変数を
+**両方とも launcher core から完全削除** し、本番 PC で fail-closed gate を有効化する。
 
 ##### 制約再設計の根拠（codex C-3 反映、Session 47 末「再緩和不可」と整合）
 
 - **単純再緩和の禁止**: 900 LOC 合算で再緩和は Session 47 末方針との正面衝突 → governance 破り
 - **責務分割後の対称構造**: `_runtime/` (process 制御) と `_supply_chain/` (真正性検証) を
   独立 subpackage 化し、それぞれに独立した上限を設定。core は orchestration のみに専念
-- **fine-tuning vs 再緩和の境界**: `_supply_chain/` 制約を 350 → 380 → 410 に 2 段階 fine-tuning。
+- **fine-tuning vs 再緩和の境界**: `_supply_chain/` 制約を 350 → 380 → 410 → 415 に 3 段階 fine-tuning。
   - **350 → 380** (step 1): provenance 検証本実装で 22 LOC 超過した実測値に応じた**責務分割後の初期 sizing 補正**
   - **380 → 410** (step 3): PR review 反映で Critical 10 件追加 (urlparse 厳格化 / DSSE payloadType 検証 /
     bypass log 強化 / subject malformed fail-fast 等)、いずれも **security gain** に対応した自然な増加であり
     「validation 削減サイン」ではない (codex C-3 への合意点)
-  - 今後 PR-7 で 410 LOC を超えそうなら **`_supply_chain/sigstore.py` 切り出しを強制** (Session 47 末
+  - **410 → 415** (PR-7 step): HTTPS GET DRY 化 helper (`_supply_chain/_http.py` 60 LOC) を新規追加。
+    `download._open_https_get` (-38 LOC) + `download._atomic_place` (-50 LOC = `_runtime/_atomic_io.py` に
+    集約) と相殺しても +3 LOC 残る。HTTPS pin + redirect downgrade 防御の **中央化による security 一貫性 gain** であり
+    「validation 削減」ではなく「責務分離」の自然結果。PR-6 後半 sigstore-python 統合で
+    `_supply_chain/sigstore.py` 内からも `_http.py` を再利用予定 (重複再発を構造的に防止)
+  - 今後 PR-6 後半で 415 LOC を超えそうなら **`_supply_chain/sigstore.py` 切り出しを強制** (Session 47 末
     「再緩和不可」精神の継承、責務分割を fine-tuning の上限とする)
 
 ##### Stop-the-line 条件 (PR-6a で追加、codex Important I-1 反映)
@@ -359,7 +381,9 @@ manifest schema（ADR-004 v2）:
   "commit_sha": "f976b44...",
   "built_at": "2026-05-06T12:00:00Z",
   "released_at": "2026-05-06T13:00:00Z",
-  "provenance_url": "versions/1.2.3/provenance.intoto.jsonl",
+  "provenance_url": "versions/1.2.3/wiseman_hub.exe.sigstore.json",
+  "expected_repo": "sasakisystem0801-source/wiseman-auto-sys",
+  "expected_workflow_ref": ".github/workflows/release.yml@refs/tags/v1.2.3",
   "release_notes": "...",
   "force_update": false
 }

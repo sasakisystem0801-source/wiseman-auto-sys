@@ -8,14 +8,13 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
-import ssl
 import tempfile
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any
 
+from .._runtime._atomic_io import atomic_replace_and_fsync_dir
 from ..checksum import ChecksumError, verify_sha256
+from ._http import open_https_get
 
 logger = logging.getLogger(__name__)
 
@@ -29,47 +28,6 @@ _CHUNK = 1024 * 1024  # 1 MiB
 
 class DownloadError(Exception):
     """artifact / provenance download 失敗 (network / size cap / IO)。"""
-
-
-def _open_https_get(url: str, *, timeout_sec: int) -> Any:  # noqa: ANN401
-    """HTTPS GET 接続を開く (download stream 用)。
-
-    Returns:
-        urllib response (caller が close する)。
-        型を Any にしているのは urllib の internal 型が安定 public でないため。
-
-    検証:
-        - 入力 URL が HTTPS
-        - redirect 後の最終 URL も HTTPS (I-2: downgrade redirect 防御、
-          codex review threadId 019dfd5d 反映)
-    """
-    if not isinstance(url, str) or not url.startswith("https://"):
-        raise DownloadError("artifact URL must use HTTPS scheme")
-    req = urllib.request.Request(url, method="GET")
-    try:
-        resp = urllib.request.urlopen(req, timeout=timeout_sec)  # noqa: S310
-    except urllib.error.HTTPError as e:
-        raise DownloadError(f"artifact fetch HTTP error: {e.code}") from e
-    except urllib.error.URLError as e:
-        raise DownloadError(
-            f"artifact fetch URL error: {type(e.reason).__name__}"
-        ) from e
-    except TimeoutError as e:
-        raise DownloadError("artifact fetch timed out") from e
-    except ssl.SSLError as e:
-        raise DownloadError(f"artifact fetch SSL error: {type(e).__name__}") from e
-    except (ConnectionError, OSError) as e:
-        raise DownloadError(
-            f"artifact fetch network error: {type(e).__name__}"
-        ) from e
-
-    # I-2: redirect 後の最終 URL も HTTPS (downgrade redirect 攻撃防御)
-    final_url = resp.geturl()
-    if not isinstance(final_url, str) or not final_url.startswith("https://"):
-        with contextlib.suppress(AttributeError, OSError):
-            resp.close()
-        raise DownloadError("artifact URL redirected to non-HTTPS scheme")
-    return resp
 
 
 def _read_to_temp_with_cap(resp: Any, fd: int, cap_bytes: int) -> int:  # noqa: ANN401
@@ -90,55 +48,6 @@ def _read_to_temp_with_cap(resp: Any, fd: int, cap_bytes: int) -> int:  # noqa: 
         f.flush()
         os.fsync(f.fileno())
     return total
-
-
-def _atomic_place(
-    fd: int,
-    tmp_path: Path,
-    final_path: Path,
-    dest_dir: Path,
-    *,
-    fd_owned: bool,
-) -> None:
-    """tmp_path → final_path に atomic 配置 + dir fsync。
-
-    呼び出し側が success フラグ管理 + 例外時の cleanup を担当する。
-    """
-    os.replace(tmp_path, final_path)
-    # 親 dir fsync (POSIX rename 永続化、電源断で current.json と exe directory entry の
-    # 不整合を防止)。silent-failure HIGH 3 反映: Windows のみ debug suppress、
-    # POSIX (mac/Linux/NAS) では warning ログで errno を残し、ENOSPC/EIO/EROFS 等の
-    # 書込み完全性 failure を debug 可能化。
-    import sys  # noqa: PLC0415
-    try:
-        dir_fd = os.open(str(dest_dir), os.O_RDONLY)
-    except OSError as e:
-        if sys.platform == "win32":
-            logger.debug("dir fsync skipped on Windows (open): %s", type(e).__name__)
-        else:
-            logger.warning(
-                "dir fsync open failed: %s errno=%s filename=%s",
-                type(e).__name__,
-                e.errno,
-                e.filename,
-            )
-        return
-    try:
-        os.fsync(dir_fd)
-    except OSError as e:
-        if sys.platform == "win32":
-            logger.debug("dir fsync skipped on Windows: %s", type(e).__name__)
-        else:
-            logger.warning(
-                "dir fsync failed: %s errno=%s",
-                type(e).__name__,
-                e.errno,
-            )
-    finally:
-        with contextlib.suppress(OSError):
-            os.close(dir_fd)
-    # fd_owned の早期終了は呼び出し側が finally で行う
-    _ = fd_owned
 
 
 def _download_with_atomic_place(
@@ -180,7 +89,12 @@ def _download_with_atomic_place(
         tmp_path = Path(tmp_name)
         fd_owned = True
 
-        resp = _open_https_get(url, timeout_sec=timeout_sec)
+        resp = open_https_get(
+            url,
+            timeout_sec=timeout_sec,
+            error_class=DownloadError,
+            label="artifact",
+        )
         try:
             try:
                 content_length = int(resp.headers.get("Content-Length", "0") or "0")
@@ -203,7 +117,7 @@ def _download_with_atomic_place(
                 f"artifact SHA-256 mismatch (expected {expected_sha256[:8]}...)"
             )
 
-        _atomic_place(fd, tmp_path, final_path, dest_dir, fd_owned=False)
+        atomic_replace_and_fsync_dir(tmp_path, final_path, dest_dir)
         success = True
     except OSError as e:
         # review_team A5 second-pass: errno / winerror / filename を含めて Windows AV /

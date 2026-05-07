@@ -42,6 +42,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ._runtime._atomic_io import atomic_replace_and_fsync_dir
 from .manifest import is_simple_semver
 
 logger = logging.getLogger(__name__)
@@ -279,7 +280,8 @@ def write_current_atomic(path: Path, current: Current) -> None:
             f.write(payload)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp_path, path)
+        # atomic replace + 親 dir fsync を共通 helper に集約 (PR-7 タスク B)
+        atomic_replace_and_fsync_dir(tmp_path, path, parent)
         success = True
     finally:
         if not success:
@@ -287,16 +289,3 @@ def write_current_atomic(path: Path, current: Current) -> None:
                 tmp_path.unlink(missing_ok=True)
             except OSError as e:
                 logger.warning("failed to clean up tmp file: %s", type(e).__name__)
-
-    # 親ディレクトリ fsync (POSIX のみ意味あり、Windows では PermissionError 等で no-op)
-    try:
-        dir_fd = os.open(str(parent), os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(dir_fd)
-    except OSError:
-        # Windows では directory fsync 不可、無視
-        pass
-    finally:
-        os.close(dir_fd)
