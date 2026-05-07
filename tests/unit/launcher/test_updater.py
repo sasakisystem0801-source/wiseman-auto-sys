@@ -20,6 +20,7 @@ import hashlib
 import io
 import json
 import os
+import ssl
 import time
 import urllib.error
 from collections.abc import Iterator
@@ -424,10 +425,14 @@ def test_download_artifact_accepts_https_to_https_redirect(tmp_path: Path) -> No
     assert out.read_bytes() == payload
 
 
-def test_download_artifact_via_real_open_https_get_path(tmp_path: Path) -> None:
-    """B1 second-pass: happy path で _open_https_get (HTTPS 検証 + redirect 検証 +
-    例外正規化) を bypass せずに実呼び出し、SUCCESS path を end-to-end で検証。"""
-    payload = b"binary via real _open_https_get"
+def test_download_artifact_via_real_https_helper_path(tmp_path: Path) -> None:
+    """B1 second-pass: happy path で open_https_get (HTTPS 検証 + redirect 検証 +
+    例外正規化) を bypass せずに実呼び出し、SUCCESS path を end-to-end で検証。
+
+    PR-7 で _open_https_get (private) → _supply_chain._http.open_https_get (public helper)
+    に rename + module 移動。test 名と docstring も新名に同期 (review I-4 反映)。
+    """
+    payload = b"binary via real https helper"
     sha = _sha256_hex(payload)
     dest = tmp_path / "versions" / "1.2.3"
 
@@ -439,7 +444,7 @@ def test_download_artifact_via_real_open_https_get_path(tmp_path: Path) -> None:
     ):
         out = download_artifact("https://example.com/x.exe", dest, sha)
     assert out.read_bytes() == payload
-    # _open_https_get が close() を呼んだことを検証 (cleanup 動作確認)
+    # open_https_get が close() を呼んだことを検証 (cleanup 動作確認)
     assert resp.close.called
 
 
@@ -698,6 +703,46 @@ def test_update_and_spawn_no_spawn_returns_success(tmp_path: Path) -> None:
     assert (tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe").exists()
 
 
+def test_update_and_spawn_emits_phase_log_failure_fingerprint(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """PR-7 review C-2 反映: download 失敗時に download_failed fingerprint が出る。
+
+    silent-failure-hunter Critical C-2: success path のみ phase log 出力では
+    triage で「どこで止まったか」が不明。失敗 phase でも fingerprint 必須。
+    """
+    cur_path = tmp_path / "current.json"
+    write_current_atomic(
+        cur_path, Current(version="1.0.0", released_at="x", previous_version="")
+    )
+    # checksum 不一致を発生させる payload
+    payload = b"new binary"
+    wrong_sha = "0" * 64
+
+    caplog.set_level("INFO", logger="wiseman_hub_launcher.updater")
+    with (
+        _bypass_provenance(),
+        patch(
+            "wiseman_hub_launcher._supply_chain.download.open_https_get",
+            return_value=_make_response(payload),
+        ),
+        pytest.raises(ChecksumError),
+    ):
+        update_and_spawn(
+            _good_manifest("1.2.3", wrong_sha), tmp_path, monitor_timeout_sec=0.05
+        )
+
+    phase_logs = [r.message for r in caplog.records if "launcher_phase" in r.message]
+    # download_start 後に download_failed が必ず出る
+    assert any('"phase": "download_start"' in m for m in phase_logs)
+    assert any(
+        '"phase": "download_failed"' in m and '"error_class": "ChecksumError"' in m
+        for m in phase_logs
+    ), f"missing download_failed fingerprint with ChecksumError (records: {phase_logs!r})"
+    # download_complete は出ない (失敗のため)
+    assert not any('"phase": "download_complete"' in m for m in phase_logs)
+
+
 def test_update_and_spawn_emits_phase_log_fingerprints(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -748,41 +793,71 @@ def test_update_and_spawn_emits_phase_log_fingerprints(
     assert any('"new_version": "1.2.3"' in m for m in phase_logs)
 
 
-def test_download_error_message_distinguishes_categories() -> None:
-    """PR-7 AC6: DownloadError メッセージで network / size / IO error が区別可能。
+@pytest.mark.parametrize(
+    ("urlopen_side_effect", "expected_substr"),
+    [
+        # PR-7 review C-3 反映: tautology から実装の例外マッピング検証へ。
+        # _supply_chain/_http.py:50-72 の 6 系統 except が DownloadError 文字列に
+        # 「kind を区別する固有 prefix」を載せていることを実 raise で検証。
+        # 1. HTTPError → "fetch HTTP error: <code>"
+        (
+            urllib.error.HTTPError(
+                url="https://x", code=503, msg="Service Unavailable", hdrs=None, fp=None  # type: ignore[arg-type]
+            ),
+            "fetch HTTP error: 503",
+        ),
+        # 2. URLError(ConnectionRefusedError) → "fetch URL error: <reason class>"
+        (
+            urllib.error.URLError(reason=ConnectionRefusedError("conn refused")),
+            "fetch URL error: ConnectionRefusedError",
+        ),
+        # 3. TimeoutError → "fetch timed out"
+        (TimeoutError("timed out"), "fetch timed out"),
+        # 4. SSLError → "fetch SSL error: <type name>"
+        (ssl.SSLError("CERTIFICATE_VERIFY_FAILED"), "fetch SSL error: SSLError"),
+        # 5. ConnectionError → "fetch network error: <type name>"
+        (
+            ConnectionResetError("conn reset"),
+            "fetch network error: ConnectionResetError",
+        ),
+    ],
+)
+def test_download_error_message_categorized_by_actual_exception(
+    tmp_path: Path,
+    urlopen_side_effect: BaseException,
+    expected_substr: str,
+) -> None:
+    """PR-7 AC6 + review C-3 反映: DownloadError message で網羅的に kind 区別可能。
 
-    DownloadError は単一 exception 型だが、message text が
-    'fetch HTTP error' / 'fetch URL error' / 'fetch SSL error' / 'fetch network error' /
-    'body exceeds' / 'Content-Length' / 'write error' で区別される。
+    実際に urlopen が各種例外を raise したときに、_supply_chain/_http.py の
+    open_https_get() を経由して DownloadError として正規化され、message text に
+    triage 用の固有 prefix が乗ることを検証。前バージョンは DownloadError(s)
+    round-trip だけ検証する tautology だったので、本 PR で実装挙動検証に変更。
     """
-    from wiseman_hub_launcher._supply_chain import DownloadError  # noqa: PLC0415
+    with patch(
+        "wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen",
+        side_effect=urlopen_side_effect,
+    ), pytest.raises(DownloadError) as exc_info:
+        download_artifact("https://example.invalid/x.exe", tmp_path, "0" * 64, timeout_sec=1)
 
-    # network 系 message templates (実際の raise は test_updater 既存テストでカバー済)
-    network_msgs = [
-        "artifact fetch HTTP error: 404",
-        "artifact fetch URL error: ConnectionRefusedError",
-        "artifact fetch timed out",
-        "artifact fetch SSL error: SSLError",
-        "artifact fetch network error: ConnectionResetError",
-    ]
-    size_msgs = [
-        "artifact body exceeds 314572800 bytes",
-        "Content-Length 999999999 exceeds 314572800 bytes",
-    ]
-    io_msgs = [
-        "artifact write error: OSError: errno=28 winerror=None filename='/tmp/x': No space left",
-    ]
+    assert expected_substr in str(exc_info.value)
 
-    # 全 message が DownloadError として raise 可能で、kind を識別する prefix が含まれる
-    for msg in network_msgs:
-        e = DownloadError(msg)
-        assert "fetch" in str(e) or "timed out" in str(e)
-    for msg in size_msgs:
-        e = DownloadError(msg)
-        assert "exceeds" in str(e)
-    for msg in io_msgs:
-        e = DownloadError(msg)
-        assert "write error" in str(e)
+
+def test_download_error_size_cap_message_categorized(tmp_path: Path) -> None:
+    """PR-7 AC6: artifact body size cap 超過時の message に 'exceeds' prefix。"""
+    # 1 MiB chunked stream で MAX_ARTIFACT_BYTES (300 MiB) を超えるシナリオは
+    # test 時間がかかるので、Content-Length header で先制 reject される経路を検証。
+    resp = MagicMock()
+    resp.read = MagicMock(return_value=b"")
+    resp.headers = {"Content-Length": str(MAX_ARTIFACT_BYTES + 1)}
+    resp.close = MagicMock()
+    resp.geturl = MagicMock(return_value="https://example.invalid/x.exe")
+
+    with patch(
+        "wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen",
+        return_value=resp,
+    ), pytest.raises(DownloadError, match="exceeds"):
+        download_artifact("https://example.invalid/x.exe", tmp_path, "0" * 64, timeout_sec=1)
 
 
 def test_update_and_spawn_invokes_verify_provenance(tmp_path: Path) -> None:

@@ -300,7 +300,7 @@ def validate_manifest(manifest: dict[str, object]) -> ManifestData:
 
     # ここまでで全必須 field が str、任意 field が型適合と確定 → cast で TypedDict narrow。
     # 以後の field-specific 検証は narrow 済の validated を参照することで
-    # `assert isinstance(..., str)  # noqa: S101` 系 9 箇所を全廃 (AC3)
+    # `assert isinstance(..., str)  # noqa: S101` 系を全廃 (AC3、PR-7 review I-5 反映で件数表記削除)
     validated = cast(ManifestData, manifest)
 
     if not _is_sha256_lower_hex(validated["checksum_sha256"]):

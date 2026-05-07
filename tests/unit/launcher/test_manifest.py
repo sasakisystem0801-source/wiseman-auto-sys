@@ -37,6 +37,46 @@ def _good_manifest() -> dict[str, object]:
     }
 
 
+def test_validate_manifest_returns_typeddict_narrow() -> None:
+    """PR-7 review I-2 反映: validate_manifest が ManifestData を返す契約を lock-in。
+
+    AC3 (assert isinstance noqa S101 を 11→0) は ManifestData TypedDict narrow に依存する。
+    将来 `return None` に戻す regression を unit レベルで検出できるよう、戻り値の
+    型契約 (必須 field 全てが key access 可能 + str + 任意 field の有無) を直接検証。
+    """
+    m = _good_manifest()
+    result = validate_manifest(m)
+
+    # 必須 field が全て str narrow 済 (cast 後 mypy も同じ判定をする)
+    assert result["current_version"] == "1.2.3"
+    assert result["minimum_version"] == "1.0.0"
+    assert result["checksum_sha256"] == "a" * 64
+    assert result["commit_sha"] == "f976b44"
+    assert result["built_at"] == "2026-05-06T12:00:00Z"
+    assert result["released_at"] == "2026-05-06T13:00:00Z"
+    assert result["download_url"] == "versions/1.2.3/wiseman_hub.exe"
+    assert result["provenance_url"] == "versions/1.2.3/wiseman_hub.exe.sigstore.json"
+    assert result["expected_repo"] == "sasakisystem0801-source/wiseman-auto-sys"
+    assert result["expected_workflow_ref"] == ".github/workflows/release.yml@refs/tags/v1.2.3"
+
+    # NotRequired field の有無 (任意なので presence/absence 両方を許容)
+    assert result.get("release_notes") == "first release"
+    assert result.get("force_update") is False
+
+
+def test_validate_manifest_returns_typeddict_without_optional_fields() -> None:
+    """PR-7 review I-2 反映: NotRequired field 不在でも ManifestData として narrow 可。"""
+    m = _good_manifest()
+    del m["release_notes"]
+    del m["force_update"]
+    result = validate_manifest(m)
+    # 必須 field は narrow 済
+    assert result["current_version"] == "1.2.3"
+    # NotRequired field は不在
+    assert "release_notes" not in result
+    assert "force_update" not in result
+
+
 def _make_fake_resp(
     body: bytes,
     *,

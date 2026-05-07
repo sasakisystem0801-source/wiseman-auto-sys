@@ -30,10 +30,11 @@ class DownloadError(Exception):
     """artifact / provenance download 失敗 (network / size cap / IO)。"""
 
 
-def _read_to_temp_with_cap(resp: Any, fd: int, cap_bytes: int) -> int:  # noqa: ANN401
+def _read_to_temp_with_cap(resp: Any, fd: int, cap_bytes: int, *, label: str = "artifact") -> int:  # noqa: ANN401, E501
     """resp から fd へ chunked 書込し、累計バイト数を返す (I-1: cap)。
 
-    fd は os.fdopen で wrap して fsync 後に close される。caller は fd を再 close しない。
+    fd は os.fdopen で wrap して fsync 後に close される。label は PR-7 review I-1 反映で
+    artifact / provenance を区別 (triage 用)。
     """
     total = 0
     with os.fdopen(fd, "wb") as f:
@@ -43,7 +44,7 @@ def _read_to_temp_with_cap(resp: Any, fd: int, cap_bytes: int) -> int:  # noqa: 
                 break
             total += len(chunk)
             if total > cap_bytes:
-                raise DownloadError(f"artifact body exceeds {cap_bytes} bytes")
+                raise DownloadError(f"{label} body exceeds {cap_bytes} bytes")
             f.write(chunk)
         f.flush()
         os.fsync(f.fileno())
@@ -58,6 +59,7 @@ def _download_with_atomic_place(
     cap_bytes: int,
     timeout_sec: int,
     expected_sha256: str | None,
+    label: str = "artifact",
 ) -> Path:
     """URL から download し atomic 配置する共通実装。
 
@@ -68,6 +70,9 @@ def _download_with_atomic_place(
         cap_bytes: download 上限 (DoS 防御)
         timeout_sec: HTTPS request timeout
         expected_sha256: 期待 SHA-256 (None なら検証 skip。provenance file は None)
+        label: error message 用のラベル ("artifact" / "provenance")。
+            PR-7 review I-1 反映: provenance download の triage で "artifact" に
+            紛れないよう、log/exception message に caller 区別を載せる。
 
     Returns:
         配置された final path
@@ -93,7 +98,7 @@ def _download_with_atomic_place(
             url,
             timeout_sec=timeout_sec,
             error_class=DownloadError,
-            label="artifact",
+            label=label,
         )
         try:
             try:
@@ -102,19 +107,19 @@ def _download_with_atomic_place(
                 content_length = 0
             if content_length > cap_bytes:
                 raise DownloadError(
-                    f"Content-Length {content_length} exceeds {cap_bytes} bytes"
+                    f"{label} Content-Length {content_length} exceeds {cap_bytes} bytes"
                 )
 
             # ownership 移譲を呼び出し前に確定させて double-close を回避
             fd_owned = False
-            _read_to_temp_with_cap(resp, fd, cap_bytes)
+            _read_to_temp_with_cap(resp, fd, cap_bytes, label=label)
         finally:
             with contextlib.suppress(AttributeError, OSError):
                 resp.close()
 
         if expected_sha256 is not None and not verify_sha256(tmp_path, expected_sha256):
             raise ChecksumError(
-                f"artifact SHA-256 mismatch (expected {expected_sha256[:8]}...)"
+                f"{label} SHA-256 mismatch (expected {expected_sha256[:8]}...)"
             )
 
         atomic_replace_and_fsync_dir(tmp_path, final_path, dest_dir)
@@ -123,7 +128,7 @@ def _download_with_atomic_place(
         # review_team A5 second-pass: errno / winerror / filename を含めて Windows AV /
         # NAS / sharing violation 等を debug 可能にする
         raise DownloadError(
-            f"artifact write error: {type(e).__name__}: "
+            f"{label} write error: {type(e).__name__}: "
             f"errno={e.errno} winerror={getattr(e, 'winerror', None)} "
             f"filename={e.filename!r}: {e}"
         ) from e
@@ -185,4 +190,5 @@ def download_provenance(
         cap_bytes=MAX_PROVENANCE_BYTES,
         timeout_sec=timeout_sec,
         expected_sha256=None,
+        label="provenance",
     )

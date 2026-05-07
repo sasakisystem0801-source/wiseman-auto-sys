@@ -295,14 +295,28 @@ def update_and_spawn(
             return SpawnOutcome.success()
         existing = versions_dir / cur.version / "wiseman_hub.exe"
         if not existing.is_file():
+            # PR-7 review C-2 反映: 失敗 phase fingerprint で triage 可能化
+            _phase_log("preflight_existing_missing", version=cur.version, expected=existing.name)
             raise PreflightError(f"binary missing for current version: {existing.name}")
         return spawn_with_monitor(existing, monitor_timeout_sec=monitor_timeout_sec)
 
     new_dir = versions_dir / new_ver
     _phase_log("download_start", new_version=new_ver, dest=str(new_dir))
-    new_binary, _provenance_path = _download_with_provenance(
-        manifest, new_dir, allow_unsigned=allow_unsigned_provenance
-    )
+    try:
+        new_binary, _provenance_path = _download_with_provenance(
+            manifest, new_dir, allow_unsigned=allow_unsigned_provenance
+        )
+    except (DownloadError, ChecksumError, ProvenanceError, ProvenanceUnavailable) as e:
+        # PR-7 review C-2 反映: download 経路の失敗 phase fingerprint
+        # (DownloadError = network/size/IO、ChecksumError = SHA-256 mismatch、
+        # ProvenanceError = claims、ProvenanceUnavailable = signature stub)
+        _phase_log(
+            "download_failed",
+            new_version=new_ver,
+            error_class=type(e).__name__,
+            message=str(e)[:200],
+        )
+        raise
     logger.info("downloaded version %s to %s", new_ver, new_binary.name)
     _phase_log("download_complete", new_version=new_ver)
 
@@ -311,7 +325,18 @@ def update_and_spawn(
         released_at=released_at,
         previous_version=cur.version if cur.version != DEFAULT_CURRENT.version else "",
     )
-    write_current_atomic(current_path, new_current)
+    try:
+        write_current_atomic(current_path, new_current)
+    except OSError as e:
+        # PR-7 review C-2 反映: current.json 切替失敗 phase fingerprint
+        # (ENOSPC / EROFS / FileNotFoundError 等。raise させて上位で EXIT_UNEXPECTED)
+        _phase_log(
+            "current_switch_failed",
+            new_version=new_ver,
+            error_class=type(e).__name__,
+            errno=e.errno,
+        )
+        raise
     logger.info("switched current.json to version %s", new_ver)
     _phase_log("current_switched", new_version=new_ver, previous_version=cur.version)
 
@@ -339,8 +364,21 @@ def update_and_spawn(
         current_path, versions_dir, monitor_timeout_sec=monitor_timeout_sec
     )
     if not rollback_outcome.is_rollback_candidate():
+        # PR-7 review C-2 反映: rollback 成功 fingerprint
+        _phase_log(
+            "rollback_complete",
+            failed_version=new_ver,
+            rollback_result=rollback_outcome.result.value,
+        )
         return rollback_outcome
 
+    # PR-7 review C-2 反映: rollback も失敗した致命状態 fingerprint
+    _phase_log(
+        "rollback_failed",
+        failed_version=new_ver,
+        rollback_result=rollback_outcome.result.value,
+        rollback_returncode=rollback_outcome.returncode,
+    )
     raise SpawnFailedNoRollbackError(
         f"both new ({outcome.returncode}) and previous "
         f"({rollback_outcome.returncode}) versions failed to spawn"

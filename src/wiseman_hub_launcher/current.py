@@ -260,8 +260,10 @@ def write_current_atomic(path: Path, current: Current) -> None:
     手順:
         1. 同ディレクトリに tempfile 作成
         2. JSON write → flush → fsync
-        3. os.replace で target を差替（同一 FS で atomic 保証）
-        4. 親ディレクトリを fsync（POSIX rename 永続化、Windows では no-op だがエラーにしない）
+        3. atomic_replace_and_fsync_dir で os.replace + 親 dir fsync を実施
+           (`_runtime/_atomic_io.py` に共通化、PR-7 review I-3 反映で docstring 同期)。
+           dir fsync は POSIX のみ意味あり、Windows では debug ログで suppress、
+           POSIX では errno 付き warning ログで ENOSPC/EIO/EROFS を可視化。
 
     親ディレクトリは事前に存在している必要がある。
     """
