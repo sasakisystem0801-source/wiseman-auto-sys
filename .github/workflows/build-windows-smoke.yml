@@ -136,15 +136,16 @@ jobs:
           $size = (Get-Item "dist\wiseman_launcher.exe").Length
           Write-Host "wiseman_launcher.exe size: $size bytes"
 
-      # `--version` は argparse の action="version" で stdout に "wiseman_launcher X.Y.Z"
-      # を書いて exit 0。これで __main__ → _supply_chain → sigstore.py の import チェーン
-      # が全開通し、PyInstaller bundle が sigstore-python + tuf + cryptography 推移依存を
-      # 解決できていることが検証される。
-      - name: Run launcher smoke test (--version, hidden imports / sigstore bundle)
+      # `--smoke-test` は CI 専用 entry。sigstore-python + tuf + cryptography の主要
+      # module を eager import + helper (build_expected_identity) を呼んで動作確認する。
+      # `--version` だと argparse の早期 SystemExit で sigstore.py の関数内 lazy import が
+      # 踏まれず、PyInstaller bundle 内の sigstore-python 解決失敗を検出できないため、
+      # 本 mode を別途用意して使う (Issue #217 / src/wiseman_hub_launcher/__main__.py)。
+      - name: Run launcher smoke test (--smoke-test, sigstore bundle resolution)
         shell: pwsh
         run: |
           $process = Start-Process -FilePath "dist\wiseman_launcher.exe" `
-            -ArgumentList "--version" `
+            -ArgumentList "--smoke-test" `
             -NoNewWindow `
             -Wait `
             -PassThru `

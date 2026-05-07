@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sys
 from pathlib import Path
 
 from . import __version__
@@ -45,6 +46,7 @@ from ._runtime import (
 )
 from ._supply_chain import (
     ProvenanceError,
+    build_expected_identity,
 )
 from .checksum import ChecksumError
 from .current import CurrentReadError, read_current
@@ -105,6 +107,15 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--smoke-test",
+        action="store_true",
+        help=(
+            "PyInstaller bundle smoke (Issue #217): sigstore-python + tuf + cryptography "
+            "推移依存を eager import + helper 動作確認 + exit 0。CI build-smoke 専用、"
+            "manifest/network/file I/O は一切触らない (副作用ゼロ)"
+        ),
+    )
+    parser.add_argument(
         "--no-spawn",
         action="store_true",
         help="--update と併用: download + 切替まで、spawn しない (PR-4)",
@@ -162,6 +173,45 @@ def _semver_tuple(s: str) -> tuple[int, int, int]:
         return (int(parts[0]), int(parts[1]), int(parts[2]))
     except (ValueError, IndexError):
         return (0, 0, 0)
+
+
+def run_smoke_test() -> int:
+    """PyInstaller bundle smoke (Issue #217)。
+
+    `--version` は argparse の早期 SystemExit で sigstore.py の関数内 lazy import が
+    踏まれず、sigstore-python + tuf + cryptography hidden imports の解決失敗を
+    検出できない。本 mode は CI build-smoke 専用で eager import + helper 呼出を
+    実行する。manifest fetch / file I/O は一切触らない (副作用ゼロ)。
+
+    成功 = sigstore-python の主要 module + helper が PyInstaller bundle 内で
+    解決可能 = 推移依存 (tuf / cryptography / sigstore-protobuf-specs 等) の
+    hidden imports が正しく bundled されている。
+    """
+    try:
+        from sigstore.models import Bundle  # noqa: F401
+        from sigstore.verify import Verifier  # noqa: F401
+        from sigstore.verify.policy import Identity  # noqa: F401
+    except ImportError as e:
+        print(
+            f"smoke test failed (sigstore-python import): {type(e).__name__}: {e}",
+            file=sys.stderr,
+        )
+        return EXIT_UNEXPECTED
+
+    identity = build_expected_identity(
+        repo="example/repo",
+        workflow_path=".github/workflows/release.yml",
+        ref="refs/tags/v0.0.0",
+    )
+    if not identity.startswith("https://github.com/"):
+        print(
+            f"smoke test failed (build_expected_identity malformed): {identity!r}",
+            file=sys.stderr,
+        )
+        return EXIT_UNEXPECTED
+
+    print("smoke test passed: sigstore-python imports + helpers OK")
+    return EXIT_OK
 
 
 def run_dry_run(manifest_url: str, current_path: Path, *, verbose: bool = False) -> int:
@@ -328,12 +378,22 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911 — top-level d
     home_dir: Path = args.home
     current_path: Path = args.current_path or (home_dir / "current.json")
 
+    if args.smoke_test and (args.dry_run or args.update):
+        logger.error("--smoke-test cannot be combined with --dry-run / --update")
+        return EXIT_CONFIG
     if args.dry_run and args.update:
         logger.error("--dry-run and --update are mutually exclusive")
         return EXIT_CONFIG
     if args.no_spawn and not args.update:
         logger.error("--no-spawn requires --update")
         return EXIT_CONFIG
+
+    if args.smoke_test:
+        try:
+            return run_smoke_test()
+        except Exception:  # noqa: BLE001 — top-level safety net
+            logger.exception("unexpected error in smoke-test")
+            return EXIT_UNEXPECTED
 
     if args.dry_run:
         try:

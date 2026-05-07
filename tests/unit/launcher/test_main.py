@@ -62,6 +62,44 @@ def test_main_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
     assert "wiseman_launcher" in out
 
 
+def test_main_smoke_test_success(capsys: pytest.CaptureFixture[str]) -> None:
+    """--smoke-test (Issue #217): sigstore-python eager import + helper 動作確認 + EXIT_OK。
+
+    PyInstaller bundle で sigstore-python + tuf + cryptography 推移依存が解決
+    できることを検証する CI 専用 entry。manifest fetch / file I/O は触らない。
+    """
+    code = main(["--smoke-test"])
+    assert code == EXIT_OK
+    out = capsys.readouterr().out
+    assert "smoke test passed" in out
+
+
+def test_main_smoke_test_with_dry_run_mutex(tmp_path: Path) -> None:
+    """--smoke-test + --dry-run は mutex (EXIT_CONFIG)。"""
+    code = main(
+        [
+            "--smoke-test",
+            "--dry-run",
+            "--current-path",
+            str(tmp_path / "current.json"),
+        ]
+    )
+    assert code == EXIT_CONFIG
+
+
+def test_main_smoke_test_with_update_mutex(tmp_path: Path) -> None:
+    """--smoke-test + --update は mutex (EXIT_CONFIG)。"""
+    code = main(
+        [
+            "--smoke-test",
+            "--update",
+            "--current-path",
+            str(tmp_path / "current.json"),
+        ]
+    )
+    assert code == EXIT_CONFIG
+
+
 def test_main_without_dry_run_returns_config_error(tmp_path: Path) -> None:
     code = main(["--current-path", str(tmp_path / "current.json")])
     assert code == EXIT_CONFIG
