@@ -37,26 +37,30 @@ import logging
 import sys
 from pathlib import Path
 
-from . import __version__
-from ._runtime import (
+# Issue #217: PyInstaller bundle で `__main__.py` を直接 entrypoint にすると
+# relative import が `ImportError: attempted relative import with no known parent
+# package` で失敗するため、wiseman_hub/__main__.py と同じく absolute import を使う。
+# `python -m wiseman_hub_launcher` 起動でも src/ が pathex にあれば動作する。
+from wiseman_hub_launcher import __version__
+from wiseman_hub_launcher._runtime import (
     LockHeartbeat,
     LockHeldError,
     acquire_lock,
     release_lock,
 )
-from ._supply_chain import (
+from wiseman_hub_launcher._supply_chain import (
     ProvenanceError,
     build_expected_identity,
 )
-from .checksum import ChecksumError
-from .current import CurrentReadError, read_current
-from .manifest import (
+from wiseman_hub_launcher.checksum import ChecksumError
+from wiseman_hub_launcher.current import CurrentReadError, read_current
+from wiseman_hub_launcher.manifest import (
     ManifestError,
     fetch_manifest,
     parse_manifest,
     validate_manifest,
 )
-from .updater import (
+from wiseman_hub_launcher.updater import (
     DownloadError,
     PreflightError,
     SpawnFailedNoRollbackError,
