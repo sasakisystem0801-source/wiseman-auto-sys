@@ -37,25 +37,34 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import NotRequired, TypedDict, cast
+from typing import NewType, NotRequired, TypedDict, cast
 
 from ._supply_chain._http import https_get_bounded
 
 logger = logging.getLogger(__name__)
 
 
+# Issue #209 PR1: Sha256Hex NewType で 64 lowercase hex を型レベル narrow。
+# 形式検証は validate_manifest 内の `_is_sha256_lower_hex` で実行、本 NewType は
+# 型注釈上のみ str と区別する (runtime cost ゼロ、NewType("X", str) は identity cast)。
+# checksum_sha256 と commit_sha (7-40 hex)、version 等の取り違えを mypy が compile-time 検出。
+# CommitSha / SemverTriple / Iso8601UtcZ への拡張は次 PR で再評価 (codex セカンドオピニオン)。
+Sha256Hex = NewType("Sha256Hex", str)
+
+
 class ManifestData(TypedDict):
     """validate_manifest 通過後の manifest schema (PR-7、type narrow 用)。
 
-    必須 field は all str、任意 field は NotRequired で表現。
-    呼び出し側は `validated["checksum_sha256"]` 等で直接 str narrow され、
+    必須 field は all str (Sha256Hex は str sub-type)、任意 field は NotRequired。
+    呼び出し側は `validated["checksum_sha256"]` 等で直接 narrow され、
     `assert isinstance(..., str)` が不要になる (PR-7 AC3)。
+    Issue #209 PR1: checksum_sha256 / sbom_sha256 を Sha256Hex 化、取り違え検出を mypy 化。
     """
 
     current_version: str
     minimum_version: str
     download_url: str
-    checksum_sha256: str
+    checksum_sha256: Sha256Hex
     commit_sha: str
     built_at: str
     released_at: str
@@ -64,7 +73,7 @@ class ManifestData(TypedDict):
     expected_workflow_ref: str
     # PR-6 後半 (codex S1 反映): SBOM 改竄検出用、sbom_url + sbom_sha256 はペアで present。
     sbom_url: NotRequired[str]
-    sbom_sha256: NotRequired[str]
+    sbom_sha256: NotRequired[Sha256Hex]
     release_notes: NotRequired[str]
     force_update: NotRequired[bool]
 
@@ -353,5 +362,13 @@ def validate_manifest(manifest: dict[str, object]) -> ManifestData:
         raise ManifestError(
             f"expected_workflow_ref format invalid: {validated['expected_workflow_ref']!r}"
         )
+
+    # Issue #209 PR1: Sha256Hex NewType narrow (mypy 上のみ、runtime は str 不変)。
+    # 形式検証 (`_is_sha256_lower_hex`) PASS 後にここで narrow を確定させる。
+    # caller (updater.py / 後続 PR2 で checksum.py / _supply_chain/* も) は Sha256Hex 受け、
+    # commit_sha / version 等との取り違えを mypy が compile-time 検出可能。
+    validated["checksum_sha256"] = Sha256Hex(validated["checksum_sha256"])
+    if "sbom_sha256" in validated:
+        validated["sbom_sha256"] = Sha256Hex(validated["sbom_sha256"])
 
     return validated

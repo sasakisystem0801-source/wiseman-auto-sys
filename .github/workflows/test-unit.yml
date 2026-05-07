@@ -33,5 +33,12 @@ jobs:
       - name: Type check
         run: uv run mypy src/
 
+      # Issue #209 PR1: assert_type ベースの static type contract lock-in を CI で発現させる。
+      # pyproject.toml の mypy exclude が `^tests/` を除外しているため、当該 test ファイルは
+      # `mypy src/` step から漏れる → 個別に明示指定。将来 ManifestData["checksum_sha256"]
+      # を `str` に戻す regression を CI が green のまま通す事故を防ぐ。
+      - name: Type check (assert_type lock-in tests)
+        run: uv run mypy tests/unit/launcher/test_manifest.py
+
       - name: Run unit tests (skip integration)
         run: uv run pytest tests/unit -v -m "not integration"
