@@ -852,12 +852,15 @@ def test_phase_log_preserves_scalar_types(caplog: pytest.LogCaptureFixture) -> N
     log analytics の filter (e.g. ``error_count > 3``) が動かなくなる将来リスク。
     本 PR で scalar type (str/int/float/bool/None) は保持、その他 (Path / Exception 等)
     のみ str() 化する _coerce_log_value に変更。
+
+    Issue #210: phase 名は Phase Literal 拘束のため、production の値 ("read_current") を
+    使用する。test 専用 dummy phase 名 ("test_scalar") は mypy で reject される。
     """
     from wiseman_hub_launcher.updater import _phase_log  # noqa: PLC0415
 
     caplog.set_level("INFO", logger="wiseman_hub_launcher.updater")
     _phase_log(
-        "test_scalar",
+        "read_current",
         version="1.2.3",
         error_count=3,
         ratio=0.75,
@@ -869,7 +872,7 @@ def test_phase_log_preserves_scalar_types(caplog: pytest.LogCaptureFixture) -> N
     # 'launcher_phase {json}' から JSON 部分を切り出し
     json_part = records[0].split("launcher_phase ", 1)[1]
     payload = json.loads(json_part)
-    assert payload["phase"] == "test_scalar"
+    assert payload["phase"] == "read_current"
     assert payload["version"] == "1.2.3"  # str
     assert payload["error_count"] == 3
     assert isinstance(payload["error_count"], int)  # str 化されていない
@@ -884,13 +887,15 @@ def test_phase_log_coerces_non_scalar_to_str(caplog: pytest.LogCaptureFixture) -
 
     JSON serializable でない型を防御的に文字列化することで、json.dumps が落ちて
     silent-failure 化することを防ぐ。
+
+    Issue #210: phase 名は Phase Literal 拘束のため production の値を使用。
     """
     from wiseman_hub_launcher.updater import _phase_log  # noqa: PLC0415
 
     caplog.set_level("INFO", logger="wiseman_hub_launcher.updater")
     p = Path("/tmp/x")
     exc = ValueError("boom")
-    _phase_log("test_non_scalar", path=p, exc=exc)
+    _phase_log("download_failed", path=p, exc=exc)
     records = [r.message for r in caplog.records if "launcher_phase" in r.message]
     json_part = records[0].split("launcher_phase ", 1)[1]
     payload = json.loads(json_part)

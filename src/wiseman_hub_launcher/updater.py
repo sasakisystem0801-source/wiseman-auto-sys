@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import TypeAlias
+from typing import Literal, TypeAlias
 
 from ._runtime import (
     DEFAULT_SPAWN_MONITOR_SEC,
@@ -53,6 +53,36 @@ logger = logging.getLogger(__name__)
 # で int/float/bool が機能する scalar を type 上で表現する。
 LogScalar: TypeAlias = str | int | float | bool | None
 
+Phase: TypeAlias = Literal[
+    "read_current",
+    "already_up_to_date",
+    "preflight_existing_missing",
+    "download_start",
+    "download_failed",
+    "download_complete",
+    "current_switched",
+    "current_switch_failed",
+    "spawn_start",
+    "spawn_complete",
+    "rollback_start",
+    "rollback_complete",
+    "rollback_failed",
+]
+"""update_and_spawn の phase fingerprint 名 (Issue #210, review type-design I2 反映)。
+
+値は JSON ``payload["phase"]`` にそのまま emit される (wire format = type identity)。
+旧仕様 ``_phase_log(phase: str, ...)`` では ``_phase_log("download_strat", ...)`` (typo)
+も runtime 通過し、test も string hardcode で typo を catch しない silent-failure が
+あった。本 Literal narrow を ``mypy src/`` (production callsite 13 箇所) と
+``tests/unit/launcher/test_updater_phase_lockin.py`` (CI mypy 専用 lock-in file) で
+enforce する。
+
+phase 追加時:
+    1. 本 Literal リストに値を append
+    2. ``update_and_spawn`` 内で対応する ``_phase_log(<new_phase>, ...)`` callsite 追加
+    3. ``mypy src/`` で全 callsite が narrow を通ることを確認
+"""
+
 
 class UpdaterError(Exception):
     """updater 経路の base exception (PR-6a で他例外は subpackage に移動)。"""
@@ -75,11 +105,12 @@ def _coerce_log_value(v: object) -> LogScalar:
     return str(v)
 
 
-def _phase_log(phase: str, **fields: object) -> None:
+def _phase_log(phase: Phase, **fields: object) -> None:
     """update_and_spawn 各 phase で構造化 JSON 1 行 log を出す (PR-7 AC5)。
 
     silent-failure 残対応: 失敗時の triage で「どこで止まったか」を機械可読化。
     Issue #212 I-4: scalar 型 (int/float/bool/None) は保持して log analytics 可能化。
+    Issue #210: phase 引数を Phase Literal で拘束し、typo を mypy で静的検出する。
     """
     payload = {"phase": phase, **{k: _coerce_log_value(v) for k, v in fields.items()}}
     logger.info("launcher_phase %s", json.dumps(payload, ensure_ascii=False))

@@ -172,9 +172,13 @@ def test_make_sha256hex_rejects_non_str(non_str_value: object) -> None:
     ManifestError として一本化 (docstring 契約 "Raises: ManifestError" を厳守)。
 
     caller は ManifestError のみ catch すれば form/type 両方の不正を捕捉可能。
+
+    Issue #210 注: src/wiseman_hub_launcher/py.typed 追加で本 test file が strict 型
+    チェック対象に。本 test は意図的に signature 違反の値を渡して runtime gate を
+    検証するため、`type: ignore[arg-type]` で型 system bypass。
     """
     with pytest.raises(ManifestError, match="must be str"):
-        make_sha256hex(non_str_value)
+        make_sha256hex(non_str_value)  # type: ignore[arg-type]
 
 
 def _make_fake_resp(
