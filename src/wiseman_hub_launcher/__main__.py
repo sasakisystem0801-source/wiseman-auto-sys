@@ -18,26 +18,14 @@ PR-6 後半で削除 (本格 fail-closed):
     環境変数を完全削除。signature 検証は sigstore-python に委譲して default 有効、
     bypass 経路は存在しない (本番 PC + test 環境共に同一 path で fail-closed)。
 
-exit code:
-    0  成功 (SUCCESS / OK_EARLY_EXIT、--dry-run / --no-spawn 完了)
-    2  CONFIG (argparse / HTTPS pre-check / mode 不正)
-    3  MANIFEST (manifest URL の HTTPS 取得段階の失敗: network / HTTP / SSL / parse / validate)
-    4  UNEXPECTED
-    5  CHECKSUM_MISMATCH (PR-4)
-    6  ROLLBACK_UNAVAILABLE / preflight 失敗 (PR-4)
-    7  SPAWN_FAILED_NO_ROLLBACK (新版 + 旧版とも spawn 失敗、PR-4)
-    8  LOCK_HELD (多重起動、PR-4)
-    9  PROVENANCE (signature 失敗 + claims 不一致 + canonical URL 違反、PR-6a + PR-6 後半)
-    10 ARTIFACT (artifact URL の HTTPS 取得段階の失敗: network / HTTP / SSL / size cap、
-       Issue #212 I-3 で manifest と分離)
-
-    triage 軸: 3 = manifest 段階、10 = artifact 段階。両方とも HTTPS / network 障害を
-    含むため、runbook では「どの段階の HTTPS 取得が落ちたか」で切り分ける。
+exit code は :class:`LauncherExitCode` 単一ソース (Issue #227)。runbook では
+``int(LauncherExitCode.OK) == 0`` のように IntEnum を介して値を引く。
 """
 
 from __future__ import annotations
 
 import argparse
+import enum
 import logging
 import sys
 from pathlib import Path
@@ -80,16 +68,47 @@ logger = logging.getLogger("wiseman_launcher")
 DEFAULT_MANIFEST_URL = "https://storage.googleapis.com/wiseman-hub-release-prod/manifest.json"
 DEFAULT_HOME = Path.home() / "wiseman-hub"
 
-EXIT_OK = 0
-EXIT_CONFIG = 2
-EXIT_MANIFEST = 3
-EXIT_UNEXPECTED = 4
-EXIT_CHECKSUM_MISMATCH = 5
-EXIT_ROLLBACK_UNAVAILABLE = 6
-EXIT_SPAWN_FAILED_NO_ROLLBACK = 7
-EXIT_LOCK_HELD = 8
-EXIT_PROVENANCE = 9  # PR-6a (codex I-5 反映: 6 と分離)、PR-6 後半で signature 失敗も統合
-EXIT_ARTIFACT = 10  # Issue #212 I-3: artifact URL / network / size cap (manifest と分離)
+
+class LauncherExitCode(enum.IntEnum):
+    """ADR-016 launcher exit codes (POSIX 0..255 範囲)。
+
+    Issue #227 で旧 ``EXIT_OK = 0`` 等の module-level int 定数を本 IntEnum に統合
+    することで以下を実現:
+
+    1. **typo 静的検出** — ``LauncherExitCode.OOK`` のような typo を mypy が
+       reject (lock-in test で CI enforce、``test_main_exit_code_lockin.py``)。
+    2. **docstring drift 解消** — exit code の意味は本 docstring が単一ソース。
+       module docstring からは本 class への参照のみ。
+    3. **uniqueness CI 化** — ``test_exit_codes_disjoint`` で値の重複を CI 検出。
+    4. **shell 互換維持** — IntEnum なので ``raise SystemExit(LauncherExitCode.OK)``
+       は ``int(LauncherExitCode.OK) == 0`` 経由で shell に正しく抜ける。
+
+    triage 軸:
+        ==========================  ==========================================
+        OK / CONFIG / UNEXPECTED    launcher 自身の状態 (network 未到達)
+        MANIFEST                    manifest 段階の HTTPS 取得失敗
+        ARTIFACT                    artifact 段階の HTTPS 取得失敗 (Issue #212)
+        CHECKSUM_MISMATCH           download 後 SHA-256 不一致 (replay/tamper 疑い)
+        PROVENANCE                  sigstore 検証失敗 + claims 不一致 + URL 違反
+        ROLLBACK_UNAVAILABLE        現行版 binary 不存在 / preflight 失敗
+        SPAWN_FAILED_NO_ROLLBACK    新版 + 旧版とも spawn 失敗
+        LOCK_HELD                   多重起動排他で停止
+        ==========================  ==========================================
+
+    runbook の triage では「manifest (3) か artifact (10) か」で HTTPS 取得段階を
+    切り分け、checksum (5) / provenance (9) は供給チェーン疑いとしてエスカレーション。
+    """
+
+    OK = 0
+    CONFIG = 2
+    MANIFEST = 3
+    UNEXPECTED = 4
+    CHECKSUM_MISMATCH = 5
+    ROLLBACK_UNAVAILABLE = 6
+    SPAWN_FAILED_NO_ROLLBACK = 7
+    LOCK_HELD = 8
+    PROVENANCE = 9
+    ARTIFACT = 10
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -97,9 +116,7 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="wiseman_launcher",
         description="Wiseman Hub bootstrapper / updater (ADR-016)",
     )
-    parser.add_argument(
-        "--version", action="version", version=f"wiseman_launcher {__version__}"
-    )
+    parser.add_argument("--version", action="version", version=f"wiseman_launcher {__version__}")
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -185,7 +202,7 @@ def _semver_tuple(s: str) -> tuple[int, int, int]:
         return (0, 0, 0)
 
 
-def run_smoke_test() -> int:
+def run_smoke_test() -> LauncherExitCode:
     """PyInstaller bundle smoke (Issue #217)。
 
     `--version` は argparse の早期 SystemExit で sigstore.py の関数内 lazy import が
@@ -206,7 +223,7 @@ def run_smoke_test() -> int:
             f"smoke test failed (sigstore-python import): {type(e).__name__}: {e}",
             file=sys.stderr,
         )
-        return EXIT_UNEXPECTED
+        return LauncherExitCode.UNEXPECTED
 
     identity = build_expected_identity(
         repo="example/repo",
@@ -218,13 +235,13 @@ def run_smoke_test() -> int:
             f"smoke test failed (build_expected_identity malformed): {identity!r}",
             file=sys.stderr,
         )
-        return EXIT_UNEXPECTED
+        return LauncherExitCode.UNEXPECTED
 
     print("smoke test passed: sigstore-python imports + helpers OK")
-    return EXIT_OK
+    return LauncherExitCode.OK
 
 
-def run_dry_run(manifest_url: str, current_path: Path, *, verbose: bool = False) -> int:
+def run_dry_run(manifest_url: str, current_path: Path, *, verbose: bool = False) -> LauncherExitCode:
     """dry-run の主処理。manifest fetch + validate + 比較ログまで。
 
     副作用ゼロ保証 (codex I-3 反映):
@@ -240,20 +257,20 @@ def run_dry_run(manifest_url: str, current_path: Path, *, verbose: bool = False)
 
     if not manifest_url.startswith("https://"):
         logger.error("--manifest-url must use HTTPS scheme")
-        return EXIT_CONFIG
+        return LauncherExitCode.CONFIG
 
     try:
         raw = fetch_manifest(manifest_url)
     except ManifestError as e:
         logger.error("manifest fetch failed: %s", e)
-        return EXIT_MANIFEST
+        return LauncherExitCode.MANIFEST
 
     try:
         parsed = parse_manifest(raw)
         validated = validate_manifest(parsed)
     except ManifestError as e:
         logger.error("manifest validation failed: %s", e)
-        return EXIT_MANIFEST
+        return LauncherExitCode.MANIFEST
 
     new_version = validated["current_version"]
     download_url = validated["download_url"]
@@ -277,14 +294,14 @@ def run_dry_run(manifest_url: str, current_path: Path, *, verbose: bool = False)
             current.version,
         )
 
-    return EXIT_OK
+    return LauncherExitCode.OK
 
 
-def _spawn_outcome_to_exit(result: SpawnResult) -> int:
+def _spawn_outcome_to_exit(result: SpawnResult) -> LauncherExitCode:
     """spawn 結果を exit code にマップ。"""
     if result in (SpawnResult.SUCCESS, SpawnResult.OK_EARLY_EXIT):
-        return EXIT_OK
-    return EXIT_SPAWN_FAILED_NO_ROLLBACK
+        return LauncherExitCode.OK
+    return LauncherExitCode.SPAWN_FAILED_NO_ROLLBACK
 
 
 def run_update(  # noqa: PLR0911 — explicit exit code mapping
@@ -294,7 +311,7 @@ def run_update(  # noqa: PLR0911 — explicit exit code mapping
     *,
     no_spawn: bool,
     monitor_timeout_sec: float,
-) -> int:
+) -> LauncherExitCode:
     """update mode の主処理 (PR-4 / PR-6a / PR-6 後半)。
 
     Flow:
@@ -310,7 +327,7 @@ def run_update(  # noqa: PLR0911 — explicit exit code mapping
     """
     if not manifest_url.startswith("https://"):
         logger.error("--manifest-url must use HTTPS scheme")
-        return EXIT_CONFIG
+        return LauncherExitCode.CONFIG
 
     home_dir.mkdir(parents=True, exist_ok=True)
     lock_path = home_dir / "launcher.lock"
@@ -319,7 +336,7 @@ def run_update(  # noqa: PLR0911 — explicit exit code mapping
         lock_fd = acquire_lock(lock_path)
     except LockHeldError as e:
         logger.error("lock held: %s", e)
-        return EXIT_LOCK_HELD
+        return LauncherExitCode.LOCK_HELD
 
     # review_team A4 second-pass: heartbeat.start() の RuntimeError 等で lock fd が
     # leak しないよう、acquire 直後から release を保証する try/finally で全体を包む
@@ -331,20 +348,20 @@ def run_update(  # noqa: PLR0911 — explicit exit code mapping
                 validated = validate_manifest(parsed)
             except ManifestError as e:
                 logger.error("manifest error: %s", e)
-                return EXIT_MANIFEST
+                return LauncherExitCode.MANIFEST
 
             try:
                 cur = read_current(current_path, strict_read=True)
             except CurrentReadError as e:
                 logger.error("current.json read failed: %s", e)
-                return EXIT_ROLLBACK_UNAVAILABLE
+                return LauncherExitCode.ROLLBACK_UNAVAILABLE
 
             versions_dir = home_dir / "versions"
             try:
                 preflight(cur, versions_dir)
             except PreflightError as e:
                 logger.error("preflight failed: %s", e)
-                return EXIT_ROLLBACK_UNAVAILABLE
+                return LauncherExitCode.ROLLBACK_UNAVAILABLE
 
             try:
                 outcome = update_and_spawn(
@@ -356,34 +373,36 @@ def run_update(  # noqa: PLR0911 — explicit exit code mapping
                 )
             except ChecksumError as e:
                 logger.error("checksum mismatch: %s", e)
-                return EXIT_CHECKSUM_MISMATCH
+                return LauncherExitCode.CHECKSUM_MISMATCH
             except ProvenanceError as e:
                 # PR-6 後半: signature 失敗 + claims 不一致 + canonical URL 違反を統合
                 logger.error("provenance verification failed: %s", e)
-                return EXIT_PROVENANCE
+                return LauncherExitCode.PROVENANCE
             except DownloadError:
                 # Issue #212 I-1: logger.exception で __cause__ chain (HTTPError 503 /
                 # TimeoutError / SSLError(CERTIFICATE_VERIFY_FAILED) 等) を traceback
-                # に残し triage 効率化。I-3: EXIT_ARTIFACT (10) で manifest と分離。
+                # に残し triage 効率化。I-3: LauncherExitCode.ARTIFACT (10) で manifest と分離。
                 logger.exception("download error")
-                return EXIT_ARTIFACT
+                return LauncherExitCode.ARTIFACT
             # C10 (silent-failure / type-design): canonical URL validation の ValueError は
             # updater.py で ProvenanceError に wrap 済。ここで except ValueError を持つと
             # Current invariant / SpawnOutcome invariant 違反 (= coding bug) も
-            # EXIT_PROVENANCE に化けるので持たない (top-level safety net で EXIT_UNEXPECTED)
+            # LauncherExitCode.PROVENANCE に化けるので持たない (top-level safety net で LauncherExitCode.UNEXPECTED)
             except PreflightError as e:
                 logger.error("preflight failed during update: %s", e)
-                return EXIT_ROLLBACK_UNAVAILABLE
+                return LauncherExitCode.ROLLBACK_UNAVAILABLE
             except SpawnFailedNoRollbackError as e:
                 logger.error("spawn failed and rollback failed: %s", e)
-                return EXIT_SPAWN_FAILED_NO_ROLLBACK
+                return LauncherExitCode.SPAWN_FAILED_NO_ROLLBACK
 
             return _spawn_outcome_to_exit(outcome.result)
     finally:
         release_lock(lock_fd, lock_path)
 
 
-def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911 — top-level dispatch
+def main(
+    argv: list[str] | None = None,
+) -> LauncherExitCode:  # noqa: PLR0911 — top-level dispatch
     parser = _build_parser()
     args = parser.parse_args(argv)
     _setup_logging(args.verbose)
@@ -393,27 +412,27 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911 — top-level d
 
     if args.smoke_test and (args.dry_run or args.update):
         logger.error("--smoke-test cannot be combined with --dry-run / --update")
-        return EXIT_CONFIG
+        return LauncherExitCode.CONFIG
     if args.dry_run and args.update:
         logger.error("--dry-run and --update are mutually exclusive")
-        return EXIT_CONFIG
+        return LauncherExitCode.CONFIG
     if args.no_spawn and not args.update:
         logger.error("--no-spawn requires --update")
-        return EXIT_CONFIG
+        return LauncherExitCode.CONFIG
 
     if args.smoke_test:
         try:
             return run_smoke_test()
         except Exception:  # noqa: BLE001 — top-level safety net
             logger.exception("unexpected error in smoke-test")
-            return EXIT_UNEXPECTED
+            return LauncherExitCode.UNEXPECTED
 
     if args.dry_run:
         try:
             return run_dry_run(args.manifest_url, current_path, verbose=args.verbose)
         except Exception:  # noqa: BLE001 — top-level safety net
             logger.exception("unexpected error in dry-run")
-            return EXIT_UNEXPECTED
+            return LauncherExitCode.UNEXPECTED
 
     if args.update:
         try:
@@ -426,13 +445,10 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911 — top-level d
             )
         except Exception:  # noqa: BLE001 — top-level safety net
             logger.exception("unexpected error in update")
-            return EXIT_UNEXPECTED
+            return LauncherExitCode.UNEXPECTED
 
-    logger.error(
-        "no mode specified. use --dry-run or --update "
-        "(see --help for full options)."
-    )
-    return EXIT_CONFIG
+    logger.error("no mode specified. use --dry-run or --update (see --help for full options).")
+    return LauncherExitCode.CONFIG
 
 
 if __name__ == "__main__":

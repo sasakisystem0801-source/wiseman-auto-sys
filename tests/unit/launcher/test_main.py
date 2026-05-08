@@ -11,15 +11,7 @@ import pytest
 
 from wiseman_hub_launcher import __main__ as launcher_main
 from wiseman_hub_launcher.__main__ import (
-    EXIT_ARTIFACT,
-    EXIT_CHECKSUM_MISMATCH,
-    EXIT_CONFIG,
-    EXIT_LOCK_HELD,
-    EXIT_MANIFEST,
-    EXIT_OK,
-    EXIT_PROVENANCE,
-    EXIT_ROLLBACK_UNAVAILABLE,
-    EXIT_SPAWN_FAILED_NO_ROLLBACK,
+    LauncherExitCode,
     main,
     run_dry_run,
 )
@@ -56,6 +48,28 @@ def _good_manifest_bytes(version: str = "1.2.3") -> bytes:
     ).encode("utf-8")
 
 
+def test_exit_codes_disjoint() -> None:
+    """Issue #227: LauncherExitCode の値が disjoint (重複なし) であることを CI で enforce。
+
+    値追加時に既存と衝突 (e.g. ARTIFACT=10 を MANIFEST=10 と書く) すると IntEnum は
+    後勝ちで alias 化し signature を壊さず通過する。本 test で len(set(...)) を取って
+    重複検出する。
+    """
+    values = [code.value for code in LauncherExitCode]
+    assert len(values) == len(set(values)), f"LauncherExitCode に重複値: {values}"
+
+
+def test_exit_codes_int_compat() -> None:
+    """Issue #227: IntEnum なので int(...) で生 int に展開でき、shell exit code と互換。
+
+    `raise SystemExit(LauncherExitCode.OK)` が ``int(LauncherExitCode.OK) == 0`` 経由で
+    shell に 0 を返すことを保証する (IntEnum を Enum に格下げると壊れる)。
+    """
+    assert int(LauncherExitCode.OK) == 0
+    assert LauncherExitCode.OK == 0  # IntEnum は __eq__ で int と比較可能
+    assert LauncherExitCode.ARTIFACT == 10
+
+
 def test_main_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exc:
         main(["--version"])
@@ -65,19 +79,19 @@ def test_main_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_main_smoke_test_success(capsys: pytest.CaptureFixture[str]) -> None:
-    """--smoke-test (Issue #217): sigstore-python eager import + helper 動作確認 + EXIT_OK。
+    """--smoke-test (Issue #217): sigstore-python eager import + helper 動作確認 + LauncherExitCode.OK。
 
     PyInstaller bundle で sigstore-python + tuf + cryptography 推移依存が解決
     できることを検証する CI 専用 entry。manifest fetch / file I/O は触らない。
     """
     code = main(["--smoke-test"])
-    assert code == EXIT_OK
+    assert code == LauncherExitCode.OK
     out = capsys.readouterr().out
     assert "smoke test passed" in out
 
 
 def test_main_smoke_test_with_dry_run_mutex(tmp_path: Path) -> None:
-    """--smoke-test + --dry-run は mutex (EXIT_CONFIG)。"""
+    """--smoke-test + --dry-run は mutex (LauncherExitCode.CONFIG)。"""
     code = main(
         [
             "--smoke-test",
@@ -86,11 +100,11 @@ def test_main_smoke_test_with_dry_run_mutex(tmp_path: Path) -> None:
             str(tmp_path / "current.json"),
         ]
     )
-    assert code == EXIT_CONFIG
+    assert code == LauncherExitCode.CONFIG
 
 
 def test_main_smoke_test_with_update_mutex(tmp_path: Path) -> None:
-    """--smoke-test + --update は mutex (EXIT_CONFIG)。"""
+    """--smoke-test + --update は mutex (LauncherExitCode.CONFIG)。"""
     code = main(
         [
             "--smoke-test",
@@ -99,12 +113,12 @@ def test_main_smoke_test_with_update_mutex(tmp_path: Path) -> None:
             str(tmp_path / "current.json"),
         ]
     )
-    assert code == EXIT_CONFIG
+    assert code == LauncherExitCode.CONFIG
 
 
 def test_main_without_dry_run_returns_config_error(tmp_path: Path) -> None:
     code = main(["--current-path", str(tmp_path / "current.json")])
-    assert code == EXIT_CONFIG
+    assert code == LauncherExitCode.CONFIG
 
 
 def test_main_dry_run_success(tmp_path: Path) -> None:
@@ -121,13 +135,11 @@ def test_main_dry_run_success(tmp_path: Path) -> None:
                 str(cur_path),
             ]
         )
-    assert code == EXIT_OK
+    assert code == LauncherExitCode.OK
 
 
 def test_main_dry_run_fetch_failure(tmp_path: Path) -> None:
-    with patch.object(
-        launcher_main, "fetch_manifest", side_effect=ManifestError("network down")
-    ):
+    with patch.object(launcher_main, "fetch_manifest", side_effect=ManifestError("network down")):
         code = main(
             [
                 "--dry-run",
@@ -137,7 +149,7 @@ def test_main_dry_run_fetch_failure(tmp_path: Path) -> None:
                 str(tmp_path / "current.json"),
             ]
         )
-    assert code == EXIT_MANIFEST
+    assert code == LauncherExitCode.MANIFEST
 
 
 def test_main_dry_run_validation_failure(tmp_path: Path) -> None:
@@ -152,12 +164,10 @@ def test_main_dry_run_validation_failure(tmp_path: Path) -> None:
                 str(tmp_path / "current.json"),
             ]
         )
-    assert code == EXIT_MANIFEST
+    assert code == LauncherExitCode.MANIFEST
 
 
-def test_run_dry_run_already_up_to_date(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_run_dry_run_already_up_to_date(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     cur_path = tmp_path / "current.json"
     cur_path.write_text(json.dumps({"version": "1.2.3", "released_at": "2026-05-06T13:00:00Z"}))
     with (
@@ -165,13 +175,11 @@ def test_run_dry_run_already_up_to_date(
         patch.object(launcher_main, "fetch_manifest", return_value=_good_manifest_bytes("1.2.3")),
     ):
         code = run_dry_run("https://example.com/manifest.json", cur_path)
-    assert code == EXIT_OK
+    assert code == LauncherExitCode.OK
     assert any("up-to-date" in r.message for r in caplog.records)
 
 
-def test_run_dry_run_would_download(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_run_dry_run_would_download(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     cur_path = tmp_path / "current.json"
     cur_path.write_text(json.dumps({"version": "1.0.0", "released_at": ""}))
     with (
@@ -179,14 +187,12 @@ def test_run_dry_run_would_download(
         patch.object(launcher_main, "fetch_manifest", return_value=_good_manifest_bytes("1.2.3")),
     ):
         code = run_dry_run("https://example.com/manifest.json", cur_path)
-    assert code == EXIT_OK
+    assert code == LauncherExitCode.OK
     msgs = " ".join(r.message for r in caplog.records)
     assert "would download" in msgs
 
 
-def test_run_dry_run_manifest_older_than_current(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_run_dry_run_manifest_older_than_current(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     cur_path = tmp_path / "current.json"
     cur_path.write_text(json.dumps({"version": "2.0.0", "released_at": "2026-04-01T00:00:00Z"}))
     with (
@@ -194,11 +200,12 @@ def test_run_dry_run_manifest_older_than_current(
         patch.object(launcher_main, "fetch_manifest", return_value=_good_manifest_bytes("1.2.3")),
     ):
         code = run_dry_run("https://example.com/manifest.json", cur_path)
-    assert code == EXIT_OK
+    assert code == LauncherExitCode.OK
     assert any("older than current" in r.message for r in caplog.records)
 
 
 # C-1: HTTPS 入口検証 (CLI レベル) -----------------------------------------
+
 
 @pytest.mark.parametrize(
     "bad_url",
@@ -210,7 +217,7 @@ def test_run_dry_run_manifest_older_than_current(
     ],
 )
 def test_main_dry_run_rejects_non_https_manifest_url(tmp_path: Path, bad_url: str) -> None:
-    """C-1: --manifest-url が HTTPS 以外なら EXIT_CONFIG (manifest fetch には到達しない)。"""
+    """C-1: --manifest-url が HTTPS 以外なら LauncherExitCode.CONFIG (manifest fetch には到達しない)。"""
     with patch.object(launcher_main, "fetch_manifest") as fetch_mock:
         code = main(
             [
@@ -221,11 +228,12 @@ def test_main_dry_run_rejects_non_https_manifest_url(tmp_path: Path, bad_url: st
                 str(tmp_path / "current.json"),
             ]
         )
-    assert code == EXIT_CONFIG
+    assert code == LauncherExitCode.CONFIG
     fetch_mock.assert_not_called()  # fetch に渡さず即拒否
 
 
 # I-3: dry-run の副作用ゼロ -------------------------------------------------
+
 
 def test_dry_run_does_not_quarantine_corrupt_current(tmp_path: Path) -> None:
     """I-3: dry-run では破損 current.json を rename しない（副作用ゼロ）。"""
@@ -243,7 +251,7 @@ def test_dry_run_does_not_quarantine_corrupt_current(tmp_path: Path) -> None:
             ]
         )
     # exit code は OK (DEFAULT_CURRENT で続行)
-    assert code == EXIT_OK
+    assert code == LauncherExitCode.OK
     # 破損ファイルはそのまま残る (dry-run 副作用ゼロ)
     assert cur_path.exists()
     assert cur_path.read_bytes() == b"{not json"
@@ -278,14 +286,12 @@ def test_main_update_unknown_flag_rejected(tmp_path: Path) -> None:
 
 
 def test_main_update_provenance_failure_returns_9(tmp_path: Path) -> None:
-    """PR-6 後半: signature 検証失敗 → ProvenanceError → EXIT_PROVENANCE (9)。
+    """PR-6 後半: signature 検証失敗 → ProvenanceError → LauncherExitCode.PROVENANCE (9)。
 
     update_and_spawn 内 verify_provenance が ProvenanceError raise する状況を模擬。
     """
     cur_path = tmp_path / "current.json"
-    cur_path.write_text(
-        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
-    )
+    cur_path.write_text(json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""}))
     binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
     binary.parent.mkdir(parents=True)
     binary.write_bytes(b"existing")
@@ -294,11 +300,13 @@ def test_main_update_provenance_failure_returns_9(tmp_path: Path) -> None:
 
     with (
         patch.object(
-            launcher_main, "fetch_manifest",
+            launcher_main,
+            "fetch_manifest",
             return_value=_good_manifest_bytes("2.0.0"),
         ),
         patch.object(
-            launcher_main, "update_and_spawn",
+            launcher_main,
+            "update_and_spawn",
             side_effect=ProvenanceError("signature verify failed: cert chain broken"),
         ),
     ):
@@ -313,15 +321,13 @@ def test_main_update_provenance_failure_returns_9(tmp_path: Path) -> None:
                 "0.05",
             ]
         )
-    assert code == EXIT_PROVENANCE
+    assert code == LauncherExitCode.PROVENANCE
 
 
 def test_main_update_signature_verify_pass_proceeds(tmp_path: Path) -> None:
     """PR-6 後半: signature 検証 pass → update 実行 (bypass 経路なし)。"""
     cur_path = tmp_path / "current.json"
-    cur_path.write_text(
-        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
-    )
+    cur_path.write_text(json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""}))
     # 既存 binary を seed (preflight pass 用)
     binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
     binary.parent.mkdir(parents=True)
@@ -350,15 +356,13 @@ def test_main_update_signature_verify_pass_proceeds(tmp_path: Path) -> None:
                 "0.05",
             ]
         )
-    assert code == EXIT_OK
+    assert code == LauncherExitCode.OK
 
 
 def test_main_update_no_spawn_returns_ok(tmp_path: Path) -> None:
-    """AC-6: --no-spawn で SUCCESS sentinel → EXIT_OK。"""
+    """AC-6: --no-spawn で SUCCESS sentinel → LauncherExitCode.OK。"""
     cur_path = tmp_path / "current.json"
-    cur_path.write_text(
-        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
-    )
+    cur_path.write_text(json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""}))
     binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
     binary.parent.mkdir(parents=True)
     binary.write_bytes(b"existing")
@@ -385,17 +389,17 @@ def test_main_update_no_spawn_returns_ok(tmp_path: Path) -> None:
                 str(tmp_path),
             ]
         )
-    assert code == EXIT_OK
+    assert code == LauncherExitCode.OK
 
 
 def test_main_no_spawn_requires_update(tmp_path: Path) -> None:
-    """--no-spawn 単独 (--update なし) は EXIT_CONFIG。"""
+    """--no-spawn 単独 (--update なし) は LauncherExitCode.CONFIG。"""
     code = main(["--no-spawn", "--home", str(tmp_path)])
-    assert code == EXIT_CONFIG
+    assert code == LauncherExitCode.CONFIG
 
 
 def test_main_dry_run_and_update_mutex(tmp_path: Path) -> None:
-    """--dry-run + --update の同時指定は EXIT_CONFIG。"""
+    """--dry-run + --update の同時指定は LauncherExitCode.CONFIG。"""
     code = main(
         [
             "--dry-run",
@@ -404,11 +408,11 @@ def test_main_dry_run_and_update_mutex(tmp_path: Path) -> None:
             str(tmp_path),
         ]
     )
-    assert code == EXIT_CONFIG
+    assert code == LauncherExitCode.CONFIG
 
 
 def test_main_update_rejects_non_https(tmp_path: Path) -> None:
-    """--update でも --manifest-url が HTTPS 以外なら EXIT_CONFIG。"""
+    """--update でも --manifest-url が HTTPS 以外なら LauncherExitCode.CONFIG。"""
     code = main(
         [
             "--update",
@@ -418,15 +422,13 @@ def test_main_update_rejects_non_https(tmp_path: Path) -> None:
             str(tmp_path),
         ]
     )
-    assert code == EXIT_CONFIG
+    assert code == LauncherExitCode.CONFIG
 
 
 def test_main_update_lock_held_returns_8(tmp_path: Path) -> None:
-    """AC-12: 多重起動 (LockHeldError) → EXIT_LOCK_HELD (8)。"""
+    """AC-12: 多重起動 (LockHeldError) → LauncherExitCode.LOCK_HELD (8)。"""
     cur_path = tmp_path / "current.json"
-    cur_path.write_text(
-        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
-    )
+    cur_path.write_text(json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""}))
 
     with patch.object(
         launcher_main,
@@ -442,15 +444,13 @@ def test_main_update_lock_held_returns_8(tmp_path: Path) -> None:
                 str(tmp_path),
             ]
         )
-    assert code == EXIT_LOCK_HELD
+    assert code == LauncherExitCode.LOCK_HELD
 
 
 def test_main_update_preflight_failure_returns_6(tmp_path: Path) -> None:
-    """AC-13: preflight 失敗 → EXIT_ROLLBACK_UNAVAILABLE (6)。"""
+    """AC-13: preflight 失敗 → LauncherExitCode.ROLLBACK_UNAVAILABLE (6)。"""
     cur_path = tmp_path / "current.json"
-    cur_path.write_text(
-        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
-    )
+    cur_path.write_text(json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""}))
     # versions/1.2.3/wiseman_hub.exe を seed しない → preflight 失敗
 
     with (
@@ -471,15 +471,13 @@ def test_main_update_preflight_failure_returns_6(tmp_path: Path) -> None:
                 str(tmp_path),
             ]
         )
-    assert code == EXIT_ROLLBACK_UNAVAILABLE
+    assert code == LauncherExitCode.ROLLBACK_UNAVAILABLE
 
 
 def test_main_update_checksum_mismatch_returns_5(tmp_path: Path) -> None:
-    """AC-2: ChecksumError → EXIT_CHECKSUM_MISMATCH (5)。"""
+    """AC-2: ChecksumError → LauncherExitCode.CHECKSUM_MISMATCH (5)。"""
     cur_path = tmp_path / "current.json"
-    cur_path.write_text(
-        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
-    )
+    cur_path.write_text(json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""}))
     binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
     binary.parent.mkdir(parents=True)
     binary.write_bytes(b"existing")
@@ -505,20 +503,18 @@ def test_main_update_checksum_mismatch_returns_5(tmp_path: Path) -> None:
                 str(tmp_path),
             ]
         )
-    assert code == EXIT_CHECKSUM_MISMATCH
+    assert code == LauncherExitCode.CHECKSUM_MISMATCH
 
 
 def test_main_update_download_error_returns_artifact(tmp_path: Path) -> None:
-    """Issue #212 I-3: download error → EXIT_ARTIFACT (10)、manifest と分離。
+    """Issue #212 I-3: download error → LauncherExitCode.ARTIFACT (10)、manifest と分離。
 
-    旧仕様 (PR-7 まで): DownloadError → EXIT_MANIFEST (3) でマップ。
+    旧仕様 (PR-7 まで): DownloadError → LauncherExitCode.MANIFEST (3) でマップ。
     runbook で「exit 3 → manifest URL 確認」と書くと artifact URL 障害なのに manifest を
-    確認して時間浪費する silent-failure。本 PR で artifact 専用 EXIT_ARTIFACT (10) を新設。
+    確認して時間浪費する silent-failure。本 PR で artifact 専用 LauncherExitCode.ARTIFACT (10) を新設。
     """
     cur_path = tmp_path / "current.json"
-    cur_path.write_text(
-        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
-    )
+    cur_path.write_text(json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""}))
     binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
     binary.parent.mkdir(parents=True)
     binary.write_bytes(b"existing")
@@ -544,27 +540,23 @@ def test_main_update_download_error_returns_artifact(tmp_path: Path) -> None:
                 str(tmp_path),
             ]
         )
-    assert code == EXIT_ARTIFACT
+    assert code == LauncherExitCode.ARTIFACT
 
 
 def test_main_update_manifest_error_returns_3(tmp_path: Path) -> None:
-    """Issue #212 I-3 review C1: update mode の ManifestError は EXIT_MANIFEST (3) のまま。
+    """Issue #212 I-3 review C1: update mode の ManifestError は LauncherExitCode.MANIFEST (3) のまま。
 
-    DownloadError → EXIT_ARTIFACT (10) と分離が双方向に守られていることを保証する
+    DownloadError → LauncherExitCode.ARTIFACT (10) と分離が双方向に守られていることを保証する
     regression guard。本 test がないと、将来 ManifestError → 10 の誤マップが入っても
     検出できず、runbook の「3 = manifest, 10 = artifact」契約が一方向しか守られない。
     """
     cur_path = tmp_path / "current.json"
-    cur_path.write_text(
-        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
-    )
+    cur_path.write_text(json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""}))
     binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
     binary.parent.mkdir(parents=True)
     binary.write_bytes(b"existing")
 
-    with patch.object(
-        launcher_main, "fetch_manifest", side_effect=ManifestError("manifest 404")
-    ):
+    with patch.object(launcher_main, "fetch_manifest", side_effect=ManifestError("manifest 404")):
         code = main(
             [
                 "--update",
@@ -574,13 +566,11 @@ def test_main_update_manifest_error_returns_3(tmp_path: Path) -> None:
                 str(tmp_path),
             ]
         )
-    # NOTE: EXIT_MANIFEST (3) であり EXIT_ARTIFACT (10) ではない
-    assert code == EXIT_MANIFEST
+    # NOTE: LauncherExitCode.MANIFEST (3) であり LauncherExitCode.ARTIFACT (10) ではない
+    assert code == LauncherExitCode.MANIFEST
 
 
-def test_main_update_download_error_logs_exception_with_cause(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_main_update_download_error_logs_exception_with_cause(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Issue #212 I-1: DownloadError の handler は logger.exception で __cause__ chain を出力。
 
     旧仕様: ``logger.error("download error: %s", e)`` で str(e) のみ出力、__cause__
@@ -588,9 +578,7 @@ def test_main_update_download_error_logs_exception_with_cause(
     本 PR で ``logger.exception(...)`` に変更し traceback (cause chain 含む) を残す。
     """
     cur_path = tmp_path / "current.json"
-    cur_path.write_text(
-        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
-    )
+    cur_path.write_text(json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""}))
     binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
     binary.parent.mkdir(parents=True)
     binary.write_bytes(b"existing")
@@ -625,7 +613,8 @@ def test_main_update_download_error_logs_exception_with_cause(
 
     # logger.exception 経由で exc_info が caplog に残る (DownloadError + __cause__ chain)
     matching = [
-        r for r in caplog.records
+        r
+        for r in caplog.records
         if r.levelno == logging.ERROR and r.exc_info is not None and "download" in r.getMessage()
     ]
     assert matching, (
@@ -641,9 +630,7 @@ def test_main_update_download_error_logs_exception_with_cause(
     assert exc_value.__cause__ is inner
 
 
-def test_main_update_download_error_real_raise_from_chain(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_main_update_download_error_real_raise_from_chain(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Issue #212 review IMPORTANT-2 (rating 7): production の `raise from` 経路で
     __cause__ chain が end-to-end (urlopen → _http.py → __main__.logger.exception) で保持。
 
@@ -655,16 +642,12 @@ def test_main_update_download_error_real_raise_from_chain(
     import urllib.error  # noqa: PLC0415
 
     cur_path = tmp_path / "current.json"
-    cur_path.write_text(
-        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
-    )
+    cur_path.write_text(json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""}))
     binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
     binary.parent.mkdir(parents=True)
     binary.write_bytes(b"existing")
 
-    inner = urllib.error.URLError(
-        reason=ConnectionRefusedError(111, "Connection refused")
-    )
+    inner = urllib.error.URLError(reason=ConnectionRefusedError(111, "Connection refused"))
 
     caplog.set_level(logging.ERROR, logger="wiseman_launcher")
     # fetch_manifest は正常 bytes を返し、その後の download_artifact (open_https_get
@@ -692,15 +675,15 @@ def test_main_update_download_error_real_raise_from_chain(
             ]
         )
 
-    assert code == EXIT_ARTIFACT  # I-3: artifact path で EXIT_ARTIFACT
+    assert code == LauncherExitCode.ARTIFACT  # I-3: artifact path で LauncherExitCode.ARTIFACT
     # logger.exception で exc_info が DownloadError + __cause__ = URLError として残る
     matching = [
-        r for r in caplog.records
+        r
+        for r in caplog.records
         if r.levelno == logging.ERROR and r.exc_info is not None and "download" in r.getMessage()
     ]
     assert matching, (
-        f"expected logger.exception record, got: "
-        f"{[(r.levelname, r.getMessage()) for r in caplog.records]!r}"
+        f"expected logger.exception record, got: {[(r.levelname, r.getMessage()) for r in caplog.records]!r}"
     )
     rec = matching[0]
     assert rec.exc_info is not None
@@ -713,11 +696,9 @@ def test_main_update_download_error_real_raise_from_chain(
 
 
 def test_main_update_spawn_no_rollback_returns_7(tmp_path: Path) -> None:
-    """新版 + 旧版とも crash → EXIT_SPAWN_FAILED_NO_ROLLBACK (7)。"""
+    """新版 + 旧版とも crash → LauncherExitCode.SPAWN_FAILED_NO_ROLLBACK (7)。"""
     cur_path = tmp_path / "current.json"
-    cur_path.write_text(
-        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
-    )
+    cur_path.write_text(json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""}))
     binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
     binary.parent.mkdir(parents=True)
     binary.write_bytes(b"existing")
@@ -743,15 +724,13 @@ def test_main_update_spawn_no_rollback_returns_7(tmp_path: Path) -> None:
                 str(tmp_path),
             ]
         )
-    assert code == EXIT_SPAWN_FAILED_NO_ROLLBACK
+    assert code == LauncherExitCode.SPAWN_FAILED_NO_ROLLBACK
 
 
 def test_main_update_internal_preflight_during_update_returns_6(tmp_path: Path) -> None:
-    """update 中の PreflightError (rollback 不能) → EXIT_ROLLBACK_UNAVAILABLE (6)。"""
+    """update 中の PreflightError (rollback 不能) → LauncherExitCode.ROLLBACK_UNAVAILABLE (6)。"""
     cur_path = tmp_path / "current.json"
-    cur_path.write_text(
-        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
-    )
+    cur_path.write_text(json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""}))
     binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
     binary.parent.mkdir(parents=True)
     binary.write_bytes(b"existing")
@@ -777,18 +756,16 @@ def test_main_update_internal_preflight_during_update_returns_6(tmp_path: Path) 
                 str(tmp_path),
             ]
         )
-    assert code == EXIT_ROLLBACK_UNAVAILABLE
+    assert code == LauncherExitCode.ROLLBACK_UNAVAILABLE
 
 
 def test_main_update_spawn_crash_only_no_rollback_returns_7(tmp_path: Path) -> None:
-    """spawn 結果が CRASH (rollback 経由しないテスト用パス) → EXIT_SPAWN_FAILED_NO_ROLLBACK。
+    """spawn 結果が CRASH (rollback 経由しないテスト用パス) → LauncherExitCode.SPAWN_FAILED_NO_ROLLBACK。
 
     update_and_spawn が CRASH outcome を直接返すケース (rollback 経由せず)。
     """
     cur_path = tmp_path / "current.json"
-    cur_path.write_text(
-        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
-    )
+    cur_path.write_text(json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""}))
     binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
     binary.parent.mkdir(parents=True)
     binary.write_bytes(b"existing")
@@ -814,7 +791,7 @@ def test_main_update_spawn_crash_only_no_rollback_returns_7(tmp_path: Path) -> N
                 str(tmp_path),
             ]
         )
-    assert code == EXIT_SPAWN_FAILED_NO_ROLLBACK
+    assert code == LauncherExitCode.SPAWN_FAILED_NO_ROLLBACK
 
 
 def test_main_update_negative_monitor_timeout_rejected(tmp_path: Path) -> None:
@@ -845,24 +822,18 @@ def test_main_update_negative_monitor_timeout_rejected(tmp_path: Path) -> None:
     assert exc.value.code == 2
 
 
-def test_main_update_current_read_error_returns_6(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_update_current_read_error_returns_6(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A2 second-pass: read_current で OSError → CurrentReadError → exit 6
     (silent に DEFAULT_CURRENT に fallback して rollback 能力喪失するのを防止)。"""
     cur_path = tmp_path / "current.json"
-    cur_path.write_text(
-        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
-    )
+    cur_path.write_text(json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""}))
 
     # read_current を CurrentReadError raise に差し替え
     def _raise_read_error(*args: object, **kwargs: object) -> None:
         raise CurrentReadError("simulated AV lock")
 
     monkeypatch.setattr(launcher_main, "read_current", _raise_read_error)
-    with patch.object(
-        launcher_main, "fetch_manifest", return_value=_good_manifest_bytes("1.5.0")
-    ):
+    with patch.object(launcher_main, "fetch_manifest", return_value=_good_manifest_bytes("1.5.0")):
         code = main(
             [
                 "--update",
@@ -872,15 +843,13 @@ def test_main_update_current_read_error_returns_6(
                 str(tmp_path),
             ]
         )
-    assert code == EXIT_ROLLBACK_UNAVAILABLE
+    assert code == LauncherExitCode.ROLLBACK_UNAVAILABLE
 
 
 def test_main_update_unexpected_error_returns_4(tmp_path: Path) -> None:
-    """B3: 想定外 RuntimeError は top-level safety net で EXIT_UNEXPECTED (4)。"""
+    """B3: 想定外 RuntimeError は top-level safety net で LauncherExitCode.UNEXPECTED (4)。"""
     cur_path = tmp_path / "current.json"
-    cur_path.write_text(
-        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
-    )
+    cur_path.write_text(json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""}))
     binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
     binary.parent.mkdir(parents=True)
     binary.write_bytes(b"existing")
@@ -906,7 +875,7 @@ def test_main_update_unexpected_error_returns_4(tmp_path: Path) -> None:
                 str(tmp_path),
             ]
         )
-    assert code == 4  # EXIT_UNEXPECTED
+    assert code == 4  # LauncherExitCode.UNEXPECTED
 
 
 def test_main_update_download_error_leaves_current_unchanged(
@@ -914,9 +883,7 @@ def test_main_update_download_error_leaves_current_unchanged(
 ) -> None:
     """B2: download_artifact 失敗時、current.json は新版に切り替わらない (atomicity)。"""
     cur_path = tmp_path / "current.json"
-    initial_payload = json.dumps(
-        {"version": "1.2.3", "released_at": "x", "previous_version": ""}
-    )
+    initial_payload = json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
     cur_path.write_text(initial_payload)
     binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
     binary.parent.mkdir(parents=True)
@@ -943,17 +910,15 @@ def test_main_update_download_error_leaves_current_unchanged(
                 str(tmp_path),
             ]
         )
-    assert code == EXIT_ARTIFACT  # 10 (Issue #212 I-3 で manifest と分離)
+    assert code == LauncherExitCode.ARTIFACT  # 10 (Issue #212 I-3 で manifest と分離)
     # current.json は元のまま (新版に切り替わっていない)
     assert cur_path.read_text() == initial_payload
 
 
 def test_main_update_ok_early_exit_returns_0(tmp_path: Path) -> None:
-    """OK_EARLY_EXIT (single-instance 等) → EXIT_OK (rollback しない)。"""
+    """OK_EARLY_EXIT (single-instance 等) → LauncherExitCode.OK (rollback しない)。"""
     cur_path = tmp_path / "current.json"
-    cur_path.write_text(
-        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
-    )
+    cur_path.write_text(json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""}))
     binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
     binary.parent.mkdir(parents=True)
     binary.write_bytes(b"existing")
@@ -979,4 +944,4 @@ def test_main_update_ok_early_exit_returns_0(tmp_path: Path) -> None:
                 str(tmp_path),
             ]
         )
-    assert code == EXIT_OK
+    assert code == LauncherExitCode.OK
