@@ -845,6 +845,30 @@ def test_download_error_message_categorized_by_actual_exception(
     assert expected_substr in str(exc_info.value)
 
 
+def test_phase_literal_typo_rejected_by_mypy() -> None:
+    """Issue #210: Phase Literal narrow が mypy で typo を catch する static contract。
+
+    本 test は runtime で何も検証しない (Literal は runtime 効果なし)。CI で
+    ``mypy tests/unit/launcher/test_updater.py`` が走ることで、Phase 外の文字列を
+    渡したコードを compile-time で reject する型契約を lock-in する。
+
+    将来の wide PR で誰かが ``_phase_log("downlaod_start", ...)`` (typo) を書いても
+    mypy が ``Argument 1 to "_phase_log" has incompatible type "Literal['downlaod_start']"``
+    で reject するため、test と production の整合が静的に保証される。
+    """
+    from typing import assert_type  # noqa: PLC0415
+
+    from wiseman_hub_launcher.updater import Phase  # noqa: PLC0415
+
+    # production phase 名は Phase narrow 通過 (assert_type は runtime no-op)
+    valid_phase: Phase = "read_current"
+    assert_type(valid_phase, Phase)
+
+    # ここで誤って `valid_phase: Phase = "downlaod_start"` (typo) と書くと
+    # mypy が "Incompatible types in assignment" で reject する。
+    # runtime 通過するだけのコードでは検出できない typo を静的に潰す。
+
+
 def test_phase_log_preserves_scalar_types(caplog: pytest.LogCaptureFixture) -> None:
     """Issue #212 I-4: _phase_log が int / float / bool / None を type 保持で出力する。
 
@@ -852,12 +876,15 @@ def test_phase_log_preserves_scalar_types(caplog: pytest.LogCaptureFixture) -> N
     log analytics の filter (e.g. ``error_count > 3``) が動かなくなる将来リスク。
     本 PR で scalar type (str/int/float/bool/None) は保持、その他 (Path / Exception 等)
     のみ str() 化する _coerce_log_value に変更。
+
+    Issue #210: phase 名は Phase Literal 拘束のため、production の値 ("read_current") を
+    使用する。test 専用 dummy phase 名 ("test_scalar") は mypy で reject される。
     """
     from wiseman_hub_launcher.updater import _phase_log  # noqa: PLC0415
 
     caplog.set_level("INFO", logger="wiseman_hub_launcher.updater")
     _phase_log(
-        "test_scalar",
+        "read_current",
         version="1.2.3",
         error_count=3,
         ratio=0.75,
@@ -869,7 +896,7 @@ def test_phase_log_preserves_scalar_types(caplog: pytest.LogCaptureFixture) -> N
     # 'launcher_phase {json}' から JSON 部分を切り出し
     json_part = records[0].split("launcher_phase ", 1)[1]
     payload = json.loads(json_part)
-    assert payload["phase"] == "test_scalar"
+    assert payload["phase"] == "read_current"
     assert payload["version"] == "1.2.3"  # str
     assert payload["error_count"] == 3
     assert isinstance(payload["error_count"], int)  # str 化されていない
@@ -884,13 +911,15 @@ def test_phase_log_coerces_non_scalar_to_str(caplog: pytest.LogCaptureFixture) -
 
     JSON serializable でない型を防御的に文字列化することで、json.dumps が落ちて
     silent-failure 化することを防ぐ。
+
+    Issue #210: phase 名は Phase Literal 拘束のため production の値を使用。
     """
     from wiseman_hub_launcher.updater import _phase_log  # noqa: PLC0415
 
     caplog.set_level("INFO", logger="wiseman_hub_launcher.updater")
     p = Path("/tmp/x")
     exc = ValueError("boom")
-    _phase_log("test_non_scalar", path=p, exc=exc)
+    _phase_log("download_failed", path=p, exc=exc)
     records = [r.message for r in caplog.records if "launcher_phase" in r.message]
     json_part = records[0].split("launcher_phase ", 1)[1]
     payload = json.loads(json_part)

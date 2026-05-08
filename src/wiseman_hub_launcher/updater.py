@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import TypeAlias
+from typing import Literal, TypeAlias
 
 from ._runtime import (
     DEFAULT_SPAWN_MONITOR_SEC,
@@ -53,6 +53,26 @@ logger = logging.getLogger(__name__)
 # で int/float/bool が機能する scalar を type 上で表現する。
 LogScalar: TypeAlias = str | int | float | bool | None
 
+# Issue #210: _phase_log の phase 名を Literal 拘束で typo を mypy で静的検出する。
+# 旧仕様 ``_phase_log(phase: str, ...)`` では ``_phase_log("download_strat", ...)`` (typo)
+# も通り、test も string hardcode で typo を catch しない silent-failure があった。
+# phase の追加時はここに値を追加するだけで、production と test の整合が静的に保証される。
+Phase: TypeAlias = Literal[
+    "read_current",
+    "already_up_to_date",
+    "preflight_existing_missing",
+    "download_start",
+    "download_failed",
+    "download_complete",
+    "current_switched",
+    "current_switch_failed",
+    "spawn_start",
+    "spawn_complete",
+    "rollback_start",
+    "rollback_complete",
+    "rollback_failed",
+]
+
 
 class UpdaterError(Exception):
     """updater 経路の base exception (PR-6a で他例外は subpackage に移動)。"""
@@ -75,11 +95,12 @@ def _coerce_log_value(v: object) -> LogScalar:
     return str(v)
 
 
-def _phase_log(phase: str, **fields: object) -> None:
+def _phase_log(phase: Phase, **fields: object) -> None:
     """update_and_spawn 各 phase で構造化 JSON 1 行 log を出す (PR-7 AC5)。
 
     silent-failure 残対応: 失敗時の triage で「どこで止まったか」を機械可読化。
     Issue #212 I-4: scalar 型 (int/float/bool/None) は保持して log analytics 可能化。
+    Issue #210: phase 引数を Phase Literal で拘束し、typo を mypy で静的検出する。
     """
     payload = {"phase": phase, **{k: _coerce_log_value(v) for k, v in fields.items()}}
     logger.info("launcher_phase %s", json.dumps(payload, ensure_ascii=False))
