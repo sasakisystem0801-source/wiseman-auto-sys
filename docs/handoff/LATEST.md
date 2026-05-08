@@ -1,15 +1,15 @@
-# Handoff: Session 53 - Issue #209 完結 (Sha256Hex NewType call-graph 全体 propagate)
+# Handoff: Session 54 - Phase 6 前 観測性 + type-safety 強化 (#212 + #210 完結)
 
-**更新日**: 2026-05-08（Session 53 / Mac 開発機、Session 52 続編）
-**main HEAD**: `e7d8dbb` type-safety(launcher): Sha256Hex 受けに caller 全面追従 + make_sha256hex 導入 (#209 PR2) (#224)
-**作業ブランチ**: なし（PR #223 / #224 全マージ完了 + Issue #209 close）
-**残作業**: ADR-016 Phase 6 (結合テスト + canary 切替) + Phase 7 (業務全件配置) + 派生 Issue #210-#212 / #161-#164 等
+**更新日**: 2026-05-08（Session 54 / Mac 開発機、Session 53 続編）
+**main HEAD**: `4d613de` type-safety(launcher): _phase_log の phase 名を Literal 拘束で typo 静的検出 (#210) (#228)
+**作業ブランチ**: なし（PR #226 / #228 全マージ完了 + Issue #212 / #210 close）
+**残作業**: ADR-016 Phase 6 (結合テスト + canary 切替) + Phase 7 (業務全件配置) + 派生 Issue #227 / #211 / #170 / #164 等
 
 ---
 
 ## 🚪 まずここを読む（次セッション最初の入口）
 
-**Session 52 で完成した Phase 6 前 gate (build / runtime / manifest / signature) の上に、Issue #209 (Sha256Hex NewType 化) を 2 段階 PR で完結させたセッション**。codex セカンドオピニオンで scope 縮小 (4 種一括 → Sha256Hex 単独)、4 並列 review で各 PR の Critical 0 / Important 全反映を本 PR 内で吸収、Issue 起票ゼロで Net -1 達成。
+**Phase 6 前に「結合テスト失敗時の triage 効率」を上げる観測性 / type-safety 系の推奨度順 2 件 (#212 / #210) を完結させたセッション**。両 PR とも複数並列 review で Important rating ≥ 7 を本 PR 内に吸収、type-narrow 系の副次成果として `py.typed` marker (PEP 561) を追加し wiseman_hub_launcher を typed package 化。
 
 **Phase 7 hard dependency 4 項目中 3/4 達成 (Session 52 から変化なし)**:
 - ✅ sigstore-python 統合 + signature 検証本実装
@@ -17,84 +17,91 @@
 - ✅ PR-5 runbook seed 手順反映済
 - ⏳ launcher.exe 本田様 PC 配置完了 (Phase 7 直前で手動配布)
 
-**Issue #209 で達成した効果 (PR1 + PR2 合算)**:
-- `Sha256Hex` NewType を `manifest.py` に導入、`ManifestData.checksum_sha256` / `sbom_sha256` を Sha256Hex 化
-- caller 6 関数 (`verify_sha256` / `download_artifact` / `_download_with_atomic_place` / `_verify_subject` / `verify_statement_claims` / `verify_provenance`) を Sha256Hex 受け化
-- `make_sha256hex(s: str) -> Sha256Hex` validating constructor で外部 source mint を gate (form / type 両方の不正を ManifestError 一本化)
-- `commit_sha` (7-40 hex) や version 文字列との取り違えを mypy で **call-graph 全体に compile-time 検出**
-- runtime ChecksumError / ProvenanceError 二重 fail-close 維持 (型 gate と runtime gate の冗長防御)
-- CI mypy step に `mypy tests/unit/launcher/test_manifest.py` を追加し `assert_type` lock-in を CI で発現
+**本セッション 2 PR で達成した Phase 6 直前の改善**:
+
+| PR | Issue | 効果 |
+|----|-------|------|
+| **#226** | #212 (Closes) | DownloadError の `__cause__` chain を `logger.exception` で traceback に残す + EXIT_ARTIFACT(10) 新設で manifest と分離 + `_phase_log` の `_coerce_log_value` で int/float/bool/None 型保持 + `_http.py` 6 系統 except 詳細化 + URLError reason str path silent-failure 解消 |
+| **#228** | #210 (Closes) | `Phase = Literal[13 値]` で `_phase_log` の typo を mypy 静的検出 + `py.typed` marker 追加で wiseman_hub_launcher を typed package 化 + 専用 lock-in file (`test_updater_phase_lockin.py`) + CI mypy step に追加で typo 反例を実 enforce |
 
 `/catchup` 後の入口は以下:
 
 1. ✅ **(Session 52 で済)** Phase 6 前 gate 4 経路完成 (PR #219 / #220 / #221)
-2. ✅ **(本セッションで済)** Issue #209 PR1: Sha256Hex NewType 導入 (#223、Refs #209)
-3. ✅ **(本セッションで済)** Issue #209 PR2: caller 全面追従 + make_sha256hex 導入 + review 反映 (#224、Closes #209)
-4. **(次)** **Phase 6 結合テスト + canary 切替**（実 dev tag `v0.99.0` push → release.yml 発火 → GCS upload → bundle 検証 → canary tag）→ 番号認可必要
-5. **(最後)** **Phase 7 業務全件配置**（launcher.exe 本田様 PC 手動配布 + Phase 4 全件配置を新システムで実行、TeamViewer 経由）
+2. ✅ **(Session 53 で済)** Issue #209 完結 (Sha256Hex NewType call-graph 全体 propagate)
+3. ✅ **(本セッションで済)** Issue #212 完結 (silent-failure 観測性強化、PR #226)
+4. ✅ **(本セッションで済)** Issue #210 完結 (Phase Literal narrow + py.typed marker、PR #228)
+5. **(次)** **Phase 6 結合テスト + canary 切替**（実 dev tag `v0.99.0` push → release.yml 発火 → GCS upload → bundle 検証 → canary tag）→ 番号認可必要
+6. **(最後)** **Phase 7 業務全件配置**（launcher.exe 本田様 PC 手動配布 + Phase 4 全件配置を新システムで実行、TeamViewer 経由）
 
 業務文脈は `specs/c-business-deployment/spec.md`（変更なし）。設計指針は ADR-016。
 
 | ファイル | 役割 |
 |---------|------|
-| [src/wiseman_hub_launcher/manifest.py](../../src/wiseman_hub_launcher/manifest.py) | `Sha256Hex` NewType + `make_sha256hex` validating constructor + `ManifestData` field 型化 + `validate_manifest` 末尾の make_sha256hex narrow |
-| [src/wiseman_hub_launcher/checksum.py](../../src/wiseman_hub_launcher/checksum.py) | `verify_sha256(expected_hex: Sha256Hex)` signature 化 + TYPE_CHECKING import |
-| [src/wiseman_hub_launcher/_supply_chain/download.py](../../src/wiseman_hub_launcher/_supply_chain/download.py) | `download_artifact` / `_download_with_atomic_place` Sha256Hex 化 |
-| [src/wiseman_hub_launcher/_supply_chain/provenance.py](../../src/wiseman_hub_launcher/_supply_chain/provenance.py) | `_verify_subject` / `verify_statement_claims` / `verify_provenance` Sha256Hex 化 |
-| [tests/unit/launcher/test_manifest.py](../../tests/unit/launcher/test_manifest.py) | `assert_type` narrow lock-in (PR1) + `make_sha256hex` direct test 16 件 (PR2 review I-1 反映) |
-| [.github/workflows/test-unit.yml](../../.github/workflows/test-unit.yml) | CI mypy step に `tests/unit/launcher/test_manifest.py` 追加 (PR1 review I-2 反映、assert_type lock-in を CI で発現) |
-| 本 LATEST.md | Session 53 差分メモ + 次セッション入口 |
+| [src/wiseman_hub_launcher/_supply_chain/_http.py](../../src/wiseman_hub_launcher/_supply_chain/_http.py) | 6 系統 except 詳細化 (HTTP code+reason+retry_after / URLError errno+strerror or repr / SSL detail / 例外順序 subclass 関係依存コメント) |
+| [src/wiseman_hub_launcher/__main__.py](../../src/wiseman_hub_launcher/__main__.py) | `EXIT_ARTIFACT = 10` 新設 + `run_update` の DownloadError handler を `logger.exception` 化 + docstring exit code 一覧の triage 軸明示 |
+| [src/wiseman_hub_launcher/updater.py](../../src/wiseman_hub_launcher/updater.py) | `LogScalar` TypeAlias + `Phase` Literal narrow + `_coerce_log_value` + `_phase_log(phase: Phase, ...)` |
+| [src/wiseman_hub_launcher/py.typed](../../src/wiseman_hub_launcher/py.typed) | PEP 561 marker (空 file)、import 経由 type narrow を有効化 |
+| [tests/unit/launcher/test_updater_phase_lockin.py](../../tests/unit/launcher/test_updater_phase_lockin.py) | typo 反例 `# type: ignore[assignment/arg-type]` で Phase narrow を CI mypy で実 enforce |
+| [.github/workflows/test-unit.yml](../../.github/workflows/test-unit.yml) | `Type check (assert_type lock-in tests)` step に `test_updater_phase_lockin.py` を追加 |
+| 本 LATEST.md | Session 54 差分メモ + 次セッション入口 |
 
 ---
 
-## 🎯 Session 53 の成果サマリー
+## 🎯 Session 54 の成果サマリー
 
-### マージ済 (本セッション、2 段階 PR)
+### マージ済 (本セッション、2 PR)
 
-| PR | Issue | 内容 | 規模 | テスト | 結果 |
-|----|-------|------|------|--------|------|
-| **#223** | #209 (Refs) | type-safety(launcher): Sha256Hex NewType を manifest.py に導入 (PR1) | 4 files / +74/-9 | 110 | ✅ squash merge (`8ac36c8`) |
-| **#224** | #209 (Closes) | type-safety(launcher): Sha256Hex 受けに caller 全面追従 + make_sha256hex (PR2) + review 反映 | 8 files / +172/-32 | 16 (新規 direct test) | ✅ squash merge (`e7d8dbb`) |
+| PR | Issue | 内容 | 規模 | 結果 |
+|----|-------|------|------|------|
+| **#226** | #212 (Closes) | silent-failure(launcher): DownloadError __cause__ + EXIT_ARTIFACT 分離 + _phase_log 型保持 (+ 4 並列 review Important 8 件本 PR 内吸収) | 5 files / +436/-14 | ✅ squash merge (`0bd4761`) |
+| **#228** | #210 (Closes) | type-safety(launcher): _phase_log の phase 名を Literal 拘束で typo 静的検出 (+ 2 並列 review Critical/Important 3 件本 PR 内吸収 + py.typed marker) | 6 files / +111/-11 | ✅ squash merge (`4d613de`) |
 
-### Issue #209 完結プロセス (Generator-Evaluator + 2 段階 PR の good practice)
+### 本セッションで踏んだ重要 process (Generator-Evaluator + 本 PR 内吸収)
 
-1. **計画段階**: codex セカンドオピニオン (`gpt-5.2`) を起動 → 当初案 (NewType 4 種一括 / 6 ファイル変更 1 PR / TypedDict constructor 構文) **NO-GO** 判定 → scope 縮小 (Sha256Hex 単独) + 2 段階 PR + dict literal 方式に修正
-2. **PR1 実装**: manifest.py + updater.py + test_manifest.py + test-unit.yml (CI mypy 追加)
-3. **PR1 review**: 4 並列 (type-design / code-reviewer / pr-test-analyzer / silent-failure-hunter) → Important 3 件 (`Closes → Refs` / CI mypy 不在 / overreach claim) すべて本 PR 内 fix
-4. **PR2 実装**: checksum.py / _supply_chain/download / _supply_chain/provenance + tests + make_sha256hex
-5. **PR2 review**: 4 並列 → Important 3 件 (make_sha256hex direct test 不在 (3 reviewer 同一指摘) / consistency / None TypeError) すべて本 PR 内 fix
+**PR #226 (Issue #212)**:
+- 4 並列 review (silent-failure / pr-test / code-reviewer / type-design) → rating ≥ 7 の Important 8 件すべて本 PR 内 commit `c0411fc` で吸収
+  - C1 ManifestError → EXIT_MANIFEST(3) regression test (rating 8 / pr-test)
+  - I1/IMPORTANT-2 real `raise from` 経由 end-to-end test (rating 7 / silent-failure + pr-test)
+  - I2 HTTPError.headers=None boundary test (rating 7 / pr-test)
+  - IMPORTANT-1 URLError.reason=str silent-failure 解消 (rating 7 / silent-failure)
+  - type-design C1 LogScalar TypeAlias narrow (rating 7)
+  - type-design _http.py precedence comment (rating 7)
+  - SUG-2 docstring 正確化 (URL/network 含む triage 軸)
+  - type-design C2 bool redundant 削除 (rating 6)
+- type-design C2/C3 (LauncherExitCode IntEnum、rating 7) は scope 大で派生 Issue #227 起票
+
+**PR #228 (Issue #210)**:
+- 2 並列 review (type-design + code-reviewer)
+- 両 reviewer が **同じ箇所** (lock-in test の dead code 状態) を Critical / Important rating 82 で指摘
+- 解決の鍵: mypy が `from wiseman_hub_launcher.updater import Phase` で **`Any` 化** していた → 原因は `py.typed` marker 不在 (PEP 561) → marker 追加で `mypy src/` が typed package として narrow 開始 → 専用 lock-in file で typo 反例を CI mypy 実 enforce
+- 副次成果: `py.typed` 追加副作用で `test_manifest.py:177` の意図的 signature 違反 test が strict 化、`# type: ignore[arg-type]` で抑制
 
 ### Issue Net 変化
 
 ```
 ## Issue Net 変化
-- Close 数: 1 件 (#209 — PR1 + PR2 で完結)
-- 起票数: 0 件
+- Close 数: 2 件 (#212, #210)
+- 起票数: 1 件 (#227 — type-design rating 7、Phase 6 を block しない deferred 起票)
 - Net: -1 件
 ```
 
-CLAUDE.md「Net ≤ 0 が進捗 OK 基準」を満たす。本セッションは review agent から rating 5-6 の Suggestion を多数受けたが、**全て PR コメント / TODO レベルで処理し Issue 化せず**。rating 7 の Important 指摘は **本 PR 内で全反映** (PR2 で test_manifest.py に make_sha256hex direct test 16 件追加 + manifest.py に isinstance check 追加)、follow-up Issue 起票ゼロで完結。
+CLAUDE.md「Net ≤ 0 が進捗 OK 基準」を 5 連続クリア (Session 50 / 51 / 52 / 53 / 54)。本セッションは review agent から rating 5-6 の Suggestion を多数受けたが **PR コメント / TODO レベルで処理し Issue 化せず**、rating 7 の Important / Critical は **本 PR 内で全反映**。#227 起票は type-design Important rating 7 (LauncherExitCode IntEnum / Literal narrow) で本 PR scope 大幅増のため deferred、本来 Session 53 の Issue #209 review で潜在的に存在していた負債の言語化。
 
 ### Test count 変化
 
-338 (Session 52 末) → **354** (+16 件 in this session):
-- PR #223: +2 (test_validate_manifest_narrows_*)
-- PR #224: +16 (test_make_sha256hex_*) - 14 件は parametrize で展開、test 関数自体は 3 つ
+354 (Session 53 末) → **357** (launcher local) / 1471 (Session 53 末 全体) → **1482** (+11 件 in this session):
+- PR #226: +10 件 (HTTP detail / cause chain real raise from / ManifestError regression / scalar 保持 / URLError str reason / headers=None 等)
+- PR #228: +1 件 (Phase Literal lock-in marker、後 commit で専用 file 移動 = 純増 1)
 
-(parametrize 展開後の合計 PASS 件数: 1471 passed, 94 skipped)
-
-### 設計判断の record (codex + 4 並列 review)
+### 設計判断の record (4 並列 + 2 並列 review)
 
 | 当初案 | 修正後 | 経路 |
 |--------|--------|------|
-| NewType 4 種一括 (Sha256Hex / CommitSha / SemverTriple / Iso8601UtcZ) | Sha256Hex 単独 | codex セカンドオピニオン (churn が勝つ) |
-| 6 ファイル変更 1 PR | 2 段階 PR (PR1: 入口 / PR2: 全面追従) | codex セカンドオピニオン (リスク分散) |
-| `ManifestData(checksum_sha256=Sha256Hex(...), ...)` 構築 | `validated["checksum_sha256"] = make_sha256hex(...)` で個別 narrow | codex (TypedDict は runtime constructor ではない) + PR2 review I-2 (consistency) |
-| Sha256Hex(...) 直接呼出 | `make_sha256hex(s)` validating constructor 経由必須 | PR1 review S-1 (silent-failure) + PR2 review I-2 (consistency) |
-| - | `assert_type` で静的 type 契約 lock-in + CI mypy step 追加 | 4 並列 review pr-test-analyzer + type-design (重複指摘) |
-| - | `make_sha256hex` 冒頭で `isinstance(value, str)` check + ManifestError 一本化 | PR2 review I-3 (docstring 契約厳守) |
-| sigstore-python 境界の `str()` cast | 不要と判断 | 実装確認の結果、境界には str (statement.digest) のみ渡る |
-| dict mutation 単一化 (review type-design Suggestion 2) | 見送り | cosmetic、scope inflation 防止 |
+| `# type: ignore` で抑制した lock-in test を `test_updater.py` 内に置く | 専用 file `test_updater_phase_lockin.py` + CI step 追加 + typo 反例 | code-reviewer Important r 82 + type-design Critical C1 (同一指摘) |
+| `from .updater import Phase` で narrow 効くと想定 | `py.typed` marker 必須 (PEP 561、`disable_error_code = ["import-untyped"]` で `Any` 化していた) | mypy verify 過程で発見 |
+| URLError reason `getattr(reason, 'errno', None)` 一律 | `isinstance(reason, OSError)` 分岐 + 非 OSError は `repr` で原文字列保持 | silent-failure IMPORTANT-1 (str reason 経路で原文字列消失) |
+| `# type: ignore` 不要 (mypy 検出しない前提) | typo 反例 `# type: ignore[assignment/arg-type]` で「mypy がここで error 出すこと」を期待値化 | type-design C1 + code-reviewer Important r 82 |
+| `LauncherExitCode = IntEnum` を本 PR で導入 | 派生 Issue #227 起票 (scope 大、本 PR は Issue #212 silent-failure に集中) | type-design C2 (rating 7、本 PR scope 外と判断) |
 
 ---
 
@@ -102,7 +109,7 @@ CLAUDE.md「Net ≤ 0 が進捗 OK 基準」を満たす。本セッションは
 
 ### 1. Phase 6 結合テスト + canary 切替 (0.5-1 日、要番号認可)
 
-**目的**: Session 52 で CI 上の build / runtime / manifest / signature gate を完成 + Session 53 で Sha256Hex 取り違え検出が call-graph 全体に届いた状態を、実 dev tag を push して **release.yml の actual run + GCS upload + provenance bundle 生成** までを End-to-End で検証する。
+**目的**: Session 52 で CI 上の build / runtime / manifest / signature gate を完成 + Session 53 で Sha256Hex 取り違え検出が call-graph 全体に届き + Session 54 で Phase 6 中の triage 効率を向上 + Phase Literal narrow を完成させた状態を、実 dev tag を push して **release.yml の actual run + GCS upload + provenance bundle 生成** までを End-to-End で検証する。
 
 ```bash
 # 1. dev tag push (release.yml 発火、do_upload=true で GCS bucket 経由)
@@ -119,6 +126,8 @@ gh run watch  # またはブラウザで Actions タブ
 - GCS bucket `gs://wiseman-hub-release-prod/versions/0.99.0/` に exe + sha256 + sbom + sigstore.json + manifest.json が揃うか
 - launcher 側で実 download → signature 検証が pass するか (Mac から `gsutil cp` で bundle 取得して unit test 経由)
 
+**triage 効率向上の実利**: Session 54 PR #226 で DownloadError の `__cause__` chain (HTTPError 503 / SSLError(CERTIFICATE_VERIFY_FAILED) 等) が `logger.exception` の traceback に残るようになったため、Phase 6 で実 download が落ちた場合に network/SSL/HTTP どの段階かが log だけで完結する。EXIT_ARTIFACT(10) で manifest(3) と分離されているので runbook 誘導も正確。
+
 問題なければ canary tag (`v0.99.1`) で Mac → 本田様 PC への Phase 7 直前 final 検証。
 
 **AI / 人間の役割分担**:
@@ -134,14 +143,13 @@ gh run watch  # またはブラウザで Actions タブ
 
 **AI ができるのは runbook 内容の事前レビュー + ユーザーが TeamViewer 中の質問にリアルタイム回答のみ。実機操作は 100% ユーザー作業。**
 
-### 3. 派生 Issue 対応 (Session 50 派生 #209-#212、後回し可)
+### 3. 派生 Issue 対応 (後回し可、いずれも Phase 6 を block しない)
 
-- ✅ **#209 (本セッションで close)** type-safety: launcher の Sha256Hex / CommitSha NewType 導入で取り違え検出
-- **#210**: type-safety: `_phase_log` の phase 名を Literal 拘束で typo 防止
+- ✅ **#209 (Session 53 close)** Sha256Hex NewType call-graph 全体 propagate
+- ✅ **#212 (本セッション close)** silent-failure: DownloadError __cause__ + EXIT_ARTIFACT 分離
+- ✅ **#210 (本セッション close)** type-safety: _phase_log の Phase Literal narrow
+- **#227** (本セッション起票): type-safety: launcher EXIT_* を Literal/IntEnum で narrow + docstring drift 単一ソース化 (scope 大)
 - **#211**: refactor: `_atomic_io.atomic_replace_and_fsync_dir` を 2 引数化 (dest_dir 冗長性除去)
-- **#212**: silent-failure: launcher の `DownloadError __cause__` を `log.exception` で出力 + EXIT_ARTIFACT 分離
-
-いずれも P2 enhancement、Phase 6 を block しない。
 
 ---
 
@@ -149,9 +157,8 @@ gh run watch  # またはブラウザで Actions タブ
 
 | # | タイトル | 系統 |
 |---|---------|------|
-| #212 | silent-failure: launcher の DownloadError __cause__ を log.exception で出力 + EXIT_ARTIFACT 分離 | launcher (Session 50 派生) |
+| #227 | type-safety: launcher EXIT_* 定数を Literal/IntEnum で narrow + docstring drift 単一ソース化 | launcher (本セッション起票) |
 | #211 | refactor: _atomic_io.atomic_replace_and_fsync_dir を 2 引数化 | launcher (Session 50 派生) |
-| #210 | type-safety: _phase_log の phase 名を Literal 拘束 | launcher (Session 50 派生) |
 | #170, #164, #162, #161, #158, #152 | ex_extractor / config / ui 系 | 別ドメイン |
 | #134 | OCR: Gemini 2.5 Flash retire (2026-10-16) 対応 | OCR |
 | #63, #39, #29, #27, #17 | テスト / マッチング / OCR proxy / config | 別ドメイン |
@@ -162,12 +169,13 @@ gh run watch  # またはブラウザで Actions タブ
 
 | 項目 | 値 |
 |------|-----|
-| main HEAD | `e7d8dbb` type-safety(launcher): Sha256Hex 受けに caller 全面追従 + make_sha256hex 導入 (#209 PR2) (#224) |
+| main HEAD | `4d613de` type-safety(launcher): _phase_log の phase 名を Literal 拘束で typo 静的検出 (#210) (#228) |
 | working tree | clean (全変更マージ済) |
 | 残留 Node プロセス | なし ✅ |
-| CI (main push 後) | success (Windows Integration Tests, 2m36s) |
-| Test count | 1471 passed, 94 skipped (本セッションで +16 件 launcher direct test) |
-| Issue 開件数 | 15 (Session 52 末 16 → -1 で 15、closed: #209) |
+| CI (main push 後) | success (Unit Tests macOS/Linux 59s, build-smoke / test-integration / test-unit 全 pass) |
+| Test count | 1482 passed, 94 skipped (本セッションで +11 件 launcher direct test) |
+| Issue 開件数 | 14 (Session 53 末 15 → -2/+1 で 14、closed: #212 / #210、起票: #227) |
+| typed package status | wiseman_hub_launcher が PEP 561 marker 付与で typed package に昇格 (副次成果) |
 
 ---
 
@@ -182,6 +190,6 @@ gh run watch  # またはブラウザで Actions タブ
 
 ## 🔁 セッション再開条件
 
-- ✅ 再開可能: working tree clean、main 同期、CI 全 pass、handoff 更新済、Issue #209 close 確認済
-- 次セッション最初: `/catchup` で Issue 一覧確認 → Phase 6 結合テスト直行 (実 dev tag push) または派生 Issue (#210-#212) 対応の選択
+- ✅ 再開可能: working tree clean、main 同期、CI 全 pass、handoff 更新済、Issue #212 / #210 close 確認済
+- 次セッション最初: `/catchup` で Issue 一覧確認 → Phase 6 結合テスト直行 (実 dev tag push) または派生 Issue (#227 / #211 / 別ドメイン) 対応の選択
 - Phase 6 で実 tag push する場合は番号単位の明示認可が必要 (destructive 操作: GCS bucket 汚染 + tag history 残存)
