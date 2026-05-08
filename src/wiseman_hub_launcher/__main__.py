@@ -29,6 +29,7 @@ import enum
 import logging
 import sys
 from pathlib import Path
+from typing import assert_never
 
 # Issue #217: PyInstaller bundle で `__main__.py` を直接 entrypoint にすると
 # relative import が `ImportError: attempted relative import with no known parent
@@ -69,6 +70,7 @@ DEFAULT_MANIFEST_URL = "https://storage.googleapis.com/wiseman-hub-release-prod/
 DEFAULT_HOME = Path.home() / "wiseman-hub"
 
 
+@enum.unique
 class LauncherExitCode(enum.IntEnum):
     """ADR-016 launcher exit codes (POSIX 0..255 範囲)。
 
@@ -298,10 +300,19 @@ def run_dry_run(manifest_url: str, current_path: Path, *, verbose: bool = False)
 
 
 def _spawn_outcome_to_exit(result: SpawnResult) -> LauncherExitCode:
-    """spawn 結果を exit code にマップ。"""
-    if result in (SpawnResult.SUCCESS, SpawnResult.OK_EARLY_EXIT):
-        return LauncherExitCode.OK
-    return LauncherExitCode.SPAWN_FAILED_NO_ROLLBACK
+    """spawn 結果を exit code にマップ (PR #230 review type-design I-1 反映)。
+
+    ``match`` + ``assert_never`` で SpawnResult 拡張時の silent fallthrough を
+    mypy が静的検出する (旧 ``in (SUCCESS, OK_EARLY_EXIT)`` fall-through 設計
+    では新 variant が暗黙裏に SPAWN_FAILED_NO_ROLLBACK に化けていた)。
+    """
+    match result:
+        case SpawnResult.SUCCESS | SpawnResult.OK_EARLY_EXIT:
+            return LauncherExitCode.OK
+        case SpawnResult.CRASH | SpawnResult.OS_ERROR:
+            return LauncherExitCode.SPAWN_FAILED_NO_ROLLBACK
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def run_update(  # noqa: PLR0911 — explicit exit code mapping

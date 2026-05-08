@@ -357,7 +357,7 @@ PR-4 codex review (threadId 019dfd43, C-3) と PR-6a codex review (threadId 019d
 
 **PR-6a 実装上の安全装置 (codex Critical C-2 反映)**:
 
-- `--update` / `--update --no-spawn` のいずれも provenance verify 経由（claims 不一致は `EXIT_PROVENANCE = 9`）
+- `--update` / `--update --no-spawn` のいずれも provenance verify 経由（claims 不一致は `LauncherExitCode.PROVENANCE` = 9、Issue #227）
 - signature 検証は stub interface (`ProvenanceUnavailable` raise)、bypass には CLI flag + env var の AND 必須
 - `--dry-run` のみ provenance 検証経路を呼ばない (read-only、副作用ゼロ)
 - 本番 PC (PyInstaller `wiseman_launcher.exe`) では環境変数を埋め込まないため、CLI flag を渡されても fail-close

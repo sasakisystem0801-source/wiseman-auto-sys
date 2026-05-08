@@ -49,25 +49,66 @@ def _good_manifest_bytes(version: str = "1.2.3") -> bytes:
 
 
 def test_exit_codes_disjoint() -> None:
-    """Issue #227: LauncherExitCode の値が disjoint (重複なし) であることを CI で enforce。
+    """Issue #227 / PR #230 review (code-reviewer #1, rating 8): @enum.unique 採用で
+    alias 化を class 定義時点で reject する不変条件を CI で enforce。
 
-    値追加時に既存と衝突 (e.g. ARTIFACT=10 を MANIFEST=10 と書く) すると IntEnum は
-    後勝ちで alias 化し signature を壊さず通過する。本 test で len(set(...)) を取って
-    重複検出する。
+    旧実装 (``for code in LauncherExitCode`` ベース) は alias を skip してしまい、
+    ``ARTIFACT=10`` の上に ``EVIL=10`` を書いても uniqueness check を通過する盲点が
+    あった。``@enum.unique`` decorator 採用 + ``__members__`` (alias 含む全 entry) で
+    検証することで本来の意図を達成する。
     """
-    values = [code.value for code in LauncherExitCode]
-    assert len(values) == len(set(values)), f"LauncherExitCode に重複値: {values}"
+    # @enum.unique 効果: alias を持たない (class 定義時に ValueError が発生済)
+    # = canonical iter と __members__ の数が一致
+    assert len(LauncherExitCode.__members__) == len(list(LauncherExitCode))
+    # __members__ 全体で値の重複なし (alias 化 regression の最終防衛線)
+    member_values = [v.value for v in LauncherExitCode.__members__.values()]
+    assert len(member_values) == len(set(member_values)), (
+        f"alias detected in LauncherExitCode: {LauncherExitCode.__members__!r}"
+    )
 
 
 def test_exit_codes_int_compat() -> None:
     """Issue #227: IntEnum なので int(...) で生 int に展開でき、shell exit code と互換。
 
+    PR #230 review (pr-test I1, rating 7): ``isinstance(..., int)`` を含めることで
+    IntEnum→Enum 格下げ regression を構造的に捕捉する (Enum のまま値域が int でも
+    isinstance check で fail するため、IntEnum 性そのものを検証できる)。
     `raise SystemExit(LauncherExitCode.OK)` が ``int(LauncherExitCode.OK) == 0`` 経由で
-    shell に 0 を返すことを保証する (IntEnum を Enum に格下げると壊れる)。
+    shell に 0 を返すことを保証する。
     """
+    # isinstance int: IntEnum→Enum 格下げ regression を 1 行で捕捉 (Enum メンバーは int 派生でない)
+    assert isinstance(LauncherExitCode.OK, int)
+    assert isinstance(LauncherExitCode.ARTIFACT, int)
+    # int(...) で展開可能 (shell exit code 互換)
     assert int(LauncherExitCode.OK) == 0
-    assert LauncherExitCode.OK == 0  # IntEnum は __eq__ で int と比較可能
-    assert LauncherExitCode.ARTIFACT == 10
+    assert int(LauncherExitCode.ARTIFACT) == 10
+    # IntEnum __eq__ は int と直接比較可能
+    assert LauncherExitCode.OK == 0
+
+
+def test_exit_codes_match_runbook_contract() -> None:
+    """PR #230 review (silent-failure I-1 / pr-test S1 / S-3, rating 7): ADR-016 / runbook
+    が約束する数値契約を 1 箇所で固定化する。
+
+    誰かが PROVENANCE を 11 にずらした / member 削除した / 新 member を追加した場合に
+    CI で検出する。test_exit_codes_disjoint (uniqueness) では「11 は他と重複しない」
+    ため通過してしまうので、本 test で member 名と値の完全な dict 比較を保証する。
+
+    値変更が必要な場合は本 test + ADR-016 §1.1 + ``LauncherExitCode`` docstring の
+    triage 表を **同時に** 更新する (drift を意図的に検出する単一ソース)。
+    """
+    assert {c.name: c.value for c in LauncherExitCode} == {
+        "OK": 0,
+        "CONFIG": 2,
+        "MANIFEST": 3,
+        "UNEXPECTED": 4,
+        "CHECKSUM_MISMATCH": 5,
+        "ROLLBACK_UNAVAILABLE": 6,
+        "SPAWN_FAILED_NO_ROLLBACK": 7,
+        "LOCK_HELD": 8,
+        "PROVENANCE": 9,
+        "ARTIFACT": 10,
+    }
 
 
 def test_main_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
@@ -875,7 +916,7 @@ def test_main_update_unexpected_error_returns_4(tmp_path: Path) -> None:
                 str(tmp_path),
             ]
         )
-    assert code == 4  # LauncherExitCode.UNEXPECTED
+    assert code == LauncherExitCode.UNEXPECTED
 
 
 def test_main_update_download_error_leaves_current_unchanged(
