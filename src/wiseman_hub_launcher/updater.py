@@ -52,13 +52,26 @@ class UpdaterError(Exception):
     """updater 経路の base exception (PR-6a で他例外は subpackage に移動)。"""
 
 
+def _coerce_log_value(v: object) -> object:
+    """log payload field 値の type 保持 / str 化 (Issue #212 I-4 反映)。
+
+    JSON serializable な scalar (str / int / float / bool / None) はそのまま、
+    その他 (Path / dataclass / Exception 等) のみ str() 化する。
+    旧仕様の全 field str() 化では log analytics filter (e.g. ``error_count > 3``)
+    が機能しなくなる silent-failure があったため、scalar 型を保持する。
+    """
+    if isinstance(v, (str, int, float, bool)) or v is None:
+        return v
+    return str(v)
+
+
 def _phase_log(phase: str, **fields: object) -> None:
     """update_and_spawn 各 phase で構造化 JSON 1 行 log を出す (PR-7 AC5)。
 
     silent-failure 残対応: 失敗時の triage で「どこで止まったか」を機械可読化。
-    field 値は str 化してログ集約 / grep 可能な形に正規化する。
+    Issue #212 I-4: scalar 型 (int/float/bool/None) は保持して log analytics 可能化。
     """
-    payload = {"phase": phase, **{k: str(v) for k, v in fields.items()}}
+    payload = {"phase": phase, **{k: _coerce_log_value(v) for k, v in fields.items()}}
     logger.info("launcher_phase %s", json.dumps(payload, ensure_ascii=False))
 
 

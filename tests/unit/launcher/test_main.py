@@ -1,8 +1,9 @@
-"""Tests for wiseman_hub_launcher.__main__ CLI entry (ADR-016 PR-3 / PR-4)。"""
+"""Tests for wiseman_hub_launcher.__main__ CLI entry (ADR-016 PR-3 / PR-4 / Issue #212)。"""
 
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,6 +11,7 @@ import pytest
 
 from wiseman_hub_launcher import __main__ as launcher_main
 from wiseman_hub_launcher.__main__ import (
+    EXIT_ARTIFACT,
     EXIT_CHECKSUM_MISMATCH,
     EXIT_CONFIG,
     EXIT_LOCK_HELD,
@@ -506,8 +508,13 @@ def test_main_update_checksum_mismatch_returns_5(tmp_path: Path) -> None:
     assert code == EXIT_CHECKSUM_MISMATCH
 
 
-def test_main_update_download_error_returns_3(tmp_path: Path) -> None:
-    """download error → EXIT_MANIFEST (3)。"""
+def test_main_update_download_error_returns_artifact(tmp_path: Path) -> None:
+    """Issue #212 I-3: download error → EXIT_ARTIFACT (10)、manifest と分離。
+
+    旧仕様 (PR-7 まで): DownloadError → EXIT_MANIFEST (3) でマップ。
+    runbook で「exit 3 → manifest URL 確認」と書くと artifact URL 障害なのに manifest を
+    確認して時間浪費する silent-failure。本 PR で artifact 専用 EXIT_ARTIFACT (10) を新設。
+    """
     cur_path = tmp_path / "current.json"
     cur_path.write_text(
         json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
@@ -537,7 +544,70 @@ def test_main_update_download_error_returns_3(tmp_path: Path) -> None:
                 str(tmp_path),
             ]
         )
-    assert code == EXIT_MANIFEST
+    assert code == EXIT_ARTIFACT
+
+
+def test_main_update_download_error_logs_exception_with_cause(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Issue #212 I-1: DownloadError の handler は logger.exception で __cause__ chain を出力。
+
+    旧仕様: ``logger.error("download error: %s", e)`` で str(e) のみ出力、__cause__
+    (HTTPError 503 / TimeoutError / SSLError 等) が triage で区別不能。
+    本 PR で ``logger.exception(...)`` に変更し traceback (cause chain 含む) を残す。
+    """
+    cur_path = tmp_path / "current.json"
+    cur_path.write_text(
+        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
+    )
+    binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"existing")
+
+    # 元 cause を持つ DownloadError を raise from inner で構成
+    inner = TimeoutError("connection timed out")
+    download_err = DownloadError("artifact fetch timed out")
+    download_err.__cause__ = inner
+
+    caplog.set_level(logging.ERROR, logger="wiseman_launcher")
+    with (
+        patch.object(
+            launcher_main,
+            "fetch_manifest",
+            return_value=_good_manifest_bytes("1.5.0"),
+        ),
+        patch.object(
+            launcher_main,
+            "update_and_spawn",
+            side_effect=download_err,
+        ),
+    ):
+        main(
+            [
+                "--update",
+                "--manifest-url",
+                "https://example.com/manifest.json",
+                "--home",
+                str(tmp_path),
+            ]
+        )
+
+    # logger.exception 経由で exc_info が caplog に残る (DownloadError + __cause__ chain)
+    matching = [
+        r for r in caplog.records
+        if r.levelno == logging.ERROR and r.exc_info is not None and "download" in r.getMessage()
+    ]
+    assert matching, (
+        f"expected logger.exception record for download error, got: "
+        f"{[(r.levelname, r.getMessage(), r.exc_info) for r in caplog.records]!r}"
+    )
+    rec = matching[0]
+    assert rec.exc_info is not None
+    exc_type, exc_value, _tb = rec.exc_info
+    assert exc_type is DownloadError
+    assert exc_value is download_err
+    # __cause__ chain で原 TimeoutError まで遡れる
+    assert exc_value.__cause__ is inner
 
 
 def test_main_update_spawn_no_rollback_returns_7(tmp_path: Path) -> None:
@@ -771,7 +841,7 @@ def test_main_update_download_error_leaves_current_unchanged(
                 str(tmp_path),
             ]
         )
-    assert code == EXIT_MANIFEST  # 3
+    assert code == EXIT_ARTIFACT  # 10 (Issue #212 I-3 で manifest と分離)
     # current.json は元のまま (新版に切り替わっていない)
     assert cur_path.read_text() == initial_payload
 

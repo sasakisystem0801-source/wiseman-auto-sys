@@ -21,13 +21,14 @@ PR-6 後半で削除 (本格 fail-closed):
 exit code:
     0  成功 (SUCCESS / OK_EARLY_EXIT、--dry-run / --no-spawn 完了)
     2  CONFIG (argparse / HTTPS pre-check / mode 不正)
-    3  MANIFEST / network / artifact size error
+    3  MANIFEST (manifest fetch / parse / validate 失敗)
     4  UNEXPECTED
     5  CHECKSUM_MISMATCH (PR-4)
     6  ROLLBACK_UNAVAILABLE / preflight 失敗 (PR-4)
     7  SPAWN_FAILED_NO_ROLLBACK (新版 + 旧版とも spawn 失敗、PR-4)
     8  LOCK_HELD (多重起動、PR-4)
     9  PROVENANCE (signature 失敗 + claims 不一致 + canonical URL 違反、PR-6a + PR-6 後半)
+    10 ARTIFACT (artifact URL / network / size cap、Issue #212 I-3 で manifest と分離)
 """
 
 from __future__ import annotations
@@ -84,6 +85,7 @@ EXIT_ROLLBACK_UNAVAILABLE = 6
 EXIT_SPAWN_FAILED_NO_ROLLBACK = 7
 EXIT_LOCK_HELD = 8
 EXIT_PROVENANCE = 9  # PR-6a (codex I-5 反映: 6 と分離)、PR-6 後半で signature 失敗も統合
+EXIT_ARTIFACT = 10  # Issue #212 I-3: artifact URL / network / size cap (manifest と分離)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -355,9 +357,12 @@ def run_update(  # noqa: PLR0911 — explicit exit code mapping
                 # PR-6 後半: signature 失敗 + claims 不一致 + canonical URL 違反を統合
                 logger.error("provenance verification failed: %s", e)
                 return EXIT_PROVENANCE
-            except DownloadError as e:
-                logger.error("download error: %s", e)
-                return EXIT_MANIFEST
+            except DownloadError:
+                # Issue #212 I-1: logger.exception で __cause__ chain (HTTPError 503 /
+                # TimeoutError / SSLError(CERTIFICATE_VERIFY_FAILED) 等) を traceback
+                # に残し triage 効率化。I-3: EXIT_ARTIFACT (10) で manifest と分離。
+                logger.exception("download error")
+                return EXIT_ARTIFACT
             # C10 (silent-failure / type-design): canonical URL validation の ValueError は
             # updater.py で ProvenanceError に wrap 済。ここで except ValueError を持つと
             # Current invariant / SpawnOutcome invariant 違反 (= coding bug) も

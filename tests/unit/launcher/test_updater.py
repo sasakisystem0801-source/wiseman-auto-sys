@@ -845,6 +845,144 @@ def test_download_error_message_categorized_by_actual_exception(
     assert expected_substr in str(exc_info.value)
 
 
+def test_phase_log_preserves_scalar_types(caplog: pytest.LogCaptureFixture) -> None:
+    """Issue #212 I-4: _phase_log が int / float / bool / None を type 保持で出力する。
+
+    旧仕様: ``{k: str(v) for k, v in fields.items()}`` で全 field が str 化され、
+    log analytics の filter (e.g. ``error_count > 3``) が動かなくなる将来リスク。
+    本 PR で scalar type (str/int/float/bool/None) は保持、その他 (Path / Exception 等)
+    のみ str() 化する _coerce_log_value に変更。
+    """
+    from wiseman_hub_launcher.updater import _phase_log  # noqa: PLC0415
+
+    caplog.set_level("INFO", logger="wiseman_hub_launcher.updater")
+    _phase_log(
+        "test_scalar",
+        version="1.2.3",
+        error_count=3,
+        ratio=0.75,
+        force=True,
+        cause=None,
+    )
+    records = [r.message for r in caplog.records if "launcher_phase" in r.message]
+    assert records, f"expected phase log record (got: {[r.message for r in caplog.records]!r})"
+    # 'launcher_phase {json}' から JSON 部分を切り出し
+    json_part = records[0].split("launcher_phase ", 1)[1]
+    payload = json.loads(json_part)
+    assert payload["phase"] == "test_scalar"
+    assert payload["version"] == "1.2.3"  # str
+    assert payload["error_count"] == 3
+    assert isinstance(payload["error_count"], int)  # str 化されていない
+    assert payload["ratio"] == 0.75
+    assert isinstance(payload["ratio"], float)
+    assert payload["force"] is True  # bool が str("True") にならない
+    assert payload["cause"] is None  # None が str("None") にならない
+
+
+def test_phase_log_coerces_non_scalar_to_str(caplog: pytest.LogCaptureFixture) -> None:
+    """Issue #212 I-4: scalar 以外 (Path / Exception 等) は str() 化される。
+
+    JSON serializable でない型を防御的に文字列化することで、json.dumps が落ちて
+    silent-failure 化することを防ぐ。
+    """
+    from wiseman_hub_launcher.updater import _phase_log  # noqa: PLC0415
+
+    caplog.set_level("INFO", logger="wiseman_hub_launcher.updater")
+    p = Path("/tmp/x")
+    exc = ValueError("boom")
+    _phase_log("test_non_scalar", path=p, exc=exc)
+    records = [r.message for r in caplog.records if "launcher_phase" in r.message]
+    json_part = records[0].split("launcher_phase ", 1)[1]
+    payload = json.loads(json_part)
+    assert payload["path"] == str(p)
+    assert payload["exc"] == str(exc)
+    assert isinstance(payload["path"], str)
+    assert isinstance(payload["exc"], str)
+
+
+def test_download_error_http_includes_reason_and_retry_after(tmp_path: Path) -> None:
+    """Issue #212 I-1: HTTPError は code に加え reason + Retry-After header を message に含む。
+
+    triage 用に「503 Service Unavailable retry_after=30」のような構造化情報を残し、
+    rate limit / temporal failure の判別を可能にする。__cause__ chain は from e で保持済。
+    """
+    headers = {"Retry-After": "30"}
+    err = urllib.error.HTTPError(
+        url="https://x",
+        code=503,
+        msg="Service Unavailable",
+        hdrs=headers,  # type: ignore[arg-type]
+        fp=None,
+    )
+    with patch(
+        "wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen",
+        side_effect=err,
+    ), pytest.raises(DownloadError) as exc_info:
+        download_artifact(
+            "https://example.invalid/x.exe",
+            tmp_path,
+            make_sha256hex("0" * 64),
+            timeout_sec=1,
+        )
+
+    msg = str(exc_info.value)
+    assert "503" in msg
+    assert "Service Unavailable" in msg
+    assert "retry_after=30" in msg
+    # __cause__ chain で原 HTTPError が保持される (logger.exception で出力される)
+    assert isinstance(exc_info.value.__cause__, urllib.error.HTTPError)
+
+
+def test_download_error_url_error_includes_errno_strerror(tmp_path: Path) -> None:
+    """Issue #212 I-1: URLError は reason の errno + strerror を message に含む。
+
+    OSError サブクラスを reason に持つ URLError (DNS 失敗 / connection refused 等) で
+    errno (ECONNREFUSED 等) と strerror を残すことで、network triage を高速化。
+    """
+    # errno + strerror を持つ ConnectionRefusedError を URLError reason に
+    inner = ConnectionRefusedError(111, "Connection refused")
+    err = urllib.error.URLError(reason=inner)
+    with patch(
+        "wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen",
+        side_effect=err,
+    ), pytest.raises(DownloadError) as exc_info:
+        download_artifact(
+            "https://example.invalid/x.exe",
+            tmp_path,
+            make_sha256hex("0" * 64),
+            timeout_sec=1,
+        )
+
+    msg = str(exc_info.value)
+    assert "ConnectionRefusedError" in msg
+    assert "errno=111" in msg
+    assert "Connection refused" in msg
+    assert isinstance(exc_info.value.__cause__, urllib.error.URLError)
+
+
+def test_download_error_ssl_includes_arg_detail(tmp_path: Path) -> None:
+    """Issue #212 I-1: SSLError は args[0] (CERTIFICATE_VERIFY_FAILED 等) を message に含む。
+
+    cert 期限切れ / hostname mismatch / CA chain 失敗などを区別可能化。
+    """
+    err = ssl.SSLError("CERTIFICATE_VERIFY_FAILED")
+    with patch(
+        "wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen",
+        side_effect=err,
+    ), pytest.raises(DownloadError) as exc_info:
+        download_artifact(
+            "https://example.invalid/x.exe",
+            tmp_path,
+            make_sha256hex("0" * 64),
+            timeout_sec=1,
+        )
+
+    msg = str(exc_info.value)
+    assert "SSLError" in msg
+    assert "CERTIFICATE_VERIFY_FAILED" in msg
+    assert isinstance(exc_info.value.__cause__, ssl.SSLError)
+
+
 def test_download_error_size_cap_message_categorized(tmp_path: Path) -> None:
     """PR-7 AC6: artifact body size cap 超過時の message に 'exceeds' prefix。"""
     # 1 MiB chunked stream で MAX_ARTIFACT_BYTES (300 MiB) を超えるシナリオは

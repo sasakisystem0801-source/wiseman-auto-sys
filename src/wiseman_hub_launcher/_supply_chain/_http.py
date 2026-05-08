@@ -50,15 +50,31 @@ def open_https_get(
     try:
         resp = urllib.request.urlopen(req, timeout=timeout_sec)  # noqa: S310
     except urllib.error.HTTPError as e:
-        raise error_class(f"{label} fetch HTTP error: {e.code}") from e
-    except urllib.error.URLError as e:
+        # Issue #212 I-1: code に加え reason + Retry-After を含める。
+        # 503 Service Unavailable / 429 Too Many Requests + Retry-After=N の triage を高速化。
+        retry_after = e.headers.get("Retry-After") if e.headers else None
         raise error_class(
-            f"{label} fetch URL error: {type(e.reason).__name__}"
+            f"{label} fetch HTTP error: {e.code} {e.reason} retry_after={retry_after}"
         ) from e
+    except urllib.error.URLError as e:
+        # Issue #212 I-1: reason の errno + strerror を message に残す
+        # (DNS / connection refused / no route 等の network 障害を区別可能化)。
+        reason = e.reason
+        detail = (
+            f"{type(reason).__name__}"
+            f"(errno={getattr(reason, 'errno', None)},"
+            f" strerror={getattr(reason, 'strerror', None)})"
+        )
+        raise error_class(f"{label} fetch URL error: {detail}") from e
     except TimeoutError as e:
         raise error_class(f"{label} fetch timed out") from e
     except ssl.SSLError as e:
-        raise error_class(f"{label} fetch SSL error: {type(e).__name__}") from e
+        # Issue #212 I-1: args[0] (CERTIFICATE_VERIFY_FAILED 等) を含める
+        # (cert 期限切れ / hostname mismatch / CA chain 失敗を区別可能化)。
+        ssl_detail = e.args[0] if e.args else type(e).__name__
+        raise error_class(
+            f"{label} fetch SSL error: {type(e).__name__}({ssl_detail})"
+        ) from e
     except (ConnectionError, OSError) as e:
         raise error_class(
             f"{label} fetch network error: {type(e).__name__}"
