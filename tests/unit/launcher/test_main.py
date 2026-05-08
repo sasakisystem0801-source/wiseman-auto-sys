@@ -1,8 +1,9 @@
-"""Tests for wiseman_hub_launcher.__main__ CLI entry (ADR-016 PR-3 / PR-4)。"""
+"""Tests for wiseman_hub_launcher.__main__ CLI entry (ADR-016 PR-3 / PR-4 / Issue #212)。"""
 
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,6 +11,7 @@ import pytest
 
 from wiseman_hub_launcher import __main__ as launcher_main
 from wiseman_hub_launcher.__main__ import (
+    EXIT_ARTIFACT,
     EXIT_CHECKSUM_MISMATCH,
     EXIT_CONFIG,
     EXIT_LOCK_HELD,
@@ -506,8 +508,13 @@ def test_main_update_checksum_mismatch_returns_5(tmp_path: Path) -> None:
     assert code == EXIT_CHECKSUM_MISMATCH
 
 
-def test_main_update_download_error_returns_3(tmp_path: Path) -> None:
-    """download error → EXIT_MANIFEST (3)。"""
+def test_main_update_download_error_returns_artifact(tmp_path: Path) -> None:
+    """Issue #212 I-3: download error → EXIT_ARTIFACT (10)、manifest と分離。
+
+    旧仕様 (PR-7 まで): DownloadError → EXIT_MANIFEST (3) でマップ。
+    runbook で「exit 3 → manifest URL 確認」と書くと artifact URL 障害なのに manifest を
+    確認して時間浪費する silent-failure。本 PR で artifact 専用 EXIT_ARTIFACT (10) を新設。
+    """
     cur_path = tmp_path / "current.json"
     cur_path.write_text(
         json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
@@ -537,7 +544,172 @@ def test_main_update_download_error_returns_3(tmp_path: Path) -> None:
                 str(tmp_path),
             ]
         )
+    assert code == EXIT_ARTIFACT
+
+
+def test_main_update_manifest_error_returns_3(tmp_path: Path) -> None:
+    """Issue #212 I-3 review C1: update mode の ManifestError は EXIT_MANIFEST (3) のまま。
+
+    DownloadError → EXIT_ARTIFACT (10) と分離が双方向に守られていることを保証する
+    regression guard。本 test がないと、将来 ManifestError → 10 の誤マップが入っても
+    検出できず、runbook の「3 = manifest, 10 = artifact」契約が一方向しか守られない。
+    """
+    cur_path = tmp_path / "current.json"
+    cur_path.write_text(
+        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
+    )
+    binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"existing")
+
+    with patch.object(
+        launcher_main, "fetch_manifest", side_effect=ManifestError("manifest 404")
+    ):
+        code = main(
+            [
+                "--update",
+                "--manifest-url",
+                "https://example.com/manifest.json",
+                "--home",
+                str(tmp_path),
+            ]
+        )
+    # NOTE: EXIT_MANIFEST (3) であり EXIT_ARTIFACT (10) ではない
     assert code == EXIT_MANIFEST
+
+
+def test_main_update_download_error_logs_exception_with_cause(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Issue #212 I-1: DownloadError の handler は logger.exception で __cause__ chain を出力。
+
+    旧仕様: ``logger.error("download error: %s", e)`` で str(e) のみ出力、__cause__
+    (HTTPError 503 / TimeoutError / SSLError 等) が triage で区別不能。
+    本 PR で ``logger.exception(...)`` に変更し traceback (cause chain 含む) を残す。
+    """
+    cur_path = tmp_path / "current.json"
+    cur_path.write_text(
+        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
+    )
+    binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"existing")
+
+    # 元 cause を持つ DownloadError を raise from inner で構成
+    inner = TimeoutError("connection timed out")
+    download_err = DownloadError("artifact fetch timed out")
+    download_err.__cause__ = inner
+
+    caplog.set_level(logging.ERROR, logger="wiseman_launcher")
+    with (
+        patch.object(
+            launcher_main,
+            "fetch_manifest",
+            return_value=_good_manifest_bytes("1.5.0"),
+        ),
+        patch.object(
+            launcher_main,
+            "update_and_spawn",
+            side_effect=download_err,
+        ),
+    ):
+        main(
+            [
+                "--update",
+                "--manifest-url",
+                "https://example.com/manifest.json",
+                "--home",
+                str(tmp_path),
+            ]
+        )
+
+    # logger.exception 経由で exc_info が caplog に残る (DownloadError + __cause__ chain)
+    matching = [
+        r for r in caplog.records
+        if r.levelno == logging.ERROR and r.exc_info is not None and "download" in r.getMessage()
+    ]
+    assert matching, (
+        f"expected logger.exception record for download error, got: "
+        f"{[(r.levelname, r.getMessage(), r.exc_info) for r in caplog.records]!r}"
+    )
+    rec = matching[0]
+    assert rec.exc_info is not None
+    exc_type, exc_value, _tb = rec.exc_info
+    assert exc_type is DownloadError
+    assert exc_value is download_err
+    # __cause__ chain で原 TimeoutError まで遡れる
+    assert exc_value.__cause__ is inner
+
+
+def test_main_update_download_error_real_raise_from_chain(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Issue #212 review IMPORTANT-2 (rating 7): production の `raise from` 経路で
+    __cause__ chain が end-to-end (urlopen → _http.py → __main__.logger.exception) で保持。
+
+    上の test (..._logs_exception_with_cause) は ``download_err.__cause__ = inner`` で
+    chain を手動 assign しており、_http.py の `raise X from e` が壊れても test 通過する。
+    本 test は urlopen を URLError raise させて download_artifact 経由で実 raise 経路を辿る
+    invariant guard。誰かが _http.py の `from e` を削除したらここで落ちる。
+    """
+    import urllib.error  # noqa: PLC0415
+
+    cur_path = tmp_path / "current.json"
+    cur_path.write_text(
+        json.dumps({"version": "1.2.3", "released_at": "x", "previous_version": ""})
+    )
+    binary = tmp_path / "versions" / "1.2.3" / "wiseman_hub.exe"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"existing")
+
+    inner = urllib.error.URLError(
+        reason=ConnectionRefusedError(111, "Connection refused")
+    )
+
+    caplog.set_level(logging.ERROR, logger="wiseman_launcher")
+    # fetch_manifest は正常 bytes を返し、その後の download_artifact (open_https_get
+    # 経由 _http.py の urlopen) で URLError raise → _http.py の
+    # `raise DownloadError(...) from e` で wrap → __main__.update path に伝播する
+    # end-to-end 経路を実 raise で叩く。
+    with (
+        patch.object(
+            launcher_main,
+            "fetch_manifest",
+            return_value=_good_manifest_bytes("1.5.0"),
+        ),
+        patch(
+            "wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen",
+            side_effect=inner,
+        ),
+    ):
+        code = main(
+            [
+                "--update",
+                "--manifest-url",
+                "https://example.com/manifest.json",
+                "--home",
+                str(tmp_path),
+            ]
+        )
+
+    assert code == EXIT_ARTIFACT  # I-3: artifact path で EXIT_ARTIFACT
+    # logger.exception で exc_info が DownloadError + __cause__ = URLError として残る
+    matching = [
+        r for r in caplog.records
+        if r.levelno == logging.ERROR and r.exc_info is not None and "download" in r.getMessage()
+    ]
+    assert matching, (
+        f"expected logger.exception record, got: "
+        f"{[(r.levelname, r.getMessage()) for r in caplog.records]!r}"
+    )
+    rec = matching[0]
+    assert rec.exc_info is not None
+    exc_type, exc_value, _ = rec.exc_info
+    assert exc_type is DownloadError
+    # production raise from 経由なので __cause__ が URLError として保持される
+    assert isinstance(exc_value.__cause__, urllib.error.URLError)
+    # かつ __suppress_context__ = True (raise from の semantics)
+    assert exc_value.__suppress_context__ is True
 
 
 def test_main_update_spawn_no_rollback_returns_7(tmp_path: Path) -> None:
@@ -771,7 +943,7 @@ def test_main_update_download_error_leaves_current_unchanged(
                 str(tmp_path),
             ]
         )
-    assert code == EXIT_MANIFEST  # 3
+    assert code == EXIT_ARTIFACT  # 10 (Issue #212 I-3 で manifest と分離)
     # current.json は元のまま (新版に切り替わっていない)
     assert cur_path.read_text() == initial_payload
 

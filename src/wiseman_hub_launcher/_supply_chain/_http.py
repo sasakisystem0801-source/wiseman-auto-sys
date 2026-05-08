@@ -47,18 +47,44 @@ def open_https_get(
     if not isinstance(url, str) or not url.startswith("https://"):
         raise error_class(f"{label} URL must use HTTPS scheme")
     req = urllib.request.Request(url, method="GET")
+    # NOTE: 例外順序は subclass 関係依存 (do not reorder alphabetically):
+    #   HTTPError < URLError       (HTTPError must come first)
+    #   TimeoutError < OSError     (TimeoutError must precede OSError)
+    # 並び替えると親クラス側で先に捕捉され、子クラス固有の triage 情報が失われる。
     try:
         resp = urllib.request.urlopen(req, timeout=timeout_sec)  # noqa: S310
     except urllib.error.HTTPError as e:
-        raise error_class(f"{label} fetch HTTP error: {e.code}") from e
-    except urllib.error.URLError as e:
+        # Issue #212 I-1: code に加え reason + Retry-After を含める。
+        # 503 Service Unavailable / 429 Too Many Requests + Retry-After=N の triage を高速化。
+        retry_after = e.headers.get("Retry-After") if e.headers else None
         raise error_class(
-            f"{label} fetch URL error: {type(e.reason).__name__}"
+            f"{label} fetch HTTP error: {e.code} {e.reason} retry_after={retry_after}"
         ) from e
+    except urllib.error.URLError as e:
+        # Issue #212 I-1: reason が OSError なら errno / strerror を残し、
+        # それ以外 (str / 任意 Exception) は repr で保持する (review IMPORTANT-1 反映)。
+        # 旧形式 ``getattr(reason, 'errno', None)`` だと URLError("proxy auth failed")
+        # の reason=str が "str(errno=None, strerror=None)" に化けて元文字列が失われる
+        # silent-failure があった。
+        reason = e.reason
+        if isinstance(reason, OSError):
+            # subclass 名 (ConnectionRefusedError 等) を残しつつ errno/strerror で詳細化。
+            detail = (
+                f"{type(reason).__name__}(errno={reason.errno},"
+                f" strerror={reason.strerror})"
+            )
+        else:
+            detail = f"{type(reason).__name__}({reason!r})"
+        raise error_class(f"{label} fetch URL error: {detail}") from e
     except TimeoutError as e:
         raise error_class(f"{label} fetch timed out") from e
     except ssl.SSLError as e:
-        raise error_class(f"{label} fetch SSL error: {type(e).__name__}") from e
+        # Issue #212 I-1: args[0] (CERTIFICATE_VERIFY_FAILED 等) を含める
+        # (cert 期限切れ / hostname mismatch / CA chain 失敗を区別可能化)。
+        ssl_detail = e.args[0] if e.args else type(e).__name__
+        raise error_class(
+            f"{label} fetch SSL error: {type(e).__name__}({ssl_detail})"
+        ) from e
     except (ConnectionError, OSError) as e:
         raise error_class(
             f"{label} fetch network error: {type(e).__name__}"
