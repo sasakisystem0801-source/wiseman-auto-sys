@@ -363,7 +363,7 @@ def update_and_spawn(
         write_current_atomic(current_path, new_current)
     except OSError as e:
         # PR-7 review C-2 反映: current.json 切替失敗 phase fingerprint
-        # (ENOSPC / EROFS / FileNotFoundError 等。raise させて上位で EXIT_UNEXPECTED)
+        # (ENOSPC / EROFS / FileNotFoundError 等。raise させて上位で LauncherExitCode.UNEXPECTED)
         _phase_log(
             "current_switch_failed",
             new_version=new_ver,
