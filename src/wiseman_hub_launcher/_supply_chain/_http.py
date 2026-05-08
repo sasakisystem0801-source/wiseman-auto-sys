@@ -47,6 +47,10 @@ def open_https_get(
     if not isinstance(url, str) or not url.startswith("https://"):
         raise error_class(f"{label} URL must use HTTPS scheme")
     req = urllib.request.Request(url, method="GET")
+    # NOTE: 例外順序は subclass 関係依存 (do not reorder alphabetically):
+    #   HTTPError < URLError       (HTTPError must come first)
+    #   TimeoutError < OSError     (TimeoutError must precede OSError)
+    # 並び替えると親クラス側で先に捕捉され、子クラス固有の triage 情報が失われる。
     try:
         resp = urllib.request.urlopen(req, timeout=timeout_sec)  # noqa: S310
     except urllib.error.HTTPError as e:
@@ -57,14 +61,20 @@ def open_https_get(
             f"{label} fetch HTTP error: {e.code} {e.reason} retry_after={retry_after}"
         ) from e
     except urllib.error.URLError as e:
-        # Issue #212 I-1: reason の errno + strerror を message に残す
-        # (DNS / connection refused / no route 等の network 障害を区別可能化)。
+        # Issue #212 I-1: reason が OSError なら errno / strerror を残し、
+        # それ以外 (str / 任意 Exception) は repr で保持する (review IMPORTANT-1 反映)。
+        # 旧形式 ``getattr(reason, 'errno', None)`` だと URLError("proxy auth failed")
+        # の reason=str が "str(errno=None, strerror=None)" に化けて元文字列が失われる
+        # silent-failure があった。
         reason = e.reason
-        detail = (
-            f"{type(reason).__name__}"
-            f"(errno={getattr(reason, 'errno', None)},"
-            f" strerror={getattr(reason, 'strerror', None)})"
-        )
+        if isinstance(reason, OSError):
+            # subclass 名 (ConnectionRefusedError 等) を残しつつ errno/strerror で詳細化。
+            detail = (
+                f"{type(reason).__name__}(errno={reason.errno},"
+                f" strerror={reason.strerror})"
+            )
+        else:
+            detail = f"{type(reason).__name__}({reason!r})"
         raise error_class(f"{label} fetch URL error: {detail}") from e
     except TimeoutError as e:
         raise error_class(f"{label} fetch timed out") from e

@@ -933,6 +933,60 @@ def test_download_error_http_includes_reason_and_retry_after(tmp_path: Path) -> 
     assert isinstance(exc_info.value.__cause__, urllib.error.HTTPError)
 
 
+def test_download_error_http_with_none_headers(tmp_path: Path) -> None:
+    """Issue #212 I-1 boundary (review I2 rating 7): HTTPError.headers=None で IndexError
+    にならず retry_after=None literal が message に乗る。
+
+    line 55 の ``e.headers.get("Retry-After") if e.headers else None`` ガードを潰す
+    (= ``e.headers.get(...)`` のみに) refactor が入っても、本 test が `AttributeError:
+    'NoneType' object has no attribute 'get'` で落ちて検出できるようにする。
+    """
+    err = urllib.error.HTTPError(
+        url="https://x", code=502, msg="Bad Gateway", hdrs=None, fp=None  # type: ignore[arg-type]
+    )
+    with patch(
+        "wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen",
+        side_effect=err,
+    ), pytest.raises(DownloadError) as exc_info:
+        download_artifact(
+            "https://example.invalid/x.exe",
+            tmp_path,
+            make_sha256hex("0" * 64),
+            timeout_sec=1,
+        )
+
+    msg = str(exc_info.value)
+    assert "502" in msg
+    assert "Bad Gateway" in msg
+    assert "retry_after=None" in msg
+
+
+def test_download_error_url_error_with_str_reason(tmp_path: Path) -> None:
+    """Issue #212 I-1 silent-failure (review IMPORTANT-1 rating 7): URLError.reason が str
+    の場合、原文字列が message に repr で保持される。
+
+    旧形式 (review 反映前) は ``getattr(reason, 'errno', None)`` で str reason から
+    errno=None / strerror=None を取り出し、結果が ``str(errno=None, strerror=None)`` に
+    化けて元文字列が完全に欠落する silent-failure があった。本 test で reason=str の
+    場合に原文字列が repr 形式で残ることを保証する。
+    """
+    err = urllib.error.URLError(reason="proxy authentication failed")
+    with patch(
+        "wiseman_hub_launcher._supply_chain._http.urllib.request.urlopen",
+        side_effect=err,
+    ), pytest.raises(DownloadError) as exc_info:
+        download_artifact(
+            "https://example.invalid/x.exe",
+            tmp_path,
+            make_sha256hex("0" * 64),
+            timeout_sec=1,
+        )
+
+    msg = str(exc_info.value)
+    assert "str" in msg
+    assert "proxy authentication failed" in msg
+
+
 def test_download_error_url_error_includes_errno_strerror(tmp_path: Path) -> None:
     """Issue #212 I-1: URLError は reason の errno + strerror を message に含む。
 

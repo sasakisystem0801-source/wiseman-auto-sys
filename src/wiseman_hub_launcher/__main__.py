@@ -21,14 +21,18 @@ PR-6 後半で削除 (本格 fail-closed):
 exit code:
     0  成功 (SUCCESS / OK_EARLY_EXIT、--dry-run / --no-spawn 完了)
     2  CONFIG (argparse / HTTPS pre-check / mode 不正)
-    3  MANIFEST (manifest fetch / parse / validate 失敗)
+    3  MANIFEST (manifest URL の HTTPS 取得段階の失敗: network / HTTP / SSL / parse / validate)
     4  UNEXPECTED
     5  CHECKSUM_MISMATCH (PR-4)
     6  ROLLBACK_UNAVAILABLE / preflight 失敗 (PR-4)
     7  SPAWN_FAILED_NO_ROLLBACK (新版 + 旧版とも spawn 失敗、PR-4)
     8  LOCK_HELD (多重起動、PR-4)
     9  PROVENANCE (signature 失敗 + claims 不一致 + canonical URL 違反、PR-6a + PR-6 後半)
-    10 ARTIFACT (artifact URL / network / size cap、Issue #212 I-3 で manifest と分離)
+    10 ARTIFACT (artifact URL の HTTPS 取得段階の失敗: network / HTTP / SSL / size cap、
+       Issue #212 I-3 で manifest と分離)
+
+    triage 軸: 3 = manifest 段階、10 = artifact 段階。両方とも HTTPS / network 障害を
+    含むため、runbook では「どの段階の HTTPS 取得が落ちたか」で切り分ける。
 """
 
 from __future__ import annotations

@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import TypeAlias
 
 from ._runtime import (
     DEFAULT_SPAWN_MONITOR_SEC,
@@ -47,20 +48,29 @@ from .manifest import ManifestData, Sha256Hex, is_simple_semver
 
 logger = logging.getLogger(__name__)
 
+# Issue #212 I-4 (review type-design C1): JSON 互換 scalar 型の単一ソース。
+# _coerce_log_value の戻り値を narrow し、log analytics filter (e.g. `error_count > 3`)
+# で int/float/bool が機能する scalar を type 上で表現する。
+LogScalar: TypeAlias = str | int | float | bool | None
+
 
 class UpdaterError(Exception):
     """updater 経路の base exception (PR-6a で他例外は subpackage に移動)。"""
 
 
-def _coerce_log_value(v: object) -> object:
+def _coerce_log_value(v: object) -> LogScalar:
     """log payload field 値の type 保持 / str 化 (Issue #212 I-4 反映)。
 
     JSON serializable な scalar (str / int / float / bool / None) はそのまま、
     その他 (Path / dataclass / Exception 等) のみ str() 化する。
     旧仕様の全 field str() 化では log analytics filter (e.g. ``error_count > 3``)
     が機能しなくなる silent-failure があったため、scalar 型を保持する。
+
+    Note: ``bool`` は ``int`` の subclass なので isinstance(True, int) は True。
+    bool 値は int として match されるが、戻り値は元の bool object (identity 保持)
+    なので JSON では ``true`` / ``false`` literal で出力される (review type-design C2)。
     """
-    if isinstance(v, (str, int, float, bool)) or v is None:
+    if isinstance(v, (str, int, float)) or v is None:
         return v
     return str(v)
 
