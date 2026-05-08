@@ -53,10 +53,6 @@ logger = logging.getLogger(__name__)
 # で int/float/bool が機能する scalar を type 上で表現する。
 LogScalar: TypeAlias = str | int | float | bool | None
 
-# Issue #210: _phase_log の phase 名を Literal 拘束で typo を mypy で静的検出する。
-# 旧仕様 ``_phase_log(phase: str, ...)`` では ``_phase_log("download_strat", ...)`` (typo)
-# も通り、test も string hardcode で typo を catch しない silent-failure があった。
-# phase の追加時はここに値を追加するだけで、production と test の整合が静的に保証される。
 Phase: TypeAlias = Literal[
     "read_current",
     "already_up_to_date",
@@ -72,6 +68,20 @@ Phase: TypeAlias = Literal[
     "rollback_complete",
     "rollback_failed",
 ]
+"""update_and_spawn の phase fingerprint 名 (Issue #210, review type-design I2 反映)。
+
+値は JSON ``payload["phase"]`` にそのまま emit される (wire format = type identity)。
+旧仕様 ``_phase_log(phase: str, ...)`` では ``_phase_log("download_strat", ...)`` (typo)
+も runtime 通過し、test も string hardcode で typo を catch しない silent-failure が
+あった。本 Literal narrow を ``mypy src/`` (production callsite 13 箇所) と
+``tests/unit/launcher/test_updater_phase_lockin.py`` (CI mypy 専用 lock-in file) で
+enforce する。
+
+phase 追加時:
+    1. 本 Literal リストに値を append
+    2. ``update_and_spawn`` 内で対応する ``_phase_log(<new_phase>, ...)`` callsite 追加
+    3. ``mypy src/`` で全 callsite が narrow を通ることを確認
+"""
 
 
 class UpdaterError(Exception):

@@ -845,30 +845,6 @@ def test_download_error_message_categorized_by_actual_exception(
     assert expected_substr in str(exc_info.value)
 
 
-def test_phase_literal_typo_rejected_by_mypy() -> None:
-    """Issue #210: Phase Literal narrow が mypy で typo を catch する static contract。
-
-    本 test は runtime で何も検証しない (Literal は runtime 効果なし)。CI で
-    ``mypy tests/unit/launcher/test_updater.py`` が走ることで、Phase 外の文字列を
-    渡したコードを compile-time で reject する型契約を lock-in する。
-
-    将来の wide PR で誰かが ``_phase_log("downlaod_start", ...)`` (typo) を書いても
-    mypy が ``Argument 1 to "_phase_log" has incompatible type "Literal['downlaod_start']"``
-    で reject するため、test と production の整合が静的に保証される。
-    """
-    from typing import assert_type  # noqa: PLC0415
-
-    from wiseman_hub_launcher.updater import Phase  # noqa: PLC0415
-
-    # production phase 名は Phase narrow 通過 (assert_type は runtime no-op)
-    valid_phase: Phase = "read_current"
-    assert_type(valid_phase, Phase)
-
-    # ここで誤って `valid_phase: Phase = "downlaod_start"` (typo) と書くと
-    # mypy が "Incompatible types in assignment" で reject する。
-    # runtime 通過するだけのコードでは検出できない typo を静的に潰す。
-
-
 def test_phase_log_preserves_scalar_types(caplog: pytest.LogCaptureFixture) -> None:
     """Issue #212 I-4: _phase_log が int / float / bool / None を type 保持で出力する。
 
