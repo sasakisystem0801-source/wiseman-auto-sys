@@ -51,6 +51,7 @@ import sys
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Final, Protocol
@@ -98,6 +99,7 @@ class ExtractionErrorCode(StrEnum):
     UNEXPECTED_PDF_NAMING = "unexpected_pdf_naming"
     QUARANTINE_FAILED = "quarantine_failed"
     QUARANTINE_RESTORE_FAILED = "quarantine_restore_failed"
+    QUARANTINE_DEST_FAILED = "quarantine_dest_failed"
     MOVE_CONFLICT = "move_conflict"
     MOVE_IO_ERROR = "move_io_error"
     COPY_FAILED = "copy_failed"
@@ -763,6 +765,38 @@ def _delete_quarantine(
         return ExtractionErrorCode.CLEANUP_FAILED
 
 
+def _quarantine_existing_dest(
+    dest: Path,
+    trashbox_root: Path,
+    facility_root_dir: Path,
+) -> Path:
+    """``dest`` を ``trashbox_root`` 配下に退避し、退避先 path を返す。
+
+    退避先構造: ``trashbox_root / <facility_root_dir.name> / <facility>/ <basename>``
+    既に同名がある場合は ``<stem>_<YYYYMMDD>_<HHMMSS><suffix>`` で衝突回避。
+
+    上書き処理 (``overwrite_existing=True``) の前段で呼ばれ、Tera-station NAS
+    の trashbox 機能とは独立した二重保険として旧 PDF を明示退避する
+    (誤上書きによるデータ消失の構造的排除)。
+
+    Raises:
+        OSError: 退避先 mkdir / shutil.move が失敗した場合。
+            呼び出し側 (``extract_one``) が捕捉して
+            ``ExtractionErrorCode.QUARANTINE_DEST_FAILED`` に変換する。
+    """
+    facility_name = dest.parent.name
+    target_dir = trashbox_root / facility_root_dir.name / facility_name
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    target_path = target_dir / dest.name
+    if target_path.exists():
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        target_path = target_dir / f"{dest.stem}_{timestamp}{dest.suffix}"
+
+    shutil.move(str(dest), str(target_path))
+    return target_path
+
+
 def find_unexpected_naming_pdfs(
     target_stem: str, watch_dirs: Sequence[Path]
 ) -> list[Path]:
@@ -820,6 +854,8 @@ def extract_one(
     adapter: SfxAdapter,
     *,
     force_facility: str | None = None,
+    overwrite_existing: bool = False,
+    trashbox_root: Path | None = None,
 ) -> ExtractionItem:
     """1 つの ``.ex_`` を resolver で振り分け先を決定し、CONFIRMED なら抽出 + 移動。
 
@@ -836,6 +872,13 @@ def extract_one(
             ``ResolveReason.MANUAL_OVERRIDE`` で擬似 CONFIRMED を構築 + 抽出 + 移動。
             UI の手動振り分けダイアログから呼ばれる経路。``facility_names`` に
             存在しない値を渡した場合は ``ValueError`` (UI が誤った値を渡す事故防止)。
+        overwrite_existing: Issue #ex-overwrite で追加。``True`` の場合、移動先
+            に同名 PDF が既存でも ``trashbox_root`` 配下に退避してから上書きする。
+            ``False`` (default) は従来通り ``MOVE_CONFLICT`` で停止 (既存挙動完全
+            維持)。``True`` 指定時は ``trashbox_root`` も必須 (= ``ValueError``)。
+        trashbox_root: ``overwrite_existing=True`` 時の旧 PDF 退避先 root。
+            退避先 path は ``trashbox_root/<facility_root_dir.name>/<facility>/<basename>``
+            で、同名衝突時は timestamp suffix を付与して衝突回避。
 
     Returns:
         ``ExtractionItem`` (PII-safe な構造化結果)
@@ -944,11 +987,27 @@ def extract_one(
             for pdf in pdfs:
                 dest = dest_dir / pdf.name
                 if dest.exists():
-                    # HIGH-A: 既に moved_pdfs に積んだ分は partially_moved に保持
-                    error_code = ExtractionErrorCode.MOVE_CONFLICT
-                    error_detail = pdf.name
-                    move_failed = True
-                    break
+                    if not overwrite_existing:
+                        # HIGH-A: 既に moved_pdfs に積んだ分は partially_moved に保持
+                        error_code = ExtractionErrorCode.MOVE_CONFLICT
+                        error_detail = pdf.name
+                        move_failed = True
+                        break
+                    # 上書き経路 (Issue #ex-overwrite): trashbox 退避 → move
+                    # 退避失敗時は新 PDF も配置せず終了 (中途半端なデータ消失を排除)
+                    if trashbox_root is None:
+                        raise ValueError(
+                            "overwrite_existing=True requires trashbox_root"
+                        )
+                    try:
+                        _quarantine_existing_dest(
+                            dest, trashbox_root, facility_root_dir
+                        )
+                    except OSError as e:
+                        error_code = ExtractionErrorCode.QUARANTINE_DEST_FAILED
+                        error_detail = type(e).__name__
+                        move_failed = True
+                        break
                 try:
                     shutil.move(str(pdf), str(dest))
                 except OSError as e:
@@ -1123,3 +1182,79 @@ def extract_directory(
         orphan_alias_canonicals=orphans,
         pending_filenames=tuple(pending_filenames),
     )
+
+
+def retry_overwrite(
+    items: Sequence[ExtractionItem],
+    facility_root_dir: Path,
+    facility_names: list[str],
+    aliases: dict[str, list[str]],
+    adapter: SfxAdapter,
+    *,
+    trashbox_root: Path,
+) -> tuple[ExtractionItem, ...]:
+    """``MOVE_CONFLICT`` 状態の items を ``overwrite_existing=True`` で再処理。
+
+    UI の「上書き再実行」ボタン経由で呼ばれ、1 回目処理で衝突した item のみを
+    対象に旧 PDF を ``trashbox_root`` 配下へ退避してから新 PDF で上書きする。
+
+    1 回目の resolver 結果 (``matched_facility``) を ``force_facility`` で再利用
+    することで、alias 辞書が後から更新されたケースでも 1 回目と同じ振り分け先
+    で処理する (整合性保持)。
+
+    Args:
+        items: 1 回目処理結果の全 ``ExtractionItem`` (MOVE_CONFLICT 以外はそのまま返す)
+        facility_root_dir: 事業所サブフォルダの親ディレクトリ
+        facility_names: 振り分け先候補
+        aliases: PR1 検証済 alias 辞書
+        adapter: SfxAdapter 実装
+        trashbox_root: 旧 PDF 退避先 root
+
+    Returns:
+        各 input item に対応する再処理後の ``ExtractionItem`` tuple
+        (MOVE_CONFLICT 以外は input item をそのまま返す)
+    """
+    results: list[ExtractionItem] = []
+    for item in items:
+        if item.error_code is not ExtractionErrorCode.MOVE_CONFLICT:
+            results.append(item)
+            continue
+        matched = item.resolve_result.matched_facility
+        if matched is None:
+            # MOVE_CONFLICT は CONFIRMED 経由でしか発生しないため通常到達しない
+            # (防御的: invariant 違反時は元の item を保持)
+            logger.warning(
+                "retry_overwrite: %s has MOVE_CONFLICT but no matched_facility "
+                "(invariant violation, keeping original item)",
+                item.source_path.name,
+            )
+            results.append(item)
+            continue
+        try:
+            new_item = extract_one(
+                item.source_path,
+                facility_root_dir,
+                facility_names,
+                aliases,
+                adapter,
+                force_facility=matched,
+                overwrite_existing=True,
+                trashbox_root=trashbox_root,
+            )
+        except (MemoryError, RecursionError):
+            raise
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "unexpected error retrying %s: %s",
+                item.source_path.name,
+                type(e).__name__,
+            )
+            new_item = ExtractionItem(
+                source_path=item.source_path,
+                resolve_result=item.resolve_result,
+                status=ExtractionStatus.EXTRACT_FAILED,
+                error_code=ExtractionErrorCode.UNEXPECTED,
+                error_detail=type(e).__name__,
+            )
+        results.append(new_item)
+    return tuple(results)

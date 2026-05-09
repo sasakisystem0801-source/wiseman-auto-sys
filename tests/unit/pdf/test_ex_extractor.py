@@ -33,6 +33,7 @@ from wiseman_hub.pdf.ex_extractor import (
     extract_one,
     find_target_pdf,
     find_unexpected_naming_pdfs,
+    retry_overwrite,
 )
 from wiseman_hub.pdf.facility_resolver import (
     ResolveReason,
@@ -813,6 +814,177 @@ class TestExtractOneFailures:
 
 
 # ---------------------------------------------------------------------------
+# extract_one の overwrite_existing + trashbox_root 経路 (Issue #ex-overwrite)
+# ---------------------------------------------------------------------------
+
+
+class TestExtractOneOverwriteWithTrashbox:
+    """``overwrite_existing=True`` + ``trashbox_root`` 指定時の旧 PDF 退避 + 上書き。
+
+    業務要件: ``move_conflict`` で停止した ex_file を、人間の確認後に
+    旧 PDF を NAS の trashbox 経由で退避してから上書きできるようにする。
+    Tera-station NAS の trashbox 機能とは独立した二重保険として、明示的に
+    ``shutil.move`` で trashbox 配下に退避する (削除復旧経路の信頼性確保)。
+    """
+
+    def test_overwrite_quarantines_existing_to_trashbox_then_moves(
+        self, source_dir: Path, facility_root: Path, tmp_path: Path
+    ) -> None:
+        """既存 dest を trashbox に退避し、新 PDF を配置 → SUCCESS。"""
+        trashbox = tmp_path / "trashbox"
+        ex_file = _make_ex_file(source_dir, "2025_DC_A_提供.ex_")
+        existing_pdf = facility_root / "サービスA" / "report.pdf"
+        existing_pdf.write_bytes(b"OLD_CONTENT")
+
+        adapter = FakeSfxAdapter(
+            produced_pdfs=(source_dir / "report.pdf",),
+            side_effect=_pdf_creating_side_effect(("report.pdf",)),
+        )
+
+        item = extract_one(
+            ex_file,
+            facility_root,
+            ["サービスA"],
+            {"サービスA": ["DC_A"]},
+            adapter,
+            overwrite_existing=True,
+            trashbox_root=trashbox,
+        )
+
+        # SUCCESS で完了
+        assert item.status is ExtractionStatus.SUCCESS
+        assert item.error_code is None
+        # 新 PDF が dest に配置されている (旧 b"OLD_CONTENT" は消失)
+        assert existing_pdf.exists()
+        assert existing_pdf.read_bytes() == b"%PDF-1.4 fake"
+        # 旧 PDF は trashbox 配下に退避 (path: trashbox/<facility_root.name>/<facility>/<basename>)
+        quarantined = trashbox / facility_root.name / "サービスA" / "report.pdf"
+        assert quarantined.exists()
+        assert quarantined.read_bytes() == b"OLD_CONTENT"
+        # SUCCESS 不変条件: moved_pdfs に新 dest が含まれる
+        assert item.moved_pdfs == (existing_pdf,)
+
+    def test_quarantine_failure_aborts_without_overwrite(
+        self,
+        source_dir: Path,
+        facility_root: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """trashbox 退避が失敗したら新 PDF を配置せず ``QUARANTINE_DEST_FAILED``。
+
+        不変条件: 旧 PDF が dest に残ったまま、新 PDF も配置されない
+        (= 中途半端なデータ消失を構造的に排除)。
+        """
+        trashbox = tmp_path / "trashbox"
+        ex_file = _make_ex_file(source_dir, "2025_DC_A_提供.ex_")
+        existing_pdf = facility_root / "サービスA" / "report.pdf"
+        existing_pdf.write_bytes(b"OLD_CONTENT")
+
+        adapter = FakeSfxAdapter(
+            produced_pdfs=(source_dir / "report.pdf",),
+            side_effect=_pdf_creating_side_effect(("report.pdf",)),
+        )
+
+        original_move = shutil.move
+
+        def _fail_to_trashbox(src: object, dst: object, *args: object, **kwargs: object) -> object:
+            # trashbox 配下への move のみ fail (SFX 抽出 PDF の dest 配置は通常通り)
+            if str(trashbox) in str(dst):
+                raise OSError("simulated permission denied on trashbox")
+            return original_move(src, dst, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(shutil, "move", _fail_to_trashbox)
+
+        item = extract_one(
+            ex_file,
+            facility_root,
+            ["サービスA"],
+            {"サービスA": ["DC_A"]},
+            adapter,
+            overwrite_existing=True,
+            trashbox_root=trashbox,
+        )
+
+        assert item.status is ExtractionStatus.MOVE_FAILED
+        assert item.error_code is ExtractionErrorCode.QUARANTINE_DEST_FAILED
+        assert item.error_detail == "OSError"
+        # 旧 PDF は dest にそのまま残る (中途半端な消失なし)
+        assert existing_pdf.read_bytes() == b"OLD_CONTENT"
+        # 新 PDF は配置されていない (moved_pdfs 空)
+        assert item.moved_pdfs == ()
+
+    def test_quarantine_dest_collision_uses_timestamp_suffix(
+        self, source_dir: Path, facility_root: Path, tmp_path: Path
+    ) -> None:
+        """trashbox に既に同名がある場合、timestamp suffix で衝突回避。"""
+        import re
+
+        trashbox = tmp_path / "trashbox"
+        existing_quarantined_dir = trashbox / facility_root.name / "サービスA"
+        existing_quarantined_dir.mkdir(parents=True)
+        (existing_quarantined_dir / "report.pdf").write_bytes(b"OLDER_QUARANTINED")
+
+        ex_file = _make_ex_file(source_dir, "2025_DC_A_提供.ex_")
+        existing_pdf = facility_root / "サービスA" / "report.pdf"
+        existing_pdf.write_bytes(b"OLD_CONTENT")
+
+        adapter = FakeSfxAdapter(
+            produced_pdfs=(source_dir / "report.pdf",),
+            side_effect=_pdf_creating_side_effect(("report.pdf",)),
+        )
+
+        item = extract_one(
+            ex_file,
+            facility_root,
+            ["サービスA"],
+            {"サービスA": ["DC_A"]},
+            adapter,
+            overwrite_existing=True,
+            trashbox_root=trashbox,
+        )
+
+        assert item.status is ExtractionStatus.SUCCESS
+        # 元の trashbox 既存物は上書きされず保持
+        assert (existing_quarantined_dir / "report.pdf").read_bytes() == b"OLDER_QUARANTINED"
+        # 新規退避は suffix 付き (report_YYYYMMDD_HHMMSS.pdf)
+        suffixed = list(existing_quarantined_dir.glob("report_*.pdf"))
+        assert len(suffixed) == 1
+        assert suffixed[0].read_bytes() == b"OLD_CONTENT"
+        assert re.match(r"^report_\d{8}_\d{6}\.pdf$", suffixed[0].name)
+
+    def test_overwrite_false_default_preserves_legacy_move_conflict(
+        self, source_dir: Path, facility_root: Path
+    ) -> None:
+        """``overwrite_existing`` 未指定 (default False) は ``MOVE_CONFLICT`` で停止。
+
+        既存挙動 100% 維持の signature contract test。
+        """
+        ex_file = _make_ex_file(source_dir, "2025_DC_A_提供.ex_")
+        existing_pdf = facility_root / "サービスA" / "report.pdf"
+        existing_pdf.write_bytes(b"existing")
+
+        adapter = FakeSfxAdapter(
+            produced_pdfs=(source_dir / "report.pdf",),
+            side_effect=_pdf_creating_side_effect(("report.pdf",)),
+        )
+
+        # overwrite_existing 未指定 (default False)
+        item = extract_one(
+            ex_file,
+            facility_root,
+            ["サービスA"],
+            {"サービスA": ["DC_A"]},
+            adapter,
+        )
+
+        assert item.status is ExtractionStatus.MOVE_FAILED
+        assert item.error_code is ExtractionErrorCode.MOVE_CONFLICT
+        # 旧 PDF はそのまま (上書きなし)
+        assert existing_pdf.read_bytes() == b"existing"
+
+
+# ---------------------------------------------------------------------------
 # extract_one の logger.warning 出力 (HIGH-G / M-1) (3 件)
 # ---------------------------------------------------------------------------
 
@@ -907,6 +1079,92 @@ class TestExtractOneWarnings:
             record for record in caplog.records if record.levelno >= logging.WARNING
         ]
         assert warnings == []
+
+
+# ---------------------------------------------------------------------------
+# retry_overwrite (Issue #ex-overwrite, UI 上書き再実行 経由)
+# ---------------------------------------------------------------------------
+
+
+class TestRetryOverwrite:
+    """1 回目処理結果から ``MOVE_CONFLICT`` のみを ``overwrite=True`` で再処理。"""
+
+    def test_empty_input_returns_empty_tuple(
+        self, facility_root: Path, tmp_path: Path
+    ) -> None:
+        """空 input → 空 output (境界値)。"""
+        result = retry_overwrite(
+            items=(),
+            facility_root_dir=facility_root,
+            facility_names=["サービスA"],
+            aliases={"サービスA": ["DC_A"]},
+            adapter=FakeSfxAdapter(produced_pdfs=()),
+            trashbox_root=tmp_path / "trashbox",
+        )
+        assert result == ()
+
+    def test_non_conflict_items_passed_through_unchanged(
+        self, source_dir: Path, facility_root: Path, tmp_path: Path
+    ) -> None:
+        """MOVE_CONFLICT 以外の item はそのまま返す (再処理対象外)。"""
+        ex_file = _make_ex_file(source_dir, "2025_DC_A_提供.ex_")
+        # 例: SUCCESS item は再処理しない
+        success_item = ExtractionItem(
+            source_path=ex_file,
+            resolve_result=_dummy_resolve_confirmed(),
+            status=ExtractionStatus.SUCCESS,
+            moved_pdfs=(facility_root / "サービスA" / "x.pdf",),
+        )
+
+        result = retry_overwrite(
+            items=(success_item,),
+            facility_root_dir=facility_root,
+            facility_names=["サービスA"],
+            aliases={"サービスA": ["DC_A"]},
+            adapter=FakeSfxAdapter(produced_pdfs=()),
+            trashbox_root=tmp_path / "trashbox",
+        )
+
+        assert result == (success_item,)
+
+    def test_move_conflict_items_retried_with_overwrite(
+        self, source_dir: Path, facility_root: Path, tmp_path: Path
+    ) -> None:
+        """MOVE_CONFLICT item は overwrite=True で再処理 → SUCCESS になる。"""
+        trashbox = tmp_path / "trashbox"
+        ex_file = _make_ex_file(source_dir, "2025_DC_A_提供.ex_")
+        existing_pdf = facility_root / "サービスA" / "report.pdf"
+        existing_pdf.write_bytes(b"OLD")
+
+        # 1 回目処理結果のシミュレート: MOVE_CONFLICT
+        conflict_item = ExtractionItem(
+            source_path=ex_file,
+            resolve_result=_dummy_resolve_confirmed("サービスA"),
+            status=ExtractionStatus.MOVE_FAILED,
+            error_code=ExtractionErrorCode.MOVE_CONFLICT,
+            error_detail="report.pdf",
+        )
+
+        adapter = FakeSfxAdapter(
+            produced_pdfs=(source_dir / "report.pdf",),
+            side_effect=_pdf_creating_side_effect(("report.pdf",)),
+        )
+
+        result = retry_overwrite(
+            items=(conflict_item,),
+            facility_root_dir=facility_root,
+            facility_names=["サービスA"],
+            aliases={"サービスA": ["DC_A"]},
+            adapter=adapter,
+            trashbox_root=trashbox,
+        )
+
+        assert len(result) == 1
+        assert result[0].status is ExtractionStatus.SUCCESS
+        # 旧 PDF は trashbox 配下に退避
+        quarantined = trashbox / facility_root.name / "サービスA" / "report.pdf"
+        assert quarantined.exists()
+        assert quarantined.read_bytes() == b"OLD"
 
 
 # ---------------------------------------------------------------------------

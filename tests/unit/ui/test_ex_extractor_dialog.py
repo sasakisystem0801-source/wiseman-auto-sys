@@ -89,6 +89,19 @@ def _manual_override_item(name: str, facility: str, dest: Path) -> ExtractionIte
     )
 
 
+def _move_conflict_item(name: str, facility: str = "サービスA") -> ExtractionItem:
+    """Issue #ex-overwrite: 上書き再実行対象の MOVE_CONFLICT item helper。"""
+    return ExtractionItem(
+        source_path=Path(name),
+        resolve_result=ResolveResult.confirmed(
+            facility, ResolveReason.ALIAS_MATCH
+        ),
+        status=ExtractionStatus.MOVE_FAILED,
+        error_code=ExtractionErrorCode.MOVE_CONFLICT,
+        error_detail=name.replace(".ex_", ".pdf"),
+    )
+
+
 # ---------------------------------------------------------------------------
 # ExExtractorViewModel: can_run / can_open_manual / 状態遷移 (10 件)
 # ---------------------------------------------------------------------------
@@ -256,6 +269,112 @@ class TestViewModelStateTransitions:
         assert a_item.resolve_result.reason is ResolveReason.MANUAL_OVERRIDE
         # pending_filenames は再計算されて空に
         assert vm.result.pending_filenames == ()
+
+
+# ---------------------------------------------------------------------------
+# Issue #ex-overwrite: 上書き再実行 state 遷移 + result 統合
+# ---------------------------------------------------------------------------
+
+
+class TestViewModelOverwriteTransitions:
+    """SHOWING_RESULT で MOVE_CONFLICT がある場合の上書き経路 (Issue #ex-overwrite)。"""
+
+    def test_overwrite_candidates_empty_when_idle(self, tmp_path: Path) -> None:
+        """IDLE 状態では overwrite_candidates は空 tuple。"""
+        vm = ExExtractorViewModel(
+            source_dir=tmp_path, facility_root_dir=tmp_path
+        )
+        assert vm.overwrite_candidates == ()
+        assert vm.can_open_overwrite is False
+
+    def test_overwrite_candidates_filters_move_conflict_only(
+        self, tmp_path: Path
+    ) -> None:
+        """SHOWING_RESULT で MOVE_CONFLICT の item だけが抽出される。"""
+        vm = ExExtractorViewModel(
+            source_dir=tmp_path, facility_root_dir=tmp_path
+        )
+        vm.transition_to_busy()
+        conflict = _move_conflict_item("a.ex_")
+        other_failed = _failed_item("b.ex_")  # NO_PDF_PRODUCED (対象外)
+        success = _confirmed_item("c.ex_", "サービスA", tmp_path / "c.pdf")
+        vm.transition_to_showing_result(
+            ExtractionResult(items=(conflict, other_failed, success))
+        )
+
+        assert vm.overwrite_candidates == (conflict,)
+        assert vm.can_open_overwrite is True
+
+    def test_can_open_overwrite_false_without_move_conflict(
+        self, tmp_path: Path
+    ) -> None:
+        """MOVE_CONFLICT が 0 件なら can_open_overwrite は False。"""
+        vm = ExExtractorViewModel(
+            source_dir=tmp_path, facility_root_dir=tmp_path
+        )
+        vm.transition_to_busy()
+        vm.transition_to_showing_result(
+            ExtractionResult(
+                items=(_confirmed_item("a.ex_", "サービスA", tmp_path / "a.pdf"),)
+            )
+        )
+        assert vm.can_open_overwrite is False
+
+    def test_transition_to_overwriting_from_showing_result(
+        self, tmp_path: Path
+    ) -> None:
+        """SHOWING_RESULT → OVERWRITING (is_busy が True になる)。"""
+        vm = ExExtractorViewModel(
+            source_dir=tmp_path, facility_root_dir=tmp_path
+        )
+        vm.transition_to_busy()
+        vm.transition_to_showing_result(
+            ExtractionResult(items=(_move_conflict_item("a.ex_"),))
+        )
+        vm.transition_to_overwriting()
+        assert vm.state is UiState.OVERWRITING
+        assert vm.is_busy is True
+
+    def test_transition_to_overwriting_rejected_outside_showing_result(
+        self, tmp_path: Path
+    ) -> None:
+        """SHOWING_RESULT 以外からの遷移は ``RuntimeError``。"""
+        vm = ExExtractorViewModel(
+            source_dir=tmp_path, facility_root_dir=tmp_path
+        )
+        with pytest.raises(RuntimeError):
+            vm.transition_to_overwriting()  # IDLE から遷移不可
+
+    def test_merge_overwrite_results_replaces_conflict_item(
+        self, tmp_path: Path
+    ) -> None:
+        """MOVE_CONFLICT item が retry 結果 (SUCCESS) で置換される。"""
+        vm = ExExtractorViewModel(
+            source_dir=tmp_path, facility_root_dir=tmp_path
+        )
+        vm.transition_to_busy()
+        conflict = _move_conflict_item("a.ex_")
+        other = _confirmed_item("b.ex_", "サービスB", tmp_path / "b.pdf")
+        vm.transition_to_showing_result(
+            ExtractionResult(items=(conflict, other))
+        )
+        vm.transition_to_overwriting()
+
+        # retry の結果 SUCCESS になった
+        retry_success = _confirmed_item(
+            "a.ex_", "サービスA", tmp_path / "a.pdf"
+        )
+        vm.merge_overwrite_results((retry_success,))
+
+        assert vm.state is UiState.SHOWING_RESULT
+        assert vm.result is not None
+        assert len(vm.result.items) == 2
+        # source_path 一致で置換: a.ex_ が SUCCESS に
+        a_item = next(i for i in vm.result.items if i.source_path.name == "a.ex_")
+        assert a_item.status is ExtractionStatus.SUCCESS
+        # b.ex_ は変更なし
+        b_item = next(i for i in vm.result.items if i.source_path.name == "b.ex_")
+        assert b_item is other
 
 
 # ---------------------------------------------------------------------------
