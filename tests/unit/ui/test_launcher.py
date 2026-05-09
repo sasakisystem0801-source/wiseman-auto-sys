@@ -219,3 +219,171 @@ class TestLauncherUI:
                 launcher.invoke_action(sentinel)  # type: ignore[arg-type]
         finally:
             root.destroy()
+
+
+# ---------------------------------------------------------------------------
+# Phase 2-α (Issue #238): GCP 同期サマリー表示
+# ---------------------------------------------------------------------------
+
+
+@tk_required
+class TestLauncherSyncSummary:
+    """Launcher 起動時の sync_summary フレーム表示 (Issue #238 Phase 2-α)。
+
+    テスト容易化のため Launcher は ``now_fn`` DI を受ける。各テストで
+    fixed_now を渡し相対表示 (N分前 等) を deterministic にする。
+    """
+
+    def _make_config_path(self, tmp_path: Path) -> Path:
+        """sync_cache_dir_for の前提に合わせて 2 階層下の config パスを作る。"""
+        cfg = tmp_path / "wiseman-hub" / "config" / "default.toml"
+        cfg.parent.mkdir(parents=True, exist_ok=True)
+        cfg.write_text("", encoding="utf-8")
+        return cfg
+
+    def test_all_three_rows_show_unsynced_when_no_cache(
+        self, tmp_path: Path
+    ) -> None:
+        """cache 未作成なら 3 行とも「{ラベル}: 未同期」を表示。"""
+        import tkinter as tk
+
+        cfg = self._make_config_path(tmp_path)
+        root = tk.Tk()
+        try:
+            launcher = Launcher(
+                config=AppConfig(),
+                config_path=cfg,
+                root=root,
+            )
+            assert launcher._sync_vars["mapping_routing"].get() == (
+                "居宅対照表: 未同期"
+            )
+            assert launcher._sync_vars["report_staff"].get() == (
+                "担当者マッピング: 未同期"
+            )
+            assert launcher._sync_vars["sheets"].get() == (
+                "シート一覧: 未同期"
+            )
+        finally:
+            root.destroy()
+
+    def test_mapping_routing_label_reflects_cache(self, tmp_path: Path) -> None:
+        """``mapping_routing`` timestamp 書込後、起動 Launcher が分前表示になる。"""
+        import datetime as _dt
+        import tkinter as tk
+
+        from wiseman_hub.cloud.sync_label import (
+            sync_cache_dir_for,
+            write_sync_timestamp,
+        )
+
+        cfg = self._make_config_path(tmp_path)
+        cache_dir = sync_cache_dir_for(cfg)
+        ts = _dt.datetime(2026, 5, 9, 14, 25, tzinfo=_dt.UTC)
+        write_sync_timestamp(cache_dir, "mapping_routing", ts=ts)
+
+        fixed_now = _dt.datetime(2026, 5, 9, 14, 30, tzinfo=_dt.UTC)
+        root = tk.Tk()
+        try:
+            launcher = Launcher(
+                config=AppConfig(),
+                config_path=cfg,
+                root=root,
+                now_fn=lambda: fixed_now,
+            )
+            text = launcher._sync_vars["mapping_routing"].get()
+            assert text.startswith("居宅対照表: ")
+            # 5 分前 (300 秒) → "5 分前" 表示
+            assert text.endswith("(5 分前)")
+        finally:
+            root.destroy()
+
+    def test_reload_config_refreshes_sync_summary(self, tmp_path: Path) -> None:
+        """``reload_config`` で sync_summary が再描画される (新規 cache 反映)。"""
+        import datetime as _dt
+        import tkinter as tk
+
+        from wiseman_hub.cloud.sync_label import (
+            sync_cache_dir_for,
+            write_sync_timestamp,
+        )
+
+        cfg = self._make_config_path(tmp_path)
+
+        fixed_now = _dt.datetime(2026, 5, 9, 14, 30, tzinfo=_dt.UTC)
+        root = tk.Tk()
+        try:
+            launcher = Launcher(
+                config=AppConfig(),
+                config_path=cfg,
+                root=root,
+                now_fn=lambda: fixed_now,
+            )
+            # 起動直後は cache 不在 → 未同期
+            assert launcher._sync_vars["report_staff"].get() == (
+                "担当者マッピング: 未同期"
+            )
+            # cache 作成後 reload_config → 再描画
+            cache_dir = sync_cache_dir_for(cfg)
+            ts = _dt.datetime(2026, 5, 9, 14, 28, tzinfo=_dt.UTC)
+            write_sync_timestamp(cache_dir, "report_staff", ts=ts)
+            launcher.reload_config(launcher._config)
+            text = launcher._sync_vars["report_staff"].get()
+            assert text.startswith("担当者マッピング: ")
+            assert text.endswith("(2 分前)")
+        finally:
+            root.destroy()
+
+    def test_sheet_list_cache_label_reflects_fetched_at(
+        self, tmp_path: Path
+    ) -> None:
+        """``sheet_list_cache`` の fetched_at が「シート一覧」行に反映される。
+
+        ``save()`` は現在時刻で書き込むため fixed_now との差が unstable になる。
+        本 test は cache JSON を直接 fixed_now-3 分の timestamp で書き、
+        分前表示が deterministic になるよう調整する。
+        """
+        import datetime as _dt
+        import json
+        import tkinter as tk
+
+        from wiseman_hub.cloud.sheet_list_cache import (
+            cache_dir_for as sheet_cache_dir_for,
+        )
+        from wiseman_hub.config import AppConfig as _AppConfig
+        from wiseman_hub.config import ChecklistConfig
+
+        cfg = self._make_config_path(tmp_path)
+        sheet_dir = sheet_cache_dir_for(cfg)
+        sheet_dir.mkdir(parents=True, exist_ok=True)
+
+        fixed_now = _dt.datetime(2026, 5, 9, 14, 30, tzinfo=_dt.UTC)
+        ts_fetched = _dt.datetime(2026, 5, 9, 14, 27, tzinfo=_dt.UTC)
+        (sheet_dir / "spread_xyz.json").write_text(
+            json.dumps(
+                {
+                    "spreadsheet_id": "spread_xyz",
+                    "sheet_names": ["25年12月", "26年1月"],
+                    "fetched_at": ts_fetched.isoformat(),
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        root = tk.Tk()
+        try:
+            launcher = Launcher(
+                config=_AppConfig(
+                    checklist=ChecklistConfig(spreadsheet_id="spread_xyz"),
+                ),
+                config_path=cfg,
+                root=root,
+                now_fn=lambda: fixed_now,
+            )
+            text = launcher._sync_vars["sheets"].get()
+            assert text.startswith("シート一覧: ")
+            # 3 分前 (180 秒) → "3 分前" 表示で deterministic
+            assert text.endswith("(3 分前)")
+        finally:
+            root.destroy()

@@ -271,6 +271,8 @@ class ChecklistSettingsDialog:
                 parent=self._top,
             )
             return
+        # Phase 2-α (Issue #238): 居宅対照表の最終同期日時を Launcher 集約表示用に記録。
+        _record_sync_timestamp(self._config_path, "mapping_routing")
         messagebox.showinfo(
             "GCP 送信完了",
             f"{len(routing)} 件を送信し、読み戻し検証 OK\nGCS URI: {uri}",
@@ -345,6 +347,8 @@ class ChecklistSettingsDialog:
             return
         self._routing_text.delete("1.0", "end")
         self._routing_text.insert("1.0", _routing_to_toml(routing))
+        # Phase 2-α (Issue #238): 居宅対照表の最終同期日時を Launcher 集約表示用に記録。
+        _record_sync_timestamp(self._config_path, "mapping_routing")
         messagebox.showinfo(
             "GCP 取得完了",
             f"{len(routing)} 件を取得しました\n保存ボタンで永続化してください",
@@ -416,6 +420,8 @@ class ChecklistSettingsDialog:
             return
         self._staff_text.delete("1.0", "end")
         self._staff_text.insert("1.0", _staff_to_toml(staff))
+        # Phase 2-α (Issue #238): 担当者マッピングの最終同期日時を Launcher 集約表示用に記録。
+        _record_sync_timestamp(self._config_path, "report_staff")
         messagebox.showinfo(
             "GCP 取得完了",
             f"{len(staff)} 件を取得しました\n保存ボタンで永続化してください",
@@ -481,6 +487,21 @@ class ChecklistSettingsDialog:
         self._saved = True
         messagebox.showinfo("保存完了", "設定を保存しました", parent=self._top)
         self._top.destroy()
+
+
+def _record_sync_timestamp(config_path: Path, name: str) -> None:
+    """Phase 2-α (Issue #238): GCP 同期完了時に最終同期日時を記録する。
+
+    Launcher 起動時の sync_summary フレーム表示用 (``cloud.sync_label``)。
+    書込失敗は warn-only で UI 進行を止めない（``write_sync_timestamp`` 内部で吸収）。
+    """
+    from wiseman_hub.cloud.sync_label import (
+        sync_cache_dir_for,
+        write_sync_timestamp,
+    )
+
+    cache_dir = sync_cache_dir_for(config_path)
+    write_sync_timestamp(cache_dir, name)
 
 
 def _routing_to_toml(routing: dict[str, str]) -> str:
