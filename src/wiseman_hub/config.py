@@ -290,6 +290,10 @@ class ChecklistConfig:
     spreadsheet_id: Google Drive 上の xlsx file id
     karte_root: B 用カルテルート（``\\\\Tera-station\\share\\02.カルテ``）
     monitoring_subfolder: 利用者フォルダ配下のモニタリング書類サブフォルダ名
+        (canonical name のみ、Issue #monitoring-substring 2026-05-09)。
+        substring match で `08.<canonical>` / `10.<canonical>` / prefix なし /
+        `<canonical>(過去分)` 等の揺らぎを吸収する。default は
+        ``"運動器機能向上計画書"``。
     fax_root: 出力先 FAX 事業所ルート（``\\\\Tera-station\\share\\03.FAX(事業所)``）
     b_output_subfolder: FAX 事業所フォルダ配下の B 出力サブフォルダ名（運動機能向上計画書）
     c_output_subfolder: FAX 事業所フォルダ配下の C 出力サブフォルダ名（経過報告書）
@@ -303,7 +307,7 @@ class ChecklistConfig:
 
     spreadsheet_id: str = "18RPsg3Ya0r7djQVzED5KAa5KyhbB9YRm"
     karte_root: str = "\\\\Tera-station\\share\\02.カルテ"
-    monitoring_subfolder: str = "08.運動器機能向上計画書"
+    monitoring_subfolder: str = "運動器機能向上計画書"
     fax_root: str = "\\\\Tera-station\\share\\03.FAX(事業所)"
     b_output_subfolder: str = "運動機能向上計画書"
     c_output_subfolder: str = "経過報告書"

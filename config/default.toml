@@ -88,7 +88,7 @@ release_bucket = ""
 # [checklist]
 # spreadsheet_id = ""                                                # Google Drive 上の xlsx file id
 # karte_root = "\\\\Tera-station\\share\\02.カルテ"                  # B 用カルテルート
-# monitoring_subfolder = "08.運動器機能向上計画書"
+# monitoring_subfolder = "運動器機能向上計画書"  # canonical name のみ。substring match で 08./10./prefix なし/(過去分) 等の揺らぎを吸収 (Issue #monitoring-substring)
 # fax_root = "\\\\Tera-station\\share\\03.FAX(事業所)"               # 出力先ルート
 # b_output_subfolder = "運動機能向上計画書"
 # c_output_subfolder = "経過報告書"
