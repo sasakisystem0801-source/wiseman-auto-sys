@@ -106,6 +106,7 @@ class Launcher:
         on_open_checklist_c: Callable[[], None] | None = None,
         messagebox_fn: MessageBoxLike | None = None,
         now_fn: Callable[[], _dt.datetime] | None = None,
+        defer_initial_refresh: bool = True,
     ) -> None:
         assert_main_thread("Launcher")
 
@@ -116,6 +117,10 @@ class Launcher:
         self._now_fn: Callable[[], _dt.datetime] = now_fn or (
             lambda: _dt.datetime.now(tz=_dt.UTC)
         )
+        # Phase 2-β (Issue #238 I-2): 起動時 cache I/O を Tk window 描画後に遅延
+        # するためのフラグ。production default = True (after_idle で初回 refresh
+        # を予約)、テストでは False を渡して deterministic な同期実行に切替。
+        self._defer_initial_refresh = defer_initial_refresh
         # _build_sync_summary で初期化される (StringVar は Tk root 取得後でないと作れない)
         self._sync_vars: dict[str, tk.StringVar] = {}
 
@@ -219,6 +224,10 @@ class Launcher:
         ``StringVar`` で更新可能。初期値は「不明」 (Phase 1 ChecklistCDialog と
         統一、cache 不在 / parse 失敗 / tz naive すべて ``format_synced_at_label``
         の None 経路で「不明」に集約)。
+
+        Phase 2-β (I-2): 起動時 cache I/O は ``self._defer_initial_refresh`` が
+        True (production default) なら ``after_idle`` で window 描画完了後に
+        遅延実行する。テストでは ``False`` で同期実行に切替。
         """
         frame = ttk.LabelFrame(
             root, text="GCP 同期サマリー", padding=8
@@ -228,7 +237,11 @@ class Launcher:
             var = tk.StringVar(value=f"{label}: 不明")
             ttk.Label(frame, textvariable=var, anchor="w").pack(fill="x")
             self._sync_vars[key] = var
-        self._refresh_sync_summary()
+        if self._defer_initial_refresh:
+            # Tk idle queue にキューイング (mainloop が初回 idle に入った時点で実行)
+            self._root.after_idle(self._refresh_sync_summary)
+        else:
+            self._refresh_sync_summary()
 
     def _refresh_sync_summary(self) -> None:
         """sync_summary の各行を最新の cache 状態で再描画する (Phase 2-α / Issue #238)。
