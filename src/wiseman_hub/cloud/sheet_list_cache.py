@@ -41,13 +41,15 @@ class CachedSheetList:
     """sheet_list_cache.load() の戻り値 (Issue #238 Phase 1)。
 
     Attributes:
-        names: シート名 (タブ名) のリスト
-        fetched_at: cache 書込時刻 (ISO8601 から parse 済の datetime)。
-            旧 schema (fetched_at 欠落) や parse 失敗時は ``None``。
-            UI 表示時の「不明」に対応。
+        names: シート名 (タブ名) の immutable tuple。
+            review 反映 (type-design): ``frozen=True`` の名目を実体に揃え、
+            caller の不用意な変更で cache が壊れないよう ``tuple[str, ...]`` に。
+        fetched_at: cache 書込時刻 (ISO8601 から parse 済の tz-aware datetime)。
+            旧 schema (fetched_at 欠落) / parse 失敗 / naive datetime (tz 欠落)
+            は ``None``。UI 表示時の「不明」に対応。
     """
 
-    names: list[str]
+    names: tuple[str, ...]
     fetched_at: _dt.datetime | None
 
 
@@ -69,16 +71,28 @@ def _path_for(cache_dir: Path, spreadsheet_id: str) -> Path:
 
 
 def _parse_fetched_at(raw: object) -> _dt.datetime | None:
-    """payload の fetched_at を datetime にパース。失敗時は None。
+    """payload の fetched_at を tz-aware datetime にパース。失敗時は None。
 
-    旧 schema (fetched_at 欠落) も None として扱い後方互換を維持。
+    review 反映 (code-reviewer Important / silent-failure MEDIUM-1):
+    - parse 失敗時は warning ログを出して silent failure を回避
+    - naive datetime (tz 欠落) は ``format_synced_at_label`` 内の ``now - fetched_at``
+      で TypeError を起こすため、fromisoformat 後に tzinfo を検査して None フォールバック。
+
+    旧 schema (fetched_at 欠落) と区別するため raw が文字列でない場合は warning なし。
     """
     if not isinstance(raw, str) or not raw:
         return None
     try:
-        return _dt.datetime.fromisoformat(raw)
-    except ValueError:
+        parsed = _dt.datetime.fromisoformat(raw)
+    except ValueError as exc:
+        logger.warning("sheet list cache fetched_at parse failed: %r: %s", raw, exc)
         return None
+    if parsed.tzinfo is None:
+        logger.warning(
+            "sheet list cache fetched_at is naive (tz欠落): %r — discarding", raw
+        )
+        return None
+    return parsed
 
 
 def load(cache_dir: Path, spreadsheet_id: str) -> CachedSheetList | None:
@@ -104,7 +118,7 @@ def load(cache_dir: Path, spreadsheet_id: str) -> CachedSheetList | None:
         logger.warning("sheet list cache schema invalid: %s", path)
         return None
     fetched_at = _parse_fetched_at(data.get("fetched_at"))
-    return CachedSheetList(names=sheets, fetched_at=fetched_at)
+    return CachedSheetList(names=tuple(sheets), fetched_at=fetched_at)
 
 
 def save(cache_dir: Path, spreadsheet_id: str, sheet_names: list[str]) -> None:

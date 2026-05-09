@@ -307,27 +307,49 @@ class ChecklistCDialog:
             )
             self._refresh_sync_info()
 
+    def _resolve_cached_fetched_at(self) -> _dt.datetime | None:
+        """sync info label 用に最新 cache.fetched_at を解決。cache miss / 設定欠落時 None。
+
+        review 反映 (code-reviewer): _refresh_sync_info / _refresh_sync_info_with_error
+        の両方で同一 disk I/O を行うため、抽出して 1 箇所に集約 (DRY)。
+        """
+        if self._config_path is None:
+            return None
+        spreadsheet_id = self._config.checklist.spreadsheet_id
+        if not spreadsheet_id:
+            return None
+        cache_dir = _sheet_cache_dir_for(self._config_path)
+        cached = _load_sheet_cache(cache_dir, spreadsheet_id)
+        return cached.fetched_at if cached is not None else None
+
     def _refresh_sync_info(self) -> None:
         """sync info label を最新の cache.fetched_at で再描画 (Issue #238 Phase 1)。
 
         config_path / spreadsheet_id 未設定や cache miss 時は「不明」表示。
         UI thread から呼ぶこと (Tk variable 更新は main thread 限定)。
         """
-        if self._config_path is None:
-            self._sync_info_var.set("シート一覧 最終更新: 不明")
-            return
-        spreadsheet_id = self._config.checklist.spreadsheet_id
-        if not spreadsheet_id:
-            self._sync_info_var.set("シート一覧 最終更新: 不明")
-            return
-        cache_dir = _sheet_cache_dir_for(self._config_path)
-        cached = _load_sheet_cache(cache_dir, spreadsheet_id)
-        fetched_at = cached.fetched_at if cached is not None else None
+        fetched_at = self._resolve_cached_fetched_at()
         label = _format_synced_at_label(fetched_at, _dt.datetime.now(tz=_dt.UTC))
         self._sync_info_var.set(f"シート一覧 最終更新: {label}")
 
+    def _refresh_sync_info_with_error(self, err_type: str) -> None:
+        """背景更新失敗時に sync_info に「※更新失敗」を併記 (review HIGH-1)。
+
+        既存 cache の fetched_at は捨てずに表示、末尾に失敗マーカーを足すことで
+        「いつの cache か」「最新化に失敗している」の両方をユーザーに伝える。
+        """
+        fetched_at = self._resolve_cached_fetched_at()
+        label = _format_synced_at_label(fetched_at, _dt.datetime.now(tz=_dt.UTC))
+        self._sync_info_var.set(
+            f"シート一覧 最終更新: {label} ※更新失敗 ({err_type})"
+        )
+
     def _on_load_error(self, err_type: str) -> None:
         self._status_var.set(f"取得失敗: {err_type}")
+        # Issue #238 Phase 1 review HIGH-1: background 更新失敗時に sync_info が
+        # 古いまま据え置かれると、ユーザーは「最新化されている」と誤認する。
+        # 既存の cache fetched_at は維持しつつ、失敗マーカーを併記して可視化。
+        self._refresh_sync_info_with_error(err_type)
         messagebox.showerror("読込エラー", f"スプレッドシート読込に失敗: {err_type}")
 
     def _on_load_rows(self) -> None:
