@@ -23,25 +23,27 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-def atomic_replace_and_fsync_dir(
-    tmp_path: Path, final_path: Path, dest_dir: Path
-) -> None:
+def atomic_replace_and_fsync_dir(tmp_path: Path, final_path: Path) -> None:
     """tmp_path を final_path に atomic replace + 親 dir fsync。
 
     呼び出し側が事前に tmp_path への write + ``os.fsync(file_fd)`` を完了している前提
     (file 内容の永続化は caller 責務、本関数は **rename + directory entry 永続化** に専念)。
 
+    Issue #211 (2026-05-09): 旧 ``dest_dir`` 引数は ``final_path.parent`` で導出可能で
+    あり、caller が異なる dir を渡せる誤用余地 + 不変条件が型で表現されない問題が
+    あった。``final_path.parent`` を内部導出に統一し、不変条件「dest dir = final の親」
+    を関数定義レベルで保証する。
+
     Args:
         tmp_path: 既に書き込み + file fsync 済の tmp file
-        final_path: 配置先 (atomic replace 対象)
-        dest_dir: final_path の親 directory (dir fsync 対象)
+        final_path: 配置先 (atomic replace 対象、親 dir が fsync 対象)
 
     Raises:
         OSError: ``os.replace`` 失敗 (filesystem 異常 / cross-device / 権限)。
             **dir fsync の OSError は raise せず log 記録のみ** (rename 自体は成功している)
     """
     os.replace(tmp_path, final_path)
-    _fsync_dir_best_effort(dest_dir)
+    _fsync_dir_best_effort(final_path.parent)
 
 
 def _fsync_dir_best_effort(dest_dir: Path) -> None:
