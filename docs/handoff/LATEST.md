@@ -1,211 +1,153 @@
-# Handoff: Session 57 完了 - TeamViewer 不通中の defer 消化 2 PR + Phase 6 引き続き ready
+# Handoff: Session 58 完了 - GCP 同期キャッシュの最終同期日時 UI 表示 (Issue #238 Phase 1)
 
-**更新日**: 2026-05-09（Session 57 / Mac 開発機、Session 56 続編）
-**main HEAD**: `a1370bd` refactor(launcher): atomic_replace_and_fsync_dir を 2 引数化 (#211) (#236)
-**作業ブランチ**: なし（PR #235 + #236 マージ完了）
-**残作業**: ADR-016 **Phase 6 (結合テスト + canary 切替) 引き続き着手可能** + Phase 7 (業務全件配置) + 派生 Issue (#170 / #164 / #162 / #161 / #158 等) / 別ドメイン
+**更新日**: 2026-05-09（Session 58 / Mac 開発機、Session 57 続編）
+**main HEAD**: `1a4035f` feat(ui): シート一覧の最終同期日時を C ダイアログに表示 (Issue #238 Phase 1) (#239)
+**作業ブランチ**: なし（PR #239 マージ完了）
+**残作業**: ADR-016 **Phase 6 (結合テスト + canary 切替) 引き続き ready** + Phase 7 (業務全件配置) + **Issue #238 Phase 2/3** + 派生 Issue (#170 / #164 / #162 等)
 
 ---
 
 ## 🚪 まずここを読む（次セッション最初の入口）
 
-**TeamViewer 不通で本田様 PC に直接アクセスできない状況下で、defer 項目を 2 件消化したセッション**。Phase 6 / 7 着手前の保険 + 片付けに専念。
+**ユーザー提案で「GCP 同期キャッシュの最終同期日時を UI に表示」を Issue #238 として起票し、Phase 1 (sheet_list_cache の C ダイアログ表示) を完了したセッション**。 Phase 6 / 7 着手前にユーザー UX 改善を 1 サイクル消化。
 
 | PR | 解消内容 | Issue 由来 | 規模 |
 |----|---------|-----------|------|
-| **#235** | ChecklistConfig に deprecation warning 追加 (旧 default 値 `08.` / `10.` 検出 → logger.warning) | Session 56 PR #233 defer 項目 (rating 7) | 2 files / +110/-1 |
-| **#236** | `atomic_replace_and_fsync_dir` を 3 引数 → 2 引数化 (`final_path.parent` 内部導出) | #211 close (PR-7 #208 type-design-analyzer rating 7) | 3 files / +11/-9 |
+| **#239** | C ダイアログに「シート一覧 最終更新: M/D HH:MM (N分前)」表示 + background 更新失敗時に「※更新失敗 (err_type)」併記 + tz 欠落 datetime parse 防御 | **#238 Phase 1** (本セッション起票、ユーザー提案) | 3 files / +357/-12 |
 
-**Phase 6 着手要件は引き続き全部満たされている** (Session 55 LATEST.md `archive/session-55-launcher-type-safety-trio.md` §🚪 表参照、本セッションで変化なし)。
+**4 並列 review 7 件吸収** (silent-failure HIGH-1 / code-reviewer Important 2 / type-design Important 1 / pr-test Critical 部分 / pr-test Tauto / silent-failure MEDIUM-1 / code-reviewer DRY)。
+
+**Phase 6 着手要件は引き続き全部満たされている** (Session 57 LATEST `archive/session-57-teamviewer-defer-and-phase6-ready.md` §🚪 表参照、本セッションで状態変化なし)。
 
 **`/catchup` 後の入口**:
 
 1. ✅ **(Session 53-55 で済)** launcher type-safety 三点セット (#209/#212/#210/#227)
 2. ✅ **(Session 56 で済)** 業務問題 2 件解決 (#232 ex-overwrite + #233 monitoring-substring)
-3. ✅ **(本セッションで済)** Phase 6 前 defer 消化 (#235 deprecation warning + #236 atomic_replace 2引数化)
-4. **(次)** **TeamViewer 復旧 → 本田様 PC TOML 設定値更新** (`monitoring_subfolder` を `運動器機能向上計画書` に) — 旧値でも launcher 起動時に WARNING で気付ける保険ありなので焦らなくてよい
-5. **(次の次)** **Phase 6 結合テスト + canary 切替**（実 dev tag `v0.99.0` push → release.yml 発火 → GCS upload → bundle 検証 → canary tag）→ 番号認可必要
-6. **(最後)** **Phase 7 業務全件配置**（launcher.exe 本田様 PC 手動配布 + Phase 4 全件配置を新システムで実行、TeamViewer 経由）
+3. ✅ **(Session 57 で済)** Phase 6 前 defer 消化 (#235 deprecation warning + #236 atomic_replace 2引数化)
+4. ✅ **(本セッションで済)** **GCP 同期日時 UI 表示 Phase 1** (#238 Phase 1 = #239、Phase 2/3 残)
+5. **(次)** **Issue #238 Phase 2** (Launcher 初期ビュー集約、~300 行、Evaluator 分離 + codex セカンドオピニオン推奨) **or** **Phase 6 結合テスト直行**
+6. **(次の次)** **TeamViewer 復旧 → 本田様 PC TOML 設定値更新** (`monitoring_subfolder` を `運動器機能向上計画書` に。PR #235 の WARNING ログ保険ありなので焦らない)
+7. **(その後)** **Phase 6 結合テスト + canary 切替** (`v0.99.0` tag push → release.yml → GCS upload → bundle 検証 → canary tag) — 番号認可必要
+8. **(最後)** **Phase 7 業務全件配置** (launcher.exe 本田様 PC 手動配布 + Phase 4 全件配置を新システムで実行、TeamViewer 経由)
 
-業務文脈は `specs/c-business-deployment/spec.md`（変更なし）。設計指針は ADR-016。
-
-| ファイル (本セッション変更、要点) | 役割 |
-|---------|------|
-| [src/wiseman_hub/config.py](../../src/wiseman_hub/config.py) | `_LEGACY_MONITORING_SUBFOLDERS` frozenset + `ChecklistConfig.__post_init__` で legacy 値検出 → warning |
-| [tests/unit/test_config.py](../../tests/unit/test_config.py) | `TestChecklistConfigDeprecationWarning` 5 test (caplog fixture) |
-| [src/wiseman_hub_launcher/_runtime/_atomic_io.py](../../src/wiseman_hub_launcher/_runtime/_atomic_io.py) | `atomic_replace_and_fsync_dir` シグネチャ 2 引数化 + Issue #211 経緯 docstring |
-| [src/wiseman_hub_launcher/current.py](../../src/wiseman_hub_launcher/current.py) | caller 追従 (`parent` 引数削除) |
-| [src/wiseman_hub_launcher/_supply_chain/download.py](../../src/wiseman_hub_launcher/_supply_chain/download.py) | caller 追従 (`dest_dir` 引数削除) |
-| 本 LATEST.md | Session 57 差分メモ + 次セッション入口 |
+業務文脈は `specs/c-business-deployment/spec.md`。設計指針は ADR-016。
 
 ---
 
-## 🎯 Session 57 の成果サマリー
+## 📌 次セッション直近のアクション (優先順)
 
-### マージ済 (本セッション、2 PR)
+### 1. Issue #238 Phase 2 着手 or Phase 6 直行 (要判断)
 
-| PR | Issue | 内容 | 規模 | 結果 |
-|----|-------|------|------|------|
-| **#235** | (Session 56 PR #233 defer) | feat(config): legacy `monitoring_subfolder` 値検出 + deprecation warning | 2 files / +110/-1 | ✅ squash merge (`fc0b522`) |
-| **#236** | #211 close | refactor(launcher): `atomic_replace_and_fsync_dir` を 2 引数化 | 3 files / +11/-9 | ✅ squash merge (`a1370bd`) |
+**Phase 2: Launcher 初期ビュー集約** (Tk Launcher 3 ボタン画面に同期サマリー集約)
+- 規模: 中 (~300 行、5+ ファイル想定)
+- 対象: mapping_sync / xlsx_path_cache_mirror / launcher current.json の load() を dataclass 化、Tk Launcher に集約 Label
+- 要 Evaluator 分離 (rules/quality-gate.md)、codex セカンドオピニオン推奨
+- ROI: 同期サマリーが起動時に一目で見える、シート一覧以外の同期状況も可視化
 
-**特筆**: Session 56 と異なり、本セッションは「業務問題発生 → 即対応」ではなく **TeamViewer 不通中の能動的な品質投資**（保険機能 + 片付け refactor）。executor として Phase 6 着手前に取れる「待ち時間の有効活用」パターン。
+**vs Phase 6 直行**:
+- Phase 6 の方が業務インパクト大 (ADR-016 main path)
+- Phase 2 は UX 拡張で急がない
+- TeamViewer 復旧次第で Phase 6 → Phase 7 を最短経路で消化する選択も合理的
 
-### 本セッションで踏んだ設計判断 (4 並列 review skip = A 案)
+### 2. Phase 6 着手 (TeamViewer 復旧 or workflow_dispatch tag push、番号認可必須)
 
-両 PR とも **「規模小 + 動作不変 or boundary 完全網羅」** で 4 並列 review を skip:
+ADR-016 §3 のリリースパイプラインを実機検証する:
+- `v0.99.0` tag push → release.yml 自動発火
+- artifact + provenance を GCS にアップロード
+- launcher が manifest.json poll → download → atomic 配置
+- canary mode で 1 ユーザー切替
 
-| PR | A 案踏襲根拠 |
-|----|-------------|
-| #235 | dataclass `__post_init__` で frozenset member check + logger.warning だけ。TDD 5 test で boundary 完全網羅 (legacy / canonical / substring 吸収可 / 既存 default) + 既存テスト破壊ゼロ |
-| #236 | 純粋 refactor (シグネチャ 1 引数削減のみ) + 動作不変 + 既存テスト 1528 全 PASS で回帰ゼロ + Issue #211 で type-design-analyzer 既に rating 7 review 済 (再 review の付加価値低) |
+事前検証 (Session 57 で実施済、read-only):
+- ✅ release.yml 構文 OK (218 行、7 actions すべて pinned)
+- ✅ GitHub Variables 5 件正常 (Session 49 設定維持)
+- ✅ GCS bucket clean state (Total runs 0)
 
-セッション内合計: **2 PR で 5 ファイル / +121/-10 / +5 test 追加**。CLAUDE.md「3 ファイル+ → /simplify + /safe-refactor」threshold は #236 のみ touch だが、refactor 単純度から逸脱と判断。CLAUDE.md「PRレビュー → /review-pr」も同じ理由で skip。これらは A 案として明示認可済。
+### 3. Phase 7 業務全件配置 (TeamViewer 復旧後)
+
+- launcher.exe 本田様 PC 手動配布
+- Phase 4 全件配置を新システムで実行
+- runbook: `docs/handoff/1c-exe-redistribution-runbook.md`
+
+---
+
+## 🔧 本セッションの技術詳細
+
+### PR #239 — feat(ui): シート一覧の最終同期日時を C ダイアログに表示 (Issue #238 Phase 1)
+
+**ユーザー提案の動機 (Session 58 冒頭)**:
+> 更新日時がデスクトップアプリの初期ビューなど各所の最適なビューのところに表示されてるとユーザビリティ高く、良いですね
+
+**実装内容**:
+1. `sheet_list_cache.load()` の戻り値を `CachedSheetList(names: tuple[str, ...], fetched_at: datetime | None)` dataclass 化
+2. `format_synced_at_label(fetched_at, now) -> str` helper 追加 (M/D HH:MM (N分前) 形式、境界値 60s/3600s/86400s 厳格化)
+3. `ChecklistCDialog` に `sync_info_var` + 専用 Label 追加 (head 直下フレーム)
+4. `_resolve_cached_fetched_at` で cache load を集約 (DRY)、`_refresh_sync_info` / `_refresh_sync_info_with_error` の 2 メソッドが利用
+5. `_on_load_error` で「※更新失敗 (err_type)」を併記 (silent failure 可視化)
+6. naive datetime (tz 欠落) 検出 → None フォールバック (TypeError 防御)
+
+**Acceptance Criteria 全達成**:
+- [x] `sheet_list_cache.load()` が `CachedSheetList(names, fetched_at)` を返す
+- [x] cache 既存ファイルから `fetched_at` 欠落時は `None` で後方互換
+- [x] `checklist_c_dialog` に「シート一覧 最終更新: M/D HH:MM (N分前)」label 表示
+- [x] background 更新成功で label 再描画 (`_on_sheets_loaded` → `_refresh_sync_info`)
+- [x] 既存テスト全 PASS + 新規テスト 7 件で fetched_at 表示パスをカバー (実際 +16 件)
+
+### 4 並列 review 結果と本 PR 内吸収
+
+| ID | 出典 | rating | 吸収 |
+|----|------|--------|------|
+| HIGH-1 | silent-failure | 7 | ✅ `_on_load_error` で sync_info に「※更新失敗」併記 |
+| Critical-1 (部分) | pr-test | 8 | ✅ 境界値「ちょうど」4 件 (sec=0/60/3600/86400) |
+| I-Naive | code-reviewer | 7 | ✅ naive datetime → None |
+| I-Type | type-design | 5(構造) | ✅ `names: list[str]` → `tuple[str, ...]` |
+| I-DRY | code-reviewer | 7 | ✅ `_resolve_cached_fetched_at` 抽出 |
+| MEDIUM-1 | silent-failure | 5 | ✅ `_parse_fetched_at` warning ログ |
+| Tauto | pr-test | 4 | ✅ tautological test → 固定文字列 endswith |
+
+### 吸収せず Phase 2/3 で対応 (rating < 7 or scope 外)
+
+| ID | 出典 | rating | 理由 |
+|----|------|--------|------|
+| MEDIUM-2 | silent-failure | 5 | broad try/except は Phase 3 (失敗状態の網羅可視化) で対応 |
+| I-Names検証 | type-design | 5 | __post_init__ での names validation は load() 既存 schema check で十分、重複 |
+
+---
+
+## 📊 状態スナップショット
+
+| 項目 | 値 |
+|------|-----|
+| main HEAD | `1a4035f` PR #239 squash merge |
+| working tree | clean |
+| Test count | 1528 → **1544** (+16) |
+| Issue 開件数 | 15 → **16** (+1, #238 起票) |
+| 完了 PR | 1 件 (#239) |
+| 残留プロセス | なし ✅ |
+| CI | success (test-unit 3.11/3.12 / test-integration / build-smoke 全 PASS) |
 
 ### Issue Net 変化
 
 ```
-## Issue Net 変化
-- Close 数: 1 件 (#211)
-- 起票数: 0 件
-- Net: -1 件
+- Close 数: 0 件
+- 起票数: 1 件 (#238)
+- Net: +1 件
 ```
 
-**Net = -1**。CLAUDE.md「Net ≤ 0 が進捗 OK 基準」を **8 連続クリア** (Session 50-57)。Issue 棚卸しが順調。
+**Net = +1 (CLAUDE.md「Net ≤ 0 進捗ゼロ扱い」基準では進捗ゼロ判定だが、本件は段階消化型 enhancement で Phase 1 完了に対する起票単独の数字。Issue #238 は Phase 2/3 完了で close 予定)。**
 
-### Test count 変化
-
-1523 (Session 56 末) → **1528** (+5 件 in this session、すべて #235 由来):
-- PR #235: +5 件 (`TestChecklistConfigDeprecationWarning` 5 test)
-- PR #236: ±0 件 (refactor のみ、回帰確認のみ)
-
-### 設計判断の record
-
-| PR | 当初案 | 修正後 | 経路 |
-|----|--------|--------|------|
-| #235 | TOML 値が legacy なら load_config 経由で warning | `ChecklistConfig.__post_init__` で warning (PdfMergeConfig との対称性 + 直接構築でも検出) | impl-plan 段階 |
-| #235 | legacy set に substring variant も含めて検出 | 完全一致 prefix 2 値のみ (= 過剰警告防止、substring 吸収可なバリアントは静か) | impl-plan 段階 (Acceptance Criteria 4) |
-| #236 | (Issue #211 仕様書通り) | 2 引数化 + `final_path.parent` 内部導出 | Issue spec 通り |
+連続 Net ≤ 0 記録は **Session 58 で一旦リセット** (前回 Session 50-57 で 8 連続 Net ≤ 0)。次セッション以降は再積み上げ。
 
 ---
 
-## 📌 次セッション直近のアクション
+## 📁 archive 整理
 
-### 1. (TeamViewer 復旧時) 本田様 PC TOML 設定値更新
-
-PR #235 で **保険を仕込み済** なので焦る必要はないが、`monitoring_subfolder` を `08.運動器機能向上計画書` から **`運動器機能向上計画書`** (canonical name のみ) に手動更新が望ましい:
-
-```powershell
-# 方法 A: UI 経由
-# launcher 起動 → 「設定」 → 「チェックリスト連携 設定」タブ → 値を書き換え → 保存
-#
-# 方法 B: 直接 TOML 編集
-$config_dir = "$HOME\wiseman-hub\config"
-# 該当 .toml の monitoring_subfolder 行を 08. プレフィックス削除
-```
-
-**保険動作確認**: launcher 起動時に旧値が残っていれば、ログに以下が出る:
-```
-WARNING wiseman_hub.config:
-  monitoring_subfolder='08.運動器機能向上計画書' is a legacy value.
-  PR #233 (2026-05-09) introduced substring matching, so set this to the
-  canonical name '運動器機能向上計画書' to enable automatic absorption ...
-```
-
-このログが出ていれば PR #235 の保険が効いている = 業務上は動くがアップデート対応が必要、と気付ける。
-
-### 2. Phase 6 結合テスト + canary 切替 (0.5-1 日、要番号認可) ★ 主目標
-
-Session 55 末と同じ。詳細は `archive/session-55-launcher-type-safety-trio.md` 参照。
-
-```bash
-git checkout main && git pull
-git tag v0.99.0
-git push origin v0.99.0  # ← 番号認可必須 (destructive: GCS bucket 汚染 + tag history 残存)
-gh run watch
-```
-
-**確認項目** (PR #214 codex C1 で merge 前に未検証だった部分):
-- `actions/attest-build-provenance@v2` の subject 名形式
-- GCS bucket `gs://wiseman-hub-release-prod/versions/0.99.0/` の bundle 完成
-- launcher 側で実 download → signature 検証 pass
-
-**AI / 人間の役割分担**:
-- AI: release.yml run 監視 / GCS 内容確認 / launcher Mac E2E
-- ユーザー: tag push 認可、canary 切替判断、Phase 7 への go/no-go 評価
-
-### 3. Phase 7 業務全件配置 (0.5 日、本田様 PC で実機作業、TeamViewer 経由)
-
-前提: Phase 6 pass + canary 成功 + TeamViewer 復旧 + 本 PR #235 の保険 or 手動 TOML 更新済。
-
-### 4. 派生 Issue 対応 (後回し可、いずれも Phase 6 を block しない)
-
-#### Session 56 PR #232 defer (rating 7 + 8、Session 58 候補)
-
-| 元 PR | 内容 | rating |
-|-------|------|--------|
-| #232 | OverwriteSpec dataclass 化 (`extract_one` シグネチャ folding) | 7 |
-| #232 | facility_names 共有 helper (extract_directory との DRY) | 7 |
-| #232 | G2 widget-level smoke test (Tk widget reflection の retry_overwrite ボタン enable/disable) | 8 |
-
-#### 別ドメイン active Issue
-
-#170 / #164 / #162 / #161 / #158 / #152 / #134 / #63 / #39 / #29 / #27 / #17 / #16 / #11 / #6 — いずれも P2 enhancement で Phase 6 を block しない。
+- Session 57 LATEST → `docs/handoff/archive/session-57-teamviewer-defer-and-phase6-ready.md`
 
 ---
 
-## 🗺️ 残 active Issue (P2 全て、ブロッカーなし)
+## ⚠️ 注意事項 (次セッションで気をつけること)
 
-Session 56 末から **#211 close で 1 件減**。残 15 件:
-
-| # | タイトル | 系統 |
-|---|---------|------|
-| #170 | ex_extractor: `_quarantine_pre_existing_target` の戻り値を tagged union 化 | ex_extractor |
-| #164 | refactor(config): ExExtractorViewModel.source_dir setter 検証で TOCTOU / 不変条件保証 | config |
-| #162 | refactor(ui): Launcher の同期 callback で重い処理時の UI フリーズ + callback 例外保護の設計 | ui |
-| #161 | feat(ui): GUI で resolve_review_session を再統合する際の messagebox マッピング再構築要件 | ui |
-| #158 | feat(diag): 起動後 callback の load_config 失敗を actionable error 化 | diag |
-| #152 | UserNameBBox の NaN/inf 座標 + OcrBackendConfig の空白 URL を検証で弾く | config |
-| #134 | OCR: Gemini 2.5 Flash retire (2026-10-16) 対応 | OCR |
-| #63 | CI: Linux runner で Tk wiring tests が全 skip になる問題 | CI |
-| #39 | 将来対応: フリガナベースのマッチング（KanjiMatcher 以外の NameMatcher 実装） | matcher |
-| #29 | OCRプロキシ: Nice-to-have 改善（非root/例外絞込/429テスト他） | OCR |
-| #27 | config dataclass 全体の型設計強化（Literal + __post_init__ 検証） | config |
-| #17 | smoke_real.py を pytest に統合し WISEMAN_REAL=1 でゲート | test infra |
-| #16 | test_new_registration_flow: Pane/Text 経路 (WM_LBUTTON) をカバー | test |
-| #11 | PywinautoEngine: コードレビュー残件 (MEDIUM 5件) | rpa |
-| #6 | PoC E2Eテスト: ログイン→CSV抽出→GCSアップロードの自動パイプライン | E2E |
-
----
-
-## 🔧 状態スナップショット
-
-| 項目 | 値 |
-|------|-----|
-| main HEAD | `a1370bd` refactor(launcher): atomic_replace_and_fsync_dir を 2 引数化 (#211) (#236) |
-| working tree | clean (全変更マージ済) |
-| 残留 Node プロセス | なし ✅ |
-| CI (main push 後) | 全 PR success (build-smoke / test-unit 3.11/3.12 / test-integration) |
-| Test count | **1528 passed**, 94 skipped (本セッションで +5 件純増) |
-| Issue 開件数 | **15** (Session 56 末 16 → 15、Net -1) |
-| Phase 6 着手要件 | 全充足 (Session 55 末から維持 + Session 57 で取り巻き整理) |
-| typed package status | wiseman_hub_launcher 引き続き typed package (PEP 561 marker) |
-| lock-in file 数 | 3 系統 (Sha256Hex / Phase / LauncherExitCode、Session 53-55 から変化なし) |
-
----
-
-## ⚙️ 開発環境メモ (Session 51 から変化なし)
-
-- Mac dev: `~/Projects/wiseman-auto-sys`、main で作業
-- Windows 実機 (本田様 PC、TeamViewer 経由): `C:\Users\sasak\Projects\wiseman-auto-sys` (clone) + `C:\Users\sasak\wiseman-hub\` (配布物)
-- 本番データ: `\\Tera-station\share\03.FAX(事業所)` (UNC、40 事業所、ADR-013)
-- NAS trashbox: `\\Tera-station\share\trashbox\` (誤削除復旧経路 + PR #232 上書き退避先)
-
----
-
-## 🔁 セッション再開条件
-
-- ✅ 再開可能: working tree clean、main 同期、CI 全 pass、handoff 更新済
-- 次セッション最初: `/catchup` で Issue 一覧確認 → **TeamViewer 復旧** or **Phase 6 結合テスト直行** (PR #235 の保険があるので TOML 更新は焦らなくてよい)
-- Phase 6 で実 tag push する場合は番号単位の明示認可が必要 (destructive 操作: GCS bucket 汚染 + tag history 残存)
-- Phase 6 着手の前提条件はすべて満たされている (`archive/session-55-launcher-type-safety-trio.md` §🚪 まずここを読む 表参照)
+1. **Issue #238 は open 維持**: Phase 2/3 残のため Phase 1 完了でも close しない。`/catchup` で見えるが「ポストポーン Issue」ではないので扱いに注意 (postponed ラベルは付いていない)
+2. **PR #235 の WARNING ログ保険**: TeamViewer 復旧前でも launcher 起動時に旧値検出で気付ける。TOML 更新を焦る必要なし
+3. **Phase 2 着手時は Evaluator 分離 + codex セカンドオピニオン推奨**: rules/quality-gate.md 発動条件 (5+ ファイル + 新機能) に該当
+4. **CachedSheetList の names は tuple[str, ...]**: caller (Phase 2 で他キャッシュ追従時) が list 期待ならば `list(cached.names)` で吸収
