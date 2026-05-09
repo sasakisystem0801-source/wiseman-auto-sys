@@ -18,6 +18,7 @@ import shutil
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from typing import Final
 
 from wiseman_hub.cloud.sheets import ChecklistRow
 from wiseman_hub.config import ChecklistConfig
@@ -32,6 +33,7 @@ class PlacementStatus(StrEnum):
     SUCCESS = "success"
     SKIPPED_NO_FACILITY = "skipped_no_facility"  # 居宅マッピング未登録
     SKIPPED_NO_USER_DIR = "skipped_no_user_dir"  # 利用者フォルダ未発見
+    SKIPPED_NO_MONITORING_DIR = "skipped_no_monitoring_dir"  # モニタリングフォルダ未発見 (Issue #monitoring-substring)
     SKIPPED_NO_PDF = "skipped_no_pdf"  # 月別 PDF 未発見
     SKIPPED_AMBIGUOUS = "skipped_ambiguous"  # 同名複数（手動選択待ち）
     ERROR = "error"
@@ -85,6 +87,11 @@ def find_user_dir(karte_root: Path, name: str) -> tuple[Path | None, list[Path]]
     return None, matches
 
 
+# canonical_name の最低長 (Review SF6): 短すぎる設定値は全 dir に誤一致するため
+# 防御。3 文字以上を要求 (例: 「運動器」= 3 文字、「計画」= 2 文字 → reject)。
+_MIN_CANONICAL_LEN: Final[int] = 3
+
+
 def find_monitoring_dir(
     user_dir: Path, canonical_name: str
 ) -> tuple[Path | None, list[Path]]:
@@ -95,21 +102,55 @@ def find_monitoring_dir(
     ``運動器機能向上計画書(過去分)`` 等で揺らぐため、設定値を canonical name のみ
     (= ``運動器機能向上計画書``) にし、substring match で全パターンを拾う。
 
+    比較は ``_normalize_name`` (全角/半角スペース除去) 経由で揺れ吸収を一貫化
+    (find_user_dir パターンと対称、Review CR2)。
+
     Args:
         user_dir: 利用者ルートディレクトリ
-        canonical_name: 設定値 (例: ``運動器機能向上計画書``)
+        canonical_name: 設定値 (例: ``運動器機能向上計画書``)。``_MIN_CANONICAL_LEN``
+            未満の場合は誤一致防御のため ``(None, [])`` を返す + ``logger.error``。
 
     Returns:
         (matched_dir, candidates):
             matched_dir: 一意に決まれば Path、それ以外 (0 件 or 複数) None
             candidates: substring match した全候補ディレクトリ (sort 順、UI 表示用)
+
+    Notes:
+        ``user_dir.iterdir()`` の OSError (NAS 切断 / 権限 / TOCTOU 等) は捕捉して
+        ``(None, [])`` を返す (Review C1)。バッチ全体クラッシュを防ぎ、当該行のみ
+        ``SKIPPED_NO_MONITORING_DIR`` で人間判断に倒す。PII 防御のため log には
+        path 値を出さず例外型のみ記録する (Review C2)。
     """
+    # Review SF6: 短すぎる canonical name は全 dir 誤一致リスク → 防御
+    normalized_canonical = _normalize_name(canonical_name)
+    if len(normalized_canonical) < _MIN_CANONICAL_LEN:
+        logger.error(
+            "find_monitoring_dir: canonical_name too short "
+            "(len=%d, required>=%d), refusing to match all dirs",
+            len(normalized_canonical),
+            _MIN_CANONICAL_LEN,
+        )
+        return None, []
+
     if not user_dir.exists():
         return None, []
+
+    # Review C1: NAS 切断 / 権限エラー時のバッチ全体クラッシュを防ぐ
+    try:
+        children = list(user_dir.iterdir())
+    except OSError as e:
+        # Review C2: PII 防御で path を log に出さない (型名のみ)
+        logger.warning(
+            "find_monitoring_dir: iterdir failed (%s, possible NAS disconnect)",
+            type(e).__name__,
+        )
+        return None, []
+
+    # Review CR2: _normalize_name 適用で全角スペース等の揺れも吸収
     matches = sorted(
         d
-        for d in user_dir.iterdir()
-        if d.is_dir() and canonical_name in d.name
+        for d in children
+        if d.is_dir() and normalized_canonical in _normalize_name(d.name)
     )
     if len(matches) == 1:
         return matches[0], matches
@@ -185,6 +226,8 @@ def plan_b_placement(
         if monitoring_dir is None:
             if len(monitoring_candidates) >= 2:
                 # 派生フォルダ同居等で複数 HIT → 誤配置 0 のため人間判断 (a 案)
+                # Review code-reviewer Imp 1: 集計時に SKIPPED_NO_PDF と区別できるよう
+                # AMBIGUOUS は専用 status を使用 (= 既存規約通り)。
                 result.status = PlacementStatus.SKIPPED_AMBIGUOUS
                 result.candidates = monitoring_candidates
                 result.message = (
@@ -192,9 +235,14 @@ def plan_b_placement(
                     f"(設定: {cfg.monitoring_subfolder})"
                 )
             else:
-                result.status = PlacementStatus.SKIPPED_NO_PDF
+                # Review CR1: モニタリングフォルダ自体が無いケースに SKIPPED_NO_PDF
+                # (= 月別 PDF 不在) を流用すると業務文脈で識別不能 →
+                # 専用 SKIPPED_NO_MONITORING_DIR を使用 (find_user_dir 不在の
+                # SKIPPED_NO_USER_DIR と対称)。
+                result.status = PlacementStatus.SKIPPED_NO_MONITORING_DIR
                 result.message = (
-                    f"モニタリングフォルダ未発見 (設定: {cfg.monitoring_subfolder})"
+                    f"モニタリングフォルダ未発見 — 利用者フォルダ配下に "
+                    f"'{cfg.monitoring_subfolder}' を含むサブフォルダがありません"
                 )
             results.append(result)
             continue
