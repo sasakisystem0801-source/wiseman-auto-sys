@@ -37,12 +37,14 @@ from typing import Final, Protocol
 
 from wiseman_hub.config import AppConfig, save_config
 from wiseman_hub.pdf.ex_extractor import (
+    ExtractionErrorCode,
     ExtractionItem,
     ExtractionResult,
     ExtractionStatus,
     SfxAdapter,
     UnsupportedSfxPlatformError,
     extract_directory,
+    retry_overwrite,
 )
 from wiseman_hub.pdf.facility_resolver import ResolveReason
 from wiseman_hub.ui.common import (
@@ -81,6 +83,7 @@ class UiState(StrEnum):
     BUSY = "busy"
     SHOWING_RESULT = "showing_result"
     MANUAL_DISTRIBUTING = "manual_distributing"
+    OVERWRITING = "overwriting"
 
 
 # ---------------------------------------------------------------------------
@@ -125,9 +128,32 @@ class ExExtractorViewModel:
         return len(self.result.pending_manual) > 0
 
     @property
+    def overwrite_candidates(self) -> tuple[ExtractionItem, ...]:
+        """``MOVE_CONFLICT`` で停止した item 群 (上書き再実行の対象)。
+
+        SHOWING_RESULT 以外では空 tuple を返す (誤発火防止)。
+        """
+        if self.state is not UiState.SHOWING_RESULT or self.result is None:
+            return ()
+        return tuple(
+            item
+            for item in self.result.failed
+            if item.error_code is ExtractionErrorCode.MOVE_CONFLICT
+        )
+
+    @property
+    def can_open_overwrite(self) -> bool:
+        """「上書き再実行」が押下可能か (SHOWING_RESULT で MOVE_CONFLICT > 0)。"""
+        return len(self.overwrite_candidates) > 0
+
+    @property
     def is_busy(self) -> bool:
-        """実行中か (BUSY または MANUAL_DISTRIBUTING)。"""
-        return self.state in (UiState.BUSY, UiState.MANUAL_DISTRIBUTING)
+        """実行中か (BUSY / MANUAL_DISTRIBUTING / OVERWRITING)。"""
+        return self.state in (
+            UiState.BUSY,
+            UiState.MANUAL_DISTRIBUTING,
+            UiState.OVERWRITING,
+        )
 
     def transition_to_busy(self) -> None:
         """IDLE / SHOWING_RESULT → BUSY。"""
@@ -137,8 +163,12 @@ class ExExtractorViewModel:
         self.error_message = None
 
     def transition_to_showing_result(self, result: ExtractionResult) -> None:
-        """BUSY / MANUAL_DISTRIBUTING → SHOWING_RESULT。"""
-        if self.state not in (UiState.BUSY, UiState.MANUAL_DISTRIBUTING):
+        """BUSY / MANUAL_DISTRIBUTING / OVERWRITING → SHOWING_RESULT。"""
+        if self.state not in (
+            UiState.BUSY,
+            UiState.MANUAL_DISTRIBUTING,
+            UiState.OVERWRITING,
+        ):
             raise RuntimeError(
                 f"cannot transition to SHOWING_RESULT from {self.state}"
             )
@@ -146,12 +176,16 @@ class ExExtractorViewModel:
         self.result = result
 
     def transition_to_idle_with_error(self, error_message: str) -> None:
-        """BUSY / MANUAL_DISTRIBUTING → IDLE (例外時、PII-safe メッセージのみ)。
+        """BUSY / MANUAL_DISTRIBUTING / OVERWRITING → IDLE (例外時、PII-safe)。
 
         HIGH-D (type-analyzer C1): 遷移元チェックを追加。SHOWING_RESULT から
         誤って呼ばれて result が宙に浮く事故を構造的に防ぐ。
         """
-        if self.state not in (UiState.BUSY, UiState.MANUAL_DISTRIBUTING):
+        if self.state not in (
+            UiState.BUSY,
+            UiState.MANUAL_DISTRIBUTING,
+            UiState.OVERWRITING,
+        ):
             raise RuntimeError(
                 f"cannot transition to IDLE with error from {self.state}"
             )
@@ -166,6 +200,14 @@ class ExExtractorViewModel:
             )
         self.state = UiState.MANUAL_DISTRIBUTING
 
+    def transition_to_overwriting(self) -> None:
+        """SHOWING_RESULT → OVERWRITING (上書き再実行ボタン押下時)。"""
+        if self.state is not UiState.SHOWING_RESULT:
+            raise RuntimeError(
+                f"cannot transition to OVERWRITING from {self.state}"
+            )
+        self.state = UiState.OVERWRITING
+
     def merge_manual_results(
         self, manual_items: Sequence[ExtractionItem]
     ) -> None:
@@ -176,13 +218,47 @@ class ExExtractorViewModel:
         """
         if self.result is None:
             raise RuntimeError("merge_manual_results requires existing result")
+        self._merge_replacement_items(manual_items)
 
-        manual_by_source = {item.source_path: item for item in manual_items}
+    def merge_overwrite_results(
+        self, retry_items: Sequence[ExtractionItem]
+    ) -> None:
+        """上書き再実行の結果を既存 result に統合する (OVERWRITING → SHOWING_RESULT)。
+
+        ``MOVE_CONFLICT`` だった item を ``retry_items`` で置き換え
+        (``source_path`` 一致)、SHOWING_RESULT に戻す。``merge_manual_results``
+        と同一の統合パターン (Issue #ex-overwrite, DRY 化共通体経由)。
+        """
+        if self.result is None:
+            raise RuntimeError("merge_overwrite_results requires existing result")
+        self._merge_replacement_items(retry_items)
+
+    def _merge_replacement_items(
+        self, replacement_items: Sequence[ExtractionItem]
+    ) -> None:
+        """``source_path`` 一致で items 置換 + ``pending_filenames`` 再計算 + SHOWING_RESULT 復帰。
+
+        ``merge_manual_results`` (MANUAL_DISTRIBUTING 由来) と
+        ``merge_overwrite_results`` (OVERWRITING 由来) の DRY 化共通体。
+        呼び出し側で ``self.result`` 非 None を保証する契約 (caller-enforced
+        invariant)。
+
+        将来 ``pending_filenames`` 判定ロジックを変えるとき本関数 1 箇所のみ
+        改修すれば全経路に反映される (drift 防止)。
+        """
+        # Review I4: ``assert`` は ``python -O`` で消えるため、PyInstaller frozen
+        # build (ADR-002) で contract が無効化されるリスクがある。明示的な raise
+        # で常時 enforce する (両 public caller も同じパターン: line 311 / 323)。
+        if self.result is None:
+            raise RuntimeError(
+                "_merge_replacement_items requires existing result"
+            )
+
+        by_source = {item.source_path: item for item in replacement_items}
         new_items = tuple(
-            manual_by_source.get(item.source_path, item)
+            by_source.get(item.source_path, item)
             for item in self.result.items
         )
-        # pending_filenames も再計算
         pending_statuses = {
             ExtractionStatus.SKIPPED_AMBIGUOUS,
             ExtractionStatus.SKIPPED_UNMATCHED,
@@ -247,6 +323,7 @@ _TITLE: Final[str] = "ex_ ファイル変換 + 振り分け"
 
 _BTN_RUN: Final[str] = "実行"
 _BTN_OPEN_MANUAL: Final[str] = "手動振り分けへ..."
+_BTN_RETRY_OVERWRITE: Final[str] = "上書き再実行..."
 _BTN_CLOSE: Final[str] = "閉じる"
 _BTN_BROWSE_SOURCE: Final[str] = "取込元選択..."
 
@@ -284,6 +361,19 @@ _MSG_SOURCE_SAVE_FAILED_FMT: Final[str] = (
     "今回のセッションでは選択値で動作しますが、次回起動時には反映されません。"
 )
 _TITLE_SOURCE_SAVE_FAILED: Final[str] = "設定保存失敗"
+
+# 上書き再実行 (Issue #ex-overwrite)
+_TITLE_OVERWRITE_CONFIRM: Final[str] = "上書き再実行の確認"
+_MSG_OVERWRITE_CONFIRM_FMT: Final[str] = (
+    "振り分け先に同名 PDF が既に存在する {count} 件を上書きしますか?\n\n"
+    "旧 PDF は trashbox へ退避されます (誤上書き時の復旧経路保持)。\n\n"
+    "{file_list}"
+)
+_TITLE_OVERWRITE_NO_TRASHBOX: Final[str] = "trashbox 不可"
+_MSG_OVERWRITE_NO_TRASHBOX_FMT: Final[str] = (
+    "trashbox の作成に失敗しました ({type})。\n"
+    "事業所ルートの親フォルダに書き込めない可能性があります:\n{path}"
+)
 
 
 # DI 用 type alias
@@ -440,6 +530,13 @@ class ExExtractorDialog:
             command=self._on_open_manual_click,
         )
         self._btn_open_manual.pack(side="left")
+        # Issue #ex-overwrite: 上書き再実行ボタン (manual と対称配置)
+        self._btn_retry_overwrite = ttk.Button(
+            bottom,
+            text=_BTN_RETRY_OVERWRITE,
+            command=self._on_retry_overwrite_click,
+        )
+        self._btn_retry_overwrite.pack(side="left", padx=(8, 0))
         self._btn_close = ttk.Button(
             bottom, text=_BTN_CLOSE, command=self._on_close
         )
@@ -470,6 +567,10 @@ class ExExtractorDialog:
         self._btn_open_manual.configure(
             state="normal" if self._vm.can_open_manual else "disabled"
         )
+        # Issue #ex-overwrite: MOVE_CONFLICT が 1 件以上で enable
+        self._btn_retry_overwrite.configure(
+            state="normal" if self._vm.can_open_overwrite else "disabled"
+        )
         self._btn_close.configure(
             state="disabled" if self._vm.is_busy else "normal"
         )
@@ -479,7 +580,7 @@ class ExExtractorDialog:
         )
 
         # ステータス文言
-        if self._vm.state is UiState.BUSY:
+        if self._vm.state in (UiState.BUSY, UiState.OVERWRITING):
             self._lbl_status.configure(text=_LBL_RUNNING, foreground="#0066cc")
         elif self._vm.error_message is not None:
             self._lbl_status.configure(
@@ -705,6 +806,116 @@ class ExExtractorDialog:
 
         self._vm.transition_to_showing_result(result)
         self._redraw()
+
+    def _on_retry_overwrite_click(self) -> None:
+        """「上書き再実行」ボタン押下 (Issue #ex-overwrite)。
+
+        SHOWING_RESULT で MOVE_CONFLICT が 1 件以上ある場合のみ動作。
+        確認ダイアログで件数 + ファイル一覧を表示し、ユーザーが OK を出したら
+        executor で retry_overwrite を実行 → 結果統合。
+
+        旧 PDF は ``facility_root_dir.parent / "trashbox"`` 配下に退避される
+        ため、誤上書き時の復旧経路が確保される (中途半端なデータ消失なし)。
+        """
+        if not self._vm.can_open_overwrite or self._vm.result is None:
+            return
+
+        candidates = self._vm.overwrite_candidates
+        if not candidates:
+            return
+
+        # 確認ダイアログ: PII-safe な filename のみ表示
+        file_list = "\n".join(
+            f"  - {item.source_path.name}" for item in candidates
+        )
+        confirm = self._messagebox.askyesno(
+            _TITLE_OVERWRITE_CONFIRM,
+            _MSG_OVERWRITE_CONFIRM_FMT.format(
+                count=len(candidates), file_list=file_list
+            ),
+        )
+        if not confirm:
+            return
+
+        # SHOWING_RESULT → OVERWRITING (例外時の復帰用に saved_result 保持)
+        saved_result = self._vm.result
+        self._vm.transition_to_overwriting()
+        self._redraw()
+
+        trashbox_root = self._vm.facility_root_dir.parent / "trashbox"
+        future = self._executor.submit(
+            self._run_retry_overwrite, candidates, trashbox_root
+        )
+        future.add_done_callback(
+            lambda f: self._top.after(
+                0, self._on_retry_overwrite_done, f, saved_result
+            )
+        )
+
+    def _run_retry_overwrite(
+        self,
+        candidates: tuple[ExtractionItem, ...],
+        trashbox_root: Path,
+    ) -> tuple[ExtractionItem, ...]:
+        """worker thread: facility_names を再計算 + retry_overwrite 呼出。"""
+        facility_names = sorted(
+            d.name
+            for d in self._vm.facility_root_dir.iterdir()
+            if d.is_dir() and not d.name.startswith("_")
+        )
+        return retry_overwrite(
+            candidates,
+            self._vm.facility_root_dir,
+            facility_names,
+            self._vm.aliases,
+            self._adapter,
+            trashbox_root=trashbox_root,
+        )
+
+    def _on_retry_overwrite_done(
+        self,
+        future: Future[tuple[ExtractionItem, ...]],
+        saved_result: ExtractionResult,
+    ) -> None:
+        """retry_overwrite 完了時 (main thread、_top.after 経由)。
+
+        - 成功: ``merge_overwrite_results`` で結果統合 → SHOWING_RESULT
+        - 失敗: ``saved_result`` で SHOWING_RESULT に復帰 + エラーモーダル
+        """
+        if not self._top.winfo_exists():
+            logger.warning(
+                "retry_overwrite result arrived after dialog destroy"
+            )
+            return
+
+        try:
+            retry_items = future.result()
+        except Exception as e:  # noqa: BLE001
+            # PII 防御で型名のみ
+            logger.warning(
+                "retry_overwrite failed: %s", type(e).__name__
+            )
+            # 例外時は元の result で SHOWING_RESULT に復帰 (永久 OVERWRITING 防止)
+            # Review I1: state 遷移自体が RuntimeError (race 等で OVERWRITING 以外
+            # に変化済) で raise した場合の二次破壊を防ぐ
+            try:
+                self._vm.transition_to_showing_result(saved_result)
+            except RuntimeError:
+                logger.warning(
+                    "retry_overwrite recovery failed: vm state changed unexpectedly"
+                )
+            # Review I2: showerror も winfo_exists ガード (close 後の TclError 抑制)
+            if self._top.winfo_exists():
+                self._messagebox.showerror(
+                    _TITLE_RUN_ERROR,
+                    f"上書き再実行中にエラーが発生しました: {type(e).__name__}",
+                )
+                self._redraw()
+            return
+
+        self._vm.merge_overwrite_results(retry_items)
+        if self._top.winfo_exists():
+            self._redraw()
 
     def _on_open_manual_click(self) -> None:
         if not self._vm.can_open_manual:
