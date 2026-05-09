@@ -282,8 +282,8 @@ def write_current_atomic(path: Path, current: Current) -> None:
             f.write(payload)
             f.flush()
             os.fsync(f.fileno())
-        # atomic replace + 親 dir fsync を共通 helper に集約 (PR-7 タスク B)
-        atomic_replace_and_fsync_dir(tmp_path, path, parent)
+        # atomic replace + 親 dir fsync を共通 helper に集約 (PR-7 タスク B、Issue #211 で 2 引数化)
+        atomic_replace_and_fsync_dir(tmp_path, path)
         success = True
     finally:
         if not success:

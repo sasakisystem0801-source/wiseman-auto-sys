@@ -128,7 +128,7 @@ def _download_with_atomic_place(
                 f"{label} SHA-256 mismatch (expected {expected_sha256[:8]}...)"
             )
 
-        atomic_replace_and_fsync_dir(tmp_path, final_path, dest_dir)
+        atomic_replace_and_fsync_dir(tmp_path, final_path)
         success = True
     except OSError as e:
         # review_team A5 second-pass: errno / winerror / filename を含めて Windows AV /
