@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import contextlib
+import datetime as _dt
 import enum
 import logging
 import tkinter as tk
@@ -32,6 +33,15 @@ from wiseman_hub.ui.common import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# Phase 2-α (Issue #238): GCP 同期サマリー表示の対象。
+# 表示順は業務頻度 (mapping_routing > report_staff > sheets) に対応。
+_SYNC_SUMMARY_ITEMS: tuple[tuple[str, str], ...] = (
+    ("居宅対照表", "mapping_routing"),
+    ("担当者マッピング", "report_staff"),
+    ("シート一覧", "sheets"),
+)
 
 
 class LauncherAction(enum.Enum):
@@ -95,12 +105,19 @@ class Launcher:
         on_open_checklist_b: Callable[[], None] | None = None,
         on_open_checklist_c: Callable[[], None] | None = None,
         messagebox_fn: MessageBoxLike | None = None,
+        now_fn: Callable[[], _dt.datetime] | None = None,
     ) -> None:
         assert_main_thread("Launcher")
 
         self._config = config
         self._config_path = config_path
         self._messagebox = messagebox_fn or default_messagebox()
+        # Phase 2-α (Issue #238): now の DI で sync_summary 表示をテスト容易化。
+        self._now_fn: Callable[[], _dt.datetime] = now_fn or (
+            lambda: _dt.datetime.now(tz=_dt.UTC)
+        )
+        # _build_sync_summary で初期化される (StringVar は Tk root 取得後でないと作れない)
+        self._sync_vars: dict[str, tk.StringVar] = {}
 
         self._on_open_settings = on_open_settings
         self._on_open_facility_merger = on_open_facility_merger
@@ -119,7 +136,8 @@ class Launcher:
     def _build_ui(self) -> None:
         root = self._root
         root.title("Wiseman PDF ツール")
-        root.geometry("420x380")
+        # Phase 2-α (Issue #238): sync_summary フレーム分だけ縦幅を拡張。
+        root.geometry("420x460")
 
         ttk.Label(
             root,
@@ -127,6 +145,9 @@ class Launcher:
             font=("TkDefaultFont", 14, "bold"),
             padding=12,
         ).pack()
+
+        # Phase 2-α (Issue #238): GCP 同期サマリー (3 行: 居宅対照表 / 担当者マッピング / シート一覧)
+        self._build_sync_summary(root)
 
         btn_frame = ttk.Frame(root, padding=12)
         btn_frame.pack(fill="both", expand=True)
@@ -183,8 +204,78 @@ class Launcher:
         )
 
     def reload_config(self, config: AppConfig) -> None:
-        """設定 GUI で保存された直後に呼ぶ。Settings dialog 等が新値を反映するため。"""
+        """設定 GUI で保存された直後に呼ぶ。Settings dialog 等が新値を反映するため。
+
+        Phase 2-α (Issue #238): 設定保存と同時に GCP 同期 (push/pull) が走り得るので、
+        sync_summary も再描画する。
+        """
         self._config = config
+        self._refresh_sync_summary()
+
+    def _build_sync_summary(self, root: tk.Misc) -> None:
+        """GCP 同期サマリー frame を構築する (Phase 2-α / Issue #238)。
+
+        3 行の固定 layout (居宅対照表 / 担当者マッピング / シート一覧)、各行は
+        ``StringVar`` で更新可能。初期値は「不明」 (Phase 1 ChecklistCDialog と
+        統一、cache 不在 / parse 失敗 / tz naive すべて ``format_synced_at_label``
+        の None 経路で「不明」に集約)。
+        """
+        frame = ttk.LabelFrame(
+            root, text="GCP 同期サマリー", padding=8
+        )
+        frame.pack(fill="x", padx=12, pady=(0, 4))
+        for label, key in _SYNC_SUMMARY_ITEMS:
+            var = tk.StringVar(value=f"{label}: 不明")
+            ttk.Label(frame, textvariable=var, anchor="w").pack(fill="x")
+            self._sync_vars[key] = var
+        self._refresh_sync_summary()
+
+    def _refresh_sync_summary(self) -> None:
+        """sync_summary の各行を最新の cache 状態で再描画する (Phase 2-α / Issue #238)。
+
+        本処理は Tk main thread 上の同期 I/O (3 ファイル分の JSON read) を伴うが、
+        各 read は ``read_sync_timestamp`` / ``sheet_list_cache.load`` 内部で warn-only
+        フォールバックされる。Launcher 起動時の体感遅延が問題になる場合は将来 daemon
+        thread 化する余地あり (review_team I-2 rating 7、Phase 2-β 繰越判定)。
+
+        review 反映 (evaluator AC-2): cache 不在 / parse 失敗 / tz naive のすべてを
+        ``format_synced_at_label(None, now)`` 経由で「不明」表示に集約。Phase 1 の
+        ChecklistCDialog (sheet_list_cache 直接呼出) との文言整合を取る。
+        """
+        if not self._sync_vars:
+            return  # _build_sync_summary 完了前 (_build_ui 直前) に呼ばれた場合
+        from wiseman_hub.cloud.sync_label import (
+            format_synced_at_label,
+            read_sync_timestamp,
+            sync_cache_dir_for,
+        )
+
+        now = self._now_fn()
+        sync_dir = sync_cache_dir_for(self._config_path)
+        for prefix, key in _SYNC_SUMMARY_ITEMS:
+            ts = (
+                self._read_sheet_fetched_at()
+                if key == "sheets"
+                else read_sync_timestamp(sync_dir, key)
+            )
+            self._sync_vars[key].set(
+                f"{prefix}: {format_synced_at_label(ts, now)}"
+            )
+
+    def _read_sheet_fetched_at(self) -> _dt.datetime | None:
+        """sheet_list_cache から fetched_at を取得 (spreadsheet_id 未設定時は None)。"""
+        from wiseman_hub.cloud.sheet_list_cache import (
+            cache_dir_for as _sheet_cache_dir_for,
+        )
+        from wiseman_hub.cloud.sheet_list_cache import (
+            load as _sheet_load,
+        )
+
+        spreadsheet_id = self._config.checklist.spreadsheet_id
+        if not spreadsheet_id:
+            return None
+        cached = _sheet_load(_sheet_cache_dir_for(self._config_path), spreadsheet_id)
+        return cached.fetched_at if cached is not None else None
 
     def get_root(self) -> tk.Tk:
         """子ダイアログ（SettingsDialog など）が ``tk.Toplevel(parent)`` で

@@ -30,6 +30,21 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+# Phase 2-α (Issue #238): format_synced_at_label を共有 helper に集約。
+# 旧 import パス (``sheet_list_cache.format_synced_at_label``) を維持するため
+# 本モジュールから re-export する。
+from wiseman_hub.cloud.sync_label import (
+    format_synced_at_label as format_synced_at_label,
+)
+
+__all__ = [
+    "CachedSheetList",
+    "cache_dir_for",
+    "format_synced_at_label",
+    "load",
+    "save",
+]
+
 logger = logging.getLogger(__name__)
 
 
@@ -144,42 +159,6 @@ def save(cache_dir: Path, spreadsheet_id: str, sheet_names: list[str]) -> None:
         logger.warning("sheet list cache save failed: %s: %s", path, exc)
 
 
-def format_synced_at_label(
-    fetched_at: _dt.datetime | None, now: _dt.datetime
-) -> str:
-    """「5/9 14:30 (3 分前)」形式で UI 表示用のラベル文字列を生成 (Issue #238 Phase 1)。
-
-    Args:
-        fetched_at: cache 取得時刻 (None なら「不明」)
-        now: 現在時刻 (テスト容易性のため引数注入、通常は ``datetime.now(tz=UTC)``)
-
-    Returns:
-        - ``fetched_at`` が None: ``"不明"``
-        - now < fetched_at (時計ずれ等): ``"M/D HH:MM (時刻同期確認中)"``
-        - 60 秒未満: ``"M/D HH:MM (たった今)"``
-        - 60 分未満: ``"M/D HH:MM (N 分前)"``
-        - 24 時間未満: ``"M/D HH:MM (N 時間前)"``
-        - それ以上: ``"M/D HH:MM (N 日前)"``
-
-    Note:
-        絶対時刻表示は ``fetched_at`` をローカルタイムゾーンに変換した上で
-        月/日と時:分を Python 標準の整形 (``f"{m}/{d}"`` 等) で組み立てる。
-        ``%-m`` 等の platform 依存指定子を避けクロスプラットフォーム対応。
-    """
-    if fetched_at is None:
-        return "不明"
-    local = fetched_at.astimezone()
-    abs_str = f"{local.month}/{local.day} {local.hour:02d}:{local.minute:02d}"
-    delta = now - fetched_at
-    sec = int(delta.total_seconds())
-    if sec < 0:
-        rel = "時刻同期確認中"
-    elif sec < 60:
-        rel = "たった今"
-    elif sec < 3600:
-        rel = f"{sec // 60} 分前"
-    elif sec < 86400:
-        rel = f"{sec // 3600} 時間前"
-    else:
-        rel = f"{sec // 86400} 日前"
-    return f"{abs_str} ({rel})"
+# NOTE: ``format_synced_at_label`` は Phase 2-α (Issue #238) で
+# ``cloud.sync_label`` に移動した。本モジュールでは module 冒頭の
+# ``from .sync_label import format_synced_at_label`` で re-export している。
