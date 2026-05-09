@@ -85,6 +85,37 @@ def find_user_dir(karte_root: Path, name: str) -> tuple[Path | None, list[Path]]
     return None, matches
 
 
+def find_monitoring_dir(
+    user_dir: Path, canonical_name: str
+) -> tuple[Path | None, list[Path]]:
+    """利用者フォルダ配下から ``canonical_name`` を含むサブディレクトリを探す。
+
+    Issue #monitoring-substring (2026-05-09): 業務上モニタリングフォルダ名が
+    ``08.運動器機能向上計画書`` / ``10.運動器機能向上計画書`` / prefix なし /
+    ``運動器機能向上計画書(過去分)`` 等で揺らぐため、設定値を canonical name のみ
+    (= ``運動器機能向上計画書``) にし、substring match で全パターンを拾う。
+
+    Args:
+        user_dir: 利用者ルートディレクトリ
+        canonical_name: 設定値 (例: ``運動器機能向上計画書``)
+
+    Returns:
+        (matched_dir, candidates):
+            matched_dir: 一意に決まれば Path、それ以外 (0 件 or 複数) None
+            candidates: substring match した全候補ディレクトリ (sort 順、UI 表示用)
+    """
+    if not user_dir.exists():
+        return None, []
+    matches = sorted(
+        d
+        for d in user_dir.iterdir()
+        if d.is_dir() and canonical_name in d.name
+    )
+    if len(matches) == 1:
+        return matches[0], matches
+    return None, matches
+
+
 def find_month_pdf(monitoring_dir: Path, month: int) -> tuple[Path | None, list[Path]]:
     """``{month}.pdf`` または ``{month}.PDF`` をマッチさせる。複数 PDF は候補返却。"""
     if not monitoring_dir.exists():
@@ -148,7 +179,26 @@ def plan_b_placement(
             results.append(result)
             continue
 
-        monitoring_dir = user_dir / cfg.monitoring_subfolder
+        monitoring_dir, monitoring_candidates = find_monitoring_dir(
+            user_dir, cfg.monitoring_subfolder
+        )
+        if monitoring_dir is None:
+            if len(monitoring_candidates) >= 2:
+                # 派生フォルダ同居等で複数 HIT → 誤配置 0 のため人間判断 (a 案)
+                result.status = PlacementStatus.SKIPPED_AMBIGUOUS
+                result.candidates = monitoring_candidates
+                result.message = (
+                    f"モニタリングフォルダ候補 {len(monitoring_candidates)} 件 "
+                    f"(設定: {cfg.monitoring_subfolder})"
+                )
+            else:
+                result.status = PlacementStatus.SKIPPED_NO_PDF
+                result.message = (
+                    f"モニタリングフォルダ未発見 (設定: {cfg.monitoring_subfolder})"
+                )
+            results.append(result)
+            continue
+
         month_pdf, all_pdfs = find_month_pdf(monitoring_dir, month)
         if month_pdf is None:
             if all_pdfs:

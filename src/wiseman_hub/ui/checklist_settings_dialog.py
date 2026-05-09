@@ -446,7 +446,7 @@ class ChecklistSettingsDialog:
             spreadsheet_id=self._spreadsheet_id.get().strip(),
             karte_root=self._karte_root.get().strip(),
             monitoring_subfolder=self._monitoring_subfolder.get().strip()
-            or "08.運動器機能向上計画書",
+            or "運動器機能向上計画書",
             fax_root=self._fax_root.get().strip(),
             b_output_subfolder=self._b_output_subfolder.get().strip()
             or "運動機能向上計画書",
