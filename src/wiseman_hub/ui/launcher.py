@@ -216,14 +216,16 @@ class Launcher:
         """GCP 同期サマリー frame を構築する (Phase 2-α / Issue #238)。
 
         3 行の固定 layout (居宅対照表 / 担当者マッピング / シート一覧)、各行は
-        ``StringVar`` で更新可能。初期値は「未同期」(cache 不在の表現)。
+        ``StringVar`` で更新可能。初期値は「不明」 (Phase 1 ChecklistCDialog と
+        統一、cache 不在 / parse 失敗 / tz naive すべて ``format_synced_at_label``
+        の None 経路で「不明」に集約)。
         """
         frame = ttk.LabelFrame(
             root, text="GCP 同期サマリー", padding=8
         )
         frame.pack(fill="x", padx=12, pady=(0, 4))
         for label, key in _SYNC_SUMMARY_ITEMS:
-            var = tk.StringVar(value=f"{label}: 未同期")
+            var = tk.StringVar(value=f"{label}: 不明")
             ttk.Label(frame, textvariable=var, anchor="w").pack(fill="x")
             self._sync_vars[key] = var
         self._refresh_sync_summary()
@@ -234,7 +236,11 @@ class Launcher:
         本処理は Tk main thread 上の同期 I/O (3 ファイル分の JSON read) を伴うが、
         各 read は ``read_sync_timestamp`` / ``sheet_list_cache.load`` 内部で warn-only
         フォールバックされる。Launcher 起動時の体感遅延が問題になる場合は将来 daemon
-        thread 化する余地あり。
+        thread 化する余地あり (review_team I-2 rating 7、Phase 2-β 繰越判定)。
+
+        review 反映 (evaluator AC-2): cache 不在 / parse 失敗 / tz naive のすべてを
+        ``format_synced_at_label(None, now)`` 経由で「不明」表示に集約。Phase 1 の
+        ChecklistCDialog (sheet_list_cache 直接呼出) との文言整合を取る。
         """
         if not self._sync_vars:
             return  # _build_sync_summary 完了前 (_build_ui 直前) に呼ばれた場合
@@ -245,12 +251,6 @@ class Launcher:
         )
 
         now = self._now_fn()
-
-        def _label(prefix: str, ts: _dt.datetime | None) -> str:
-            if ts is None:
-                return f"{prefix}: 未同期"
-            return f"{prefix}: {format_synced_at_label(ts, now)}"
-
         sync_dir = sync_cache_dir_for(self._config_path)
         for prefix, key in _SYNC_SUMMARY_ITEMS:
             ts = (
@@ -258,7 +258,9 @@ class Launcher:
                 if key == "sheets"
                 else read_sync_timestamp(sync_dir, key)
             )
-            self._sync_vars[key].set(_label(prefix, ts))
+            self._sync_vars[key].set(
+                f"{prefix}: {format_synced_at_label(ts, now)}"
+            )
 
     def _read_sheet_fetched_at(self) -> _dt.datetime | None:
         """sheet_list_cache から fetched_at を取得 (spreadsheet_id 未設定時は None)。"""

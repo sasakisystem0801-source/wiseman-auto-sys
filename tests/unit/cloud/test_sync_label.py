@@ -168,6 +168,52 @@ class TestWriteReadSyncTimestamp:
         with pytest.raises(ValueError):
             write_sync_timestamp(tmp_path, bad_name)
 
+    def test_naive_ts_raises(self, tmp_path: Path) -> None:
+        """review 反映 (code-reviewer I-1 rating 7): naive datetime は構造的に reject。
+
+        ``read_sync_timestamp`` が naive を None フォールバックする設計と対称性を取る
+        ため、書込側でも naive を受け入れない。
+        """
+        naive = _dt.datetime(2026, 5, 9, 10, 0)  # tz=None
+        assert naive.tzinfo is None
+        with pytest.raises(ValueError, match="timezone-aware"):
+            write_sync_timestamp(tmp_path, "k", ts=naive)
+
+    def test_mkdir_oserror_returns_silently(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """review 反映 (evaluator AC-7): mkdir OSError は warn + 何も書かず return。"""
+        import logging
+        readonly_dir = tmp_path / "readonly_cache"
+
+        def _raise_oserror(*args: object, **kwargs: object) -> None:
+            raise PermissionError("simulated readonly")
+
+        monkeypatch.setattr(Path, "mkdir", _raise_oserror)
+        with caplog.at_level(logging.WARNING):
+            # raise しないことが契約 (UI 進行を止めない)
+            write_sync_timestamp(readonly_dir, "mapping_routing")
+        # ファイルは書かれていない
+        assert not (readonly_dir / "mapping_routing.json").exists()
+        # warning ログが出ている
+        assert any("mkdir failed" in rec.message for rec in caplog.records)
+
+    def test_write_oserror_returns_silently(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """review 反映 (evaluator AC-7): write_text OSError も warn + return。"""
+        import logging
+
+        def _raise_oserror(*args: object, **kwargs: object) -> None:
+            raise PermissionError("simulated write failure")
+
+        monkeypatch.setattr(Path, "write_text", _raise_oserror)
+        with caplog.at_level(logging.WARNING):
+            write_sync_timestamp(tmp_path, "mapping_routing")
+        assert any("write failed" in rec.message for rec in caplog.records)
+
 
 class TestSyncCacheDirFor:
     def test_derives_from_config_path(self, tmp_path: Path) -> None:

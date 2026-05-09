@@ -77,13 +77,28 @@ def write_sync_timestamp(
     Args:
         cache_dir: cache ディレクトリ (存在しなければ自動作成)
         name: 識別子 ([A-Za-z0-9_-]+)、path traversal は ValueError で拒否
-        ts: 書き込む時刻。``None`` なら ``datetime.now(tz=UTC)``
+        ts: 書き込む時刻。``None`` なら呼出時の ``datetime.now(tz=UTC)`` で
+            上書きする (既存値があれば置換)。**過去時刻を保持したい migration
+            用途では必ず明示的に tz-aware datetime を渡すこと**。
 
-    書込失敗は warning ログのみ (fatal にしない、UI 進行を止めない)。
+    Raises:
+        ValueError: ``name`` が制約違反 / ``ts`` が naive (tz 欠落) datetime。
+
+    書込失敗 (OSError) は warning ログのみ (fatal にしない、UI 進行を止めない)。
+
+    review 反映 (code-reviewer I-1 rating 7): ``read_sync_timestamp`` は naive
+    datetime を None フォールバックして「不明」表示にするため、書込側で naive
+    を受け入れると「書いた直後に read で消える」asymmetric が発生する。
+    対称性を担保するため write 側で構造的に reject。
     """
     _validate_name(name)
     if ts is None:
         ts = _dt.datetime.now(tz=_dt.UTC)
+    elif ts.tzinfo is None:
+        # I-1 反映: read 側が naive を None 化するので書込側でも reject。
+        raise ValueError(
+            f"ts must be timezone-aware (got naive datetime: {ts!r})"
+        )
     try:
         cache_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:

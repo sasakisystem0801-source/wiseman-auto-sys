@@ -241,10 +241,15 @@ class TestLauncherSyncSummary:
         cfg.write_text("", encoding="utf-8")
         return cfg
 
-    def test_all_three_rows_show_unsynced_when_no_cache(
+    def test_all_three_rows_show_unknown_when_no_cache(
         self, tmp_path: Path
     ) -> None:
-        """cache 未作成なら 3 行とも「{ラベル}: 未同期」を表示。"""
+        """cache 未作成なら 3 行とも「{ラベル}: 不明」を表示 (Phase 1 ChecklistCDialog と統一)。
+
+        review 反映 (evaluator AC-2 FAIL): cache 不在 / parse 失敗 / tz naive を
+        format_synced_at_label の None 経路で「不明」に集約することで、Phase 1 と
+        文言が一致する。
+        """
         import tkinter as tk
 
         cfg = self._make_config_path(tmp_path)
@@ -256,13 +261,52 @@ class TestLauncherSyncSummary:
                 root=root,
             )
             assert launcher._sync_vars["mapping_routing"].get() == (
-                "居宅対照表: 未同期"
+                "居宅対照表: 不明"
             )
             assert launcher._sync_vars["report_staff"].get() == (
-                "担当者マッピング: 未同期"
+                "担当者マッピング: 不明"
             )
             assert launcher._sync_vars["sheets"].get() == (
-                "シート一覧: 未同期"
+                "シート一覧: 不明"
+            )
+        finally:
+            root.destroy()
+
+    def test_corrupt_cache_falls_back_to_unknown(
+        self, tmp_path: Path
+    ) -> None:
+        """cache JSON が破損 / tz naive なら「不明」表示 (AC-2 統合検証)。"""
+        import datetime as _dt
+        import json
+        import tkinter as tk
+
+        from wiseman_hub.cloud.sync_label import sync_cache_dir_for
+
+        cfg = self._make_config_path(tmp_path)
+        sync_dir = sync_cache_dir_for(cfg)
+        sync_dir.mkdir(parents=True, exist_ok=True)
+        # tz naive の datetime を直接書き込み (read_sync_timestamp が None で返す)
+        (sync_dir / "mapping_routing.json").write_text(
+            json.dumps({"fetched_at": "2026-05-09T14:30:00"}),  # tz 欠落
+            encoding="utf-8",
+        )
+        # JSON 破損
+        (sync_dir / "report_staff.json").write_text("{ broken json", encoding="utf-8")
+
+        fixed_now = _dt.datetime(2026, 5, 9, 14, 30, tzinfo=_dt.UTC)
+        root = tk.Tk()
+        try:
+            launcher = Launcher(
+                config=AppConfig(),
+                config_path=cfg,
+                root=root,
+                now_fn=lambda: fixed_now,
+            )
+            assert launcher._sync_vars["mapping_routing"].get() == (
+                "居宅対照表: 不明"
+            )
+            assert launcher._sync_vars["report_staff"].get() == (
+                "担当者マッピング: 不明"
             )
         finally:
             root.destroy()
@@ -319,9 +363,9 @@ class TestLauncherSyncSummary:
                 root=root,
                 now_fn=lambda: fixed_now,
             )
-            # 起動直後は cache 不在 → 未同期
+            # 起動直後は cache 不在 → 不明 (Phase 1 ChecklistCDialog と統一)
             assert launcher._sync_vars["report_staff"].get() == (
-                "担当者マッピング: 未同期"
+                "担当者マッピング: 不明"
             )
             # cache 作成後 reload_config → 再描画
             cache_dir = sync_cache_dir_for(cfg)
