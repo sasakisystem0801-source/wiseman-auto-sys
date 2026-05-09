@@ -102,6 +102,24 @@ def _dummy_resolve_unmatched() -> ResolveResult:
     return ResolveResult.unmatched(ResolveReason.NO_CANDIDATE)
 
 
+class _DynamicSfxAdapter:
+    """ex_file 毎に異なる PDF (= ``<exe_path.stem>.pdf``) を生成する adapter。
+
+    ``FakeSfxAdapter`` は固定 ``produced_pdfs`` のみ返せるため、複数 ex_file の
+    retry シナリオでは対応 PDF を動的に生成する必要がある。Protocol を満たす
+    最小実装 (Review G4 用)。
+    """
+
+    def extract_pdf(
+        self, exe_path: Path, watch_dirs: Sequence[Path]
+    ) -> Sequence[Path]:
+        out_dir = watch_dirs[0]
+        out_dir.mkdir(parents=True, exist_ok=True)
+        pdf = out_dir / f"{exe_path.stem}.pdf"
+        pdf.write_bytes(b"%PDF-1.4 new")
+        return [pdf]
+
+
 class TestExtractionItemInvariants:
     def test_success_without_moved_pdfs_raises(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="SUCCESS requires non-empty moved_pdfs"):
@@ -947,11 +965,80 @@ class TestExtractOneOverwriteWithTrashbox:
         assert item.status is ExtractionStatus.SUCCESS
         # 元の trashbox 既存物は上書きされず保持
         assert (existing_quarantined_dir / "report.pdf").read_bytes() == b"OLDER_QUARANTINED"
-        # 新規退避は suffix 付き (report_YYYYMMDD_HHMMSS.pdf)
+        # 新規退避は suffix 付き (report_YYYYMMDD_HHMMSS_<6hex>.pdf)
+        # Review C1: 同秒 silent overwrite 防止のため urandom uniquifier を含む
         suffixed = list(existing_quarantined_dir.glob("report_*.pdf"))
         assert len(suffixed) == 1
         assert suffixed[0].read_bytes() == b"OLD_CONTENT"
-        assert re.match(r"^report_\d{8}_\d{6}\.pdf$", suffixed[0].name)
+        assert re.match(r"^report_\d{8}_\d{6}_[0-9a-f]{6}\.pdf$", suffixed[0].name)
+
+    def test_quarantine_dest_same_second_collision_uses_random_suffix(
+        self,
+        source_dir: Path,
+        facility_root: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """同秒 + urandom suffix 衝突時に ``QUARANTINE_DEST_FAILED`` で明示停止。
+
+        Review C1 / G5 (rating 9): 旧実装は秒精度 timestamp のみで、同秒に複数
+        retry が走ると trashbox 上の前 quarantine を silent overwrite していた。
+        ``_quarantine_pre_existing_target`` と一貫して ``os.urandom(3).hex()``
+        uniquifier を追加 + 衝突再チェックで構造的に排除。urandom を fixed bytes
+        にモックして強制衝突 → OSError → QUARANTINE_DEST_FAILED となる動作を確認。
+        """
+        from datetime import datetime as _dt
+
+        trashbox = tmp_path / "trashbox"
+        facility_subdir = trashbox / facility_root.name / "サービスA"
+        facility_subdir.mkdir(parents=True)
+
+        # urandom と datetime.now() を fixed value にモックして衝突を強制
+        monkeypatch.setattr("os.urandom", lambda n: b"\xab\xcd\xef"[:n])
+
+        class _FixedDatetime:
+            @classmethod
+            def now(cls) -> _dt:
+                return _dt(2026, 5, 9, 12, 0, 0)
+
+        monkeypatch.setattr(
+            "wiseman_hub.pdf.ex_extractor.datetime", _FixedDatetime
+        )
+
+        # 衝突対象: 同 timestamp + 同 urandom hex のファイルを事前配置
+        (facility_subdir / "report.pdf").write_bytes(b"first_quarantined")
+        (facility_subdir / "report_20260509_120000_abcdef.pdf").write_bytes(
+            b"second_collision_target"
+        )
+
+        ex_file = _make_ex_file(source_dir, "2025_DC_A_提供.ex_")
+        existing_pdf = facility_root / "サービスA" / "report.pdf"
+        existing_pdf.write_bytes(b"OLD_3RD")
+
+        adapter = FakeSfxAdapter(
+            produced_pdfs=(source_dir / "report.pdf",),
+            side_effect=_pdf_creating_side_effect(("report.pdf",)),
+        )
+
+        item = extract_one(
+            ex_file,
+            facility_root,
+            ["サービスA"],
+            {"サービスA": ["DC_A"]},
+            adapter,
+            overwrite_existing=True,
+            trashbox_root=trashbox,
+        )
+
+        # 衝突で QUARANTINE_DEST_FAILED (旧 PDF も新 PDF も触られない)
+        assert item.status is ExtractionStatus.MOVE_FAILED
+        assert item.error_code is ExtractionErrorCode.QUARANTINE_DEST_FAILED
+        # 既存 trashbox の "second_collision_target" は silent overwrite されない
+        assert (
+            facility_subdir / "report_20260509_120000_abcdef.pdf"
+        ).read_bytes() == b"second_collision_target"
+        # 旧 PDF は dest にそのまま残る
+        assert existing_pdf.read_bytes() == b"OLD_3RD"
 
     def test_overwrite_false_default_preserves_legacy_move_conflict(
         self, source_dir: Path, facility_root: Path
@@ -1165,6 +1252,188 @@ class TestRetryOverwrite:
         quarantined = trashbox / facility_root.name / "サービスA" / "report.pdf"
         assert quarantined.exists()
         assert quarantined.read_bytes() == b"OLD"
+
+    # ----- Review G3: matched_facility is None 防御パス -----
+
+    def test_move_conflict_without_matched_facility_logged_and_passed_through(
+        self,
+        source_dir: Path,
+        facility_root: Path,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """``MOVE_CONFLICT`` で ``matched_facility is None`` の防御パスが動作する。
+
+        Review G3 (rating 8): ``ExtractionItem.__post_init__`` の不変条件を
+        bypass した invariant 違反 item に対し、retry_overwrite が
+        ``logger.warning`` を出して input 元のまま skip する (=defensive)。
+        """
+        ex_file = _make_ex_file(source_dir, "2025_DC_A_提供.ex_")
+        # __post_init__ をすり抜けるため object.__setattr__ で invariant 違反を構築
+        # (frozen dataclass のため通常代入では構築不能)
+        invariant_violator = ExtractionItem(
+            source_path=ex_file,
+            resolve_result=_dummy_resolve_confirmed("サービスA"),
+            status=ExtractionStatus.MOVE_FAILED,
+            error_code=ExtractionErrorCode.MOVE_CONFLICT,
+        )
+        # post-construction で resolve_result を unmatched に強制 (invariant 違反)
+        object.__setattr__(
+            invariant_violator,
+            "resolve_result",
+            _dummy_resolve_unmatched(),
+        )
+
+        adapter = FakeSfxAdapter(produced_pdfs=())
+
+        with caplog.at_level("WARNING"):
+            result = retry_overwrite(
+                items=(invariant_violator,),
+                facility_root_dir=facility_root,
+                facility_names=["サービスA"],
+                aliases={"サービスA": ["DC_A"]},
+                adapter=adapter,
+                trashbox_root=tmp_path / "trashbox",
+            )
+
+        # input そのまま (再処理されず)
+        assert result == (invariant_violator,)
+        # 防御 log 出力済 (filename のみ含む PII-safe)
+        assert any(
+            "invariant violation" in r.message and ex_file.name in r.message
+            for r in caplog.records
+        )
+
+    # ----- Review G4: 複数 MOVE_CONFLICT items / 部分失敗 -----
+
+    def test_multiple_move_conflicts_retried_independently(
+        self, source_dir: Path, facility_root: Path, tmp_path: Path
+    ) -> None:
+        """複数 MOVE_CONFLICT items を順次 retry し、ordering と独立性を検証。
+
+        Review G4 (rating 7): 業務 context の "3 件 conflict" を実証カバー。
+        SUCCESS item は pass-through、ordering は input 順を保持。
+        """
+        trashbox = tmp_path / "trashbox"
+        # 3 件 conflict + 1 件 SUCCESS
+        conflicts = []
+        for i in range(3):
+            ex_file = _make_ex_file(source_dir, f"2025_DC_A_提供_{i}.ex_")
+            (facility_root / "サービスA" / f"2025_DC_A_提供_{i}.pdf").write_bytes(
+                f"OLD_{i}".encode()
+            )
+            conflicts.append(
+                ExtractionItem(
+                    source_path=ex_file,
+                    resolve_result=_dummy_resolve_confirmed("サービスA"),
+                    status=ExtractionStatus.MOVE_FAILED,
+                    error_code=ExtractionErrorCode.MOVE_CONFLICT,
+                )
+            )
+        success_item = ExtractionItem(
+            source_path=Path("ok.ex_"),
+            resolve_result=_dummy_resolve_confirmed(),
+            status=ExtractionStatus.SUCCESS,
+            moved_pdfs=(facility_root / "サービスA" / "ok.pdf",),
+        )
+
+        # ex_file 毎に異なる PDF を返す動的 adapter (FakeSfxAdapter は単一 fixed
+        # produced_pdfs しか返せないため、複数 retry を表現するには Protocol 直実装)
+        adapter = _DynamicSfxAdapter()
+
+        result = retry_overwrite(
+            items=(*conflicts, success_item),
+            facility_root_dir=facility_root,
+            facility_names=["サービスA"],
+            aliases={"サービスA": ["DC_A"]},
+            adapter=adapter,
+            trashbox_root=trashbox,
+        )
+
+        # ordering 保持 (3 件 conflict + 1 件 SUCCESS、input 順)
+        assert len(result) == 4
+        # 全 conflict が SUCCESS に変化
+        for i in range(3):
+            assert result[i].status is ExtractionStatus.SUCCESS
+        # SUCCESS item は pass-through
+        assert result[3] is success_item
+        # 全旧 PDF が trashbox に退避済 (各々独立)
+        for i in range(3):
+            quarantined = trashbox / facility_root.name / "サービスA" / f"2025_DC_A_提供_{i}.pdf"
+            assert quarantined.exists()
+            assert quarantined.read_bytes() == f"OLD_{i}".encode()
+
+    def test_partial_failure_preserves_success_items(
+        self,
+        source_dir: Path,
+        facility_root: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """1 件目成功 / 2 件目失敗 → 1 件目の成功は破棄されず保持される。
+
+        Review G4 (rating 7): per-item exception の独立性検証。
+        ループ全体を try/except で包む regression を構造的に防ぐ。
+        """
+        trashbox = tmp_path / "trashbox"
+        ex_files = []
+        conflicts = []
+        for i in range(2):
+            ex_file = _make_ex_file(source_dir, f"2025_DC_A_提供_{i}.ex_")
+            ex_files.append(ex_file)
+            (facility_root / "サービスA" / f"2025_DC_A_提供_{i}.pdf").write_bytes(
+                f"OLD_{i}".encode()
+            )
+            conflicts.append(
+                ExtractionItem(
+                    source_path=ex_file,
+                    resolve_result=_dummy_resolve_confirmed("サービスA"),
+                    status=ExtractionStatus.MOVE_FAILED,
+                    error_code=ExtractionErrorCode.MOVE_CONFLICT,
+                )
+            )
+
+        adapter = _DynamicSfxAdapter()
+
+        # 2 件目の trashbox 退避を fail させる
+        original_move = shutil.move
+        call_count = {"trashbox": 0}
+
+        def _fail_second_trashbox_move(
+            src: object, dst: object, *args: object, **kwargs: object
+        ) -> object:
+            if str(trashbox) in str(dst):
+                call_count["trashbox"] += 1
+                if call_count["trashbox"] == 2:
+                    raise OSError("simulated 2nd trashbox failure")
+            return original_move(src, dst, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(shutil, "move", _fail_second_trashbox_move)
+
+        result = retry_overwrite(
+            items=tuple(conflicts),
+            facility_root_dir=facility_root,
+            facility_names=["サービスA"],
+            aliases={"サービスA": ["DC_A"]},
+            adapter=adapter,
+            trashbox_root=trashbox,
+        )
+
+        # 1 件目成功 / 2 件目失敗
+        assert len(result) == 2
+        assert result[0].status is ExtractionStatus.SUCCESS
+        assert result[1].status is ExtractionStatus.MOVE_FAILED
+        assert result[1].error_code is ExtractionErrorCode.QUARANTINE_DEST_FAILED
+        # 1 件目の旧 PDF は trashbox に退避済 (失敗で破棄されていない)
+        first_quarantined = (
+            trashbox / facility_root.name / "サービスA" / "2025_DC_A_提供_0.pdf"
+        )
+        assert first_quarantined.exists()
+        assert first_quarantined.read_bytes() == b"OLD_0"
+        # 2 件目の旧 PDF は dest に残る (中途半端な消失なし)
+        assert (
+            facility_root / "サービスA" / "2025_DC_A_提供_1.pdf"
+        ).read_bytes() == b"OLD_1"
 
 
 # ---------------------------------------------------------------------------

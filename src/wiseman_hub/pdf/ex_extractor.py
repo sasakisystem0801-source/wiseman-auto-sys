@@ -790,8 +790,18 @@ def _quarantine_existing_dest(
 
     target_path = target_dir / dest.name
     if target_path.exists():
+        # 秒精度の strftime だけでは、同秒の連続 retry / 複数 ex_file 処理で
+        # 同名衝突 → shutil.move による silent overwrite で trashbox 上の前ファイル
+        # が消失するため、``_quarantine_pre_existing_target`` (line ~691) と一貫した
+        # urandom suffix で衝突を構造的に回避 (Issue #ex-overwrite review C1)。
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        target_path = target_dir / f"{dest.stem}_{timestamp}{dest.suffix}"
+        unique = os.urandom(3).hex()
+        target_path = target_dir / f"{dest.stem}_{timestamp}_{unique}{dest.suffix}"
+        # 万一 urandom 衝突 (確率 1/16M) でもデータ消失を起こさず明示的に失敗させる
+        if target_path.exists():
+            raise OSError(
+                f"trashbox collision after randomization for {dest.name}"
+            )
 
     shutil.move(str(dest), str(target_path))
     return target_path
@@ -1241,7 +1251,10 @@ def retry_overwrite(
                 overwrite_existing=True,
                 trashbox_root=trashbox_root,
             )
-        except (MemoryError, RecursionError):
+        except (MemoryError, RecursionError, AssertionError):
+            # Review I3 (silent_failure HIGH-3): AssertionError も明示 re-raise
+            # (invariant 違反は隠蔽不可、UNEXPECTED に丸めると本番運用で原因不明化)。
+            # SystemExit / KeyboardInterrupt は BaseException で素通り済。
             raise
         except Exception as e:  # noqa: BLE001
             logger.warning(

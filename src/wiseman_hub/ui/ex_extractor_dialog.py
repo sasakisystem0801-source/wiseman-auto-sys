@@ -246,7 +246,13 @@ class ExExtractorViewModel:
         将来 ``pending_filenames`` 判定ロジックを変えるとき本関数 1 箇所のみ
         改修すれば全経路に反映される (drift 防止)。
         """
-        assert self.result is not None  # caller-enforced invariant
+        # Review I4: ``assert`` は ``python -O`` で消えるため、PyInstaller frozen
+        # build (ADR-002) で contract が無効化されるリスクがある。明示的な raise
+        # で常時 enforce する (両 public caller も同じパターン: line 311 / 323)。
+        if self.result is None:
+            raise RuntimeError(
+                "_merge_replacement_items requires existing result"
+            )
 
         by_source = {item.source_path: item for item in replacement_items}
         new_items = tuple(
@@ -890,12 +896,20 @@ class ExExtractorDialog:
                 "retry_overwrite failed: %s", type(e).__name__
             )
             # 例外時は元の result で SHOWING_RESULT に復帰 (永久 OVERWRITING 防止)
-            self._vm.transition_to_showing_result(saved_result)
-            self._messagebox.showerror(
-                _TITLE_RUN_ERROR,
-                f"上書き再実行中にエラーが発生しました: {type(e).__name__}",
-            )
+            # Review I1: state 遷移自体が RuntimeError (race 等で OVERWRITING 以外
+            # に変化済) で raise した場合の二次破壊を防ぐ
+            try:
+                self._vm.transition_to_showing_result(saved_result)
+            except RuntimeError:
+                logger.warning(
+                    "retry_overwrite recovery failed: vm state changed unexpectedly"
+                )
+            # Review I2: showerror も winfo_exists ガード (close 後の TclError 抑制)
             if self._top.winfo_exists():
+                self._messagebox.showerror(
+                    _TITLE_RUN_ERROR,
+                    f"上書き再実行中にエラーが発生しました: {type(e).__name__}",
+                )
                 self._redraw()
             return
 

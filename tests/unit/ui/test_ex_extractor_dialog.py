@@ -345,6 +345,29 @@ class TestViewModelOverwriteTransitions:
         with pytest.raises(RuntimeError):
             vm.transition_to_overwriting()  # IDLE から遷移不可
 
+    def test_overwriting_can_rollback_to_showing_result_with_saved_result(
+        self, tmp_path: Path
+    ) -> None:
+        """OVERWRITING → SHOWING_RESULT (saved_result 経路) で result が不変。
+
+        Review G1 (rating 9): _on_retry_overwrite_done の例外パスが保持する
+        saved_result 復帰契約を ViewModel レベルで verify (永久 OVERWRITING
+        固着 regression を構造的に防ぐ)。
+        """
+        vm = ExExtractorViewModel(
+            source_dir=tmp_path, facility_root_dir=tmp_path
+        )
+        vm.transition_to_busy()
+        original_result = ExtractionResult(items=(_move_conflict_item("a.ex_"),))
+        vm.transition_to_showing_result(original_result)
+        vm.transition_to_overwriting()
+        assert vm.state is UiState.OVERWRITING
+
+        # 例外復帰経路: 同じ saved_result で SHOWING_RESULT に戻れる
+        vm.transition_to_showing_result(original_result)
+        assert vm.state is UiState.SHOWING_RESULT
+        assert vm.result is original_result  # 不変条件
+
     def test_merge_overwrite_results_replaces_conflict_item(
         self, tmp_path: Path
     ) -> None:
