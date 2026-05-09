@@ -11,7 +11,7 @@ import os
 from dataclasses import asdict, dataclass, field
 from glob import glob
 from pathlib import Path
-from typing import Any, Literal, get_args
+from typing import Any, Final, Literal, get_args
 
 import tomlkit
 from tomlkit import TOMLDocument
@@ -283,6 +283,18 @@ class ReportStaffEntry:
     file_template: str = ""
 
 
+# PR #233 substring match 化以前の旧 default 値。本田様 PC 等で TOML に保存
+# された旧値が PR #233 の自動吸収を bypass する事故防止のため、ChecklistConfig
+# 構築時に検出して logger.warning で気付ける仕組みを提供する。
+# canonical name (= "運動器機能向上計画書") を含む他のバリアントは folder 側の
+# 揺らぎとして substring match が吸収するため、設定値としての legacy 検出は
+# 完全一致の固定値に絞る (= 過剰警告防止)。
+_LEGACY_MONITORING_SUBFOLDERS: Final[frozenset[str]] = frozenset({
+    "08.運動器機能向上計画書",
+    "10.運動器機能向上計画書",
+})
+
+
 @dataclass
 class ChecklistConfig:
     """スプレッドシート連携 B/C PDF 自動配置機能の設定（MVP）。
@@ -294,6 +306,8 @@ class ChecklistConfig:
         substring match で `08.<canonical>` / `10.<canonical>` / prefix なし /
         `<canonical>(過去分)` 等の揺らぎを吸収する。default は
         ``"運動器機能向上計画書"``。
+        ``__post_init__`` で ``_LEGACY_MONITORING_SUBFOLDERS`` (旧 default 値)
+        を検出して ``logger.warning`` で気付ける (PR #233 後の救済)。
     fax_root: 出力先 FAX 事業所ルート（``\\\\Tera-station\\share\\03.FAX(事業所)``）
     b_output_subfolder: FAX 事業所フォルダ配下の B 出力サブフォルダ名（運動機能向上計画書）
     c_output_subfolder: FAX 事業所フォルダ配下の C 出力サブフォルダ名（経過報告書）
@@ -314,6 +328,27 @@ class ChecklistConfig:
     facility_routing: dict[str, str] = field(default_factory=dict)
     report_staff: dict[str, ReportStaffEntry] = field(default_factory=dict)
     xlsx_path_cache: dict[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """legacy ``monitoring_subfolder`` 値を検出して WARNING で気付かせる。
+
+        PR #233 (2026-05-09) で ``monitoring_subfolder`` の運用を canonical name
+        + substring match に変更した。本田様 PC 等で旧 default 値が保存済 TOML に
+        残ると新ロジックの prefix/suffix 自動吸収が効かないため、構築時に
+        検出して ``logger.warning`` で気付ける。
+        現時点でも値そのものは動作するため (完全一致 prefix で 1 件だけ HIT する
+        運用は維持)、エラーではなく WARNING にする。
+        """
+        if self.monitoring_subfolder in _LEGACY_MONITORING_SUBFOLDERS:
+            logger.warning(
+                "monitoring_subfolder='%s' is a legacy value. "
+                "PR #233 (2026-05-09) introduced substring matching, so set this "
+                "to the canonical name '運動器機能向上計画書' to enable "
+                "automatic absorption of prefix/suffix variants "
+                "(e.g. '10.運動器機能向上計画書', '運動器機能向上計画書(過去分)'). "
+                "Current value still works for exact prefix match but bypasses the new behavior.",
+                self.monitoring_subfolder,
+            )
 
 
 @dataclass

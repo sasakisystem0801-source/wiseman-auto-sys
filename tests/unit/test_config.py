@@ -1,5 +1,6 @@
 """設定ローダーのユニットテスト"""
 
+import logging
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
@@ -1557,3 +1558,76 @@ suggest_patterns = ""
         assert entry.suggest_patterns == []
         assert entry.year_subfolder_template == "リハ経過報告書\\令和{era}年"
         assert entry.file_template == "リハ経過報告書 (宮下) {month}月 .xlsx"
+
+
+class TestChecklistConfigDeprecationWarning:
+    """ChecklistConfig.monitoring_subfolder の legacy 値検出 (PR #233 後の救済)。
+
+    本田様 PC 等で旧 default 値 ``08.運動器機能向上計画書`` / ``10.運動器機能向上計画書``
+    が TOML に保存されている場合、PR #233 (substring match) の自動吸収が
+    効かない。__post_init__ で検出 → logger.warning することで運用上気付ける。
+    """
+
+    def test_legacy_value_with_08_prefix_emits_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """旧 default ``08.運動器機能向上計画書`` で WARNING 発火。"""
+        with caplog.at_level(logging.WARNING, logger="wiseman_hub.config"):
+            ChecklistConfig(monitoring_subfolder="08.運動器機能向上計画書")
+        assert any(
+            "08.運動器機能向上計画書" in record.getMessage()
+            and "運動器機能向上計画書" in record.getMessage()
+            for record in caplog.records
+        )
+
+    def test_legacy_value_with_10_prefix_emits_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """業務問題の発端 ``10.運動器機能向上計画書`` も legacy 扱いで WARNING。"""
+        with caplog.at_level(logging.WARNING, logger="wiseman_hub.config"):
+            ChecklistConfig(monitoring_subfolder="10.運動器機能向上計画書")
+        assert any(
+            "10.運動器機能向上計画書" in record.getMessage()
+            for record in caplog.records
+        )
+
+    def test_canonical_value_does_not_warn(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """新 default ``運動器機能向上計画書`` (canonical) は WARNING 出ない。"""
+        with caplog.at_level(logging.WARNING, logger="wiseman_hub.config"):
+            ChecklistConfig(monitoring_subfolder="運動器機能向上計画書")
+        assert not any(
+            "monitoring_subfolder" in record.getMessage()
+            for record in caplog.records
+        )
+
+    def test_substring_absorbable_variant_does_not_warn(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """substring match で吸収可能なバリアント (``運動器機能向上計画書(過去分)``)
+        は legacy 扱いせず WARNING 出ない。canonical name 設定は維持し、folder 側の
+        揺らぎは substring match で吸収する設計のため、設定値としての WARNING は
+        canonical name 完全不一致の固定 legacy 値に絞る。
+        """
+        with caplog.at_level(logging.WARNING, logger="wiseman_hub.config"):
+            ChecklistConfig(monitoring_subfolder="運動器機能向上計画書(過去分)")
+        assert not any(
+            "monitoring_subfolder" in record.getMessage()
+            for record in caplog.records
+        )
+
+    def test_default_construction_does_not_warn(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """引数なしの ``ChecklistConfig()`` (= 新 default 値) は WARNING 出ない。
+
+        既存の数百件のテストが ``ChecklistConfig()`` を使っているため、
+        default 構築で warning が出ないことを保証する (テスト騒音防止)。
+        """
+        with caplog.at_level(logging.WARNING, logger="wiseman_hub.config"):
+            ChecklistConfig()
+        assert not any(
+            "monitoring_subfolder" in record.getMessage()
+            for record in caplog.records
+        )
