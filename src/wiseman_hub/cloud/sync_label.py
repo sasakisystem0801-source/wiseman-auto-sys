@@ -71,7 +71,7 @@ def write_sync_timestamp(
     name: str,
     *,
     ts: _dt.datetime | None = None,
-) -> None:
+) -> bool:
     """指定 ``name`` の sync timestamp を JSON として書き込む。
 
     Args:
@@ -81,15 +81,23 @@ def write_sync_timestamp(
             上書きする (既存値があれば置換)。**過去時刻を保持したい migration
             用途では必ず明示的に tz-aware datetime を渡すこと**。
 
+    Returns:
+        ``True``: 書込成功 (mkdir + write_text 完了)
+        ``False``: I/O 失敗 (mkdir / write_text の OSError)。caller は warn ログ
+        を出して UI 進行を継続すること。
+
     Raises:
         ValueError: ``name`` が制約違反 / ``ts`` が naive (tz 欠落) datetime。
-
-    書込失敗 (OSError) は warning ログのみ (fatal にしない、UI 進行を止めない)。
 
     review 反映 (code-reviewer I-1 rating 7): ``read_sync_timestamp`` は naive
     datetime を None フォールバックして「不明」表示にするため、書込側で naive
     を受け入れると「書いた直後に read で消える」asymmetric が発生する。
     対称性を担保するため write 側で構造的に reject。
+
+    Phase 2-β (silent-failure F1 rating 6): 書込失敗 (OSError) は raise せず
+    ``False`` を返す契約に変更。caller (Tk handler) は False を見て warn ログ
+    を emit し UI 進行を継続する。**入力不正 (ValueError) と I/O 失敗 (False)
+    の境界を保つ**: caller bug は例外、I/O 経路は戻り値で signal。
     """
     _validate_name(name)
     if ts is None:
@@ -105,7 +113,7 @@ def write_sync_timestamp(
         logger.warning(
             "sync timestamp mkdir failed: %s: %s", cache_dir, type(exc).__name__
         )
-        return
+        return False
     path = _path_for(cache_dir, name)
     payload = {"fetched_at": ts.isoformat()}
     try:
@@ -116,6 +124,8 @@ def write_sync_timestamp(
         logger.warning(
             "sync timestamp write failed: %s: %s", path, type(exc).__name__
         )
+        return False
+    return True
 
 
 def read_sync_timestamp(cache_dir: Path, name: str) -> _dt.datetime | None:

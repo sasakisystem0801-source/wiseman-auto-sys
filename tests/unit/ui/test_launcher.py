@@ -259,6 +259,9 @@ class TestLauncherSyncSummary:
                 config=AppConfig(),
                 config_path=cfg,
                 root=root,
+                # Phase 2-β (I-2): production default = True (after_idle 遅延)、
+                # test では deterministic な同期実行を要求する。
+                defer_initial_refresh=False,
             )
             assert launcher._sync_vars["mapping_routing"].get() == (
                 "居宅対照表: 不明"
@@ -301,6 +304,7 @@ class TestLauncherSyncSummary:
                 config_path=cfg,
                 root=root,
                 now_fn=lambda: fixed_now,
+                defer_initial_refresh=False,
             )
             assert launcher._sync_vars["mapping_routing"].get() == (
                 "居宅対照表: 不明"
@@ -334,6 +338,7 @@ class TestLauncherSyncSummary:
                 config_path=cfg,
                 root=root,
                 now_fn=lambda: fixed_now,
+                defer_initial_refresh=False,
             )
             text = launcher._sync_vars["mapping_routing"].get()
             assert text.startswith("居宅対照表: ")
@@ -362,6 +367,7 @@ class TestLauncherSyncSummary:
                 config_path=cfg,
                 root=root,
                 now_fn=lambda: fixed_now,
+                defer_initial_refresh=False,
             )
             # 起動直後は cache 不在 → 不明 (Phase 1 ChecklistCDialog と統一)
             assert launcher._sync_vars["report_staff"].get() == (
@@ -424,10 +430,117 @@ class TestLauncherSyncSummary:
                 config_path=cfg,
                 root=root,
                 now_fn=lambda: fixed_now,
+                defer_initial_refresh=False,
             )
             text = launcher._sync_vars["sheets"].get()
             assert text.startswith("シート一覧: ")
             # 3 分前 (180 秒) → "3 分前" 表示で deterministic
             assert text.endswith("(3 分前)")
+        finally:
+            root.destroy()
+
+
+# ---------------------------------------------------------------------------
+# Phase 2-β (Issue #238): I-2 — _refresh_sync_summary を window 描画後に遅延
+# ---------------------------------------------------------------------------
+
+
+@tk_required
+class TestLauncherDeferredInitialRefresh:
+    """Phase 2-β (I-2): 起動時 cache I/O を Tk window 描画後に遅延する。
+
+    production default は ``defer_initial_refresh=True`` (after_idle 経由)、
+    test では ``False`` を渡して deterministic な同期実行に切替。
+
+    本テストは defer 機構そのもの (True 時の挙動) を確認する。
+    """
+
+    def _make_config_path(self, tmp_path: Path) -> Path:
+        cfg = tmp_path / "wiseman-hub" / "config" / "default.toml"
+        cfg.parent.mkdir(parents=True, exist_ok=True)
+        cfg.write_text("", encoding="utf-8")
+        return cfg
+
+    def test_initial_render_shows_unknown_when_deferred(
+        self, tmp_path: Path
+    ) -> None:
+        """``defer_initial_refresh=True`` (default) なら ``__init__`` 直後は
+        StringVar が初期値「不明」のままで cache read を行わない。"""
+        import datetime as _dt
+        import tkinter as tk
+
+        from wiseman_hub.cloud.sync_label import (
+            sync_cache_dir_for,
+            write_sync_timestamp,
+        )
+
+        cfg = self._make_config_path(tmp_path)
+        cache_dir = sync_cache_dir_for(cfg)
+        ts = _dt.datetime(2026, 5, 9, 14, 25, tzinfo=_dt.UTC)
+        write_sync_timestamp(cache_dir, "mapping_routing", ts=ts)
+
+        fixed_now = _dt.datetime(2026, 5, 9, 14, 30, tzinfo=_dt.UTC)
+        root = tk.Tk()
+        try:
+            launcher = Launcher(
+                config=AppConfig(),
+                config_path=cfg,
+                root=root,
+                now_fn=lambda: fixed_now,
+                # defer_initial_refresh は default で True (production)
+            )
+            # __init__ 直後 (mainloop 開始前) は initial 値「不明」のまま
+            assert launcher._sync_vars["mapping_routing"].get() == (
+                "居宅対照表: 不明"
+            )
+            # Tk idle queue を回すと after_idle callback が走り cache 値で update
+            root.update_idletasks()
+            text = launcher._sync_vars["mapping_routing"].get()
+            assert text.startswith("居宅対照表: ")
+            assert text.endswith("(5 分前)")
+        finally:
+            root.destroy()
+
+    def test_default_defer_is_true(self, tmp_path: Path) -> None:
+        """``defer_initial_refresh`` の default 値は True (production 想定)。"""
+        import inspect
+
+        from wiseman_hub.ui.launcher import Launcher as _Launcher
+
+        sig = inspect.signature(_Launcher.__init__)
+        assert sig.parameters["defer_initial_refresh"].default is True
+
+    def test_defer_false_renders_immediately(self, tmp_path: Path) -> None:
+        """``defer_initial_refresh=False`` なら ``__init__`` 内で同期 refresh。
+
+        既存 Phase 2-α テスト 5 件 (cache 値を直接 assert) が動くための仕掛け。
+        """
+        import datetime as _dt
+        import tkinter as tk
+
+        from wiseman_hub.cloud.sync_label import (
+            sync_cache_dir_for,
+            write_sync_timestamp,
+        )
+
+        cfg = self._make_config_path(tmp_path)
+        cache_dir = sync_cache_dir_for(cfg)
+        ts = _dt.datetime(2026, 5, 9, 14, 25, tzinfo=_dt.UTC)
+        write_sync_timestamp(cache_dir, "mapping_routing", ts=ts)
+
+        fixed_now = _dt.datetime(2026, 5, 9, 14, 30, tzinfo=_dt.UTC)
+        root = tk.Tk()
+        try:
+            launcher = Launcher(
+                config=AppConfig(),
+                config_path=cfg,
+                root=root,
+                now_fn=lambda: fixed_now,
+                defer_initial_refresh=False,
+            )
+            # __init__ 直後で既に cache 値が反映されている (update_idletasks 不要)
+            text = launcher._sync_vars["mapping_routing"].get()
+            assert text.startswith("居宅対照表: ")
+            assert text.endswith("(5 分前)")
         finally:
             root.destroy()

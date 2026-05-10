@@ -106,6 +106,7 @@ class Launcher:
         on_open_checklist_c: Callable[[], None] | None = None,
         messagebox_fn: MessageBoxLike | None = None,
         now_fn: Callable[[], _dt.datetime] | None = None,
+        defer_initial_refresh: bool = True,
     ) -> None:
         assert_main_thread("Launcher")
 
@@ -116,6 +117,10 @@ class Launcher:
         self._now_fn: Callable[[], _dt.datetime] = now_fn or (
             lambda: _dt.datetime.now(tz=_dt.UTC)
         )
+        # Phase 2-β (Issue #238 I-2): 起動時 cache I/O を Tk window 描画後に遅延
+        # するためのフラグ。production default = True (after_idle で初回 refresh
+        # を予約)、テストでは False を渡して deterministic な同期実行に切替。
+        self._defer_initial_refresh = defer_initial_refresh
         # _build_sync_summary で初期化される (StringVar は Tk root 取得後でないと作れない)
         self._sync_vars: dict[str, tk.StringVar] = {}
 
@@ -219,6 +224,10 @@ class Launcher:
         ``StringVar`` で更新可能。初期値は「不明」 (Phase 1 ChecklistCDialog と
         統一、cache 不在 / parse 失敗 / tz naive すべて ``format_synced_at_label``
         の None 経路で「不明」に集約)。
+
+        Phase 2-β (I-2): 起動時 cache I/O は ``self._defer_initial_refresh`` が
+        True (production default) なら ``after_idle`` で window 描画完了後に
+        遅延実行する。テストでは ``False`` で同期実行に切替。
         """
         frame = ttk.LabelFrame(
             root, text="GCP 同期サマリー", padding=8
@@ -228,22 +237,39 @@ class Launcher:
             var = tk.StringVar(value=f"{label}: 不明")
             ttk.Label(frame, textvariable=var, anchor="w").pack(fill="x")
             self._sync_vars[key] = var
-        self._refresh_sync_summary()
+        if self._defer_initial_refresh:
+            # Tk idle queue にキューイング (mainloop が初回 idle に入った時点で実行)
+            self._root.after_idle(self._refresh_sync_summary)
+        else:
+            self._refresh_sync_summary()
 
     def _refresh_sync_summary(self) -> None:
         """sync_summary の各行を最新の cache 状態で再描画する (Phase 2-α / Issue #238)。
 
         本処理は Tk main thread 上の同期 I/O (3 ファイル分の JSON read) を伴うが、
         各 read は ``read_sync_timestamp`` / ``sheet_list_cache.load`` 内部で warn-only
-        フォールバックされる。Launcher 起動時の体感遅延が問題になる場合は将来 daemon
-        thread 化する余地あり (review_team I-2 rating 7、Phase 2-β 繰越判定)。
+        フォールバックされる。Phase 2-β (I-2) で ``defer_initial_refresh=True`` 時は
+        ``after_idle`` で初回呼出を window 描画後に遅延する。
 
         review 反映 (evaluator AC-2): cache 不在 / parse 失敗 / tz naive のすべてを
         ``format_synced_at_label(None, now)`` 経由で「不明」表示に集約。Phase 1 の
         ChecklistCDialog (sheet_list_cache 直接呼出) との文言整合を取る。
+
+        review 反映 (silent-failure H2 rating 7): ``after_idle`` callback が destroy
+        後の root に発火する race を防ぐため、winfo_exists ガードで早期 return。
+        production の dongle 認証失敗による即終了 / TeamViewer 起動 race / test の
+        早期 ``root.destroy()`` 経路で ``TclError("invalid command name ...")`` が出
+        ないようにする (Tk exception guard で捕捉されるが、起動直後にエラーダイア
+        ログが出るのは UX 上望ましくない)。
         """
         if not self._sync_vars:
             return  # _build_sync_summary 完了前 (_build_ui 直前) に呼ばれた場合
+        # I-2 race-guard: after_idle 経由で root が既に destroy されていたら諦める。
+        try:
+            if not self._root.winfo_exists():
+                return
+        except tk.TclError:
+            return
         from wiseman_hub.cloud.sync_label import (
             format_synced_at_label,
             read_sync_timestamp,

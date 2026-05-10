@@ -107,7 +107,9 @@ class TestWriteReadSyncTimestamp:
     """write/read の round-trip + edge cases。"""
 
     def test_round_trip_returns_aware_datetime(self, tmp_path: Path) -> None:
-        write_sync_timestamp(tmp_path, "mapping_routing")
+        ok = write_sync_timestamp(tmp_path, "mapping_routing")
+        # Phase 2-β (F1): 成功時は True を返す
+        assert ok is True
         ts = read_sync_timestamp(tmp_path, "mapping_routing")
         assert ts is not None
         assert ts.tzinfo is not None
@@ -179,11 +181,11 @@ class TestWriteReadSyncTimestamp:
         with pytest.raises(ValueError, match="timezone-aware"):
             write_sync_timestamp(tmp_path, "k", ts=naive)
 
-    def test_mkdir_oserror_returns_silently(
+    def test_mkdir_oserror_returns_false(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """review 反映 (evaluator AC-7): mkdir OSError は warn + 何も書かず return。"""
+        """review 反映 (evaluator AC-7 + Phase 2-β F1): mkdir OSError は warn + False。"""
         import logging
         readonly_dir = tmp_path / "readonly_cache"
 
@@ -193,17 +195,19 @@ class TestWriteReadSyncTimestamp:
         monkeypatch.setattr(Path, "mkdir", _raise_oserror)
         with caplog.at_level(logging.WARNING):
             # raise しないことが契約 (UI 進行を止めない)
-            write_sync_timestamp(readonly_dir, "mapping_routing")
+            ok = write_sync_timestamp(readonly_dir, "mapping_routing")
+        # Phase 2-β (F1): I/O 失敗は False を返す (caller が warn ログ可能)
+        assert ok is False
         # ファイルは書かれていない
         assert not (readonly_dir / "mapping_routing.json").exists()
         # warning ログが出ている
         assert any("mkdir failed" in rec.message for rec in caplog.records)
 
-    def test_write_oserror_returns_silently(
+    def test_write_oserror_returns_false(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """review 反映 (evaluator AC-7): write_text OSError も warn + return。"""
+        """review 反映 (evaluator AC-7 + Phase 2-β F1): write_text OSError は warn + False。"""
         import logging
 
         def _raise_oserror(*args: object, **kwargs: object) -> None:
@@ -211,8 +215,16 @@ class TestWriteReadSyncTimestamp:
 
         monkeypatch.setattr(Path, "write_text", _raise_oserror)
         with caplog.at_level(logging.WARNING):
-            write_sync_timestamp(tmp_path, "mapping_routing")
+            ok = write_sync_timestamp(tmp_path, "mapping_routing")
+        # Phase 2-β (F1): write 失敗も False を返す
+        assert ok is False
         assert any("write failed" in rec.message for rec in caplog.records)
+
+    def test_explicit_ts_returns_true(self, tmp_path: Path) -> None:
+        """Phase 2-β (F1): explicit ts override 経路でも success → True。"""
+        custom = _dt.datetime(2026, 5, 9, 10, 0, tzinfo=_dt.UTC)
+        ok = write_sync_timestamp(tmp_path, "report_staff", ts=custom)
+        assert ok is True
 
 
 class TestSyncCacheDirFor:
