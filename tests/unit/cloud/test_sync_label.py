@@ -226,6 +226,40 @@ class TestWriteReadSyncTimestamp:
         ok = write_sync_timestamp(tmp_path, "report_staff", ts=custom)
         assert ok is True
 
+    def test_cache_dir_path_is_file_returns_false(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Issue #246 (Phase 3 P1-2 rating 8): cache_dir が file の場合は False。
+
+        Windows 配布固有 fail mode:
+            - PyInstaller 配布先で別ユーザー権限により cache_dir 名と同名の file
+              が作成されている場合
+            - インストール時の atomic_replace で file → directory 置換が失敗した残骸
+            - 手動でユーザーが cache_dir 名と同名の file を作成した場合
+
+        ``Path.mkdir(parents=True, exist_ok=True)`` は対象が file として存在する
+        と ``FileExistsError`` (``OSError`` サブクラス) を raise するため、
+        ``write_sync_timestamp`` 内の ``except OSError`` で捕捉され False を返す。
+
+        本 test は ``test_mkdir_oserror_returns_false`` (monkeypatch) の補完で、
+        実際の filesystem 状態を作って behavioral に検証する。
+        """
+        import logging
+        file_path = tmp_path / "blocking_file_at_cache_dir_path"
+        file_path.write_text("pre-existing user file", encoding="utf-8")
+        assert file_path.is_file()
+
+        with caplog.at_level(logging.WARNING):
+            ok = write_sync_timestamp(file_path, "mapping_routing")
+
+        # Phase 2-β (F1) 契約: I/O 失敗は False を返す (raise しない)
+        assert ok is False
+        # 既存 file は破壊されない
+        assert file_path.is_file()
+        assert file_path.read_text(encoding="utf-8") == "pre-existing user file"
+        # warning ログが出ている (mkdir failed 経路)
+        assert any("mkdir failed" in rec.message for rec in caplog.records)
+
 
 class TestSyncCacheDirFor:
     def test_derives_from_config_path(self, tmp_path: Path) -> None:
