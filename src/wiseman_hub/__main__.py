@@ -213,11 +213,18 @@ def _make_checklist_b_callback(
         )
         dialog.get_toplevel().wait_window()
         # 設定が変更された可能性 → Launcher 側を再ロード
+        # Issue #250: facility_root post-action と対称化。silent な ``pass`` だと
+        # 古い config が Launcher に残ったままユーザーは保存反映されない理由が不明。
+        # PII 防御で型名のみ warning ログに残す。
         try:
             updated = load_config(config_path)
-            launcher.reload_config(updated)
-        except (OSError, ValueError, TypeError):
-            pass
+        except (OSError, ValueError, TypeError) as exc:
+            logger.warning(
+                "load_config after checklist_b dialog failed: %s",
+                type(exc).__name__,
+            )
+            return
+        launcher.reload_config(updated)
 
     return open_checklist_b
 
@@ -253,11 +260,16 @@ def _make_checklist_c_callback(
             parent=launcher.get_root(), config=config, config_path=config_path
         )
         dialog.get_toplevel().wait_window()
+        # Issue #250: facility_root post-action と対称化 (checklist_b と同形)。
         try:
             updated = load_config(config_path)
-            launcher.reload_config(updated)
-        except (OSError, ValueError, TypeError):
-            pass
+        except (OSError, ValueError, TypeError) as exc:
+            logger.warning(
+                "load_config after checklist_c dialog failed: %s",
+                type(exc).__name__,
+            )
+            return
+        launcher.reload_config(updated)
 
     return open_checklist_c
 

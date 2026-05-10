@@ -798,3 +798,224 @@ class TestPostStartupCallbackLoadConfigError:
         assert all(
             "disk full" not in rec.message for rec in caplog.records
         )
+
+
+class TestPostActionReloadWarningLog:
+    """Issue #250: post-action reload (dialog 終了後の load_config) 失敗時の warning ログ化。
+
+    PR #249 (Issue #158) で起動前 callback の load_config 失敗を actionable
+    error 化したが、dialog 終了後の **post-action reload** は checklist_b/c
+    で完全 silent (``except: pass``) のままだった。``facility_root`` post-action
+    の warning ログパターンと対称化することを契約化する。
+
+    対象 callback (post-action reload を持つ 3 callback):
+        - ``_make_facility_merger_callback`` (facility_root)
+        - ``_make_checklist_b_callback``
+        - ``_make_checklist_c_callback``
+
+    ``ex_extractor`` は post-action reload を持たない (dialog 内部の
+    ``on_source_persisted`` 経由で reload するため、本契約の対象外)。
+
+    期待挙動 (3 callback 共通):
+        - 1 回目 load_config (起動前) は成功し dialog を構築
+        - dialog 終了後の 2 回目 load_config が ``(OSError, ValueError, TypeError)``
+          のいずれかを raise した場合
+        - ``logger.warning`` に PII-safe (型名のみ) のメッセージが記録される
+        - ``launcher.reload_config`` は呼ばれない (early return)
+        - 例外は callback の外に漏れない
+
+    PII 防御契約 (本テスト群で固定):
+        - log は ``type(exc).__name__`` のみ。``exc.args`` / ``str(exc)`` は出さない
+        - ``logger.warning("... %s", exc)`` への退化を test で catch
+    """
+
+    @staticmethod
+    def _setup_load_config_succeed_then_raise(
+        monkeypatch: Any, config: Any, exc: Exception
+    ) -> list[int]:
+        """1 回目は ``config`` を返し、2 回目以降は ``exc`` を raise する load_config スタブ。
+
+        Returns:
+            呼び出し回数を保持する 1 要素 list (test 側で counter[0] を assert)。
+        """
+        counter = [0]
+
+        def _stub(_p: Path) -> Any:
+            counter[0] += 1
+            if counter[0] == 1:
+                return config
+            raise exc
+
+        monkeypatch.setattr("wiseman_hub.config.load_config", _stub)
+        return counter
+
+    @staticmethod
+    def _install_noop_dialog(monkeypatch: Any, target: str) -> None:
+        """``target`` (dotted path) のダイアログを即座に閉じる no-op スタブに差し替え。"""
+
+        class _NoopToplevel:
+            def wait_window(self) -> None:
+                return None
+
+        class _NoopDialog:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                return None
+
+            def get_toplevel(self) -> Any:
+                return _NoopToplevel()
+
+        monkeypatch.setattr(target, _NoopDialog)
+
+    def test_facility_root_callback_post_action_warning_on_oserror(
+        self, tmp_path: Path, monkeypatch: Any, caplog: Any
+    ) -> None:
+        """facility_root callback: post-action reload OSError → warning ログ + reload_config 不呼。"""
+        import logging
+
+        config_file = tmp_path / "config.toml"
+        config_file.write_text("", encoding="utf-8")
+
+        fake_config = object()
+        counter = self._setup_load_config_succeed_then_raise(
+            monkeypatch, fake_config, OSError("permission denied")
+        )
+        self._install_noop_dialog(
+            monkeypatch,
+            "wiseman_hub.ui.facility_root_dialog.FacilityRootManagerDialog",
+        )
+
+        reload_called: list[Any] = []
+
+        class FakeLauncher:
+            def get_root(self) -> None:
+                return None
+
+            def reload_config(self, config: Any) -> None:
+                reload_called.append(config)
+
+        from wiseman_hub.__main__ import _make_facility_merger_callback
+
+        callback = _make_facility_merger_callback(
+            config_file, lambda: FakeLauncher()
+        )
+
+        with caplog.at_level(logging.WARNING):
+            callback()
+
+        # 1 回目 (起動前) + 2 回目 (post-action) の計 2 回呼ばれた
+        assert counter[0] == 2
+        # post-action reload が失敗 → launcher.reload_config は呼ばれない
+        assert reload_called == []
+        # warning ログ: PII-safe (型名のみ)
+        warning_records = [
+            rec for rec in caplog.records if rec.levelname == "WARNING"
+        ]
+        assert any(
+            "OSError" in rec.message
+            and "facility_root" in rec.message
+            for rec in warning_records
+        )
+        # PII 防御: exc.args (filesystem state の漏洩) は出さない
+        assert all(
+            "permission denied" not in rec.message for rec in caplog.records
+        )
+
+    def test_checklist_b_callback_post_action_warning_on_valueerror(
+        self, tmp_path: Path, monkeypatch: Any, caplog: Any
+    ) -> None:
+        """checklist_b callback: post-action reload ValueError → warning + reload_config 不呼。"""
+        import logging
+
+        config_file = tmp_path / "config.toml"
+        config_file.write_text("", encoding="utf-8")
+
+        fake_config = object()
+        counter = self._setup_load_config_succeed_then_raise(
+            monkeypatch, fake_config, ValueError("invalid TOML structure")
+        )
+        self._install_noop_dialog(
+            monkeypatch,
+            "wiseman_hub.ui.checklist_b_dialog.ChecklistBDialog",
+        )
+
+        reload_called: list[Any] = []
+
+        class FakeLauncher:
+            def get_root(self) -> None:
+                return None
+
+            def reload_config(self, config: Any) -> None:
+                reload_called.append(config)
+
+        from wiseman_hub.__main__ import _make_checklist_b_callback
+
+        callback = _make_checklist_b_callback(
+            config_file, lambda: FakeLauncher()
+        )
+
+        with caplog.at_level(logging.WARNING):
+            callback()
+
+        assert counter[0] == 2
+        assert reload_called == []
+        warning_records = [
+            rec for rec in caplog.records if rec.levelname == "WARNING"
+        ]
+        assert any(
+            "ValueError" in rec.message and "checklist_b" in rec.message
+            for rec in warning_records
+        )
+        assert all(
+            "invalid TOML structure" not in rec.message
+            for rec in caplog.records
+        )
+
+    def test_checklist_c_callback_post_action_warning_on_typeerror(
+        self, tmp_path: Path, monkeypatch: Any, caplog: Any
+    ) -> None:
+        """checklist_c callback: post-action reload TypeError → warning + reload_config 不呼。"""
+        import logging
+
+        config_file = tmp_path / "config.toml"
+        config_file.write_text("", encoding="utf-8")
+
+        fake_config = object()
+        counter = self._setup_load_config_succeed_then_raise(
+            monkeypatch, fake_config, TypeError("expected dict, got list")
+        )
+        self._install_noop_dialog(
+            monkeypatch,
+            "wiseman_hub.ui.checklist_c_dialog.ChecklistCDialog",
+        )
+
+        reload_called: list[Any] = []
+
+        class FakeLauncher:
+            def get_root(self) -> None:
+                return None
+
+            def reload_config(self, config: Any) -> None:
+                reload_called.append(config)
+
+        from wiseman_hub.__main__ import _make_checklist_c_callback
+
+        callback = _make_checklist_c_callback(
+            config_file, lambda: FakeLauncher()
+        )
+
+        with caplog.at_level(logging.WARNING):
+            callback()
+
+        assert counter[0] == 2
+        assert reload_called == []
+        warning_records = [
+            rec for rec in caplog.records if rec.levelname == "WARNING"
+        ]
+        assert any(
+            "TypeError" in rec.message and "checklist_c" in rec.message
+            for rec in warning_records
+        )
+        assert all(
+            "expected dict, got list" not in rec.message
+            for rec in caplog.records
+        )
