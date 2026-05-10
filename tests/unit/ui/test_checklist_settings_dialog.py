@@ -393,3 +393,148 @@ class TestRecordWarnsOnWriteFailure:
             rec for rec in caplog.records if rec.levelno >= logging.WARNING
         ]
         assert warns == []
+
+
+# ---------------------------------------------------------------------------
+# Phase 2-β review 反映 (pr-test P0 rating 9 + codex rating 7-8 推奨):
+# F4 dirty flag の behavioral test (実 Tk + monkeypatch)。source-level static
+# check は維持しつつ、構造変更に強い動作テストを薄く追加。
+# ---------------------------------------------------------------------------
+
+
+tk_required = pytest.mark.tk_required
+
+
+@tk_required
+class TestPulledDirtyFlagBehavioral:
+    """Phase 2-β (F4) review 反映: dirty flag の挙動を Tk 上で実証する。
+
+    review (pr-test P0 rating 9): source-level static check はリファクタで
+    リテラルが移動すると空振りするため、最小 1 件は behavioral に固定する。
+    review (codex rating 8 conf 90): save 失敗時に flag を維持して retry で
+    正しく記録される invariant も合わせて固定。
+
+    Tk 環境がない CI runner では ``@tk_required`` で skip される (Mac dev も同様)。
+    Linux CI で実行され、構造変更で dirty flag 機構が壊れたら検出する役割。
+    """
+
+    def _make_config_path(self, tmp_path):  # type: ignore[no-untyped-def]
+        from pathlib import Path  # noqa: F401 (Path 自体は型注釈で使用)
+        cfg = tmp_path / "wiseman-hub" / "config" / "default.toml"
+        cfg.parent.mkdir(parents=True, exist_ok=True)
+        cfg.write_text("", encoding="utf-8")
+        return cfg
+
+    def test_save_failure_keeps_dirty_flags_for_retry(
+        self, tmp_path, monkeypatch,
+    ) -> None:  # type: ignore[no-untyped-def]
+        """save 失敗 (TOML parse error) で flag が True のまま残り、retry save で
+        正しく記録される (closed-loop verify の本質的 invariant)。"""
+        import tkinter as tk
+
+        from wiseman_hub.config import AppConfig
+        from wiseman_hub.ui import checklist_settings_dialog as csd
+
+        # _record_sync_timestamp の呼出回数を観測
+        recorded: list[tuple[str, str]] = []
+
+        def _spy_record(config_path, name):  # type: ignore[no-untyped-def]
+            recorded.append((str(config_path), name))
+
+        monkeypatch.setattr(
+            csd, "_record_sync_timestamp", _spy_record,
+        )
+        # messagebox を全部 fake (yes/no は True、info/error は no-op)
+        monkeypatch.setattr(
+            csd.messagebox, "askyesno", lambda *a, **kw: True,
+        )
+        monkeypatch.setattr(
+            csd.messagebox, "showinfo", lambda *a, **kw: None,
+        )
+        monkeypatch.setattr(
+            csd.messagebox, "showerror", lambda *a, **kw: None,
+        )
+
+        cfg = self._make_config_path(tmp_path)
+        root = tk.Tk()
+        try:
+            dialog = csd.ChecklistSettingsDialog(
+                parent=root, config=AppConfig(), config_path=cfg,
+            )
+            # pull 完了相当に dirty flag を立てる (実 GCP 呼出は重いため flag を
+            # 直接 set。_on_pull_routing 内部の flag 立て位置は別 test で固定済)
+            dialog._pulled_routing = True
+            # 不正 TOML を Text widget に流し込み save で parse error 経路に
+            dialog._routing_text.delete("1.0", "end")
+            dialog._routing_text.insert("1.0", "this is not valid TOML = =")
+
+            dialog._on_save()
+
+            # AC: parse error で early return、_record_sync_timestamp 未呼出
+            assert recorded == []
+            # AC: flag は True のまま (retry save で打てる)
+            assert dialog._pulled_routing is True
+
+            # 修正して再 save: 今度は record が打たれて flag リセット
+            dialog._routing_text.delete("1.0", "end")
+            dialog._routing_text.insert("1.0", '"居宅A" = "FAX/事業所1"')
+            dialog._staff_text.delete("1.0", "end")
+            # save_config を mock で成功させる (実 fs 書込を回避)
+            monkeypatch.setattr(
+                csd, "save_config", lambda *a, **kw: None,
+            )
+            dialog._on_save()
+
+            # AC: routing 側だけ record (staff は flag False のまま)
+            names = [n for _, n in recorded]
+            assert names == ["mapping_routing"]
+            # AC: 成功 path で flag リセット
+            assert dialog._pulled_routing is False
+            assert dialog._pulled_staff is False
+        finally:
+            root.destroy()
+
+    def test_save_success_records_only_dirty_side(
+        self, tmp_path, monkeypatch,
+    ) -> None:  # type: ignore[no-untyped-def]
+        """片側 (staff のみ) pull → save 成功時に staff だけ record される。"""
+        import tkinter as tk
+
+        from wiseman_hub.config import AppConfig
+        from wiseman_hub.ui import checklist_settings_dialog as csd
+
+        recorded: list[str] = []
+
+        def _spy_record(config_path, name):  # type: ignore[no-untyped-def]
+            recorded.append(name)
+
+        monkeypatch.setattr(csd, "_record_sync_timestamp", _spy_record)
+        monkeypatch.setattr(
+            csd.messagebox, "showinfo", lambda *a, **kw: None,
+        )
+        monkeypatch.setattr(
+            csd.messagebox, "showerror", lambda *a, **kw: None,
+        )
+        monkeypatch.setattr(csd, "save_config", lambda *a, **kw: None)
+
+        cfg = self._make_config_path(tmp_path)
+        root = tk.Tk()
+        try:
+            dialog = csd.ChecklistSettingsDialog(
+                parent=root, config=AppConfig(), config_path=cfg,
+            )
+            # staff のみ pull した状態をシミュレート
+            dialog._pulled_routing = False
+            dialog._pulled_staff = True
+            # routing は空 (元の値のまま、Text widget はそのまま)
+            # save 実行
+            dialog._on_save()
+
+            # AC: report_staff だけ record、mapping_routing は record されない
+            assert recorded == ["report_staff"]
+            # AC: 両 flag が False に reset (record されたのは staff だけだが
+            # routing も False のままで一貫)
+            assert dialog._pulled_routing is False
+            assert dialog._pulled_staff is False
+        finally:
+            root.destroy()

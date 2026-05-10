@@ -515,14 +515,19 @@ def _record_sync_timestamp(config_path: Path, name: str) -> None:
     (bool) を確認し、I/O 失敗時は caller 側で warn ログを emit する (helper 内部
     の warn と合わせて二重ロギングだが、UI 起源の文脈情報を残す)。書込失敗で
     UI 進行を止めない契約は維持。
+
+    review 反映 (silent-failure H1 rating 7 conf 88): caller 側の warn ログには
+    ``cache_dir`` も含め、複数事業所 PC で同一 OSError が出た時に grep で区別
+    可能にする (helper 内部 warn と紐付ける手がかりとして有効)。
     """
     from wiseman_hub.cloud import sync_label
 
     cache_dir = sync_label.sync_cache_dir_for(config_path)
     if not sync_label.write_sync_timestamp(cache_dir, name):
         logger.warning(
-            "sync timestamp record failed for %s (write_sync_timestamp returned False)",
-            name,
+            "sync timestamp record failed [name=%s cache_dir=%s] "
+            "(write_sync_timestamp returned False; see helper warn for OSError detail)",
+            name, cache_dir,
         )
 
 
