@@ -550,3 +550,223 @@ class TestDefaultConfigPath:
         monkeypatch.setattr(sys, "frozen", True, raising=False)
         monkeypatch.setattr(sys, "executable", "/opt/wiseman/wiseman_hub.exe", raising=False)
         assert _default_config_path() == Path("/explicit/path.toml")
+
+
+# ===========================================================================
+# Issue #158: 起動後 callback の load_config 失敗 actionable error 化
+# ===========================================================================
+#
+# PR #157 で起動経路 (WisemanHub.__init__ / __main__.main()) と settings dialog
+# 経路の load_config 失敗を actionable error 化済み。本テスト群は同等の対称性を
+# 残り 4 callback (facility_root / ex_extractor / checklist_b / checklist_c) に
+# 確保することを契約化する。
+#
+# 期待挙動:
+#     - load_config が OSError / ValueError / TypeError を raise した場合
+#     - logger.error に PII-safe (型名のみ) のメッセージが記録される
+#     - messagebox.showerror が "設定ファイル読込エラー" タイトルで呼ばれる
+#     - dialog 構築 (FacilityRootManagerDialog / ExExtractorDialog 等) は実行されない
+#     - early return: callback は副作用なく終了
+
+
+class TestPostStartupCallbackLoadConfigError:
+    """Issue #158: 起動後 callback の load_config 失敗 actionable error 化。
+
+    PR #157 settings dialog (`__main__.py:222-235`) と同形パターンを
+    facility_root / ex_extractor / checklist_b / checklist_c の 4 callback
+    に展開。設定ファイルが TOML 構文エラー / I/O 失敗で読めない状況でも、
+    UI を破壊せず early return + messagebox + log error を発火する契約。
+
+    PII 防御: log は ``type(exc).__name__`` のみ、exception の str() は出さない。
+    """
+
+    @staticmethod
+    def _setup_failing_load_config(monkeypatch: Any, exc: Exception) -> None:
+        """``wiseman_hub.config.load_config`` を例外 raise 版に差し替え。"""
+        def _raise(_p: Path) -> None:
+            raise exc
+
+        monkeypatch.setattr("wiseman_hub.config.load_config", _raise)
+
+    @staticmethod
+    def _capture_messagebox(monkeypatch: Any) -> list[tuple[str, str]]:
+        """``tkinter.messagebox.showerror`` 呼び出しを記録するスタブを設置。"""
+        captured: list[tuple[str, str]] = []
+
+        def _stub(title: str, message: str, *args: Any, **kwargs: Any) -> None:
+            captured.append((title, message))
+
+        monkeypatch.setattr("tkinter.messagebox.showerror", _stub)
+        return captured
+
+    def test_facility_root_callback_actionable_error_on_oserror(
+        self, tmp_path: Path, monkeypatch: Any, caplog: Any
+    ) -> None:
+        """facility_root callback: load_config が OSError raise → actionable + early return。"""
+        import logging
+
+        config_file = tmp_path / "config.toml"
+        config_file.write_text("", encoding="utf-8")
+
+        self._setup_failing_load_config(monkeypatch, OSError("permission denied"))
+        captured = self._capture_messagebox(monkeypatch)
+
+        # dialog が実行されていないことの検証スタブ
+        dialog_called: list[bool] = []
+
+        def _dialog_stub(*args: Any, **kwargs: Any) -> None:
+            dialog_called.append(True)
+
+        monkeypatch.setattr(
+            "wiseman_hub.ui.facility_root_dialog.FacilityRootManagerDialog",
+            _dialog_stub,
+        )
+
+        class FakeLauncher:
+            def get_root(self) -> None:
+                return None
+
+            def reload_config(self, config: Any) -> None:
+                pass
+
+        from wiseman_hub.__main__ import _make_facility_merger_callback
+
+        callback = _make_facility_merger_callback(config_file, lambda: FakeLauncher())
+
+        with caplog.at_level(logging.ERROR):
+            callback()  # 例外が外に漏れないこと
+
+        # dialog が起動されていない (early return)
+        assert dialog_called == []
+        # messagebox が表示されている
+        assert len(captured) == 1
+        assert captured[0][0] == "設定ファイル読込エラー"
+        # log が PII-safe (型名のみ、exc.args の "permission denied" は含まれない想定)
+        assert any("OSError" in rec.message for rec in caplog.records)
+
+    def test_ex_extractor_callback_actionable_error_on_valueerror(
+        self, tmp_path: Path, monkeypatch: Any, caplog: Any
+    ) -> None:
+        """ex_extractor callback: load_config が ValueError raise → actionable + early return。"""
+        import logging
+
+        config_file = tmp_path / "config.toml"
+        config_file.write_text("", encoding="utf-8")
+
+        self._setup_failing_load_config(
+            monkeypatch, ValueError("invalid TOML structure")
+        )
+        captured = self._capture_messagebox(monkeypatch)
+
+        dialog_called: list[bool] = []
+
+        def _dialog_stub(*args: Any, **kwargs: Any) -> None:
+            dialog_called.append(True)
+
+        monkeypatch.setattr(
+            "wiseman_hub.ui.ex_extractor_dialog.ExExtractorDialog",
+            _dialog_stub,
+        )
+
+        class FakeLauncher:
+            def get_root(self) -> None:
+                return None
+
+            def reload_config(self, config: Any) -> None:
+                pass
+
+        from wiseman_hub.__main__ import _make_ex_extractor_callback
+
+        callback = _make_ex_extractor_callback(config_file, lambda: FakeLauncher())
+
+        with caplog.at_level(logging.ERROR):
+            callback()
+
+        assert dialog_called == []
+        assert len(captured) == 1
+        assert captured[0][0] == "設定ファイル読込エラー"
+        assert any("ValueError" in rec.message for rec in caplog.records)
+
+    def test_checklist_b_callback_actionable_error_on_typeerror(
+        self, tmp_path: Path, monkeypatch: Any, caplog: Any
+    ) -> None:
+        """checklist_b callback: load_config が TypeError raise → actionable + early return。"""
+        import logging
+
+        config_file = tmp_path / "config.toml"
+        config_file.write_text("", encoding="utf-8")
+
+        self._setup_failing_load_config(
+            monkeypatch, TypeError("expected dict, got list")
+        )
+        captured = self._capture_messagebox(monkeypatch)
+
+        dialog_called: list[bool] = []
+
+        def _dialog_stub(*args: Any, **kwargs: Any) -> None:
+            dialog_called.append(True)
+
+        monkeypatch.setattr(
+            "wiseman_hub.ui.checklist_b_dialog.ChecklistBDialog",
+            _dialog_stub,
+        )
+
+        class FakeLauncher:
+            def get_root(self) -> None:
+                return None
+
+            def reload_config(self, config: Any) -> None:
+                pass
+
+        from wiseman_hub.__main__ import _make_checklist_b_callback
+
+        callback = _make_checklist_b_callback(config_file, lambda: FakeLauncher())
+
+        with caplog.at_level(logging.ERROR):
+            callback()
+
+        assert dialog_called == []
+        assert len(captured) == 1
+        assert captured[0][0] == "設定ファイル読込エラー"
+        assert any("TypeError" in rec.message for rec in caplog.records)
+
+    def test_checklist_c_callback_actionable_error_on_oserror(
+        self, tmp_path: Path, monkeypatch: Any, caplog: Any
+    ) -> None:
+        """checklist_c callback: load_config が OSError raise → actionable + early return。"""
+        import logging
+
+        config_file = tmp_path / "config.toml"
+        config_file.write_text("", encoding="utf-8")
+
+        self._setup_failing_load_config(monkeypatch, OSError("disk full"))
+        captured = self._capture_messagebox(monkeypatch)
+
+        dialog_called: list[bool] = []
+
+        def _dialog_stub(*args: Any, **kwargs: Any) -> None:
+            dialog_called.append(True)
+
+        monkeypatch.setattr(
+            "wiseman_hub.ui.checklist_c_dialog.ChecklistCDialog",
+            _dialog_stub,
+        )
+
+        class FakeLauncher:
+            def get_root(self) -> None:
+                return None
+
+            def reload_config(self, config: Any) -> None:
+                pass
+
+        from wiseman_hub.__main__ import _make_checklist_c_callback
+
+        callback = _make_checklist_c_callback(config_file, lambda: FakeLauncher())
+
+        with caplog.at_level(logging.ERROR):
+            callback()
+
+        assert dialog_called == []
+        assert len(captured) == 1
+        assert captured[0][0] == "設定ファイル読込エラー"
+        assert any("OSError" in rec.message for rec in caplog.records)
