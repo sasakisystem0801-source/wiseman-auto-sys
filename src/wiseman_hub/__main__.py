@@ -70,12 +70,29 @@ def _make_facility_merger_callback(
     """
 
     def open_facility_root_manager() -> None:
+        from tkinter import messagebox
+
         from wiseman_hub.config import load_config
         from wiseman_hub.ui.facility_root_dialog import FacilityRootManagerDialog
 
         launcher = get_launcher()
         # 設定 GUI で root 変更後にも追随する（13B/13C と同じパターン）
-        config = load_config(config_path)
+        # Issue #158: TOML 構文エラー / I/O 失敗時は dialog を開かず Launcher 継続。
+        # PR #157 の `_make_settings_callback` と同形パターン。PII 防御で型名のみ
+        # ログ・UI に残す（4 callback 共通契約: ex_extractor / checklist_b / _c も同形）。
+        try:
+            config = load_config(config_path)
+        except (OSError, ValueError, TypeError) as exc:
+            logger.error(
+                "load_config failed before facility_root dialog: %s",
+                type(exc).__name__,
+            )
+            messagebox.showerror(
+                "設定ファイル読込エラー",
+                "設定ファイルを読み込めませんでした。詳細はログを確認してください。"
+                f"\n\n{type(exc).__name__}",
+            )
+            return
         dialog = FacilityRootManagerDialog(
             parent=launcher.get_root(),
             config=config,
@@ -122,7 +139,20 @@ def _make_ex_extractor_callback(
         from wiseman_hub.ui.ex_extractor_dialog import ExExtractorDialog
 
         launcher = get_launcher()
-        config = load_config(config_path)
+        # Issue #158 (4 callback 共通): facility_root と同形 — 詳細はそちら参照。
+        try:
+            config = load_config(config_path)
+        except (OSError, ValueError, TypeError) as exc:
+            logger.error(
+                "load_config failed before ex_extractor dialog: %s",
+                type(exc).__name__,
+            )
+            messagebox.showerror(
+                "設定ファイル読込エラー",
+                "設定ファイルを読み込めませんでした。詳細はログを確認してください。"
+                f"\n\n{type(exc).__name__}",
+            )
+            return
 
         # adapter は dialog 起動前に構築 (macOS なら即座にエラーを出す)
         # MEDIUM-1 (code-reviewer C-2): parent= 指定で Launcher への transient 化
@@ -158,11 +188,26 @@ def _make_checklist_b_callback(
     """Launcher に注入する「B: 運動機能向上計画書 自動配置」コールバック。"""
 
     def open_checklist_b() -> None:
+        from tkinter import messagebox
+
         from wiseman_hub.config import load_config
         from wiseman_hub.ui.checklist_b_dialog import ChecklistBDialog
 
         launcher = get_launcher()
-        config = load_config(config_path)
+        # Issue #158 (4 callback 共通): facility_root と同形 — 詳細はそちら参照。
+        try:
+            config = load_config(config_path)
+        except (OSError, ValueError, TypeError) as exc:
+            logger.error(
+                "load_config failed before checklist_b dialog: %s",
+                type(exc).__name__,
+            )
+            messagebox.showerror(
+                "設定ファイル読込エラー",
+                "設定ファイルを読み込めませんでした。詳細はログを確認してください。"
+                f"\n\n{type(exc).__name__}",
+            )
+            return
         dialog = ChecklistBDialog(
             parent=launcher.get_root(), config=config, config_path=config_path
         )
@@ -184,11 +229,26 @@ def _make_checklist_c_callback(
     """Launcher に注入する「C: 経過報告書 自動配置」コールバック。"""
 
     def open_checklist_c() -> None:
+        from tkinter import messagebox
+
         from wiseman_hub.config import load_config
         from wiseman_hub.ui.checklist_c_dialog import ChecklistCDialog
 
         launcher = get_launcher()
-        config = load_config(config_path)
+        # Issue #158 (4 callback 共通): facility_root と同形 — 詳細はそちら参照。
+        try:
+            config = load_config(config_path)
+        except (OSError, ValueError, TypeError) as exc:
+            logger.error(
+                "load_config failed before checklist_c dialog: %s",
+                type(exc).__name__,
+            )
+            messagebox.showerror(
+                "設定ファイル読込エラー",
+                "設定ファイルを読み込めませんでした。詳細はログを確認してください。"
+                f"\n\n{type(exc).__name__}",
+            )
+            return
         dialog = ChecklistCDialog(
             parent=launcher.get_root(), config=config, config_path=config_path
         )
