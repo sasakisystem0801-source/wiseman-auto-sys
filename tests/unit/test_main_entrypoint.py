@@ -572,12 +572,14 @@ class TestDefaultConfigPath:
 class TestPostStartupCallbackLoadConfigError:
     """Issue #158: 起動後 callback の load_config 失敗 actionable error 化。
 
-    PR #157 settings dialog (`__main__.py:222-235`) と同形パターンを
+    PR #157 の ``_make_settings_callback`` と同形パターンを
     facility_root / ex_extractor / checklist_b / checklist_c の 4 callback
     に展開。設定ファイルが TOML 構文エラー / I/O 失敗で読めない状況でも、
     UI を破壊せず early return + messagebox + log error を発火する契約。
 
-    PII 防御: log は ``type(exc).__name__`` のみ、exception の str() は出さない。
+    PII 防御契約 (本テスト群で固定):
+        - log は ``type(exc).__name__`` のみ、``exc.args`` / ``str(exc)`` は出さない
+        - messagebox body も同様 (型名のみ)。``f"\\n\\n{exc}"`` への退化を test で検出。
     """
 
     @staticmethod
@@ -641,8 +643,15 @@ class TestPostStartupCallbackLoadConfigError:
         # messagebox が表示されている
         assert len(captured) == 1
         assert captured[0][0] == "設定ファイル読込エラー"
-        # log が PII-safe (型名のみ、exc.args の "permission denied" は含まれない想定)
+        # PII 防御: messagebox body に型名は含まれるが exc.args は出さない
+        # (将来 `f"\n\n{exc}"` への退化を catch する規約 lock-in)
+        assert "OSError" in captured[0][1]
+        assert "permission denied" not in captured[0][1]
+        # log も同様に型名のみ (PII-safe)
         assert any("OSError" in rec.message for rec in caplog.records)
+        assert all(
+            "permission denied" not in rec.message for rec in caplog.records
+        )
 
     def test_ex_extractor_callback_actionable_error_on_valueerror(
         self, tmp_path: Path, monkeypatch: Any, caplog: Any
@@ -685,7 +694,14 @@ class TestPostStartupCallbackLoadConfigError:
         assert dialog_called == []
         assert len(captured) == 1
         assert captured[0][0] == "設定ファイル読込エラー"
+        # PII 防御: 型名のみ、exc.args (TOML 内容の漏洩) は出さない
+        assert "ValueError" in captured[0][1]
+        assert "invalid TOML structure" not in captured[0][1]
         assert any("ValueError" in rec.message for rec in caplog.records)
+        assert all(
+            "invalid TOML structure" not in rec.message
+            for rec in caplog.records
+        )
 
     def test_checklist_b_callback_actionable_error_on_typeerror(
         self, tmp_path: Path, monkeypatch: Any, caplog: Any
@@ -728,7 +744,13 @@ class TestPostStartupCallbackLoadConfigError:
         assert dialog_called == []
         assert len(captured) == 1
         assert captured[0][0] == "設定ファイル読込エラー"
+        # PII 防御: 型名のみ、exc.args (構造化エラー詳細の漏洩) は出さない
+        assert "TypeError" in captured[0][1]
+        assert "expected dict" not in captured[0][1]
         assert any("TypeError" in rec.message for rec in caplog.records)
+        assert all(
+            "expected dict" not in rec.message for rec in caplog.records
+        )
 
     def test_checklist_c_callback_actionable_error_on_oserror(
         self, tmp_path: Path, monkeypatch: Any, caplog: Any
@@ -769,4 +791,10 @@ class TestPostStartupCallbackLoadConfigError:
         assert dialog_called == []
         assert len(captured) == 1
         assert captured[0][0] == "設定ファイル読込エラー"
+        # PII 防御: 型名のみ、exc.args (filesystem 状態の漏洩) は出さない
+        assert "OSError" in captured[0][1]
+        assert "disk full" not in captured[0][1]
         assert any("OSError" in rec.message for rec in caplog.records)
+        assert all(
+            "disk full" not in rec.message for rec in caplog.records
+        )

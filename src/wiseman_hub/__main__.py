@@ -78,7 +78,8 @@ def _make_facility_merger_callback(
         launcher = get_launcher()
         # 設定 GUI で root 変更後にも追随する（13B/13C と同じパターン）
         # Issue #158: TOML 構文エラー / I/O 失敗時は dialog を開かず Launcher 継続。
-        # PR #157 の settings dialog 経路 (line 222-235) と同形パターン。
+        # PR #157 の `_make_settings_callback` と同形パターン。PII 防御で型名のみ
+        # ログ・UI に残す（4 callback 共通契約: ex_extractor / checklist_b / _c も同形）。
         try:
             config = load_config(config_path)
         except (OSError, ValueError, TypeError) as exc:
@@ -138,8 +139,7 @@ def _make_ex_extractor_callback(
         from wiseman_hub.ui.ex_extractor_dialog import ExExtractorDialog
 
         launcher = get_launcher()
-        # Issue #158: TOML 構文エラー / I/O 失敗時は dialog を開かず Launcher 継続。
-        # PR #157 の settings dialog 経路と同形パターン。
+        # Issue #158 (4 callback 共通): facility_root と同形 — 詳細はそちら参照。
         try:
             config = load_config(config_path)
         except (OSError, ValueError, TypeError) as exc:
@@ -194,8 +194,7 @@ def _make_checklist_b_callback(
         from wiseman_hub.ui.checklist_b_dialog import ChecklistBDialog
 
         launcher = get_launcher()
-        # Issue #158: TOML 構文エラー / I/O 失敗時は dialog を開かず Launcher 継続。
-        # PR #157 の settings dialog 経路と同形パターン。
+        # Issue #158 (4 callback 共通): facility_root と同形 — 詳細はそちら参照。
         try:
             config = load_config(config_path)
         except (OSError, ValueError, TypeError) as exc:
@@ -236,8 +235,7 @@ def _make_checklist_c_callback(
         from wiseman_hub.ui.checklist_c_dialog import ChecklistCDialog
 
         launcher = get_launcher()
-        # Issue #158: TOML 構文エラー / I/O 失敗時は dialog を開かず Launcher 継続。
-        # PR #157 の settings dialog 経路と同形パターン。
+        # Issue #158 (4 callback 共通): facility_root と同形 — 詳細はそちら参照。
         try:
             config = load_config(config_path)
         except (OSError, ValueError, TypeError) as exc:
