@@ -803,10 +803,18 @@ class TestPostStartupCallbackLoadConfigError:
 class TestPostActionReloadWarningLog:
     """Issue #250: post-action reload (dialog 終了後の load_config) 失敗時の warning ログ化。
 
-    PR #249 (Issue #158) で起動前 callback の load_config 失敗を actionable
-    error 化したが、dialog 終了後の **post-action reload** は checklist_b/c
-    で完全 silent (``except: pass``) のままだった。``facility_root`` post-action
-    の warning ログパターンと対称化することを契約化する。
+    系譜:
+        - PR #157 (Issue #150 close): ``_make_settings_callback`` で起動経路 +
+          settings dialog の load_config を actionable error 化 (起源パターン)
+        - PR #249 (Issue #158 close): 起動前 4 callback (facility_root /
+          ex_extractor / checklist_b / checklist_c) に展開
+        - **本 PR (Issue #250 close)**: post-action reload (dialog 終了後の
+          再ロード) を ``facility_root`` post-action と対称化
+
+    本 PR 起源は PR #249 の silent-failure-hunter Important rating 7 conf 90:
+    checklist_b/c の post-action は完全 silent (``except: pass``) のままで、
+    設定変更後 reload 失敗時にユーザーが「dialog 閉じたら設定が反映されない
+    けどエラーも出ない」状態に陥る silent failure が残っていた。
 
     対象 callback (post-action reload を持つ 3 callback):
         - ``_make_facility_merger_callback`` (facility_root)
@@ -824,9 +832,27 @@ class TestPostActionReloadWarningLog:
         - ``launcher.reload_config`` は呼ばれない (early return)
         - 例外は callback の外に漏れない
 
+    カバー戦略 (対角線):
+        3 callback × 3 例外型 = 9 マトリックスのうち 3 件 (各 callback で
+        異なる例外型を 1 つずつ) でカバー。``except (OSError, ValueError,
+        TypeError) as exc`` の handling code path は同一なので、9 件完全
+        マトリックスは redundant。各 callback が tuple 全例外を catch できる
+        ことが代理的に verify される (Python の例外 catch 仕様)。
+
     PII 防御契約 (本テスト群で固定):
         - log は ``type(exc).__name__`` のみ。``exc.args`` / ``str(exc)`` は出さない
         - ``logger.warning("... %s", exc)`` への退化を test で catch
+        - WARNING record の message format ``"load_config after <ctx> dialog
+          failed: <TypeName>"`` との完全一致 assertion で `%s` formatter の
+          追加退化も catch (negative + positive assertion の両側 lock-in)
+
+    実装前提:
+        - callback は ``from wiseman_hub.config import load_config`` を関数内
+          import で評価する (lazy import)。``monkeypatch.setattr("wiseman_hub.
+          config.load_config", _stub)`` で stub が有効になるのはこの前提に依存。
+        - 将来 module top-level の eager import に refactor された場合、
+          ``counter[0] == 2`` assertion が ``counter[0] == 0`` で fail し、
+          patch が外れたことを catch する (safety net 機能)。
     """
 
     @staticmethod
@@ -851,7 +877,14 @@ class TestPostActionReloadWarningLog:
 
     @staticmethod
     def _install_noop_dialog(monkeypatch: Any, target: str) -> None:
-        """``target`` (dotted path) のダイアログを即座に閉じる no-op スタブに差し替え。"""
+        """``target`` (dotted path) を、``wait_window()`` が即 return する
+        no-op に差し替える (post-action reload に到達させる fixture)。
+
+        load-bearing semantic は **wait_window() が同期的に return すること**。
+        実 dialog は modal で wait_window 内で event loop が回るが、本 stub は
+        即座に制御を返し、呼出元 callback の post-action ``load_config`` を
+        同期的に到達させる。
+        """
 
         class _NoopToplevel:
             def wait_window(self) -> None:
@@ -910,10 +943,10 @@ class TestPostActionReloadWarningLog:
         warning_records = [
             rec for rec in caplog.records if rec.levelname == "WARNING"
         ]
-        assert any(
-            "OSError" in rec.message
-            and "facility_root" in rec.message
-            for rec in warning_records
+        # PII 契約 lock-in: template 完全一致 (`%s` formatter の追加退化も catch)
+        assert (
+            "load_config after facility_root dialog failed: OSError"
+            in [rec.message for rec in warning_records]
         )
         # PII 防御: exc.args (filesystem state の漏洩) は出さない
         assert all(
@@ -961,9 +994,10 @@ class TestPostActionReloadWarningLog:
         warning_records = [
             rec for rec in caplog.records if rec.levelname == "WARNING"
         ]
-        assert any(
-            "ValueError" in rec.message and "checklist_b" in rec.message
-            for rec in warning_records
+        # PII 契約 lock-in: template 完全一致
+        assert (
+            "load_config after checklist_b dialog failed: ValueError"
+            in [rec.message for rec in warning_records]
         )
         assert all(
             "invalid TOML structure" not in rec.message
@@ -1011,9 +1045,10 @@ class TestPostActionReloadWarningLog:
         warning_records = [
             rec for rec in caplog.records if rec.levelname == "WARNING"
         ]
-        assert any(
-            "TypeError" in rec.message and "checklist_c" in rec.message
-            for rec in warning_records
+        # PII 契約 lock-in: template 完全一致
+        assert (
+            "load_config after checklist_c dialog failed: TypeError"
+            in [rec.message for rec in warning_records]
         )
         assert all(
             "expected dict, got list" not in rec.message

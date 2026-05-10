@@ -212,10 +212,8 @@ def _make_checklist_b_callback(
             parent=launcher.get_root(), config=config, config_path=config_path
         )
         dialog.get_toplevel().wait_window()
-        # 設定が変更された可能性 → Launcher 側を再ロード
-        # Issue #250: facility_root post-action と対称化。silent な ``pass`` だと
-        # 古い config が Launcher に残ったままユーザーは保存反映されない理由が不明。
-        # PII 防御で型名のみ warning ログに残す。
+        # 設定変更の可能性 → Launcher 再ロード (Issue #250: facility_root post-action と
+        # 対称化、silent な ``pass`` だと保存反映されない理由が見えない。PII 防御で型名のみ)。
         try:
             updated = load_config(config_path)
         except (OSError, ValueError, TypeError) as exc:
