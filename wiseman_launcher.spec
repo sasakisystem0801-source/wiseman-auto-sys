@@ -21,7 +21,22 @@ ADR-002 / ADR-016 §2 (bootstrapper / updater 分離) 参照。
 
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import (
+    collect_data_files,
+    collect_dynamic_libs,
+    collect_submodules,
+)
+
+
+def _hidden(pkg: str) -> list[str]:
+    """`collect_submodules` の silent 漏れを構造的に排除する wrapper。
+
+    default の ``on_error='warn once'`` は誤字 / 未インストールでも 0 件返して
+    build を完走させ、Phase 6 canary 検証で初めて ``ModuleNotFoundError`` が
+    露見する事故あり (review I2 反映、PR #254)。``on_error='raise'`` で
+    spec parse 時点で fail-fast させる。
+    """
+    return collect_submodules(pkg, on_error="raise")
 
 # PyInstaller の spec グローバル（Analysis/EXE/PYZ 等）は実行時に注入される。
 # 静的解析を通すため明示的に名前を列挙（flake8 / ruff の F821 回避）。
@@ -34,25 +49,58 @@ ROOT = Path(SPECPATH)  # noqa: F821 — SPECPATH は PyInstaller が spec 実行
 block_cipher = None
 
 
-# sigstore-python と TUF の hidden imports。
-# 明示列挙 (旧戦略) は内部 module (`sigstore._store` 等) の漏れで
-# 実機 `Verifier.production()` init が ModuleNotFoundError で fail する事故あり
-# (Phase 6 canary 検証 2026-05-12)。`collect_submodules` で全 submodule を網羅し、
-# 明示列挙起因の再発を構造的に排除する。bundle size は +1-2 MB 程度の増加で許容。
+# sigstore-python の Verifier.production() に必要な supply chain 依存を網羅。
+#
+# 旧戦略 (明示列挙) は内部 module (`sigstore._store` 等) の漏れで実機
+# `Verifier.production()` init が ModuleNotFoundError で fail (Phase 6 canary
+# 検証 2026-05-12、PR #254 review C1/C2 反映)。修正方針:
+#
+# 1. collect_data_files("sigstore") — TUF trust roots (`_store/prod/*.json`)
+#    を data file に含める。`collect_submodules` だけでは .json が含まれず
+#    `TrustedRoot.production()` で FileNotFoundError 再発する
+# 2. collect_dynamic_libs("cryptography") — OpenSSL ベースの compiled
+#    extension (`_rust.abi3.pyd`) を binaries に含めるため
+# 3. collect_data_files("certifi") — TLS 検証用 CA bundle (`cacert.pem`)
+# 4. PyPI 名 ≠ import 名: `sigstore-rekor-types` → `rekor_types`、
+#    `pyopenssl` → `OpenSSL`、`pyjwt` → `jwt`、`rfc3161-client` → `rfc3161_client`
+# 5. `_hidden(...)` で on_error='raise' を強制し silent 漏れを構造的排除
+#
+# NOTE: `collect_all(pkg)` を使わない理由 — PyInstaller 6.x で sigstore /
+# cryptography / certifi に対し datas を 0 件で返す挙動を確認 (2026-05-12)。
+# `collect_data_files` / `collect_dynamic_libs` を個別呼出しすると正しく取得
+# できるため、確実性を優先して明示分離する。
 _SIGSTORE_HIDDEN = (
-    collect_submodules("sigstore")
-    + collect_submodules("sigstore_protobuf_specs")
-    + collect_submodules("sigstore_rekor_types")
-    + collect_submodules("tuf")
-    + collect_submodules("securesystemslib")
-    + collect_submodules("cryptography")
+    _hidden("sigstore")
+    + _hidden("sigstore_protobuf_specs")
+    + _hidden("rekor_types")
+    + _hidden("tuf")
+    + _hidden("securesystemslib")
+    + _hidden("cryptography")
+    + _hidden("certifi")
+    + _hidden("OpenSSL")
+    + _hidden("pyasn1")
+    + _hidden("pyasn1_modules")
+    + _hidden("rfc3161_client")
+    + _hidden("id")
+    + _hidden("jwt")
+    + _hidden("rfc8785")
+)
+_SIGSTORE_DATAS = (
+    collect_data_files("sigstore")
+    + collect_data_files("cryptography")
+    + collect_data_files("certifi")
+)
+_SIGSTORE_BINARIES = (
+    collect_dynamic_libs("sigstore")
+    + collect_dynamic_libs("cryptography")
+    + collect_dynamic_libs("certifi")
 )
 
 a = Analysis(
     [str(ROOT / "src" / "wiseman_hub_launcher" / "__main__.py")],
     pathex=[str(ROOT / "src")],
-    binaries=[],
-    datas=[],
+    binaries=_SIGSTORE_BINARIES,
+    datas=_SIGSTORE_DATAS,
     hiddenimports=[
         # stdlib only なので原則不要だが、urllib.request は環境によって自動検出が
         # 抜けるケースが報告されているため明示する（最小限の補強）。
