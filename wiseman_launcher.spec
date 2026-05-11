@@ -21,6 +21,8 @@ ADR-002 / ADR-016 §2 (bootstrapper / updater 分離) 参照。
 
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_submodules
+
 # PyInstaller の spec グローバル（Analysis/EXE/PYZ 等）は実行時に注入される。
 # 静的解析を通すため明示的に名前を列挙（flake8 / ruff の F821 回避）。
 # ruff: noqa: F821
@@ -32,26 +34,19 @@ ROOT = Path(SPECPATH)  # noqa: F821 — SPECPATH は PyInstaller が spec 実行
 block_cipher = None
 
 
-# PR-6 後半: sigstore-python と TUF の hidden imports を明示。
-# PyInstaller の static analysis では `__import__` 経由の動的 import が拾えない。
-# `--collect-all` で全 submodule を含める方が安全だが、明示 hiddenimports + excludes
-# 削除で十分動作することを smoke build で確認した上で採用する。
-_SIGSTORE_HIDDEN = [
-    "sigstore",
-    "sigstore.models",
-    "sigstore.verify",
-    "sigstore.verify.policy",
-    "sigstore.verify.verifier",
-    "sigstore.oidc",
-    "sigstore_protobuf_specs",
-    "sigstore_rekor_types",
-    "tuf",
-    "tuf.ngclient",
-    "securesystemslib",
-    "cryptography",
-    "cryptography.hazmat",
-    "cryptography.x509",
-]
+# sigstore-python と TUF の hidden imports。
+# 明示列挙 (旧戦略) は内部 module (`sigstore._store` 等) の漏れで
+# 実機 `Verifier.production()` init が ModuleNotFoundError で fail する事故あり
+# (Phase 6 canary 検証 2026-05-12)。`collect_submodules` で全 submodule を網羅し、
+# 明示列挙起因の再発を構造的に排除する。bundle size は +1-2 MB 程度の増加で許容。
+_SIGSTORE_HIDDEN = (
+    collect_submodules("sigstore")
+    + collect_submodules("sigstore_protobuf_specs")
+    + collect_submodules("sigstore_rekor_types")
+    + collect_submodules("tuf")
+    + collect_submodules("securesystemslib")
+    + collect_submodules("cryptography")
+)
 
 a = Analysis(
     [str(ROOT / "src" / "wiseman_hub_launcher" / "__main__.py")],
