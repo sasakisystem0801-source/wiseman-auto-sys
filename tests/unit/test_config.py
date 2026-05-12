@@ -1740,6 +1740,130 @@ check_interval_hours = "1"
         with pytest.raises(TypeError, match="check_interval_hours must be int"):
             load_config(config_file)
 
+
+class TestLoadConfigSectionTypeGuards:
+    """Issue #27 続編 B (Codex PR #260 review): load_config の section 値型ガード。
+
+    旧 ``dict(data.get("gcp", {}))`` 強制変換と ``if routing_data:`` falsy 判定が
+    silent 通過させていた経路を厳格化。dataclass `__post_init__` 型ガード設計が
+    load_config 層で **無効化されない** ことを保証する。
+    """
+
+    @pytest.mark.parametrize(
+        "section",
+        ["app", "wiseman", "schedule", "gcp", "updater", "ocr_backend", "pdf_merge", "checklist"],
+    )
+    def test_array_section_raises_type_error(
+        self, tmp_path: Path, section: str
+    ) -> None:
+        """TOML で ``gcp = []`` 等の array を section 値に書くと TypeError fail-close。
+
+        旧コードは ``dict([])`` で ``{}`` 化、設定ミスを default で黙殺していた。
+        """
+        toml_content = f"{section} = []\n"
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(TypeError, match=f"\\[{section}\\] section must be a table"):
+            load_config(config_file)
+
+    def test_string_section_raises_type_error(self, tmp_path: Path) -> None:
+        """TOML で ``wiseman = "string"`` のような scalar は TypeError。"""
+        toml_content = 'wiseman = "string"\n'
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(TypeError, match=r"\[wiseman\] section must be a table"):
+            load_config(config_file)
+
+    def test_integer_section_raises_type_error(self, tmp_path: Path) -> None:
+        """TOML で ``schedule = 123`` のような scalar は TypeError。"""
+        toml_content = "schedule = 123\n"
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(TypeError, match=r"\[schedule\] section must be a table"):
+            load_config(config_file)
+
+    def test_empty_dict_section_passes(self, tmp_path: Path) -> None:
+        """TOML で ``[wiseman]`` (空 section) は OK (default 値で構築)。"""
+        toml_content = "[wiseman]\n"
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        cfg = load_config(config_file)
+        assert cfg.wiseman.exe_path == ""
+        assert cfg.wiseman.startup_wait_sec == 15
+
+    def test_checklist_facility_routing_array_raises(self, tmp_path: Path) -> None:
+        """Issue #27 続編 B: TOML ``facility_routing = []`` (空 list) は TypeError。
+
+        旧コード ``if routing_data: ... isinstance check`` は空 list を falsy 判定で
+        if 分岐に入らず silent 通過させていた (Codex 致命的指摘)。
+        """
+        toml_content = """\
+[checklist]
+facility_routing = []
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(TypeError, match=r"facility_routing\] must be a table"):
+            load_config(config_file)
+
+    def test_checklist_facility_routing_false_raises(self, tmp_path: Path) -> None:
+        """TOML ``facility_routing = false`` も TypeError (旧コードでは silent 通過)。"""
+        toml_content = """\
+[checklist]
+facility_routing = false
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(TypeError, match=r"facility_routing\] must be a table"):
+            load_config(config_file)
+
+    def test_checklist_report_staff_zero_raises(self, tmp_path: Path) -> None:
+        """TOML ``report_staff = 0`` も TypeError (falsy int の silent 通過防止)。"""
+        toml_content = """\
+[checklist]
+report_staff = 0
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(TypeError, match=r"report_staff\] must be a table"):
+            load_config(config_file)
+
+    def test_checklist_xlsx_path_cache_string_raises(self, tmp_path: Path) -> None:
+        """TOML ``xlsx_path_cache = "not-a-dict"`` は TypeError。"""
+        toml_content = """\
+[checklist]
+xlsx_path_cache = "not-a-dict"
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(TypeError, match=r"xlsx_path_cache\] must be a table"):
+            load_config(config_file)
+
+    def test_checklist_empty_routing_table_passes(self, tmp_path: Path) -> None:
+        """TOML ``facility_routing = {}`` (空 dict 明示) は OK (空 dict として構築)。"""
+        toml_content = """\
+[checklist]
+facility_routing = {}
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        cfg = load_config(config_file)
+        assert cfg.checklist.facility_routing == {}
+
+    def test_default_toml_loads_after_section_type_guards(self) -> None:
+        """既存 ``config/default.toml`` が section 型ガード追加後も読み込めること (regression)。"""
+        cfg = load_config(Path("config/default.toml"))
+        assert isinstance(cfg, AppConfig)
+
     def test_whitespace_endpoint_in_toml_keeps_unconfigured(self, tmp_path: Path) -> None:
         """Issue #152: TOML の空白文字列のみ endpoint_url は ``is_configured=False``。
 
