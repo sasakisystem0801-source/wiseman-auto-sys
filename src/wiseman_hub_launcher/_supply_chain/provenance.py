@@ -46,11 +46,18 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# T0 Explore 結果: GitHub-hosted runner の builder id prefix
-# self-hosted は本 PR では非許可 (allow_self_hosted=False default)
+# builder.id の allowlist (SLSA Provenance v1.0 §7.2)。
+#
+# Phase 6 canary 検証 (2026-05-13) で旧定義 (``actions/runner@`` / ``actions/runner-releases/``)
+# が実 GitHub attestation の builder.id と不一致と判明し fail。実値は
+# ``actions/attest-build-provenance@v2`` が出す **workflow ref**:
+# ``https://github.com/{owner}/{repo}/.github/workflows/{file}.yml@{ref}``
+#
+# 修正: launcher 埋め込み constant ``LAUNCHER_EXPECTED_REPO`` から prefix を動的構築。
+# ``_verify_workflow_ref`` で workflow.repository / ref / path は別途完全検証されているため、
+# 本 prefix check は cross-repo attestation の防御 (defense in depth) として機能。
 _ALLOWED_BUILDER_ID_PREFIXES: tuple[str, ...] = (
-    "https://github.com/actions/runner@",
-    "https://github.com/actions/runner-releases/",
+    f"https://github.com/{LAUNCHER_EXPECTED_REPO}/.github/workflows/",
 )
 
 # C8 (PR codex S-1): SLSA Provenance v1.x の predicateType を厳格化。
