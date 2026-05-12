@@ -27,9 +27,12 @@ from wiseman_hub_launcher.manifest import Sha256Hex, make_sha256hex
 
 # Test fixtures ----------------------------------------------------------------
 
-# 期待値 (T0 Explore で確認した GitHub Actions hosted runner の builder id)
+# 期待値 (Phase 6 canary 2026-05-13: 実 GitHub attest-build-provenance@v2 の builder.id 形式)
 _EXPECTED_REPO_SUFFIX = "/sasakisystem0801-source/wiseman-auto-sys"
-_VALID_BUILDER_ID = "https://github.com/actions/runner@v2.300.0"
+_VALID_BUILDER_ID = (
+    "https://github.com/sasakisystem0801-source/wiseman-auto-sys/"
+    ".github/workflows/release.yml@refs/tags/v1.2.3"
+)
 _VALID_REPO_URL = "https://github.com/sasakisystem0801-source/wiseman-auto-sys"
 _VALID_WORKFLOW_PATH = ".github/workflows/release.yml"
 _VALID_WORKFLOW_REF = "refs/tags/v1.2.3"
@@ -337,22 +340,21 @@ def test_verify_claims_workflow_missing_fields() -> None:
 # verify_statement_claims: builder id allowlist ---------------------------------
 
 
-def test_verify_claims_builder_actions_runner() -> None:
-    """正常系: GitHub-hosted runner builder id (T0 Explore allowlist)。"""
+def test_verify_claims_builder_workflow_ref_accepted() -> None:
+    """正常系: GitHub Actions attest-build-provenance@v2 の workflow ref builder.id。"""
     verify_statement_claims(
-        _good_statement(builder_id="https://github.com/actions/runner@v2.300.0"),
+        _good_statement(builder_id=_VALID_BUILDER_ID),
         expected_sha256=_VALID_SHA,
     )
 
 
-def test_verify_claims_builder_runner_releases() -> None:
-    """正常系: legacy runner-releases prefix も allowlist。"""
-    verify_statement_claims(
-        _good_statement(
-            builder_id="https://github.com/actions/runner-releases/v2.299.0"
-        ),
-        expected_sha256=_VALID_SHA,
+def test_verify_claims_builder_other_repo_rejected() -> None:
+    """security: 別 repo の workflow ref → allowlist 外で reject (cross-repo attestation 防御)。"""
+    stmt = _good_statement(
+        builder_id="https://github.com/evil/repo/.github/workflows/release.yml@refs/tags/v1.2.3"
     )
+    with pytest.raises(ProvenanceError, match="not in allowlist"):
+        verify_statement_claims(stmt, expected_sha256=_VALID_SHA)
 
 
 def test_verify_claims_builder_self_hosted_rejected() -> None:
