@@ -103,6 +103,23 @@ def _check_dict_str_to_str(name: str, value: object) -> None:
             )
 
 
+def _require_section_table(name: str, value: Any) -> dict[str, Any]:
+    """TOML section が dict (table) でなければ ``TypeError`` (#27 続編 B)。
+
+    旧 load_config では ``dict(data.get("gcp", {}))`` 等で section 値を
+    強制変換していたが、これは ``gcp = []`` を ``dict([])`` で ``{}`` 化して
+    silent 通過させる経路があった (Codex review PR #260 致命的 1 反映)。
+    本関数で section の型を起動時に厳格化し、配下 dataclass の
+    ``__post_init__`` 型ガード設計を load_config 層で **無効化させない**。
+    """
+    if not isinstance(value, dict):
+        raise TypeError(
+            f"[{name}] section must be a table (TOML inline/block table), "
+            f"got {type(value).__name__}: {value!r}"
+        )
+    return value
+
+
 TableLike = Table | InlineTable
 _TABLE_LIKE_TYPES: tuple[type, ...] = (Table, InlineTable)
 
@@ -579,9 +596,14 @@ def _coerce_facility_aliases(aliases_data: Any) -> dict[str, list[str]]:
     型違反（value が list でない、要素が str でない）は ``TypeError`` で fail-fast する。
     PII 防御で例外メッセージには key/value の生値を含めず、構造的な型情報のみ出す
     （介護現場の事業所名・別名はログ送信先で機密扱いになる場合がある）。
+
+    Issue #27 続編 B (Codex PR #261 review 致命的残存): section 自体の型を
+    ``_require_section_table`` で先頭で守る。旧 ``dict(aliases_data).items()`` は
+    ``facility_aliases = []`` を ``dict([])`` で ``{}`` 化、silent 通過していた。
     """
+    aliases_data = _require_section_table("pdf_merge.facility_aliases", aliases_data)
     coerced: dict[str, list[str]] = {}
-    for key, value in dict(aliases_data).items():
+    for key, value in aliases_data.items():
         canonical = str(key)
         if not isinstance(value, list):
             raise TypeError(
@@ -719,17 +741,24 @@ def load_config(path: Path | None = None) -> AppConfig:
     with open(path, "rb") as f:
         data: dict[str, Any] = tomllib.load(f)
 
-    app_data = data.get("app", {})
-    wiseman_data = data.get("wiseman", {})
-    schedule_data = data.get("schedule", {})
-    gcp_data = dict(data.get("gcp", {}))
+    # Issue #27 続編 B (Codex PR #260 review 致命的 1): 各 section 値を
+    # ``_require_section_table`` で厳格化。旧 ``dict(data.get(...))`` は
+    # ``gcp = []`` 等を ``{}`` 化して silent 通過させていた。
+    app_data = _require_section_table("app", data.get("app", {}))
+    wiseman_data = _require_section_table("wiseman", data.get("wiseman", {}))
+    schedule_data = _require_section_table("schedule", data.get("schedule", {}))
+    gcp_data = dict(_require_section_table("gcp", data.get("gcp", {})))
     if "service_account_key_path" in gcp_data:
         gcp_data["service_account_key_path"] = _resolve_sa_key_path(
             gcp_data["service_account_key_path"], path
         )
-    updater_data = data.get("updater", {})
-    ocr_backend_data = data.get("ocr_backend", {})
-    pdf_merge_data = dict(data.get("pdf_merge", {}))
+    updater_data = _require_section_table("updater", data.get("updater", {}))
+    ocr_backend_data = _require_section_table(
+        "ocr_backend", data.get("ocr_backend", {})
+    )
+    pdf_merge_data = dict(
+        _require_section_table("pdf_merge", data.get("pdf_merge", {}))
+    )
 
     # Issue #150 (PR #157 codex セカンドオピニオン High): TOML として合法な
     # `reports = "bad"` 等の型違反は元実装で AttributeError を raise していたため
@@ -766,55 +795,61 @@ def load_config(path: Path | None = None) -> AppConfig:
         facility_aliases=facility_aliases,
     )
 
-    checklist_data = dict(data.get("checklist", {}))
+    checklist_data = dict(
+        _require_section_table("checklist", data.get("checklist", {}))
+    )
     routing_data = checklist_data.pop("facility_routing", {})
     staff_data = checklist_data.pop("report_staff", {})
     cache_data = checklist_data.pop("xlsx_path_cache", {})
+
+    # Issue #27 続編 B (Codex PR #260 review): isinstance 判定を ``if routing_data:``
+    # の **前** に置く。旧コード ``if routing_data: ... isinstance check`` は
+    # ``routing_data = []`` (空 list) / ``false`` / ``0`` が falsy で if 分岐に
+    # 入らないため silent 通過する経路があった。
+    if not isinstance(routing_data, dict):
+        raise TypeError(
+            f"[checklist.facility_routing] must be a table; "
+            f"got {type(routing_data).__name__}: {routing_data!r}"
+        )
     facility_routing: dict[str, str] = {}
-    if routing_data:
-        if not isinstance(routing_data, dict):
+    for key, value in routing_data.items():
+        if not isinstance(value, str):
             raise TypeError(
-                f"[checklist.facility_routing] must be a table; "
-                f"got {type(routing_data).__name__}"
+                "checklist.facility_routing values must be strings"
             )
-        for key, value in routing_data.items():
-            if not isinstance(value, str):
-                raise TypeError(
-                    "checklist.facility_routing values must be strings"
-                )
-            # PR-γ v1: lookup 表記揺れ吸収のため key は normalize_lookup_key
-            # を通して保存する（全角/半角空白・全角/半角英数・括弧等を統一）
-            facility_routing[normalize_lookup_key(str(key))] = value
+        # PR-γ v1: lookup 表記揺れ吸収のため key は normalize_lookup_key
+        # を通して保存する（全角/半角空白・全角/半角英数・括弧等を統一）
+        facility_routing[normalize_lookup_key(str(key))] = value
+
+    if not isinstance(staff_data, dict):
+        raise TypeError(
+            f"[checklist.report_staff] must be a table; "
+            f"got {type(staff_data).__name__}: {staff_data!r}"
+        )
     report_staff: dict[str, ReportStaffEntry] = {}
-    if staff_data:
-        if not isinstance(staff_data, dict):
+    for staff_name, entry_data in staff_data.items():
+        if not isinstance(entry_data, dict):
             raise TypeError(
-                f"[checklist.report_staff] must be a table; "
-                f"got {type(staff_data).__name__}"
+                "checklist.report_staff entries must be tables"
             )
-        for staff_name, entry_data in staff_data.items():
-            if not isinstance(entry_data, dict):
-                raise TypeError(
-                    "checklist.report_staff entries must be tables"
-                )
-            normalized_entry = _coerce_report_staff_entry(
-                str(staff_name), dict(entry_data)
-            )
-            # PR-γ v1: 同上、staff key も lookup 正規化
-            report_staff[normalize_lookup_key(str(staff_name))] = normalized_entry
+        normalized_entry = _coerce_report_staff_entry(
+            str(staff_name), dict(entry_data)
+        )
+        # PR-γ v1: 同上、staff key も lookup 正規化
+        report_staff[normalize_lookup_key(str(staff_name))] = normalized_entry
+
+    if not isinstance(cache_data, dict):
+        raise TypeError(
+            f"[checklist.xlsx_path_cache] must be a table; "
+            f"got {type(cache_data).__name__}: {cache_data!r}"
+        )
     xlsx_path_cache: dict[str, str] = {}
-    if cache_data:
-        if not isinstance(cache_data, dict):
+    for key, value in cache_data.items():
+        if not isinstance(value, str):
             raise TypeError(
-                f"[checklist.xlsx_path_cache] must be a table; "
-                f"got {type(cache_data).__name__}"
+                "checklist.xlsx_path_cache values must be strings"
             )
-        for key, value in cache_data.items():
-            if not isinstance(value, str):
-                raise TypeError(
-                    "checklist.xlsx_path_cache values must be strings"
-                )
-            xlsx_path_cache[str(key)] = value
+        xlsx_path_cache[str(key)] = value
     checklist = ChecklistConfig(
         **checklist_data,
         facility_routing=facility_routing,
