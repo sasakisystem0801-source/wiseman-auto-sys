@@ -1499,6 +1499,45 @@ class TestDataclassTypeGuards:
         assert isinstance(cfg.updater.enabled, bool)
         assert isinstance(cfg.checklist.facility_routing, dict)
 
+    # --- AppConfig 自身の field 型ガード (silent-failure review 反映) ----
+    def test_app_config_non_string_version_raises(self) -> None:
+        with pytest.raises(TypeError, match="AppConfig.version must be str"):
+            AppConfig(version=123)  # type: ignore[arg-type]
+
+    def test_app_config_non_string_log_level_raises(self) -> None:
+        with pytest.raises(TypeError, match="AppConfig.log_level must be str"):
+            AppConfig(log_level=None)  # type: ignore[arg-type]
+
+    def test_app_config_non_list_reports_raises(self) -> None:
+        with pytest.raises(TypeError, match="AppConfig.reports must be list"):
+            AppConfig(reports="not-a-list")  # type: ignore[arg-type]
+
+    def test_app_config_non_report_target_in_reports_raises(self) -> None:
+        with pytest.raises(TypeError, match=r"AppConfig.reports\[0\] must be ReportTarget"):
+            AppConfig(reports=["not-a-ReportTarget"])  # type: ignore[list-item]
+
+    # --- ChecklistConfig.report_staff inline 検査の漏れたケース (pr-test rating 7) ---
+    def test_checklist_report_staff_non_dict_raises(self) -> None:
+        from wiseman_hub.config import ChecklistConfig
+        with pytest.raises(TypeError, match="report_staff must be dict"):
+            ChecklistConfig(report_staff=[])  # type: ignore[arg-type]
+
+    def test_checklist_report_staff_non_string_key_raises(self) -> None:
+        from wiseman_hub.config import ChecklistConfig, ReportStaffEntry
+        with pytest.raises(TypeError, match="report_staff key must be str"):
+            ChecklistConfig(report_staff={1: ReportStaffEntry()})  # type: ignore[dict-item]
+
+    # --- ChecklistConfig.xlsx_path_cache 型ガード (pr-test rating 6) ----
+    def test_checklist_xlsx_path_cache_non_dict_raises(self) -> None:
+        from wiseman_hub.config import ChecklistConfig
+        with pytest.raises(TypeError, match="xlsx_path_cache must be dict"):
+            ChecklistConfig(xlsx_path_cache="not-a-dict")  # type: ignore[arg-type]
+
+    def test_checklist_xlsx_path_cache_non_string_value_raises(self) -> None:
+        from wiseman_hub.config import ChecklistConfig
+        with pytest.raises(TypeError, match=r"xlsx_path_cache\['宮下:2026:3'\] must be str"):
+            ChecklistConfig(xlsx_path_cache={"宮下:2026:3": 123})  # type: ignore[dict-item]
+
 
 class TestTypeGuardHelpers:
     """Issue #27 続編 A: ``_check_*`` helper 関数群の単体テスト。"""

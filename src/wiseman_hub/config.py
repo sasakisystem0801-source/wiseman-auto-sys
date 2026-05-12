@@ -550,6 +550,28 @@ class AppConfig:
     pdf_merge: PdfMergeConfig = field(default_factory=PdfMergeConfig)
     checklist: ChecklistConfig = field(default_factory=ChecklistConfig)
 
+    def __post_init__(self) -> None:
+        """AppConfig 自体の str field + reports list 要素を型ガード。
+
+        ネスト dataclass (wiseman/schedule/gcp/...) は各々の ``__post_init__`` で
+        守られるが、``AppConfig`` 直下の ``version`` / ``log_level`` / ``log_dir`` /
+        ``reports`` は本層で守る (silent-failure-hunter PR #260 review 反映)。
+        """
+        _check_str("AppConfig.version", self.version)
+        _check_str("AppConfig.log_level", self.log_level)
+        _check_str("AppConfig.log_dir", self.log_dir)
+        if not isinstance(self.reports, list):
+            raise TypeError(
+                f"AppConfig.reports must be list, got "
+                f"{type(self.reports).__name__}: {self.reports!r}"
+            )
+        for i, item in enumerate(self.reports):
+            if not isinstance(item, ReportTarget):
+                raise TypeError(
+                    f"AppConfig.reports[{i}] must be ReportTarget, got "
+                    f"{type(item).__name__}"
+                )
+
 
 def _coerce_facility_aliases(aliases_data: Any) -> dict[str, list[str]]:
     """TOML の facility_aliases section を ``dict[str, list[str]]`` に強制変換する。
