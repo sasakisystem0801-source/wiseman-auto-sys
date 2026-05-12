@@ -16,10 +16,15 @@ ADR-016 §1.1.3 (新設):
     - **system clock sanity check**: 起動時に UTC clock が **2026-01-01〜2030-12-31** の
       絶対範囲内であることを確認 (codex C3 反映)。範囲外は ``SigstoreVerifyError`` raise。
       2030 上限は本 appliance のサポート期限と整合 — 期限到来前に再検討必須 (TODO)。
-    - **TUF trusted root の運用**: ``Verifier.production()`` 内部で TUF root の online
-      refresh を試行する。sigstore-python 3.x の default 動作で、refresh 失敗時の挙動
-      (offline cache 利用 / fail-close) はバージョン依存。本 launcher では失敗を
-      ``SigstoreVerifyError`` に wrap して fail-close (操作員が clock / network を確認)。
+    - **TUF trusted root の運用 (offline=True)**: ``Verifier.production(offline=True)``
+      で TUF online refresh を skip し、bundle 済 trust roots
+      (``sigstore/_store/prod/{root,trusted_root}.json``) のみで verify する。
+      online refresh は Windows 上で ``root_history/N.root.json`` への symlink を
+      作成する経路があり、非管理者 user では ``WinError 1314`` で失敗する
+      (Phase 6 canary 検証 2026-05-13、PR #254 後継)。launcher は集中型運用
+      (1 台で 40 事業所データを処理) で **launcher 再 build 時に新 trust roots を
+      取り込むモデル**のため online refresh は不要。失敗時は引き続き
+      ``SigstoreVerifyError`` に wrap して fail-close。
     - **戻り値**: DSSE payload を decode した SLSA Statement dict。claims 検証は
       呼出側 (provenance.verify_statement_claims) に委譲する二段構成 (codex C1 反映)
 """
@@ -87,7 +92,13 @@ def _build_identity_policy(*, expected_identity: str, expected_issuer: str) -> A
 
 
 def _build_verifier() -> Any:
-    """Sigstore production Verifier (TUF online refresh + 同梱 cache fallback)。"""
+    """Sigstore production Verifier (offline=True: TUF online refresh を skip)。
+
+    ``offline=True`` は bundle 済 trust roots のみで verify する。Windows symlink
+    権限要件 (``WinError 1314``) を回避し、launcher の集中型運用モデル
+    (1 台 / launcher 再 build 時に trust root 更新) と整合させる。
+    詳細はモジュール docstring 参照。
+    """
     try:
         from sigstore.verify import Verifier
     except ImportError as e:
@@ -95,10 +106,10 @@ def _build_verifier() -> Any:
             f"sigstore-python not installed: {type(e).__name__}: {e}"
         ) from e
     try:
-        return Verifier.production()
-    except Exception as e:  # noqa: BLE001 — sigstore TrustedRoot/network 系の例外を一律 wrap
+        return Verifier.production(offline=True)
+    except Exception as e:  # noqa: BLE001 — sigstore TrustedRoot 系の例外を一律 wrap
         raise SigstoreVerifyError(
-            f"Verifier.production() init failed: {type(e).__name__}: {e}"
+            f"Verifier.production(offline=True) init failed: {type(e).__name__}: {e}"
         ) from e
 
 
