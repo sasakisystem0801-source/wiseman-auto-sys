@@ -1,6 +1,7 @@
 """設定ローダーのユニットテスト"""
 
 import logging
+import math
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
@@ -1083,6 +1084,48 @@ class TestUserNameBBoxValidation:
         with pytest.raises(ValueError, match="dpi must be positive"):
             UserNameBBox(dpi=dpi)
 
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("x0", float("nan")),
+            ("y0", float("nan")),
+            ("x1", float("nan")),
+            ("y1", float("nan")),
+            ("x0", float("inf")),
+            ("y1", float("inf")),
+            ("x0", float("-inf")),
+            ("y0", float("-inf")),
+        ],
+    )
+    def test_nan_inf_coord_raises(self, field: str, value: float) -> None:
+        """Issue #152: NaN/inf 座標を ``math.isfinite`` で弾く。
+
+        NaN は ``x0 >= x1`` 比較が常に False になり、後続の不変条件チェック
+        (x0<x1, y0<y1) をすり抜けて silent fail する。``__post_init__`` の
+        「未設定 return」より **前** で弾く必要がある (NaN は ``v == 0.0`` も
+        False のため未設定判定にも引っ掛からず、return しないまま比較段に進む)。
+        """
+        # 他フィールドは妥当な値で埋める (NaN/inf 単独の影響を分離)
+        coords: dict[str, float] = {"x0": 10.0, "y0": 20.0, "x1": 100.0, "y1": 80.0}
+        coords[field] = value
+        with pytest.raises(ValueError, match=f"{field} must be finite"):
+            UserNameBBox(**coords)
+
+    def test_nan_with_all_zero_coords_still_raises(self) -> None:
+        """NaN は「未設定」判定 (4 値全 0) をすり抜けても弾かれる。
+
+        ``x0=NaN, y0=0, x1=0, y1=0`` は ``NaN == 0`` が False なので
+        未設定 return に入らず、NaN チェックで raise する。
+        """
+        with pytest.raises(ValueError, match="x0 must be finite"):
+            UserNameBBox(x0=float("nan"), y0=0.0, x1=0.0, y1=0.0)
+
+    def test_finite_coords_pass(self) -> None:
+        """正常系: ``math.isfinite`` を通る通常座標は問題なく構築できる。"""
+        bbox = UserNameBBox(x0=10.0, y0=20.0, x1=100.0, y1=80.0)
+        assert math.isfinite(bbox.x0)
+        assert bbox.is_configured is True
+
 
 class TestOcrBackendConfigValidation:
     """OcrBackendConfig の不変条件検証 + is_configured。"""
@@ -1117,6 +1160,28 @@ class TestOcrBackendConfigValidation:
         """再試行なし運用（max_retries=0）は妥当な設定。"""
         cfg = OcrBackendConfig(max_retries=0)
         assert cfg.max_retries == 0
+
+    @pytest.mark.parametrize("whitespace", ["   ", "\t", "\n", " \t\n"])
+    def test_whitespace_only_endpoint_is_unconfigured(self, whitespace: str) -> None:
+        """Issue #152: 空白文字列のみの endpoint_url は ``is_configured=False``。
+
+        ``bool("   ")`` は truthy なので素朴な ``bool(url and key)`` では
+        ``is_configured=True`` と誤判定し、HTTP 呼び出し時に runtime 失敗する。
+        ``.strip()`` を噛ませて空白のみを「未設定」と扱う。
+        """
+        cfg = OcrBackendConfig(endpoint_url=whitespace, api_key="abc")
+        assert cfg.is_configured is False
+
+    @pytest.mark.parametrize("whitespace", ["   ", "\t", "\n", " \t\n"])
+    def test_whitespace_only_api_key_is_unconfigured(self, whitespace: str) -> None:
+        """Issue #152: 空白文字列のみの api_key は ``is_configured=False``。"""
+        cfg = OcrBackendConfig(endpoint_url="https://example.run.app", api_key=whitespace)
+        assert cfg.is_configured is False
+
+    def test_both_whitespace_only_is_unconfigured(self) -> None:
+        """Issue #152: 両方とも空白のみ → ``is_configured=False``。"""
+        cfg = OcrBackendConfig(endpoint_url="   ", api_key="\t")
+        assert cfg.is_configured is False
 
 
 class TestPdfMergeConfigValidation:

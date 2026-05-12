@@ -78,9 +78,12 @@ class OcrClient:
         *,
         http_client: httpx.Client | None = None,
     ) -> None:
-        if not config.endpoint_url:
+        # Issue #152: 空白文字列のみ (``"   "`` / ``"\t\n"`` 等) も「未設定」扱い。
+        # ``OcrBackendConfig.is_configured`` を gate にしない直接構築経路
+        # (例: __main__.py:382) でも runtime 失敗ではなく起動時 ValueError で拒否。
+        if not config.endpoint_url.strip():
             raise ValueError("OcrBackendConfig.endpoint_url is empty")
-        if not config.api_key:
+        if not config.api_key.strip():
             raise ValueError("OcrBackendConfig.api_key is empty")
         self._config = config
         self._url = f"{config.endpoint_url.rstrip('/')}{_ENDPOINT_PATH}"

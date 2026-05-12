@@ -7,6 +7,7 @@ try:
 except ModuleNotFoundError:
     import tomli as tomllib  # type: ignore[no-redef]
 import logging
+import math
 import os
 from dataclasses import asdict, dataclass, field
 from glob import glob
@@ -147,8 +148,12 @@ class OcrBackendConfig:
 
     @property
     def is_configured(self) -> bool:
-        """endpoint_url と api_key の両方が設定済みなら True（OCR 呼び出し可能）。"""
-        return bool(self.endpoint_url and self.api_key)
+        """endpoint_url と api_key の両方が設定済みなら True（OCR 呼び出し可能）。
+
+        Issue #152: 空白文字列のみ (``"   "`` / ``"\\t\\n"`` 等) は ``False`` 扱い。
+        HTTP 呼び出し時の runtime 失敗を起動時 gate で防ぐ。
+        """
+        return bool(self.endpoint_url.strip() and self.api_key.strip())
 
 
 @dataclass
@@ -173,6 +178,13 @@ class UserNameBBox:
     def __post_init__(self) -> None:
         if self.dpi <= 0:
             raise ValueError(f"UserNameBBox.dpi must be positive: {self.dpi}")
+        # Issue #152: NaN/inf を弾く。NaN は ``x0 >= x1`` 比較が常に False となり、
+        # 後続の不変条件チェック (x0<x1, y0<y1) をすり抜けて silent fail する。
+        # 「未設定 return」より **前** に置く必要がある — NaN は ``v == 0.0`` も
+        # False のため未設定判定にも引っ掛からず、return しないまま比較段に進む。
+        for name, v in (("x0", self.x0), ("y0", self.y0), ("x1", self.x1), ("y1", self.y1)):
+            if not math.isfinite(v):
+                raise ValueError(f"UserNameBBox.{name} must be finite (no NaN/inf): {v}")
         # 「未設定」判定は座標 4 値が全 0 で固定（is_configured の定義変更に依存しない）。
         if self.x0 == 0.0 and self.y0 == 0.0 and self.x1 == 0.0 and self.y1 == 0.0:
             return

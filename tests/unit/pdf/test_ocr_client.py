@@ -61,6 +61,27 @@ def test_init_raises_on_empty_api_key() -> None:
         OcrClient(config)
 
 
+@pytest.mark.parametrize("whitespace", ["   ", "\t", "\n", " \t\n"])
+def test_init_raises_on_whitespace_only_endpoint(whitespace: str) -> None:
+    """Issue #152: 空白文字列のみの endpoint_url は ``ValueError`` で起動時拒否。
+
+    ``OcrBackendConfig.is_configured`` を gate にしない直接構築経路
+    (``__main__.py:382``) でも HTTP 呼出時の runtime 失敗ではなく
+    起動時 ValueError で fail-close。
+    """
+    config = OcrBackendConfig(endpoint_url=whitespace, api_key="k")
+    with pytest.raises(ValueError, match="endpoint_url"):
+        OcrClient(config)
+
+
+@pytest.mark.parametrize("whitespace", ["   ", "\t", "\n", " \t\n"])
+def test_init_raises_on_whitespace_only_api_key(whitespace: str) -> None:
+    """Issue #152: 空白文字列のみの api_key は ``ValueError`` で起動時拒否。"""
+    config = OcrBackendConfig(endpoint_url="https://x.run.app", api_key=whitespace)
+    with pytest.raises(ValueError, match="api_key"):
+        OcrClient(config)
+
+
 # --- 正常系 --------------------------------------------------------
 
 
