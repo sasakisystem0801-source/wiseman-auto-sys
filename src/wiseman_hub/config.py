@@ -137,6 +137,30 @@ class OcrBackendConfig:
     max_retries: int = 3
 
     def __post_init__(self) -> None:
+        # Issue #27 §2: 型ガード。TOML パーサは型を解釈するが強制しないため
+        # ``endpoint_url = 123`` 等の誤入力で非文字列が来ると ``.strip()`` /
+        # ``rstrip("/")`` で AttributeError が起動時に出る。詳細メッセージで fail-close。
+        if not isinstance(self.endpoint_url, str):
+            raise TypeError(
+                f"OcrBackendConfig.endpoint_url must be str, got "
+                f"{type(self.endpoint_url).__name__}: {self.endpoint_url!r}"
+            )
+        if not isinstance(self.api_key, str):
+            raise TypeError(
+                f"OcrBackendConfig.api_key must be str, got "
+                f"{type(self.api_key).__name__}: {self.api_key!r}"
+            )
+        # bool は int サブクラスのため明示除外 (timeout_sec=True は設定ミス)
+        if isinstance(self.timeout_sec, bool) or not isinstance(self.timeout_sec, int):
+            raise TypeError(
+                f"OcrBackendConfig.timeout_sec must be int, got "
+                f"{type(self.timeout_sec).__name__}: {self.timeout_sec!r}"
+            )
+        if isinstance(self.max_retries, bool) or not isinstance(self.max_retries, int):
+            raise TypeError(
+                f"OcrBackendConfig.max_retries must be int, got "
+                f"{type(self.max_retries).__name__}: {self.max_retries!r}"
+            )
         if self.timeout_sec <= 0:
             raise ValueError(
                 f"OcrBackendConfig.timeout_sec must be positive: {self.timeout_sec}"
@@ -176,6 +200,20 @@ class UserNameBBox:
     dpi: int = 200
 
     def __post_init__(self) -> None:
+        # Issue #27 §2: 型ガード。bool は ``int`` サブクラスで ``math.isfinite(True)==True``
+        # と ``True == 1`` で後続の NaN/inf チェック・座標順序チェックをすり抜けるため
+        # 明示除外。str / None / list 等の非数値も同様に最初に弾く (TypeError で fail-close)。
+        for name, v in (("x0", self.x0), ("y0", self.y0), ("x1", self.x1), ("y1", self.y1)):
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                raise TypeError(
+                    f"UserNameBBox.{name} must be int or float, got "
+                    f"{type(v).__name__}: {v!r}"
+                )
+        if isinstance(self.dpi, bool) or not isinstance(self.dpi, int):
+            raise TypeError(
+                f"UserNameBBox.dpi must be int, got "
+                f"{type(self.dpi).__name__}: {self.dpi!r}"
+            )
         if self.dpi <= 0:
             raise ValueError(f"UserNameBBox.dpi must be positive: {self.dpi}")
         # Issue #152: NaN/inf を弾く。NaN は ``x0 >= x1`` 比較が常に False となり、
