@@ -1864,6 +1864,50 @@ facility_routing = {}
         cfg = load_config(Path("config/default.toml"))
         assert isinstance(cfg, AppConfig)
 
+    def test_checklist_xlsx_path_cache_array_raises(self, tmp_path: Path) -> None:
+        """Codex review (PR #261): xlsx_path_cache = [] (空 list) も TypeError。
+
+        他 sibling (facility_routing, report_staff) と対称性確保。
+        """
+        toml_content = """\
+[checklist]
+xlsx_path_cache = []
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(TypeError, match=r"xlsx_path_cache\] must be a table"):
+            load_config(config_file)
+
+    def test_pdf_merge_facility_aliases_array_raises(self, tmp_path: Path) -> None:
+        """Codex PR #261 review 致命的残存: facility_aliases = [] が silent 通過していた。
+
+        旧 ``_coerce_facility_aliases`` の ``dict(aliases_data).items()`` は
+        ``[]`` を ``dict([])`` で ``{}`` 化していた。本 PR で先頭に
+        ``_require_section_table`` を入れて fail-close する。
+        """
+        toml_content = """\
+[pdf_merge]
+facility_aliases = []
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(TypeError, match=r"facility_aliases\] section must be a table"):
+            load_config(config_file)
+
+    def test_pdf_merge_facility_aliases_string_raises(self, tmp_path: Path) -> None:
+        """同上: facility_aliases = "string" も TypeError。"""
+        toml_content = """\
+[pdf_merge]
+facility_aliases = "not-a-table"
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(TypeError, match=r"facility_aliases\] section must be a table"):
+            load_config(config_file)
+
     def test_whitespace_endpoint_in_toml_keeps_unconfigured(self, tmp_path: Path) -> None:
         """Issue #152: TOML の空白文字列のみ endpoint_url は ``is_configured=False``。
 

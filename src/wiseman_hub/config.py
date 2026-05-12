@@ -596,9 +596,14 @@ def _coerce_facility_aliases(aliases_data: Any) -> dict[str, list[str]]:
     型違反（value が list でない、要素が str でない）は ``TypeError`` で fail-fast する。
     PII 防御で例外メッセージには key/value の生値を含めず、構造的な型情報のみ出す
     （介護現場の事業所名・別名はログ送信先で機密扱いになる場合がある）。
+
+    Issue #27 続編 B (Codex PR #261 review 致命的残存): section 自体の型を
+    ``_require_section_table`` で先頭で守る。旧 ``dict(aliases_data).items()`` は
+    ``facility_aliases = []`` を ``dict([])`` で ``{}`` 化、silent 通過していた。
     """
+    aliases_data = _require_section_table("pdf_merge.facility_aliases", aliases_data)
     coerced: dict[str, list[str]] = {}
-    for key, value in dict(aliases_data).items():
+    for key, value in aliases_data.items():
         canonical = str(key)
         if not isinstance(value, list):
             raise TypeError(
