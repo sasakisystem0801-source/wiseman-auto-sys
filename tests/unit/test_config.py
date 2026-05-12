@@ -1337,6 +1337,45 @@ timeout_sec = 0
         with pytest.raises(ValueError, match="timeout_sec must be positive"):
             load_config(config_file)
 
+    def test_nan_bbox_coord_in_toml_propagates(self, tmp_path: Path) -> None:
+        """Issue #152: TOML の ``nan`` リテラル座標を起動時 ValueError で fail-close。
+
+        TOML 1.0 仕様で ``nan`` / ``inf`` / ``-inf`` は float リテラルとして
+        解釈される (https://toml.io/en/v1.0.0#float)。手書き編集や設定ミスで
+        NaN が混入しても dataclass の ``math.isfinite`` チェックで起動時に拒否。
+        """
+        toml_content = """\
+[pdf_merge.user_name_bbox]
+x0 = nan
+y0 = 10.0
+x1 = 100.0
+y1 = 80.0
+dpi = 200
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(ValueError, match="x0 must be finite"):
+            load_config(config_file)
+
+    def test_whitespace_endpoint_in_toml_keeps_unconfigured(self, tmp_path: Path) -> None:
+        """Issue #152: TOML の空白文字列のみ endpoint_url は ``is_configured=False``。
+
+        手書き編集で ``endpoint_url = "   "`` が永続化されたケースでも、
+        load_config 経由で構築した dataclass の ``is_configured`` が False を
+        返すこと (HTTP 呼出時 runtime 失敗ではなく起動時 gate で disable)。
+        """
+        toml_content = """\
+[ocr_backend]
+endpoint_url = "   "
+api_key = "valid-key"
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        cfg = load_config(config_file)
+        assert cfg.ocr_backend.is_configured is False
+
     def test_default_toml_loads_successfully(self) -> None:
         """既存 config/default.toml が新検証下でも回帰なく読める（regression guard）。"""
         config = load_config(Path("config/default.toml"))
