@@ -23,6 +23,86 @@ from wiseman_hub.utils.text_norm import normalize_lookup_key
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# 型ガード helper (Issue #27 §2 水平展開)
+#
+# 各 dataclass の ``__post_init__`` から呼び出して、TOML パーサ経由 + 直接構築
+# 双方の経路で型違反を起動時 ``TypeError`` で fail-close する。値違反 (range)
+# は ``ValueError`` と区別する。
+#
+# 設計判断:
+#   - ``bool`` は ``int`` サブクラスのため明示除外 (``isinstance(True, int)==True``
+#     ですり抜けるため)
+#   - PII 隠蔽: ``echo_value=False`` を指定するとエラーメッセージから値を除外
+#     (api_key / spreadsheet_id / SA key path 等の秘密情報フィールド向け)
+#   - エラーメッセージに ``type(v).__name__`` は常時含める (デバッグ可読性確保)
+# ---------------------------------------------------------------------------
+
+
+def _check_str(name: str, value: object, *, echo_value: bool = True) -> None:
+    """型が ``str`` でなければ ``TypeError``。
+
+    ``echo_value=False`` で値を ``{v!r}`` で出さない (PII 防御)。
+    """
+    if not isinstance(value, str):
+        suffix = f": {value!r}" if echo_value else ""
+        raise TypeError(
+            f"{name} must be str, got {type(value).__name__}{suffix}"
+        )
+
+
+def _check_int(name: str, value: object) -> None:
+    """型が ``int`` (bool 除く) でなければ ``TypeError``。
+
+    bool は ``int`` サブクラスのため明示除外。``True == 1`` で後続の値範囲
+    チェック (e.g. ``v <= 0``) や ``time.sleep(v)`` 経路をすり抜ける。
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(
+            f"{name} must be int, got {type(value).__name__}: {value!r}"
+        )
+
+
+def _check_bool(name: str, value: object) -> None:
+    """型が ``bool`` でなければ ``TypeError``。"""
+    if not isinstance(value, bool):
+        raise TypeError(
+            f"{name} must be bool, got {type(value).__name__}: {value!r}"
+        )
+
+
+def _check_list_of_str(name: str, value: object) -> None:
+    """``list[str]`` でなければ ``TypeError`` (要素まで検査)。"""
+    if not isinstance(value, list):
+        raise TypeError(
+            f"{name} must be list, got {type(value).__name__}: {value!r}"
+        )
+    for i, item in enumerate(value):
+        if not isinstance(item, str):
+            raise TypeError(
+                f"{name}[{i}] must be str, got "
+                f"{type(item).__name__}: {item!r}"
+            )
+
+
+def _check_dict_str_to_str(name: str, value: object) -> None:
+    """``dict[str, str]`` でなければ ``TypeError`` (キー/値とも検査)。"""
+    if not isinstance(value, dict):
+        raise TypeError(
+            f"{name} must be dict, got {type(value).__name__}: {value!r}"
+        )
+    for k, v in value.items():
+        if not isinstance(k, str):
+            raise TypeError(
+                f"{name} key must be str, got {type(k).__name__}: {k!r}"
+            )
+        if not isinstance(v, str):
+            raise TypeError(
+                f"{name}[{k!r}] must be str, got {type(v).__name__}: {v!r}"
+            )
+
+
 TableLike = Table | InlineTable
 _TABLE_LIKE_TYPES: tuple[type, ...] = (Table, InlineTable)
 
@@ -54,11 +134,20 @@ class WisemanConfig:
     startup_wait_sec: int = 15  # 起動・ドングル認証待機秒数
     window_title_pattern: str = ".*管理システム SP.*"  # メインウィンドウのタイトルパターン
 
+    def __post_init__(self) -> None:
+        _check_str("WisemanConfig.exe_path", self.exe_path)
+        _check_int("WisemanConfig.startup_wait_sec", self.startup_wait_sec)
+        _check_str("WisemanConfig.window_title_pattern", self.window_title_pattern)
+
 
 @dataclass
 class ScheduleConfig:
     enabled: bool = False
     cron: str = "0 8 * * *"
+
+    def __post_init__(self) -> None:
+        _check_bool("ScheduleConfig.enabled", self.enabled)
+        _check_str("ScheduleConfig.cron", self.cron)
 
 
 @dataclass
@@ -66,6 +155,11 @@ class ReportTarget:
     name: str = ""
     menu_path: list[str] = field(default_factory=list)
     output_format: str = "csv"
+
+    def __post_init__(self) -> None:
+        _check_str("ReportTarget.name", self.name)
+        _check_list_of_str("ReportTarget.menu_path", self.menu_path)
+        _check_str("ReportTarget.output_format", self.output_format)
 
 
 @dataclass
@@ -103,6 +197,20 @@ class GcpConfig:
     service_account_key_path: str = ""
     region: str = "asia-northeast1"
 
+    def __post_init__(self) -> None:
+        _check_str("GcpConfig.project_id", self.project_id)
+        _check_str("GcpConfig.bucket_name", self.bucket_name)
+        _check_str("GcpConfig.data_bucket_name", self.data_bucket_name)
+        _check_str("GcpConfig.release_bucket_name", self.release_bucket_name)
+        # SA key path 自体は秘密ではないが key file 内容を推測されるリスクを
+        # 下げるため PII 隠蔽 (defensive)
+        _check_str(
+            "GcpConfig.service_account_key_path",
+            self.service_account_key_path,
+            echo_value=False,
+        )
+        _check_str("GcpConfig.region", self.region)
+
     @property
     def effective_data_bucket(self) -> str:
         """data bucket 名（ADR-016 新フィールド優先、空なら旧 bucket_name）。"""
@@ -119,6 +227,11 @@ class UpdaterConfig:
     enabled: bool = False
     check_interval_hours: int = 1
     release_bucket: str = ""
+
+    def __post_init__(self) -> None:
+        _check_bool("UpdaterConfig.enabled", self.enabled)
+        _check_int("UpdaterConfig.check_interval_hours", self.check_interval_hours)
+        _check_str("UpdaterConfig.release_bucket", self.release_bucket)
 
 
 @dataclass
@@ -137,32 +250,11 @@ class OcrBackendConfig:
     max_retries: int = 3
 
     def __post_init__(self) -> None:
-        # Issue #27 §2: 型ガード。TOML パーサは型を解釈するが強制しないため
-        # ``endpoint_url = 123`` 等の誤入力で非文字列が来ると ``.strip()`` /
-        # ``rstrip("/")`` で AttributeError が起動時に出る。詳細メッセージで fail-close。
-        if not isinstance(self.endpoint_url, str):
-            raise TypeError(
-                f"OcrBackendConfig.endpoint_url must be str, got "
-                f"{type(self.endpoint_url).__name__}: {self.endpoint_url!r}"
-            )
-        if not isinstance(self.api_key, str):
-            # PII 防御 (type-design review): api_key は秘密情報のため値を ``{v!r}``
-            # で含めない。型違反検出には ``type().__name__`` だけで充分。
-            raise TypeError(
-                f"OcrBackendConfig.api_key must be str, got "
-                f"{type(self.api_key).__name__}"
-            )
-        # bool は int サブクラスのため明示除外 (timeout_sec=True は設定ミス)
-        if isinstance(self.timeout_sec, bool) or not isinstance(self.timeout_sec, int):
-            raise TypeError(
-                f"OcrBackendConfig.timeout_sec must be int, got "
-                f"{type(self.timeout_sec).__name__}: {self.timeout_sec!r}"
-            )
-        if isinstance(self.max_retries, bool) or not isinstance(self.max_retries, int):
-            raise TypeError(
-                f"OcrBackendConfig.max_retries must be int, got "
-                f"{type(self.max_retries).__name__}: {self.max_retries!r}"
-            )
+        _check_str("OcrBackendConfig.endpoint_url", self.endpoint_url)
+        # api_key は秘密情報のため PII 防御で値を出さない
+        _check_str("OcrBackendConfig.api_key", self.api_key, echo_value=False)
+        _check_int("OcrBackendConfig.timeout_sec", self.timeout_sec)
+        _check_int("OcrBackendConfig.max_retries", self.max_retries)
         if self.timeout_sec <= 0:
             raise ValueError(
                 f"OcrBackendConfig.timeout_sec must be positive: {self.timeout_sec}"
@@ -202,20 +294,17 @@ class UserNameBBox:
     dpi: int = 200
 
     def __post_init__(self) -> None:
-        # Issue #27 §2: 型ガード。bool は ``int`` サブクラスで ``math.isfinite(True)==True``
-        # と ``True == 1`` で後続の NaN/inf チェック・座標順序チェックをすり抜けるため
-        # 明示除外。str / None / list 等の非数値も同様に最初に弾く (TypeError で fail-close)。
+        # 座標は float field だが TOML で ``x0 = 10`` の int リテラルも許容するため
+        # ``isinstance(v, (int, float))`` で受ける。bool は int サブクラスのため
+        # ``math.isfinite(True) == True`` / ``True == 1`` で silent 通過するため
+        # 別判定で除外する (_check_int / _check_str の helper 化対象外)。
         for name, v in (("x0", self.x0), ("y0", self.y0), ("x1", self.x1), ("y1", self.y1)):
             if isinstance(v, bool) or not isinstance(v, (int, float)):
                 raise TypeError(
                     f"UserNameBBox.{name} must be int or float, got "
                     f"{type(v).__name__}: {v!r}"
                 )
-        if isinstance(self.dpi, bool) or not isinstance(self.dpi, int):
-            raise TypeError(
-                f"UserNameBBox.dpi must be int, got "
-                f"{type(self.dpi).__name__}: {self.dpi!r}"
-            )
+        _check_int("UserNameBBox.dpi", self.dpi)
         if self.dpi <= 0:
             raise ValueError(f"UserNameBBox.dpi must be positive: {self.dpi}")
         # Issue #152: NaN/inf を弾く。NaN は ``x0 >= x1`` 比較が常に False となり、
@@ -334,6 +423,12 @@ class ReportStaffEntry:
     year_subfolder_template: str = ""
     file_template: str = ""
 
+    def __post_init__(self) -> None:
+        _check_str("ReportStaffEntry.base_dir", self.base_dir)
+        _check_list_of_str("ReportStaffEntry.suggest_patterns", self.suggest_patterns)
+        _check_str("ReportStaffEntry.year_subfolder_template", self.year_subfolder_template)
+        _check_str("ReportStaffEntry.file_template", self.file_template)
+
 
 # PR #233 substring match 化以前の旧 default 値。本田様 PC 等で TOML に保存
 # された旧値が PR #233 の自動吸収を bypass する事故防止のため、ChecklistConfig
@@ -382,15 +477,53 @@ class ChecklistConfig:
     xlsx_path_cache: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        """legacy ``monitoring_subfolder`` 値を検出して WARNING で気付かせる。
+        """型ガード (#27 §2 水平展開) + legacy ``monitoring_subfolder`` 検出。
 
-        PR #233 (2026-05-09) で ``monitoring_subfolder`` の運用を canonical name
-        + substring match に変更した。本田様 PC 等で旧 default 値が保存済 TOML に
-        残ると新ロジックの prefix/suffix 自動吸収が効かないため、構築時に
-        検出して ``logger.warning`` で気付ける。
+        型ガードを先に走らせ、その後 legacy 値の WARNING 検出を続ける
+        (PR #233 (2026-05-09) で導入した既存挙動を保持)。
+
+        legacy WARNING: PR #233 で ``monitoring_subfolder`` の運用を
+        canonical name + substring match に変更した。本田様 PC 等で旧 default
+        値が保存済 TOML に残ると新ロジックの prefix/suffix 自動吸収が効かない
+        ため、構築時に検出して ``logger.warning`` で気付ける。
         現時点でも値そのものは動作するため (完全一致 prefix で 1 件だけ HIT する
         運用は維持)、エラーではなく WARNING にする。
         """
+        # spreadsheet_id は Google Drive file id (URL 推測可能) のため PII 隠蔽
+        _check_str(
+            "ChecklistConfig.spreadsheet_id",
+            self.spreadsheet_id,
+            echo_value=False,
+        )
+        _check_str("ChecklistConfig.karte_root", self.karte_root)
+        _check_str("ChecklistConfig.monitoring_subfolder", self.monitoring_subfolder)
+        _check_str("ChecklistConfig.fax_root", self.fax_root)
+        _check_str("ChecklistConfig.b_output_subfolder", self.b_output_subfolder)
+        _check_str("ChecklistConfig.c_output_subfolder", self.c_output_subfolder)
+        _check_dict_str_to_str(
+            "ChecklistConfig.facility_routing", self.facility_routing
+        )
+        # report_staff は dict[str, ReportStaffEntry] (dataclass 値) なので直接検査
+        if not isinstance(self.report_staff, dict):
+            raise TypeError(
+                f"ChecklistConfig.report_staff must be dict, got "
+                f"{type(self.report_staff).__name__}: {self.report_staff!r}"
+            )
+        for k, v in self.report_staff.items():
+            if not isinstance(k, str):
+                raise TypeError(
+                    f"ChecklistConfig.report_staff key must be str, got "
+                    f"{type(k).__name__}: {k!r}"
+                )
+            if not isinstance(v, ReportStaffEntry):
+                raise TypeError(
+                    f"ChecklistConfig.report_staff[{k!r}] must be ReportStaffEntry, "
+                    f"got {type(v).__name__}"
+                )
+        _check_dict_str_to_str(
+            "ChecklistConfig.xlsx_path_cache", self.xlsx_path_cache
+        )
+
         if self.monitoring_subfolder in _LEGACY_MONITORING_SUBFOLDERS:
             logger.warning(
                 "monitoring_subfolder='%s' is a legacy value. "
@@ -416,6 +549,28 @@ class AppConfig:
     ocr_backend: OcrBackendConfig = field(default_factory=OcrBackendConfig)
     pdf_merge: PdfMergeConfig = field(default_factory=PdfMergeConfig)
     checklist: ChecklistConfig = field(default_factory=ChecklistConfig)
+
+    def __post_init__(self) -> None:
+        """AppConfig 自体の str field + reports list 要素を型ガード。
+
+        ネスト dataclass (wiseman/schedule/gcp/...) は各々の ``__post_init__`` で
+        守られるが、``AppConfig`` 直下の ``version`` / ``log_level`` / ``log_dir`` /
+        ``reports`` は本層で守る (silent-failure-hunter PR #260 review 反映)。
+        """
+        _check_str("AppConfig.version", self.version)
+        _check_str("AppConfig.log_level", self.log_level)
+        _check_str("AppConfig.log_dir", self.log_dir)
+        if not isinstance(self.reports, list):
+            raise TypeError(
+                f"AppConfig.reports must be list, got "
+                f"{type(self.reports).__name__}: {self.reports!r}"
+            )
+        for i, item in enumerate(self.reports):
+            if not isinstance(item, ReportTarget):
+                raise TypeError(
+                    f"AppConfig.reports[{i}] must be ReportTarget, got "
+                    f"{type(item).__name__}"
+                )
 
 
 def _coerce_facility_aliases(aliases_data: Any) -> dict[str, list[str]]:
