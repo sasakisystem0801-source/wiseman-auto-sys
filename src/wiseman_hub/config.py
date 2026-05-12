@@ -146,9 +146,11 @@ class OcrBackendConfig:
                 f"{type(self.endpoint_url).__name__}: {self.endpoint_url!r}"
             )
         if not isinstance(self.api_key, str):
+            # PII 防御 (type-design review): api_key は秘密情報のため値を ``{v!r}``
+            # で含めない。型違反検出には ``type().__name__`` だけで充分。
             raise TypeError(
                 f"OcrBackendConfig.api_key must be str, got "
-                f"{type(self.api_key).__name__}: {self.api_key!r}"
+                f"{type(self.api_key).__name__}"
             )
         # bool は int サブクラスのため明示除外 (timeout_sec=True は設定ミス)
         if isinstance(self.timeout_sec, bool) or not isinstance(self.timeout_sec, int):

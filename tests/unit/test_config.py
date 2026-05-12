@@ -1228,6 +1228,20 @@ class TestOcrBackendConfigValidation:
         with pytest.raises(TypeError, match="api_key must be str"):
             OcrBackendConfig(api_key=bad_value)  # type: ignore[arg-type]
 
+    def test_api_key_typeerror_does_not_leak_value(self) -> None:
+        """PII 防御: api_key の TypeError メッセージに値を含めない。
+
+        型違反時に渡される値は str ではないため実シークレットそのものは
+        含まれないが、pattern hygiene として ``{v!r}`` を含めない設計。
+        ``type().__name__`` のみで型違反は十分診断可能。
+        """
+        sensitive_marker = "should_not_appear_in_message"
+        with pytest.raises(TypeError) as exc_info:
+            OcrBackendConfig(api_key=[sensitive_marker])  # type: ignore[arg-type]
+        assert sensitive_marker not in str(exc_info.value)
+        assert "api_key must be str" in str(exc_info.value)
+        assert "list" in str(exc_info.value)  # 型名は出る
+
     @pytest.mark.parametrize("bad_value", [True, "30", 1.5, None])
     def test_non_int_timeout_sec_raises(self, bad_value: object) -> None:
         """Issue #27 §2: bool / str / float / None の timeout_sec は TypeError。"""
