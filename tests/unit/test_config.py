@@ -1126,6 +1126,39 @@ class TestUserNameBBoxValidation:
         assert math.isfinite(bbox.x0)
         assert bbox.is_configured is True
 
+    @pytest.mark.parametrize(
+        ("field", "bad_value"),
+        [
+            ("x0", True),
+            ("y0", False),
+            ("x1", "10"),
+            ("y1", None),
+            ("x0", [10.0]),
+        ],
+    )
+    def test_non_numeric_coord_raises(self, field: str, bad_value: object) -> None:
+        """Issue #27 §2: bool / str / None / list の座標は TypeError で起動時拒否。
+
+        bool は ``int`` サブクラスのため ``math.isfinite(True)==True`` と
+        ``True == 1`` で後続の NaN/inf チェック・座標順序チェックをすり抜ける。
+        明示的に ``isinstance(v, bool)`` で除外する必要がある。
+        """
+        coords: dict[str, object] = {"x0": 10.0, "y0": 20.0, "x1": 100.0, "y1": 80.0}
+        coords[field] = bad_value
+        with pytest.raises(TypeError, match=f"{field} must be int or float"):
+            UserNameBBox(**coords)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("bad_value", [True, "200", None, 1.5])
+    def test_non_int_dpi_raises(self, bad_value: object) -> None:
+        """Issue #27 §2: bool / str / None / float の dpi は TypeError で起動時拒否。"""
+        with pytest.raises(TypeError, match="dpi must be int"):
+            UserNameBBox(dpi=bad_value)  # type: ignore[arg-type]
+
+    def test_int_coords_accepted(self) -> None:
+        """正常系: ``x0=10`` (int リテラル) も float field に受け入れる。"""
+        bbox = UserNameBBox(x0=10, y0=20, x1=100, y1=80)
+        assert bbox.is_configured is True
+
 
 class TestOcrBackendConfigValidation:
     """OcrBackendConfig の不変条件検証 + is_configured。"""
@@ -1182,6 +1215,44 @@ class TestOcrBackendConfigValidation:
         """Issue #152: 両方とも空白のみ → ``is_configured=False``。"""
         cfg = OcrBackendConfig(endpoint_url="   ", api_key="\t")
         assert cfg.is_configured is False
+
+    @pytest.mark.parametrize("bad_value", [123, None, ["url"], True])
+    def test_non_string_endpoint_url_raises(self, bad_value: object) -> None:
+        """Issue #27 §2: 非文字列 endpoint_url は TypeError で起動時拒否。"""
+        with pytest.raises(TypeError, match="endpoint_url must be str"):
+            OcrBackendConfig(endpoint_url=bad_value)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("bad_value", [456, None, {"key": "val"}, False])
+    def test_non_string_api_key_raises(self, bad_value: object) -> None:
+        """Issue #27 §2: 非文字列 api_key は TypeError で起動時拒否。"""
+        with pytest.raises(TypeError, match="api_key must be str"):
+            OcrBackendConfig(api_key=bad_value)  # type: ignore[arg-type]
+
+    def test_api_key_typeerror_does_not_leak_value(self) -> None:
+        """PII 防御: api_key の TypeError メッセージに値を含めない。
+
+        型違反時に渡される値は str ではないため実シークレットそのものは
+        含まれないが、pattern hygiene として ``{v!r}`` を含めない設計。
+        ``type().__name__`` のみで型違反は十分診断可能。
+        """
+        sensitive_marker = "should_not_appear_in_message"
+        with pytest.raises(TypeError) as exc_info:
+            OcrBackendConfig(api_key=[sensitive_marker])  # type: ignore[arg-type]
+        assert sensitive_marker not in str(exc_info.value)
+        assert "api_key must be str" in str(exc_info.value)
+        assert "list" in str(exc_info.value)  # 型名は出る
+
+    @pytest.mark.parametrize("bad_value", [True, "30", 1.5, None])
+    def test_non_int_timeout_sec_raises(self, bad_value: object) -> None:
+        """Issue #27 §2: bool / str / float / None の timeout_sec は TypeError。"""
+        with pytest.raises(TypeError, match="timeout_sec must be int"):
+            OcrBackendConfig(timeout_sec=bad_value)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("bad_value", [True, "3", 2.5, None])
+    def test_non_int_max_retries_raises(self, bad_value: object) -> None:
+        """Issue #27 §2: bool / str / float / None の max_retries は TypeError。"""
+        with pytest.raises(TypeError, match="max_retries must be int"):
+            OcrBackendConfig(max_retries=bad_value)  # type: ignore[arg-type]
 
 
 class TestPdfMergeConfigValidation:
@@ -1356,6 +1427,37 @@ dpi = 200
         config_file.write_text(toml_content, encoding="utf-8")
 
         with pytest.raises(ValueError, match="x0 must be finite"):
+            load_config(config_file)
+
+    def test_bool_bbox_coord_in_toml_propagates(self, tmp_path: Path) -> None:
+        """Issue #27 §2: TOML の ``x0 = true`` は TypeError で起動時拒否。
+
+        bool は int サブクラスで silent にすり抜ける可能性があるため
+        ``isinstance(v, bool)`` で明示除外。
+        """
+        toml_content = """\
+[pdf_merge.user_name_bbox]
+x0 = true
+y0 = 10.0
+x1 = 100.0
+y1 = 80.0
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(TypeError, match="x0 must be int or float"):
+            load_config(config_file)
+
+    def test_non_string_endpoint_in_toml_propagates(self, tmp_path: Path) -> None:
+        """Issue #27 §2: TOML の ``endpoint_url = 123`` は TypeError で起動時拒否。"""
+        toml_content = """\
+[ocr_backend]
+endpoint_url = 123
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(TypeError, match="endpoint_url must be str"):
             load_config(config_file)
 
     def test_whitespace_endpoint_in_toml_keeps_unconfigured(self, tmp_path: Path) -> None:
