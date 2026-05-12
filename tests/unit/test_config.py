@@ -1367,6 +1367,219 @@ class TestPdfMergeConfigValidation:
         assert "X" in cfg.concat_order
 
 
+class TestDataclassTypeGuards:
+    """Issue #27 続編 A: 7 dataclass の ``__post_init__`` 型ガード水平展開。
+
+    各 dataclass の代表的フィールドで bool/str/None/list/dict 型違反が
+    ``TypeError`` で起動時拒否されることを検証。
+    helper 単位の網羅テストは TestTypeGuardHelpers で別途実施。
+    """
+
+    # --- WisemanConfig --------------------------------------------------
+    def test_wiseman_non_string_exe_path_raises(self) -> None:
+        with pytest.raises(TypeError, match="WisemanConfig.exe_path must be str"):
+            from wiseman_hub.config import WisemanConfig
+            WisemanConfig(exe_path=123)  # type: ignore[arg-type]
+
+    def test_wiseman_non_int_startup_wait_raises(self) -> None:
+        from wiseman_hub.config import WisemanConfig
+        with pytest.raises(TypeError, match="startup_wait_sec must be int"):
+            WisemanConfig(startup_wait_sec=True)  # type: ignore[arg-type]
+        with pytest.raises(TypeError, match="startup_wait_sec must be int"):
+            WisemanConfig(startup_wait_sec="15")  # type: ignore[arg-type]
+
+    # --- ScheduleConfig -------------------------------------------------
+    def test_schedule_non_bool_enabled_raises(self) -> None:
+        from wiseman_hub.config import ScheduleConfig
+        with pytest.raises(TypeError, match="ScheduleConfig.enabled must be bool"):
+            ScheduleConfig(enabled=1)  # type: ignore[arg-type]
+        with pytest.raises(TypeError, match="ScheduleConfig.enabled must be bool"):
+            ScheduleConfig(enabled="true")  # type: ignore[arg-type]
+
+    def test_schedule_non_string_cron_raises(self) -> None:
+        from wiseman_hub.config import ScheduleConfig
+        with pytest.raises(TypeError, match="ScheduleConfig.cron must be str"):
+            ScheduleConfig(cron=None)  # type: ignore[arg-type]
+
+    # --- ReportTarget ---------------------------------------------------
+    def test_report_target_non_list_menu_path_raises(self) -> None:
+        from wiseman_hub.config import ReportTarget
+        with pytest.raises(TypeError, match="ReportTarget.menu_path must be list"):
+            ReportTarget(menu_path="A/B/C")  # type: ignore[arg-type]
+
+    def test_report_target_non_string_menu_item_raises(self) -> None:
+        from wiseman_hub.config import ReportTarget
+        with pytest.raises(TypeError, match=r"menu_path\[0\] must be str"):
+            ReportTarget(menu_path=[123])  # type: ignore[list-item]
+
+    # --- GcpConfig ------------------------------------------------------
+    def test_gcp_non_string_project_id_raises(self) -> None:
+        from wiseman_hub.config import GcpConfig
+        with pytest.raises(TypeError, match="GcpConfig.project_id must be str"):
+            GcpConfig(project_id=123)  # type: ignore[arg-type]
+
+    def test_gcp_sa_key_path_typeerror_does_not_leak_value(self) -> None:
+        """PII 防御: service_account_key_path の TypeError に値を含めない。"""
+        from wiseman_hub.config import GcpConfig
+        sensitive_marker = "should_not_appear_in_message"
+        with pytest.raises(TypeError) as exc_info:
+            GcpConfig(service_account_key_path=[sensitive_marker])  # type: ignore[arg-type]
+        assert sensitive_marker not in str(exc_info.value)
+        assert "service_account_key_path must be str" in str(exc_info.value)
+
+    # --- UpdaterConfig --------------------------------------------------
+    def test_updater_non_bool_enabled_raises(self) -> None:
+        from wiseman_hub.config import UpdaterConfig
+        with pytest.raises(TypeError, match="UpdaterConfig.enabled must be bool"):
+            UpdaterConfig(enabled="true")  # type: ignore[arg-type]
+
+    def test_updater_non_int_check_interval_raises(self) -> None:
+        from wiseman_hub.config import UpdaterConfig
+        with pytest.raises(TypeError, match="check_interval_hours must be int"):
+            UpdaterConfig(check_interval_hours="1")  # type: ignore[arg-type]
+
+    # --- ChecklistConfig ------------------------------------------------
+    def test_checklist_non_string_karte_root_raises(self) -> None:
+        from wiseman_hub.config import ChecklistConfig
+        with pytest.raises(TypeError, match="karte_root must be str"):
+            ChecklistConfig(karte_root=None)  # type: ignore[arg-type]
+
+    def test_checklist_non_dict_facility_routing_raises(self) -> None:
+        from wiseman_hub.config import ChecklistConfig
+        with pytest.raises(TypeError, match="facility_routing must be dict"):
+            ChecklistConfig(facility_routing=[])  # type: ignore[arg-type]
+
+    def test_checklist_facility_routing_non_string_value_raises(self) -> None:
+        from wiseman_hub.config import ChecklistConfig
+        with pytest.raises(TypeError, match=r"facility_routing\['居宅A'\] must be str"):
+            ChecklistConfig(facility_routing={"居宅A": 123})  # type: ignore[dict-item]
+
+    def test_checklist_report_staff_non_entry_value_raises(self) -> None:
+        from wiseman_hub.config import ChecklistConfig
+        with pytest.raises(TypeError, match=r"report_staff\['宮下'\] must be ReportStaffEntry"):
+            ChecklistConfig(report_staff={"宮下": "not-an-entry"})  # type: ignore[dict-item]
+
+    def test_checklist_spreadsheet_id_typeerror_does_not_leak_value(self) -> None:
+        """PII 防御: spreadsheet_id (Google Drive file id) の TypeError に値を含めない。"""
+        from wiseman_hub.config import ChecklistConfig
+        sensitive_marker = "secret_drive_file_id_12345"
+        with pytest.raises(TypeError) as exc_info:
+            ChecklistConfig(spreadsheet_id=[sensitive_marker])  # type: ignore[arg-type]
+        assert sensitive_marker not in str(exc_info.value)
+        assert "spreadsheet_id must be str" in str(exc_info.value)
+
+    def test_checklist_legacy_warning_still_fires_after_type_guard(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """型ガード追加後も既存の legacy WARNING (PR #233) が維持されること。"""
+        from wiseman_hub.config import ChecklistConfig
+        with caplog.at_level(logging.WARNING, logger="wiseman_hub.config"):
+            ChecklistConfig(monitoring_subfolder="08.運動器機能向上計画書")
+        assert any("legacy value" in record.message for record in caplog.records)
+
+    # --- ReportStaffEntry -----------------------------------------------
+    def test_report_staff_entry_non_string_base_dir_raises(self) -> None:
+        from wiseman_hub.config import ReportStaffEntry
+        with pytest.raises(TypeError, match="ReportStaffEntry.base_dir must be str"):
+            ReportStaffEntry(base_dir=123)  # type: ignore[arg-type]
+
+    def test_report_staff_entry_non_list_suggest_patterns_raises(self) -> None:
+        from wiseman_hub.config import ReportStaffEntry
+        with pytest.raises(TypeError, match="suggest_patterns must be list"):
+            ReportStaffEntry(suggest_patterns="*.xlsx")  # type: ignore[arg-type]
+
+    # --- AppConfig default インスタンス化が全 type guard を通過 ----------
+    def test_app_config_default_construction_passes_all_type_guards(self) -> None:
+        """AppConfig() の default 値が全 dataclass の型ガードを通過すること (regression guard)。"""
+        cfg = AppConfig()
+        assert isinstance(cfg.wiseman.exe_path, str)
+        assert isinstance(cfg.schedule.enabled, bool)
+        assert isinstance(cfg.reports, list)
+        assert isinstance(cfg.gcp.project_id, str)
+        assert isinstance(cfg.updater.enabled, bool)
+        assert isinstance(cfg.checklist.facility_routing, dict)
+
+
+class TestTypeGuardHelpers:
+    """Issue #27 続編 A: ``_check_*`` helper 関数群の単体テスト。"""
+
+    def test_check_str_passes_str(self) -> None:
+        from wiseman_hub.config import _check_str
+        _check_str("field", "value")  # raises なし
+
+    @pytest.mark.parametrize("bad", [123, None, [], {}, True])
+    def test_check_str_raises_on_non_str(self, bad: object) -> None:
+        from wiseman_hub.config import _check_str
+        with pytest.raises(TypeError, match="field must be str"):
+            _check_str("field", bad)
+
+    def test_check_str_echo_value_false_hides_value(self) -> None:
+        """PII 防御: echo_value=False で値がメッセージに含まれない。"""
+        from wiseman_hub.config import _check_str
+        marker = "leaked_secret_xyz"
+        with pytest.raises(TypeError) as exc_info:
+            _check_str("api_key", [marker], echo_value=False)
+        assert marker not in str(exc_info.value)
+        assert "list" in str(exc_info.value)  # 型名は出る
+
+    def test_check_int_passes_int(self) -> None:
+        from wiseman_hub.config import _check_int
+        _check_int("field", 42)
+
+    @pytest.mark.parametrize("bad", [True, False, "1", 1.5, None])
+    def test_check_int_raises_on_non_int_or_bool(self, bad: object) -> None:
+        """bool は int サブクラスのため明示除外。"""
+        from wiseman_hub.config import _check_int
+        with pytest.raises(TypeError, match="field must be int"):
+            _check_int("field", bad)
+
+    def test_check_bool_passes_bool(self) -> None:
+        from wiseman_hub.config import _check_bool
+        _check_bool("field", True)
+        _check_bool("field", False)
+
+    @pytest.mark.parametrize("bad", [1, 0, "true", None])
+    def test_check_bool_raises_on_non_bool(self, bad: object) -> None:
+        from wiseman_hub.config import _check_bool
+        with pytest.raises(TypeError, match="field must be bool"):
+            _check_bool("field", bad)
+
+    def test_check_list_of_str_passes(self) -> None:
+        from wiseman_hub.config import _check_list_of_str
+        _check_list_of_str("field", ["a", "b", "c"])
+        _check_list_of_str("field", [])  # 空 list も OK
+
+    def test_check_list_of_str_raises_on_non_list(self) -> None:
+        from wiseman_hub.config import _check_list_of_str
+        with pytest.raises(TypeError, match="field must be list"):
+            _check_list_of_str("field", "abc")
+
+    def test_check_list_of_str_raises_on_non_str_element(self) -> None:
+        from wiseman_hub.config import _check_list_of_str
+        with pytest.raises(TypeError, match=r"field\[1\] must be str"):
+            _check_list_of_str("field", ["a", 123, "c"])
+
+    def test_check_dict_str_to_str_passes(self) -> None:
+        from wiseman_hub.config import _check_dict_str_to_str
+        _check_dict_str_to_str("field", {"k": "v"})
+        _check_dict_str_to_str("field", {})  # 空 dict も OK
+
+    def test_check_dict_str_to_str_raises_on_non_dict(self) -> None:
+        from wiseman_hub.config import _check_dict_str_to_str
+        with pytest.raises(TypeError, match="field must be dict"):
+            _check_dict_str_to_str("field", [("k", "v")])
+
+    def test_check_dict_str_to_str_raises_on_non_str_key(self) -> None:
+        from wiseman_hub.config import _check_dict_str_to_str
+        with pytest.raises(TypeError, match="field key must be str"):
+            _check_dict_str_to_str("field", {1: "v"})
+
+    def test_check_dict_str_to_str_raises_on_non_str_value(self) -> None:
+        from wiseman_hub.config import _check_dict_str_to_str
+        with pytest.raises(TypeError, match=r"field\['k'\] must be str"):
+            _check_dict_str_to_str("field", {"k": 123})
+
+
 class TestLoadConfigWithValidation:
     """load_config が検証エラーを伝播することを確認。"""
 
@@ -1458,6 +1671,34 @@ endpoint_url = 123
         config_file.write_text(toml_content, encoding="utf-8")
 
         with pytest.raises(TypeError, match="endpoint_url must be str"):
+            load_config(config_file)
+
+    def test_non_string_gcp_project_id_in_toml_propagates(
+        self, tmp_path: Path
+    ) -> None:
+        """Issue #27 続編 A: TOML の ``[gcp] project_id = 123`` は TypeError で起動時拒否。"""
+        toml_content = """\
+[gcp]
+project_id = 123
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(TypeError, match="GcpConfig.project_id must be str"):
+            load_config(config_file)
+
+    def test_non_int_updater_check_interval_in_toml_propagates(
+        self, tmp_path: Path
+    ) -> None:
+        """Issue #27 続編 A: TOML の ``[updater] check_interval_hours = "1"`` は TypeError。"""
+        toml_content = """\
+[updater]
+check_interval_hours = "1"
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(TypeError, match="check_interval_hours must be int"):
             load_config(config_file)
 
     def test_whitespace_endpoint_in_toml_keeps_unconfigured(self, tmp_path: Path) -> None:
