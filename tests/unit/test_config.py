@@ -1970,6 +1970,28 @@ targets = ["bad-entry-not-a-table"]
         ):
             load_config(config_file)
 
+    def test_reports_targets_element_index_non_zero_in_message(self, tmp_path: Path) -> None:
+        """pr-test / silent-failure rating 7: ``enumerate`` 経路を index 1 で固定。
+
+        旧 ``[reports].targets entries must be tables`` は位置情報がなく、
+        複数 entry のうちどれが壊れているか分からなかった。新メッセージ
+        ``[reports].targets[1] must be a table`` で index ≥ 1 にも index が
+        正しく付くことを assert する。``enumerate`` を将来うっかり ``range`` に
+        差し替えた等のリグレッションを検知する。
+        """
+        # inline syntax: [{valid dict}, "bad"] で index 1 を非 dict にする
+        toml_content = """\
+[reports]
+targets = [{name = "ok"}, "bad-entry-at-index-1"]
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(
+            TypeError, match=r"\[reports\]\.targets\[1\] must be a table"
+        ):
+            load_config(config_file)
+
     def test_user_name_bbox_array_raises_named_error(self, tmp_path: Path) -> None:
         """Issue #27 続編 D: TOML ``user_name_bbox = []`` は named error で TypeError。
 
