@@ -620,11 +620,16 @@ def _parse_staff_toml(text: str) -> dict[str, ReportStaffEntry]:
                     f"staff[{name}].suggest_patterns elements must be strings"
                 )
             suggest_patterns.append(element)
+        # Issue #27 続編 C: `entry.get(..., "")` を ``str(...)`` で包むと TOML 値の
+        # 非文字列 (int/bool/list/dict) が ``"123"`` 等に強制変換され、
+        # ``ReportStaffEntry.__post_init__`` の ``_check_str`` を bypass する。
+        # default 文字列 ``""`` を明示し、TOML 由来の値はそのまま dataclass に渡して
+        # 型違反を起動時 TypeError で拒否する。
         result[str(name)] = ReportStaffEntry(
-            base_dir=str(entry.get("base_dir", "")),
+            base_dir=entry.get("base_dir", ""),
             suggest_patterns=suggest_patterns,
-            year_subfolder_template=str(entry.get("year_subfolder_template", "")),
-            file_template=str(entry.get("file_template", "")),
+            year_subfolder_template=entry.get("year_subfolder_template", ""),
+            file_template=entry.get("file_template", ""),
         )
     return result
 
