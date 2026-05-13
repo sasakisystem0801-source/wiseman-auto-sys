@@ -503,6 +503,18 @@ class TestOpenOutputAvailable:
 
 
 class TestPersistRoot:
+    """ViewModel 経由の root 永続化挙動。
+
+    Issue #27 続編 E Phase 3b CRITICAL fix (silent-failure-hunter + Codex 共指摘):
+        ViewModel.set_root_and_rows は AppConfig が frozen=True のため、
+        ``self.config = replace(...)`` で **新 AppConfig instance** に差し替える。
+        Dialog 側 (FacilityRootManagerDialog._do_scan) は set_root_and_rows 直後に
+        ``self._config = self._vm.config`` で参照を再同期する責務を持つ。
+        本 ViewModel-only テストでは Dialog の責務はカバーできないため、Dialog
+        統合での save 経路 (``save_config_fn(self._config, ...)``) の正常動作は
+        Windows 実機検証 (Test plan) で確認する。
+    """
+
     def test_set_root_writes_to_config(self, tmp_path: Path) -> None:
         """ViewModel 経由で root を設定すると AppConfig.pdf_merge.facility_root_dir が更新される。
 

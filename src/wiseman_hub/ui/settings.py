@@ -153,12 +153,16 @@ def form_to_config(form: SettingsForm, base: AppConfig) -> AppConfig:
     (``replace(base, pdf_merge=replace(base.pdf_merge, ...))``) に統一する。
 
     ``replace()`` は dataclass フィールドの shallow copy のため、上書きしない
-    ``reports`` / ``schedule`` / ``gcp`` 等のフィールドは ``base`` と同一
-    オブジェクトを共有する。``AppConfig`` は frozen のため呼出側から
-    ``new_cfg.reports = [...]`` 等の参照差し替えは不可能。``reports.append(...)``
-    のような list 内容変更は frozen でも防げない仕様外動作だが、``form_to_config``
-    の呼出側 (settings.py 内 SettingsDialogResult) は ``new_cfg`` を変更しないため
-    ``base`` と ``new_cfg`` 間の list 共有による副作用は現状コードベース上では発生しない。
+    ``schedule`` / ``gcp`` / ``updater`` / ``checklist`` 等のフィールドは
+    ``base`` と同一オブジェクトを共有する。``AppConfig`` は frozen のため呼出側から
+    ``new_cfg.gcp = ...`` 等の参照差し替えは不可能で、各 nested dataclass も
+    frozen=True (Phase 1-3a) のため属性代入も防がれる。
+    ただし mutable leaf (``AppConfig.reports`` の list / ``ReportTarget.menu_path``
+    の list) は frozen でも内容変更不可ではないため、``form_to_config`` の
+    戻り値経由で ``new_cfg.reports.append(...)`` 等を実行すると ``base`` 側にも
+    漏れる。Codex review (PR #272) Medium 指摘の防御として ``reports`` は
+    ``ReportTarget.menu_path`` まで含めて新 list で再構築し、mutable leaf
+    の base/new_cfg alias を切る。
     """
     # bbox / concat_order は dataclass を再構築して __post_init__ で即時検証する
     # （個別属性代入では bypass されるため、不正値が次回起動まで silent になる問題を回避）。
@@ -178,9 +182,14 @@ def form_to_config(form: SettingsForm, base: AppConfig) -> AppConfig:
         tuple[ConcatSourceLetter, ...],
         tuple(s.strip() for s in form.concat_order.split(",") if s.strip()),
     )
+    # PR #272 Codex Medium 指摘対応: mutable leaf list の base/new_cfg alias を切る。
+    # AppConfig.reports は list[ReportTarget] で、各 ReportTarget の menu_path も list。
+    # tuple 化 (umbrella §1) 完了までの暫定防御として、leaf list を浅くコピーする。
+    decoupled_reports = [replace(r, menu_path=list(r.menu_path)) for r in base.reports]
     # API Key は前後空白も有効値として尊重（``form.ocr_api_key`` 生値を維持）。
     return replace(
         base,
+        reports=decoupled_reports,
         pdf_merge=replace(
             base.pdf_merge,
             input_dir=form.input_dir.strip(),
