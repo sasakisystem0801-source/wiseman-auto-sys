@@ -15,6 +15,7 @@ AC:
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,11 @@ import pytest
 
 os.environ.setdefault("TK_SILENCE_DEPRECATION", "1")
 
-from wiseman_hub.config import AppConfig  # noqa: E402
+from wiseman_hub.config import (  # noqa: E402
+    AppConfig,
+    OcrBackendConfig,
+    UserNameBBox,
+)
 from wiseman_hub.ui.settings import (  # noqa: E402
     SettingsDialog,
     SettingsForm,
@@ -228,11 +233,15 @@ class TestFormFromConfig:
         base.pdf_merge.input_dir = "/in"
         base.pdf_merge.output_dir = "/out"
         base.pdf_merge.source_a_filename = "A.pdf"
-        base.pdf_merge.user_name_bbox.x0 = 1.5
-        base.pdf_merge.user_name_bbox.dpi = 300
+        # Issue #27 続編 E Phase 1: UserNameBBox / OcrBackendConfig は frozen=True のため
+        # post-construction mutation 不可。``replace()`` で新インスタンス生成して差し替える。
+        # frozen 化で __post_init__ が replace 経由で再評価されるため、
+        # 不変条件 (x0<x1, y0<y1) を満たす全フィールド指定で構築する。
+        base.pdf_merge.user_name_bbox = UserNameBBox(
+            x0=1.5, y0=2.0, x1=100.0, y1=50.0, dpi=300
+        )
         base.pdf_merge.concat_order = ("B", "A", "C")
-        base.ocr_backend.endpoint_url = "https://api"
-        base.ocr_backend.api_key = "key"
+        base.ocr_backend = replace(base.ocr_backend, endpoint_url="https://api", api_key="key")
         base.wiseman.exe_path = "C:/Wiseman/app.exe"
 
         form = form_from_config(base)
@@ -273,7 +282,7 @@ class TestFormToConfig:
     def test_form_values_override_base(self) -> None:
         base = AppConfig()
         base.pdf_merge.input_dir = "/old"
-        base.ocr_backend.api_key = "old_key"
+        base.ocr_backend = replace(base.ocr_backend, api_key="old_key")
 
         new_cfg = form_to_config(_full_form(), base)
 
@@ -308,12 +317,9 @@ def _base_config() -> AppConfig:
     cfg.pdf_merge.input_dir = "/in"
     cfg.pdf_merge.output_dir = "/out"
     cfg.pdf_merge.source_a_filename = "A.pdf"
-    cfg.pdf_merge.user_name_bbox.x0 = 10.0
-    cfg.pdf_merge.user_name_bbox.y0 = 20.0
-    cfg.pdf_merge.user_name_bbox.x1 = 100.0
-    cfg.pdf_merge.user_name_bbox.y1 = 50.0
-    cfg.ocr_backend.endpoint_url = "https://example.com"
-    cfg.ocr_backend.api_key = "key"
+    # Issue #27 続編 E Phase 1: UserNameBBox / OcrBackendConfig は frozen=True。
+    cfg.pdf_merge.user_name_bbox = UserNameBBox(x0=10.0, y0=20.0, x1=100.0, y1=50.0)
+    cfg.ocr_backend = OcrBackendConfig(endpoint_url="https://example.com", api_key="key")
     return cfg
 
 
