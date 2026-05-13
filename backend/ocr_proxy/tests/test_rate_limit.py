@@ -2,10 +2,19 @@
 
 Issue #29 §3 対応。``RATE_LIMIT`` 環境変数を test_main.py の ``1000/minute``
 から ``2/minute`` に切り替えて ``app.main`` を reload する。テスト終了時に元の
-設定に戻して reload することで、後続テストへの side effect を防ぐ。
+設定 (``"1000/minute"`` 固定値) に reload し、後続テストへの side effect を防ぐ。
 
 slowapi の Limiter は API Key (X-API-Key) ベースで集計するため、同一 key で
 3 連続 POST すると 3 回目が 429 になることを確認する。
+
+注意 (pytest-xdist 非対応): このファイルは process-global な
+``os.environ`` と module キャッシュを mutate する。``pytest-xdist`` の worker
+間ではプロセスが分かれているため worker 跨ぎでは破綻しないが、**同一 worker
+内の他テストが ``app.main.app`` の reference を import レベルでキャッシュして
+いる場合は再 reload で stale になる**。本リポジトリでは test_main.py が
+``from app import main`` (module reference) のみで ``app.main.app`` を直接
+キャッシュしていないため安全。新規テストで ``from app.main import app``
+パターンを導入する際は本 fixture との競合に注意。
 """
 
 from __future__ import annotations
@@ -17,6 +26,11 @@ from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
+
+# Evaluator REQUEST_CHANGES 対応: teardown で固定値リセットして xdist 競合防止。
+# test_main.py が setdefault している "1000/minute" を明示再現する (動的退避は
+# 環境変数が事前に未設定だった場合の None ハンドリングで競合余地があった)。
+_RESTORE_RATE_LIMIT = "1000/minute"
 
 
 def _png_base64() -> str:
@@ -32,14 +46,13 @@ def _png_base64() -> str:
 def main_with_2_per_minute_limit() -> Iterator[object]:
     """``RATE_LIMIT=2/minute`` で app.main を reload した module を yield。
 
-    teardown では元の ``RATE_LIMIT`` (test_main.py の "1000/minute") に戻して
-    reload することで、後続テスト (特に test_main.py の 429 以外のテスト) に
-    side effect が出ないようにする。
+    teardown では固定値 ``"1000/minute"`` に戻して reload する (xdist 競合防止)。
+    silent-failure-hunter Important #3 対応: slowapi の Limiter ストレージは
+    module-global にキャッシュされるため、reload 後も旧 counter が残るリスクが
+    ある。yield 前後で ``limiter.reset()`` を呼んで明示クリアする。
     """
     from app.models import ExtractNameResponse
 
-    # test_main.py が setdefault で "1000/minute" を入れているので元値を退避
-    original_rate_limit = os.environ.get("RATE_LIMIT")
     os.environ["RATE_LIMIT"] = "2/minute"
     os.environ.setdefault("API_KEYS", "test-key-1,test-key-2")
     os.environ.setdefault("GCP_PROJECT_ID", "test-project")
@@ -48,6 +61,8 @@ def main_with_2_per_minute_limit() -> Iterator[object]:
     from app import main as _main
 
     importlib.reload(_main)
+    # slowapi storage の事前クリア (前テスト残カウンター混入防止)
+    _main.limiter.reset()
 
     class _FakeClient:
         """常に同じ応答を返すスタブ (test_main.py の _FakeClient と同等)。"""
@@ -60,12 +75,10 @@ def main_with_2_per_minute_limit() -> Iterator[object]:
     try:
         yield _main
     finally:
-        # 元の RATE_LIMIT に戻して reload (test_main.py 等が期待する状態に復元)
-        if original_rate_limit is not None:
-            os.environ["RATE_LIMIT"] = original_rate_limit
-        else:
-            os.environ.pop("RATE_LIMIT", None)
+        # 固定値で復元 (xdist 競合防止、原値退避の None ハンドリング廃止)
+        os.environ["RATE_LIMIT"] = _RESTORE_RATE_LIMIT
         importlib.reload(_main)
+        _main.limiter.reset()  # teardown でも明示クリア
         _main.set_client(None)
 
 

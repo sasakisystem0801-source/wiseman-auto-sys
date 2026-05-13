@@ -14,6 +14,7 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from google.api_core import exceptions as gax_exceptions
+from google.genai import errors as genai_errors
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -152,24 +153,63 @@ def extract_name(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
-    # Issue #29 §2: 旧 ``except Exception`` は Vertex AI 一時障害以外の
-    # プログラミングバグ (ValueError / TypeError 等) も 503 に集約してしまい、
-    # クライアントが自動リトライで再発する原因になっていた。
-    # 一時障害シグナル (transient) として知られている 4 種類だけを 503 に変換し、
-    # 他の例外は FastAPI のデフォルトハンドラに任せて 500 を返す。
+    # Issue #29 §2 (PR #265 codex セカンドオピニオン Critical 対応):
+    # ``google-genai`` SDK (Vertex AI モード含む) は HTTP エラーを
+    # ``google.genai.errors.APIError`` 階層 (``ClientError`` 4xx / ``ServerError`` 5xx)
+    # に wrap する。旧版は ``google.api_core.exceptions`` の 4 種類のみ catch しており、
+    # 主経路の SDK エラーを取りこぼして 500 fallthrough していた。
+    # 修正後の挙動:
+    #   - genai_errors.ServerError (5xx): transient → 503 集約
+    #   - genai_errors.ClientError(code=429): TooManyRequests → 503 集約
+    #   - genai_errors.ClientError(other 4xx, 400/401/403 等): client bug → 500 fallthrough
+    #   - gax_exceptions の 4 種類: gRPC 経路の保険 (vertexai SDK が grpc backend を
+    #     使うケースで genai_errors より先に投げる可能性)
+    #   - その他 Exception (ValueError / TypeError 等): プログラミングバグ → 500、
+    #     ただし request_id 相関のため logger.exception で記録してから re-raise
     try:
         result = client.extract(image_bytes, body.mime_type)
+    except genai_errors.ServerError as e:
+        logger.exception(
+            "Gemini server error (5xx): id=%s code=%s", request_id, getattr(e, "code", "?")
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OCR backend is temporarily unavailable",
+        ) from e
+    except genai_errors.ClientError as e:
+        code = getattr(e, "code", None)
+        if code == 429:
+            logger.exception("Gemini rate limited (429): id=%s", request_id)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="OCR backend is temporarily unavailable",
+            ) from e
+        # 400/401/403 等は client-side bug。500 を返してアプリ側で表面化させる。
+        logger.exception(
+            "Gemini client error (non-transient 4xx): id=%s code=%s", request_id, code
+        )
+        raise
     except (
         gax_exceptions.ServiceUnavailable,
         gax_exceptions.ResourceExhausted,
         gax_exceptions.DeadlineExceeded,
         gax_exceptions.InternalServerError,
     ) as e:
-        logger.exception("Gemini transient error: id=%s type=%s", request_id, type(e).__name__)
+        logger.exception(
+            "Gemini transient (gax): id=%s type=%s", request_id, type(e).__name__
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="OCR backend is temporarily unavailable",
         ) from e
+    except Exception as e:
+        # silent-failure-hunter Important #1 対応: 500 fallthrough 経路でも
+        # request_id correlation のため app logger で記録してから re-raise。
+        # FastAPI/Starlette のデフォルトハンドラが 500 を返す。
+        logger.exception(
+            "Gemini unexpected error: id=%s type=%s", request_id, type(e).__name__
+        )
+        raise
 
     # APPI 準拠: raw_text は PII を含むためデフォルトで返さない。
     if not body.include_raw_text:

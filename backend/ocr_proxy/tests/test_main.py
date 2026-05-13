@@ -7,6 +7,7 @@ import os
 
 import pytest
 from google.api_core import exceptions as gax_exceptions
+from google.genai import errors as genai_errors
 
 # TestClient を import する前に環境変数を設定しないと Settings.from_env が空になる。
 os.environ.setdefault("API_KEYS", "test-key-1,test-key-2")
@@ -202,6 +203,95 @@ def test_extract_name_logic_bug_does_not_return_503() -> None:
 def test_extract_name_runtime_error_does_not_return_503() -> None:
     """同上 §2: 旧テストの ``RuntimeError`` も 503 ではなく 500 fallthrough になる。"""
     main.set_client(_FakeClient(raise_exc=RuntimeError("not a Vertex transient")))
+    test_client = TestClient(main.app, raise_server_exceptions=False)
+    resp = test_client.post(
+        "/v1/ocr/extract-name",
+        headers={"X-API-Key": "test-key-1"},
+        json={"image_base64": _png_base64()},
+    )
+    assert resp.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# PR #265 review 反映 (Codex Critical): google-genai SDK は HTTP エラーを
+# google.api_core.exceptions ではなく google.genai.errors.APIError 階層
+# (ClientError 4xx / ServerError 5xx) に wrap する。SDK 主経路の例外も
+# 503 集約することを固定する。
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "code",
+    [500, 502, 503, 504],
+    ids=["500", "502", "503", "504"],
+)
+def test_extract_name_genai_server_error_returns_503(
+    client: TestClient, code: int
+) -> None:
+    """Codex Critical: ``genai_errors.ServerError`` (5xx) は SDK 主経路の
+    transient エラー。503 集約を固定する。"""
+    main.set_client(_FakeClient(raise_exc=genai_errors.ServerError(code, {})))
+    resp = client.post(
+        "/v1/ocr/extract-name",
+        headers={"X-API-Key": "test-key-1"},
+        json={"image_base64": _png_base64()},
+    )
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == "OCR backend is temporarily unavailable"
+
+
+def test_extract_name_genai_429_client_error_returns_503(client: TestClient) -> None:
+    """``genai_errors.ClientError(code=429)`` (TooManyRequests) は transient。
+
+    4xx 系統だが上流レート制限による一時障害なので 503 集約 (client retry を促す)。
+    """
+    main.set_client(_FakeClient(raise_exc=genai_errors.ClientError(429, {})))
+    resp = client.post(
+        "/v1/ocr/extract-name",
+        headers={"X-API-Key": "test-key-1"},
+        json={"image_base64": _png_base64()},
+    )
+    assert resp.status_code == 503
+
+
+@pytest.mark.parametrize(
+    "code",
+    [400, 401, 403, 404],
+    ids=["400_bad_request", "401_unauth", "403_forbidden", "404_not_found"],
+)
+def test_extract_name_genai_non_transient_4xx_fallthrough(code: int) -> None:
+    """``genai_errors.ClientError`` の 429 以外 (client-side bug) は 500 fallthrough。
+
+    旧 ``except Exception`` は 4xx も 503 にしていたが、これは client retry で
+    再発する設定ミス (API Key 違反等) を隠す silent failure 経路だった。
+    新挙動では透過的に 500 を返してアプリ側で表面化させる。
+    """
+    main.set_client(_FakeClient(raise_exc=genai_errors.ClientError(code, {})))
+    test_client = TestClient(main.app, raise_server_exceptions=False)
+    resp = test_client.post(
+        "/v1/ocr/extract-name",
+        headers={"X-API-Key": "test-key-1"},
+        json={"image_base64": _png_base64()},
+    )
+    # FastAPI/Starlette のデフォルト 500 ハンドラはボディを返さない (空 or HTML)。
+    # status_code が 503 でないことだけを確認 (transient 集約に巻き込まれていない)。
+    assert resp.status_code == 500
+
+
+@pytest.mark.parametrize(
+    "exc_class",
+    [gax_exceptions.FailedPrecondition, gax_exceptions.PermissionDenied],
+    ids=["failed_precondition", "permission_denied"],
+)
+def test_extract_name_non_transient_gax_fallthrough(
+    exc_class: type[gax_exceptions.GoogleAPICallError],
+) -> None:
+    """pr-test-analyzer Important #2: transient 系 4 種以外の gax 例外は 500 fallthrough。
+
+    将来 google-api-core が新しい transient 系を追加した際、503 catch リストへ
+    明示的に追加しないと 500 になることを固定する (silent expansion 防止)。
+    """
+    main.set_client(_FakeClient(raise_exc=exc_class("non-transient")))
     test_client = TestClient(main.app, raise_server_exceptions=False)
     resp = test_client.post(
         "/v1/ocr/extract-name",
