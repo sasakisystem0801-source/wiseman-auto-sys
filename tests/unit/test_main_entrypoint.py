@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -413,7 +414,8 @@ def test_settings_callback_reloads_launcher_on_save(
     from wiseman_hub.config import AppConfig
 
     saved_config = AppConfig()
-    saved_config.pdf_merge.input_dir = "/reloaded"
+    # Issue #27 続編 E Phase 2: PdfMergeConfig は frozen=True、replace() 経由。
+    saved_config.pdf_merge = replace(saved_config.pdf_merge, input_dir="/reloaded")
 
     class FakeDialog:
         def __init__(self, *args: Any, **kwargs: Any) -> None:

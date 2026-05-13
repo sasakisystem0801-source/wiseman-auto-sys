@@ -133,6 +133,42 @@ def _default_concat_order() -> tuple[ConcatSourceLetter, ...]:
     return ("A", "B", "C")
 
 
+def _coerce_concat_order(raw: Any) -> tuple[ConcatSourceLetter, ...]:
+    """``concat_order`` を tuple 化し、空 / unknown / duplicate を ``ValueError`` で弾く。
+
+    Issue #27 続編 E Phase 2 (PR #258 type-design-analyzer rating 7 対応):
+        ``PdfMergeConfig`` を ``frozen=True`` 化するため、旧 ``__post_init__`` 内
+        の ``self.concat_order = tuple(self.concat_order)`` 自己代入を本関数に
+        外出しする。frozen dataclass の ``__init__`` 自動生成では ``__post_init__``
+        での自己代入は ``FrozenInstanceError`` になり、``object.__setattr__`` 経由
+        の bypass は型保証を黒魔術で迂回する黒い手段になるため採らない。
+
+    呼出パターン:
+        - ``load_config`` の TOML 経由 ``list[str]`` → tuple coerce
+        - ``ui/settings.py`` の ``parsed_concat`` (form parser 出力、既に tuple)
+        - 直接構築テストの ``concat_order=["A","B","C"]`` → tuple coerce
+
+    値域検証:
+        - 空 tuple は禁止 (最低 1 letter)
+        - ``VALID_CONCAT_LETTERS`` 外の文字は禁止
+        - 同一 letter の重複は禁止 (B が 2 回現れて B PDF を 2 重添付する事故防止)
+    """
+    coerced = tuple(raw)
+    if not coerced:
+        raise ValueError("PdfMergeConfig.concat_order must not be empty")
+    unknown = [s for s in coerced if s not in VALID_CONCAT_LETTERS]
+    if unknown:
+        raise ValueError(
+            f"PdfMergeConfig.concat_order contains unknown source(s): {unknown}; "
+            f"valid letters are {sorted(VALID_CONCAT_LETTERS)}"
+        )
+    if len(coerced) != len(set(coerced)):
+        raise ValueError(
+            f"PdfMergeConfig.concat_order contains duplicates: {coerced}"
+        )
+    return coerced
+
+
 def _require_table(container: Any, key: str) -> TableLike:
     """container[key] が table (Block or Inline) であることを保証して返す。
 
@@ -145,8 +181,17 @@ def _require_table(container: Any, key: str) -> TableLike:
     return item
 
 
-@dataclass
+@dataclass(frozen=True)
 class WisemanConfig:
+    """Wiseman SP 本体起動・ウィンドウ識別設定。
+
+    Issue #27 続編 E Phase 2 (PR #258 type-design-analyzer rating 7 対応):
+        ``frozen=True`` 化により post-construction mutation
+        (``cfg.exe_path = "  "`` 等) で ``__post_init__`` 型ガードを bypass する
+        経路を構造的に防ぐ。フィールド更新は ``replace()`` 経由 (UI 設定保存等)
+        に統一する。
+    """
+
     exe_path: str = ""  # ワイズマンSPの実行ファイルパス
     startup_wait_sec: int = 15  # 起動・ドングル認証待機秒数
     window_title_pattern: str = ".*管理システム SP.*"  # メインウィンドウのタイトルパターン
@@ -361,9 +406,19 @@ class UserNameBBox:
         return any(v != 0.0 for v in (self.x0, self.y0, self.x1, self.y1))
 
 
-@dataclass
+@dataclass(frozen=True)
 class PdfMergeConfig:
     """PDF分割・条件付き再結合機能の設定。
+
+    Issue #27 続編 E Phase 2 (PR #258 type-design-analyzer rating 7 対応):
+        ``frozen=True`` 化により post-construction mutation
+        (``cfg.concat_order = ("X",)`` 等) で ``__post_init__`` 不変条件チェック
+        を bypass する経路を構造的に防ぐ。フィールド更新は ``replace()`` 経由
+        (UI 設定保存等) に統一する。
+
+        旧 ``__post_init__`` 内の ``self.concat_order = tuple(self.concat_order)``
+        自己代入は ``_coerce_concat_order()`` helper に外出しした。呼出側で
+        TOML / form parser / 直接構築のすべてが tuple を渡す責務を負う。
 
     facility_root_dir: 事業所ルートフォルダ（複数事業所を一括処理する起点）。
         配下に `{事業所名}/{運動機能向上計画書,経過報告書}/` 構造を持つ親ディレクトリ。
@@ -401,20 +456,25 @@ class PdfMergeConfig:
     def __post_init__(self) -> None:
         """concat_order の不変条件を検証する。
 
-        TOML 由来の値は ``list[str]`` で渡るため runtime 検証で値域を担保する。
-        Literal 型注釈は静的検査（mypy）で API 直接呼び出し時のタイポを catch する用途。
+        Issue #27 続編 E Phase 2 (frozen 化):
+            旧実装の ``self.concat_order = tuple(self.concat_order)`` 自己代入は
+            frozen dataclass では不可。tuple 化責務は ``_coerce_concat_order()``
+            helper に外出しし、呼出側 (load_config / settings.py / 直接構築テスト)
+            が tuple を渡す前提に切り替えた。本 ``__post_init__`` は **入力が tuple
+            であることを確認した上で値域検証のみ実施** する fail-safe 層に役割変更。
 
-        Issue #151: 型注釈を tuple に変更したが、TOML / settings.py / 既存テスト
-        経由で list が渡る経路が残るため、ここで tuple 化して mutation bypass
-        (``cfg.concat_order.append("X")`` 等で __post_init__ 検証を迂回する経路)
-        を構造的に防ぐ。dataclass は型強制しないため、呼出側の漏れを fail-safe に
-        吸収する責務を __post_init__ に集約する。
+            ``_coerce_concat_order()`` を経由しない直接構築で list 等が渡った場合は
+            ``TypeError`` を起動時に raise し、silent fallback を作らない。
 
-        ``facility_aliases`` の検証は ``load_config`` 側の ``_validate_facility_aliases`` が
-        担うため、ここでは触らない（dataclass 単体生成では検証されない既存設計を維持）。
+        ``facility_aliases`` の検証は ``load_config`` 側の ``_validate_facility_aliases``
+        が担うため、ここでは触らない（dataclass 単体生成では検証されない既存設計を維持）。
         """
         if not isinstance(self.concat_order, tuple):
-            self.concat_order = tuple(self.concat_order)
+            raise TypeError(
+                f"PdfMergeConfig.concat_order must be tuple "
+                f"(use _coerce_concat_order() for list inputs), "
+                f"got {type(self.concat_order).__name__}: {self.concat_order!r}"
+            )
         if not self.concat_order:
             raise ValueError("PdfMergeConfig.concat_order must not be empty")
         unknown = [s for s in self.concat_order if s not in VALID_CONCAT_LETTERS]
@@ -804,6 +864,14 @@ def load_config(path: Path | None = None) -> AppConfig:
     aliases_data = pdf_merge_data.pop("facility_aliases", {})
     facility_aliases = _coerce_facility_aliases(aliases_data)
     _validate_facility_aliases(facility_aliases)
+    # Issue #27 続編 E Phase 2: PdfMergeConfig が frozen=True 化されたため、
+    # __post_init__ の自己代入 ``self.concat_order = tuple(...)`` を廃止し、
+    # TOML 経由の ``list[str]`` を ``_coerce_concat_order()`` で tuple 化して
+    # コンストラクタに渡す。TOML に concat_order キーが無い場合は default factory 任せ。
+    if "concat_order" in pdf_merge_data:
+        pdf_merge_data["concat_order"] = _coerce_concat_order(
+            pdf_merge_data["concat_order"]
+        )
     pdf_merge = PdfMergeConfig(
         **pdf_merge_data,
         user_name_bbox=UserNameBBox(**bbox_data),

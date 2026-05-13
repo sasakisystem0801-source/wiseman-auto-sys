@@ -230,19 +230,20 @@ class TestFormFromConfig:
 
     def test_roundtrip_preserves_form_fields(self) -> None:
         base = AppConfig()
-        base.pdf_merge.input_dir = "/in"
-        base.pdf_merge.output_dir = "/out"
-        base.pdf_merge.source_a_filename = "A.pdf"
-        # Issue #27 続編 E Phase 1: UserNameBBox / OcrBackendConfig は frozen=True のため
-        # post-construction mutation 不可。``replace()`` で新インスタンス生成して差し替える。
+        # Issue #27 続編 E Phase 1/2: PdfMergeConfig / WisemanConfig / UserNameBBox /
+        # OcrBackendConfig はすべて frozen=True のため ``replace()`` で差し替える。
         # frozen 化で __post_init__ が replace 経由で再評価されるため、
-        # 不変条件 (x0<x1, y0<y1) を満たす全フィールド指定で構築する。
-        base.pdf_merge.user_name_bbox = UserNameBBox(
-            x0=1.5, y0=2.0, x1=100.0, y1=50.0, dpi=300
+        # bbox は不変条件 (x0<x1, y0<y1) を満たす全フィールド指定で構築する。
+        base.pdf_merge = replace(
+            base.pdf_merge,
+            input_dir="/in",
+            output_dir="/out",
+            source_a_filename="A.pdf",
+            user_name_bbox=UserNameBBox(x0=1.5, y0=2.0, x1=100.0, y1=50.0, dpi=300),
+            concat_order=("B", "A", "C"),
         )
-        base.pdf_merge.concat_order = ("B", "A", "C")
         base.ocr_backend = replace(base.ocr_backend, endpoint_url="https://api", api_key="key")
-        base.wiseman.exe_path = "C:/Wiseman/app.exe"
+        base.wiseman = replace(base.wiseman, exe_path="C:/Wiseman/app.exe")
 
         form = form_from_config(base)
 
@@ -270,7 +271,7 @@ class TestFormToConfig:
         base.version = "0.9.9"
         base.log_level = "DEBUG"
         base.schedule.cron = "0 3 * * *"
-        base.pdf_merge.source_d_filename = "D.pdf"  # フォームに無い
+        base.pdf_merge = replace(base.pdf_merge, source_d_filename="D.pdf")  # フォームに無い
 
         new_cfg = form_to_config(_full_form(), base)
 
@@ -281,7 +282,7 @@ class TestFormToConfig:
 
     def test_form_values_override_base(self) -> None:
         base = AppConfig()
-        base.pdf_merge.input_dir = "/old"
+        base.pdf_merge = replace(base.pdf_merge, input_dir="/old")
         base.ocr_backend = replace(base.ocr_backend, api_key="old_key")
 
         new_cfg = form_to_config(_full_form(), base)
