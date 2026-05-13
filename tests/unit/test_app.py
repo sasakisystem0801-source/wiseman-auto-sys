@@ -199,8 +199,10 @@ class TestWisemanHubLoadConfigErrors:
                 id="reports_targets_not_list",
             ),
             pytest.param(
+                # Issue #27 続編 D: メッセージを ``[reports].targets[i] must be a table``
+                # に変更（要素位置を index 付きで明示、他 helper との整合）。
                 '[reports]\ntargets = ["not_a_dict"]\n',
-                "[reports].targets entries must be tables",
+                "[reports].targets[0] must be a table",
                 id="reports_targets_entry_not_dict",
             ),
         ],

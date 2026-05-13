@@ -765,27 +765,30 @@ def load_config(path: Path | None = None) -> AppConfig:
     # __main__.main() の (OSError, ValueError, TypeError) 捕捉から漏れて exit code 1
     # に落ちていた。設定形状エラーは exit code 2 (config error) 扱いに寄せるべく、
     # `_coerce_facility_aliases` と同じく TypeError で fail-fast する。
-    reports_section = data.get("reports", {})
-    if not isinstance(reports_section, dict):
-        raise TypeError(
-            f"[reports] section must be a table; "
-            f"got {type(reports_section).__name__}"
-        )
+    # Issue #27 続編 D: 他の 8 section と同じく ``_require_section_table`` に
+    # 統一する (silent-failure-hunter rating 6)。
+    reports_section = _require_section_table("reports", data.get("reports", {}))
     targets = reports_section.get("targets", [])
     if not isinstance(targets, list):
         raise TypeError(
             f"[reports].targets must be a list; got {type(targets).__name__}"
         )
     reports: list[ReportTarget] = []
-    for target in targets:
+    for i, target in enumerate(targets):
         if not isinstance(target, dict):
             raise TypeError(
-                f"[reports].targets entries must be tables; "
-                f"got {type(target).__name__}"
+                f"[reports].targets[{i}] must be a table; "
+                f"got {type(target).__name__}: {target!r}"
             )
         reports.append(ReportTarget(**target))
 
-    bbox_data = pdf_merge_data.pop("user_name_bbox", {})
+    # Issue #27 続編 D: ``pop`` の戻り値を ``_require_section_table`` で守る。
+    # 旧コード ``UserNameBBox(**bbox_data)`` は ``user_name_bbox = []`` 等で
+    # generic ``TypeError: argument of type 'list' is not a mapping`` を raise し、
+    # どの section の問題か分からなかった (silent-failure-hunter rating 6)。
+    bbox_data = _require_section_table(
+        "pdf_merge.user_name_bbox", pdf_merge_data.pop("user_name_bbox", {})
+    )
     aliases_data = pdf_merge_data.pop("facility_aliases", {})
     facility_aliases = _coerce_facility_aliases(aliases_data)
     _validate_facility_aliases(facility_aliases)
