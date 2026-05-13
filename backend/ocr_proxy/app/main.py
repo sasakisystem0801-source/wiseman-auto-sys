@@ -13,6 +13,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
+from google.api_core import exceptions as gax_exceptions
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -151,10 +152,20 @@ def extract_name(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
+    # Issue #29 §2: 旧 ``except Exception`` は Vertex AI 一時障害以外の
+    # プログラミングバグ (ValueError / TypeError 等) も 503 に集約してしまい、
+    # クライアントが自動リトライで再発する原因になっていた。
+    # 一時障害シグナル (transient) として知られている 4 種類だけを 503 に変換し、
+    # 他の例外は FastAPI のデフォルトハンドラに任せて 500 を返す。
     try:
         result = client.extract(image_bytes, body.mime_type)
-    except Exception as e:  # noqa: BLE001 - Vertex AI からの多様な例外を 503 に集約
-        logger.exception("Gemini call failed: id=%s", request_id)
+    except (
+        gax_exceptions.ServiceUnavailable,
+        gax_exceptions.ResourceExhausted,
+        gax_exceptions.DeadlineExceeded,
+        gax_exceptions.InternalServerError,
+    ) as e:
+        logger.exception("Gemini transient error: id=%s type=%s", request_id, type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="OCR backend is temporarily unavailable",

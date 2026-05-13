@@ -6,6 +6,7 @@ import base64
 import os
 
 import pytest
+from google.api_core import exceptions as gax_exceptions
 
 # TestClient を import する前に環境変数を設定しないと Settings.from_env が空になる。
 os.environ.setdefault("API_KEYS", "test-key-1,test-key-2")
@@ -148,8 +149,25 @@ def test_extract_name_rejects_invalid_base64(client: TestClient) -> None:
     assert resp.status_code == 400
 
 
-def test_extract_name_vertex_error_returns_503(client: TestClient) -> None:
-    main.set_client(_FakeClient(raise_exc=RuntimeError("vertex ai down")))
+@pytest.mark.parametrize(
+    "exc_class",
+    [
+        gax_exceptions.ServiceUnavailable,
+        gax_exceptions.ResourceExhausted,
+        gax_exceptions.DeadlineExceeded,
+        gax_exceptions.InternalServerError,
+    ],
+    ids=["503_unavailable", "429_quota", "504_timeout", "500_internal"],
+)
+def test_extract_name_transient_gax_errors_return_503(
+    client: TestClient, exc_class: type[gax_exceptions.GoogleAPICallError]
+) -> None:
+    """Issue #29 §2: Vertex AI / Gemini SDK が投げる 4 種類の transient 例外は 503 集約。
+
+    旧コード ``except Exception`` の代替として、明示的に google.api_core の
+    transient 系のみを 503 に変換することを固定する。
+    """
+    main.set_client(_FakeClient(raise_exc=exc_class("simulated transient")))
     resp = client.post(
         "/v1/ocr/extract-name",
         headers={"X-API-Key": "test-key-1"},
@@ -157,6 +175,40 @@ def test_extract_name_vertex_error_returns_503(client: TestClient) -> None:
     )
     assert resp.status_code == 503
     assert resp.json()["detail"] == "OCR backend is temporarily unavailable"
+
+
+def test_extract_name_logic_bug_does_not_return_503() -> None:
+    """Issue #29 §2: ロジックバグ (ValueError 等) が 503 に変換されないことを確認。
+
+    旧 ``except Exception`` はプログラミングバグも 503 として返し、クライアントの
+    自動リトライで無限に再発させていた。新挙動では transient 例外以外は捕捉せず、
+    production では FastAPI のデフォルトハンドラに任せて 500 を返す
+    (透過的に表面化させて修正につなげる)。
+
+    ``raise_server_exceptions=False`` で TestClient を構築することで、production
+    挙動 (500 レスポンス) を再現する。デフォルト True ではテスト側で再 raise される。
+    """
+    main.set_client(_FakeClient(raise_exc=ValueError("programming bug")))
+    test_client = TestClient(main.app, raise_server_exceptions=False)
+    resp = test_client.post(
+        "/v1/ocr/extract-name",
+        headers={"X-API-Key": "test-key-1"},
+        json={"image_base64": _png_base64()},
+    )
+    # 503 ではなく 500 (Internal Server Error) になることを確認
+    assert resp.status_code == 500
+
+
+def test_extract_name_runtime_error_does_not_return_503() -> None:
+    """同上 §2: 旧テストの ``RuntimeError`` も 503 ではなく 500 fallthrough になる。"""
+    main.set_client(_FakeClient(raise_exc=RuntimeError("not a Vertex transient")))
+    test_client = TestClient(main.app, raise_server_exceptions=False)
+    resp = test_client.post(
+        "/v1/ocr/extract-name",
+        headers={"X-API-Key": "test-key-1"},
+        json={"image_base64": _png_base64()},
+    )
+    assert resp.status_code == 500
 
 
 def test_extract_name_confidence_low_preserved(client: TestClient) -> None:

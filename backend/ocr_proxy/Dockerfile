@@ -18,5 +18,11 @@ COPY app ./app
 ENV PORT=8080
 EXPOSE 8080
 
+# Issue #29 §1: defense-in-depth として runtime のみ非 root で実行。
+# Cloud Run のサンドボックスで blast radius は元々小さいが、コンテナ脱出系の
+# 仮想的攻撃に対する追加保護。COPY は root のままで、CMD のみ app ユーザーで起動。
+RUN adduser --system --no-create-home app
+USER app
+
 # 単一ワーカーで起動（Cloud Run のスケーリング任せ）。concurrency は Cloud Run 側で設定。
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]
