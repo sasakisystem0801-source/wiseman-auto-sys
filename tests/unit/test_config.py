@@ -1400,6 +1400,162 @@ class TestFrozenInstanceImmutability:
                 user_name_bbox=UserNameBBox(x0=100.0, y0=20.0, x1=50.0, y1=80.0),
             )
 
+    # --- Issue #27 続編 E Phase 3a: 残 6 dataclass frozen 化 ---
+
+    @pytest.mark.parametrize(
+        "field_name,new_value",
+        [("enabled", True), ("cron", "0 9 * * *")],
+    )
+    def test_schedule_config_frozen_field_assignment_raises(
+        self, field_name: str, new_value: object
+    ) -> None:
+        """ScheduleConfig の各フィールドへの post-construction 代入は FrozenInstanceError。"""
+        from wiseman_hub.config import ScheduleConfig
+
+        cfg = ScheduleConfig()
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            setattr(cfg, field_name, new_value)
+
+    def test_schedule_config_replace_reapplies_post_init_validation(self) -> None:
+        """replace() で __post_init__ 型ガードが再評価される。"""
+        from wiseman_hub.config import ScheduleConfig
+
+        cfg = ScheduleConfig()
+        with pytest.raises(TypeError, match="cron must be str"):
+            replace(cfg, cron=123)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize(
+        "field_name,new_value",
+        [
+            ("name", "new-report"),
+            ("menu_path", ["A", "B"]),
+            ("output_format", "xlsx"),
+        ],
+    )
+    def test_report_target_frozen_field_assignment_raises(
+        self, field_name: str, new_value: object
+    ) -> None:
+        """ReportTarget の各フィールドへの post-construction 代入は FrozenInstanceError。"""
+        from wiseman_hub.config import ReportTarget
+
+        cfg = ReportTarget()
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            setattr(cfg, field_name, new_value)
+
+    def test_report_target_replace_reapplies_post_init_validation(self) -> None:
+        """replace() で menu_path に str を渡したら TypeError (list[str] 期待)。"""
+        from wiseman_hub.config import ReportTarget
+
+        cfg = ReportTarget()
+        with pytest.raises(TypeError, match="menu_path must be list"):
+            replace(cfg, menu_path="not-a-list")  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize(
+        "field_name,new_value",
+        [
+            ("project_id", "x"),
+            ("bucket_name", "x"),
+            ("data_bucket_name", "x"),
+            ("release_bucket_name", "x"),
+            ("service_account_key_path", "x"),
+            ("region", "asia-northeast2"),
+        ],
+    )
+    def test_gcp_config_frozen_field_assignment_raises(
+        self, field_name: str, new_value: object
+    ) -> None:
+        """GcpConfig の各フィールドへの post-construction 代入は FrozenInstanceError。"""
+        from wiseman_hub.config import GcpConfig
+
+        cfg = GcpConfig()
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            setattr(cfg, field_name, new_value)
+
+    def test_gcp_config_replace_reapplies_post_init_validation(self) -> None:
+        """replace() で project_id に int を渡したら TypeError。"""
+        from wiseman_hub.config import GcpConfig
+
+        cfg = GcpConfig()
+        with pytest.raises(TypeError, match="project_id must be str"):
+            replace(cfg, project_id=42)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize(
+        "field_name,new_value",
+        [
+            ("enabled", True),
+            ("check_interval_hours", 24),
+            ("release_bucket", "x"),
+        ],
+    )
+    def test_updater_config_frozen_field_assignment_raises(
+        self, field_name: str, new_value: object
+    ) -> None:
+        """UpdaterConfig の各フィールドへの post-construction 代入は FrozenInstanceError。"""
+        from wiseman_hub.config import UpdaterConfig
+
+        cfg = UpdaterConfig()
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            setattr(cfg, field_name, new_value)
+
+    def test_updater_config_replace_reapplies_post_init_validation(self) -> None:
+        """replace() で check_interval_hours に bool を渡したら TypeError (int サブクラス除外)。"""
+        from wiseman_hub.config import UpdaterConfig
+
+        cfg = UpdaterConfig()
+        with pytest.raises(TypeError, match="check_interval_hours must be int"):
+            replace(cfg, check_interval_hours=True)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize(
+        "field_name,new_value",
+        [
+            ("base_dir", "/x"),
+            ("suggest_patterns", ["a.xlsx"]),
+            ("year_subfolder_template", "x"),
+            ("file_template", "x"),
+        ],
+    )
+    def test_report_staff_entry_frozen_field_assignment_raises(
+        self, field_name: str, new_value: object
+    ) -> None:
+        """ReportStaffEntry の各フィールドへの post-construction 代入は FrozenInstanceError。"""
+        cfg = ReportStaffEntry()
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            setattr(cfg, field_name, new_value)
+
+    def test_report_staff_entry_replace_reapplies_post_init_validation(self) -> None:
+        """replace() で suggest_patterns に str を渡したら TypeError。"""
+        cfg = ReportStaffEntry()
+        with pytest.raises(TypeError, match="suggest_patterns must be list"):
+            replace(cfg, suggest_patterns="not-a-list")  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize(
+        "field_name,new_value",
+        [
+            ("spreadsheet_id", "x"),
+            ("karte_root", "x"),
+            ("monitoring_subfolder", "x"),
+            ("fax_root", "x"),
+            ("b_output_subfolder", "x"),
+            ("c_output_subfolder", "x"),
+            ("facility_routing", {"x": "y"}),
+            ("report_staff", {"x": ReportStaffEntry()}),
+            ("xlsx_path_cache", {"x": "y"}),
+        ],
+    )
+    def test_checklist_config_frozen_field_assignment_raises(
+        self, field_name: str, new_value: object
+    ) -> None:
+        """ChecklistConfig の各フィールドへの post-construction 代入は FrozenInstanceError。"""
+        cfg = ChecklistConfig()
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            setattr(cfg, field_name, new_value)
+
+    def test_checklist_config_replace_reapplies_post_init_validation(self) -> None:
+        """replace() で facility_routing に list を渡したら TypeError (dict 期待)。"""
+        cfg = ChecklistConfig()
+        with pytest.raises(TypeError, match="facility_routing must be dict"):
+            replace(cfg, facility_routing=["x", "y"])  # type: ignore[arg-type]
+
 
 class TestCoerceConcatOrder:
     """Issue #27 続編 E Phase 2: ``_coerce_concat_order()`` helper 単体検証。

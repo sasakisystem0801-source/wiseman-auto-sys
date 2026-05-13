@@ -270,7 +270,8 @@ class TestFormToConfig:
         base = AppConfig()
         base.version = "0.9.9"
         base.log_level = "DEBUG"
-        base.schedule.cron = "0 3 * * *"
+        # Issue #27 続編 E Phase 3a: ScheduleConfig は frozen=True、replace() 経由。
+        base.schedule = replace(base.schedule, cron="0 3 * * *")
         base.pdf_merge = replace(base.pdf_merge, source_d_filename="D.pdf")  # フォームに無い
 
         new_cfg = form_to_config(_full_form(), base)
