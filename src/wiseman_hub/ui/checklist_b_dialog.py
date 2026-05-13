@@ -110,11 +110,21 @@ class ChecklistBDialog:
         self._tree.column("facility", width=160)
         self._tree.column("staff", width=60)
         self._tree.column("status", width=160)
-        self._tree.column("message", width=240)
+        # Issue #274 Phase 1: 詳細列を 240 → 500 に拡大、stretch=True で残幅も吸収。
+        # UNC パス + 業務メッセージ (例: ``PDF 不在: \\Tera-station\share\...``) が
+        # 1 行で読めるようにする。横スクロールバーで全文確認可能。
+        self._tree.column("message", width=500, minwidth=240, stretch=True)
+        # Issue #274 Phase 1: 横スクロールバーを下端に追加。pack の order が
+        # 重要 (先に pack されたものから残スペースを占有) なので
+        # hscroll(bottom) → vscroll(right) → tree(left, expand) の順。
+        hscroll = ttk.Scrollbar(mid, orient="horizontal", command=self._tree.xview)
+        hscroll.pack(side="bottom", fill="x")
+        vscroll = ttk.Scrollbar(mid, orient="vertical", command=self._tree.yview)
+        vscroll.pack(side="right", fill="y")
         self._tree.pack(side="left", fill="both", expand=True)
-        scroll = ttk.Scrollbar(mid, orient="vertical", command=self._tree.yview)
-        scroll.pack(side="right", fill="y")
-        self._tree.configure(yscrollcommand=scroll.set)
+        self._tree.configure(
+            yscrollcommand=vscroll.set, xscrollcommand=hscroll.set
+        )
         self._tree.bind("<Double-1>", self._on_row_double_click)
 
         # 下段: ステータス + 実行/閉じる
