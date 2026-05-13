@@ -123,7 +123,7 @@ def test_concat_order_respected(
         source_b_pattern=config.source_b_pattern,
         source_c_pattern=config.source_c_pattern,
         source_d_filename="",  # D なし
-        concat_order=["C", "A", "B"],
+        concat_order=("C", "A", "B"),
     )
     users = [_user("u1")]
     report = merge_user_pdfs(users, reordered, output_path)
@@ -143,7 +143,7 @@ def test_empty_source_d_filename_skips_d_silently(
         source_b_pattern="B_{name}.pdf",
         source_c_pattern="C_{name}.pdf",
         source_d_filename="",
-        concat_order=["A", "B", "C"],
+        concat_order=("A", "B", "C"),
     )
     report = merge_user_pdfs([_user("u1")], cfg, output_path)
     assert report.d_appended is False
@@ -234,7 +234,7 @@ def test_empty_users_and_no_d_raises(
     cfg = PdfMergeConfig(
         input_dir=str(input_dir),
         source_d_filename="",
-        concat_order=["A", "B", "C"],
+        concat_order=("A", "B", "C"),
     )
     with pytest.raises(ValueError, match="no pages"):
         merge_user_pdfs([], cfg, output_path)
@@ -250,7 +250,7 @@ def test_order_a_only_works(
     cfg = PdfMergeConfig(
         input_dir=str(input_dir),
         source_d_filename="",
-        concat_order=["A"],
+        concat_order=("A",),
     )
     users = [_user("u1"), _user("u2"), _user("u3")]
     merge_user_pdfs(users, cfg, output_path)
@@ -279,7 +279,7 @@ def test_multiple_users_missing_various(
 def test_empty_input_dir_raises() -> None:
     cfg = PdfMergeConfig(
         input_dir="",
-        concat_order=["A"],
+        concat_order=("A",),
         source_d_filename="",
     )
     with pytest.raises(ValueError, match="input_dir"):

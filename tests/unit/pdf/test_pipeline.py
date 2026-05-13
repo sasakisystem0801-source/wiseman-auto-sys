@@ -66,7 +66,7 @@ def _config(tmp_path: Path) -> PdfMergeConfig:
         source_d_filename="",
         source_b_pattern="B_{name}.pdf",
         source_c_pattern="C_{name}.pdf",
-        concat_order=["A", "B", "C"],
+        concat_order=("A", "B", "C"),
         user_name_bbox=_bbox(),
     )
 
@@ -1259,7 +1259,7 @@ class TestPipelineLogPiiDefense:
             source_d_filename="",
             source_b_pattern="B_{name}.pdf",
             source_c_pattern="C_{name}.pdf",
-            concat_order=["A", "B", "C"],
+            concat_order=("A", "B", "C"),
             user_name_bbox=_bbox(),
         )
 

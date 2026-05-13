@@ -29,7 +29,7 @@ import logging
 import tkinter as tk
 from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from tkinter import filedialog, ttk
@@ -714,7 +714,12 @@ class ExExtractorDialog:
         # config_path 未指定時 (テスト等) は永続化を skip して ViewModel 更新のみ。
         save_failed_type: str | None = None
         if self._config_path is not None:
-            self._config.pdf_merge.ex_source_dir = str(selected)
+            # Issue #27 続編 E Phase 2: PdfMergeConfig は frozen=True のため
+            # post-construction mutation 不可。``replace()`` で新インスタンス生成して差し替える。
+            self._config.pdf_merge = replace(
+                self._config.pdf_merge,
+                ex_source_dir=str(selected),
+            )
             try:
                 self._save_config_fn(
                     self._config, self._config_path, create_if_missing=True

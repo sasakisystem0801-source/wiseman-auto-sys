@@ -185,7 +185,12 @@ def form_to_config(form: SettingsForm, base: AppConfig) -> AppConfig:
         endpoint_url=form.ocr_endpoint_url.strip(),
         api_key=form.ocr_api_key,
     )
-    new_config.wiseman.exe_path = form.wiseman_exe_path.strip()
+    # Issue #27 続編 E Phase 2: WisemanConfig は frozen=True のため
+    # post-construction mutation 不可。``replace()`` で新インスタンス生成して差し替える。
+    new_config.wiseman = replace(
+        new_config.wiseman,
+        exe_path=form.wiseman_exe_path.strip(),
+    )
     return new_config
 
 

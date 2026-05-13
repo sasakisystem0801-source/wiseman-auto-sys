@@ -516,10 +516,13 @@ class TestPersistRoot:
     def test_set_root_does_not_modify_other_fields(self, tmp_path: Path) -> None:
         """root 更新で既存フィールドが変わらない（Partial Update）。"""
         cfg = AppConfig()
-        cfg.pdf_merge.input_dir = "/keep_in"
-        cfg.pdf_merge.output_dir = "/keep_out"
-        cfg.pdf_merge.source_a_filename = "keep.pdf"
-        cfg = replace(cfg)
+        # Issue #27 続編 E Phase 2: PdfMergeConfig は frozen=True、replace() 経由。
+        cfg.pdf_merge = replace(
+            cfg.pdf_merge,
+            input_dir="/keep_in",
+            output_dir="/keep_out",
+            source_a_filename="keep.pdf",
+        )
         vm = FacilityRootViewModel(config=cfg)
 
         vm.set_root_and_rows(tmp_path, [])

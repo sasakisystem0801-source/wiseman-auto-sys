@@ -24,7 +24,7 @@ import threading
 import tkinter as tk
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from tkinter import filedialog, ttk
 from typing import Final
@@ -184,7 +184,12 @@ class FacilityRootViewModel:
             for c in candidates
         ]
         if self.config is not None:
-            self.config.pdf_merge.facility_root_dir = str(root)
+            # Issue #27 続編 E Phase 2: PdfMergeConfig は frozen=True のため
+            # post-construction mutation 不可。``replace()`` で新インスタンス生成して差し替える。
+            self.config.pdf_merge = replace(
+                self.config.pdf_merge,
+                facility_root_dir=str(root),
+            )
 
     def select_all(self) -> None:
         """選択可能な行（PENDING または解決済 A_MULTIPLE）を全選択。"""
