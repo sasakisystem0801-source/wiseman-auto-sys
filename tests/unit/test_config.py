@@ -1908,6 +1908,128 @@ facility_aliases = "not-a-table"
         with pytest.raises(TypeError, match=r"facility_aliases\] section must be a table"):
             load_config(config_file)
 
+    # ------------------------------------------------------------------
+    # Issue #27 続編 D (silent-failure-hunter rating 6):
+    # reports section の inline isinstance を _require_section_table に統一 +
+    # user_name_bbox を _require_section_table でラップして named error 化。
+    # ------------------------------------------------------------------
+
+    def test_reports_section_array_raises(self, tmp_path: Path) -> None:
+        """TOML ``reports = []`` も他 section と同じ ``_require_section_table`` 経路。"""
+        toml_content = "reports = []\n"
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(TypeError, match=r"\[reports\] section must be a table"):
+            load_config(config_file)
+
+    def test_reports_section_string_raises(self, tmp_path: Path) -> None:
+        """TOML ``reports = "bad"`` も named ``[reports] section`` で TypeError。
+
+        Issue #150 で導入されたエラーパス。続編 D で他 section と message 統一。
+        """
+        toml_content = 'reports = "bad"\n'
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(TypeError, match=r"\[reports\] section must be a table"):
+            load_config(config_file)
+
+    def test_reports_section_integer_raises(self, tmp_path: Path) -> None:
+        """TOML ``reports = 0`` (falsy int) も silent 通過させず TypeError。"""
+        toml_content = "reports = 0\n"
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(TypeError, match=r"\[reports\] section must be a table"):
+            load_config(config_file)
+
+    def test_reports_targets_non_list_raises(self, tmp_path: Path) -> None:
+        """TOML ``[reports]\\ntargets = "bad"`` は inline list check で TypeError。"""
+        toml_content = """\
+[reports]
+targets = "bad"
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(TypeError, match=r"\[reports\]\.targets must be a list"):
+            load_config(config_file)
+
+    def test_reports_targets_element_non_dict_raises(self, tmp_path: Path) -> None:
+        """TOML ``targets = ["bad"]`` の element 型違反は named ``[reports].targets[i]``。"""
+        toml_content = """\
+[reports]
+targets = ["bad-entry-not-a-table"]
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(
+            TypeError, match=r"\[reports\]\.targets\[0\] must be a table"
+        ):
+            load_config(config_file)
+
+    def test_user_name_bbox_array_raises_named_error(self, tmp_path: Path) -> None:
+        """Issue #27 続編 D: TOML ``user_name_bbox = []`` は named error で TypeError。
+
+        旧コード ``UserNameBBox(**bbox_data)`` は generic
+        ``TypeError: argument of type 'list' is not a mapping`` を raise し、
+        どの section の問題か特定できなかった。``_require_section_table`` 経由で
+        ``[pdf_merge.user_name_bbox]`` が明示される。
+        """
+        toml_content = """\
+[pdf_merge]
+user_name_bbox = []
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(
+            TypeError, match=r"\[pdf_merge\.user_name_bbox\] section must be a table"
+        ):
+            load_config(config_file)
+
+    def test_user_name_bbox_string_raises_named_error(self, tmp_path: Path) -> None:
+        """``user_name_bbox = "bad"`` も named error で TypeError。"""
+        toml_content = """\
+[pdf_merge]
+user_name_bbox = "not-a-bbox"
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(
+            TypeError, match=r"\[pdf_merge\.user_name_bbox\] section must be a table"
+        ):
+            load_config(config_file)
+
+    def test_user_name_bbox_falsy_int_raises_named_error(self, tmp_path: Path) -> None:
+        """``user_name_bbox = 0`` (falsy int) も silent 通過させず named error。"""
+        toml_content = """\
+[pdf_merge]
+user_name_bbox = 0
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(
+            TypeError, match=r"\[pdf_merge\.user_name_bbox\] section must be a table"
+        ):
+            load_config(config_file)
+
+    def test_user_name_bbox_empty_table_uses_defaults(self, tmp_path: Path) -> None:
+        """``[pdf_merge.user_name_bbox]`` (空 table) は default 値で構築できること (regression)。"""
+        toml_content = """\
+[pdf_merge.user_name_bbox]
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        cfg = load_config(config_file)
+        # UserNameBBox default 値で構築されること
+        assert cfg.pdf_merge.user_name_bbox.dpi == 200  # default dpi
+
     def test_whitespace_endpoint_in_toml_keeps_unconfigured(self, tmp_path: Path) -> None:
         """Issue #152: TOML の空白文字列のみ endpoint_url は ``is_configured=False``。
 
