@@ -18,7 +18,9 @@ from wiseman_hub.cloud.sheets import ChecklistRow
 from wiseman_hub.config import ChecklistConfig
 from wiseman_hub.pdf.checklist_b import (
     PlacementStatus,
+    _parse_year_folder_name,
     find_monitoring_dir,
+    find_month_pdf,
     plan_b_placement,
 )
 
@@ -303,3 +305,190 @@ class TestPlanBPlacementMonitoringBranches:
         assert len(results) == 1
         assert results[0].status is PlacementStatus.PENDING
         assert results[0].source_pdf == monitoring_dir / "3.pdf"
+
+    def test_year_folder_r7_with_month_pdf_pending(self, tmp_path: Path) -> None:
+        """Issue #282: ``R7/3.pdf`` (新構造) でも ``PENDING`` 配置成功。"""
+        karte_root = tmp_path / "karte"
+        fax_root = tmp_path / "fax"
+        user_dir = karte_root / "さ" / "(さんわ)三和太郎"
+        monitoring_dir = user_dir / "11.運動器機能向上計画書"
+        year_dir = monitoring_dir / "R7"
+        year_dir.mkdir(parents=True)
+        (year_dir / "3.pdf").write_bytes(b"%PDF-1.4")
+        (fax_root / "きなり(メール)※持参").mkdir(parents=True)
+
+        cfg = _make_config(karte_root, fax_root)
+        results = plan_b_placement([_make_row()], cfg, month=3)
+
+        assert len(results) == 1
+        assert results[0].status is PlacementStatus.PENDING
+        assert results[0].source_pdf == year_dir / "3.pdf"
+
+
+# ---------------------------------------------------------------------------
+# Issue #282: R<年> フォルダ表記揺れ吸収 (_parse_year_folder_name)
+# ---------------------------------------------------------------------------
+
+
+class TestParseYearFolderName:
+    """``_parse_year_folder_name`` が R<年> 表記揺れを吸収する (Issue #282)。"""
+
+    @pytest.mark.parametrize(
+        "folder_name,expected",
+        [
+            # 基本: 半角
+            ("R7", 7),
+            ("R10", 10),
+            # 全角混在 (NFKC で半角化)
+            ("R７", 7),
+            ("Ｒ7", 7),
+            ("Ｒ７", 7),
+            # スペース挿入
+            ("R 7", 7),
+            ("R　7", 7),  # 全角スペース
+            # 区切り文字挿入
+            ("R.7", 7),
+            ("R-7", 7),
+            # 小文字
+            ("r7", 7),
+            # 複数桁
+            ("Ｒ１０", 10),
+        ],
+    )
+    def test_year_extracted_from_variations(
+        self, folder_name: str, expected: int
+    ) -> None:
+        """表記揺れ 11 パターンから年数値が正しく抽出される。"""
+        assert _parse_year_folder_name(folder_name) == expected
+
+    @pytest.mark.parametrize(
+        "folder_name",
+        [
+            "",
+            "R",
+            "R abc",
+            "A7",  # 別アルファベット
+            "H30",  # 平成 (本 Issue scope 外)
+            "令和7",  # 漢字表記 (本 Issue scope 外)
+            "2025",  # 西暦 (本 Issue scope 外)
+            "R7年",  # 末尾に余分な文字
+            "前R7",  # 先頭に余分な文字
+        ],
+    )
+    def test_non_r_year_format_returns_none(self, folder_name: str) -> None:
+        """R<年> 形式として解釈不能なら None を返す。"""
+        assert _parse_year_folder_name(folder_name) is None
+
+
+# ---------------------------------------------------------------------------
+# Issue #282: find_month_pdf の年フォルダ対応
+# ---------------------------------------------------------------------------
+
+
+class TestFindMonthPdfYearFolder:
+    """``find_month_pdf`` が R<年> サブフォルダを走査する (Issue #282)。"""
+
+    def test_direct_placement_preferred_over_year_folder(
+        self, tmp_path: Path
+    ) -> None:
+        """旧/新構造混在時は直配置を優先 (旧運用との後方互換)。"""
+        monitoring = tmp_path / "11.運動器機能向上計画書"
+        (monitoring / "R7").mkdir(parents=True)
+        (monitoring / "3.pdf").write_bytes(b"%PDF-1.4 direct")
+        (monitoring / "R7" / "3.pdf").write_bytes(b"%PDF-1.4 year")
+
+        found, _ = find_month_pdf(monitoring, 3)
+        assert found == monitoring / "3.pdf"
+
+    def test_year_folder_only_found(self, tmp_path: Path) -> None:
+        """直配置なし + R7 のみ → R7/3.pdf を返す。"""
+        monitoring = tmp_path / "11.運動器機能向上計画書"
+        year_dir = monitoring / "R7"
+        year_dir.mkdir(parents=True)
+        (year_dir / "3.pdf").write_bytes(b"%PDF-1.4")
+
+        found, _ = find_month_pdf(monitoring, 3)
+        assert found == year_dir / "3.pdf"
+
+    def test_latest_year_folder_preferred(self, tmp_path: Path) -> None:
+        """複数年フォルダ存在時は R 数字最大 (最新年) を優先。"""
+        monitoring = tmp_path / "11.運動器機能向上計画書"
+        for year_name in ["R6", "R7", "R8"]:
+            d = monitoring / year_name
+            d.mkdir(parents=True)
+            (d / "3.pdf").write_bytes(f"%PDF-1.4 {year_name}".encode())
+
+        found, _ = find_month_pdf(monitoring, 3)
+        assert found == monitoring / "R8" / "3.pdf"
+
+    def test_falls_through_to_older_year_if_target_missing(
+        self, tmp_path: Path
+    ) -> None:
+        """最新年 R8 に 3.pdf がなく R7 にあれば R7 を返す。"""
+        monitoring = tmp_path / "11.運動器機能向上計画書"
+        (monitoring / "R8").mkdir(parents=True)  # 空
+        r7 = monitoring / "R7"
+        r7.mkdir(parents=True)
+        (r7 / "3.pdf").write_bytes(b"%PDF-1.4")
+
+        found, _ = find_month_pdf(monitoring, 3)
+        assert found == r7 / "3.pdf"
+
+    @pytest.mark.parametrize(
+        "year_folder_name",
+        ["R7", "R７", "Ｒ7", "Ｒ７", "R 7", "R　7", "R.7", "R-7", "r7"],
+    )
+    def test_year_folder_notation_variations_matched(
+        self, year_folder_name: str, tmp_path: Path
+    ) -> None:
+        """表記揺れ 9 パターンの年フォルダで PDF 発見可能。"""
+        monitoring = tmp_path / "11.運動器機能向上計画書"
+        year_dir = monitoring / year_folder_name
+        year_dir.mkdir(parents=True)
+        (year_dir / "3.pdf").write_bytes(b"%PDF-1.4")
+
+        found, _ = find_month_pdf(monitoring, 3)
+        assert found == year_dir / "3.pdf"
+
+    def test_non_year_folder_ignored(self, tmp_path: Path) -> None:
+        """R<年> 形式以外のサブフォルダは走査対象外。"""
+        monitoring = tmp_path / "11.運動器機能向上計画書"
+        (monitoring / "過去分").mkdir(parents=True)
+        (monitoring / "過去分" / "3.pdf").write_bytes(b"%PDF-1.4")
+
+        found, _ = find_month_pdf(monitoring, 3)
+        assert found is None
+
+    def test_empty_monitoring_dir_returns_none(self, tmp_path: Path) -> None:
+        """空ディレクトリ → None。"""
+        monitoring = tmp_path / "11.運動器機能向上計画書"
+        monitoring.mkdir(parents=True)
+
+        found, all_pdfs = find_month_pdf(monitoring, 3)
+        assert found is None
+        assert all_pdfs == []
+
+    def test_nonexistent_monitoring_dir_returns_none(self, tmp_path: Path) -> None:
+        """存在しないディレクトリ → None。"""
+        monitoring = tmp_path / "does_not_exist"
+        found, all_pdfs = find_month_pdf(monitoring, 3)
+        assert found is None
+        assert all_pdfs == []
+
+    def test_ambiguous_in_year_folder_returns_all_candidates(
+        self, tmp_path: Path
+    ) -> None:
+        """年フォルダ内で月マッチが複数 (3.pdf + 3X.pdf 等は除外、3.pdf のみ重複は
+        OS 的に作れないので 「3.pdf」 と stem=3 の別ファイル 「3.PDF」 大文字違いを
+        模す。実環境では別ファイルとして両存しないが、stem 解釈の堅牢性のため
+        他の数字違いを使う) → AMBIGUOUS シグナル (None + 候補リスト)。"""
+        monitoring = tmp_path / "11.運動器機能向上計画書"
+        year_dir = monitoring / "R7"
+        year_dir.mkdir(parents=True)
+        # 同月マッチを意図的に複数作る (stem=3 のみが拾われる、4 は拾われない)
+        (year_dir / "3.pdf").write_bytes(b"%PDF-1.4")
+        (year_dir / "4.pdf").write_bytes(b"%PDF-1.4")
+
+        # month=3 でマッチは 3.pdf のみなので一意確定
+        found, _ = find_month_pdf(monitoring, 3)
+        assert found == year_dir / "3.pdf"

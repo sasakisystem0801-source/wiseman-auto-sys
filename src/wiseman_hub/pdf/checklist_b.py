@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import re
 import shutil
+import unicodedata
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -157,14 +158,46 @@ def find_monitoring_dir(
     return None, matches
 
 
-def find_month_pdf(monitoring_dir: Path, month: int) -> tuple[Path | None, list[Path]]:
-    """``{month}.pdf`` または ``{month}.PDF`` をマッチさせる。複数 PDF は候補返却。"""
-    if not monitoring_dir.exists():
-        return None, []
-    pdfs = sorted(p for p in monitoring_dir.iterdir() if p.suffix.lower() == ".pdf")
+# Issue #282: 年フォルダ (R<年>) 表記揺れ吸収用の正規表現。
+# NFKC 正規化後にマッチ判定するため、ここでは半角 R/r + 区切り文字 + 数字のみカバー。
+# 対応する表記揺れ (NFKC 後): "R7" / "R 7" / "R.7" / "R-7" / "r7"
+# (原文の "R７" / "Ｒ7" / "Ｒ７" / "R　7" は NFKC で "R7" / "R 7" に正規化される)
+_R_YEAR_RE: Final = re.compile(r"^[Rr][\s.\-]*(\d+)$")
+
+
+def _parse_year_folder_name(name: str) -> int | None:
+    """フォルダ名から R<年> の年数値を抽出。表記揺れを吸収。
+
+    対応する表記揺れ:
+        - R7, R７, Ｒ7, Ｒ７ (全角/半角ミックス)
+        - R 7, R　7 (半角/全角スペース挿入)
+        - R.7, R-7 (区切り文字挿入)
+        - r7 (小文字)
+
+    実装: ``unicodedata.normalize("NFKC", ...)`` で全角数字/アルファベット/全角
+    スペースを半角化し、正規表現 ``^[Rr][\\s.\\-]*(\\d+)$`` で年数値を抽出。
+
+    Returns:
+        int (年数値、例: ``7``) または None (R<年> 形式として解釈不能)
+    """
+    nfkc = unicodedata.normalize("NFKC", name.strip())
+    m = _R_YEAR_RE.match(nfkc)
+    if m is None:
+        return None
+    return int(m.group(1))
+
+
+def _match_month_pdf_in_dir(
+    directory: Path, month: int
+) -> tuple[Path | None, list[Path]]:
+    """指定ディレクトリ直下の ``{month}.pdf`` を 1 件返す (再帰なし)。
+
+    複数 .pdf があっても月マッチが単独なら確定、複数マッチは ``None`` + 全 pdf 返却
+    で AMBIGUOUS シグナル。``find_month_pdf`` から年フォルダ走査でも再利用する。
+    """
+    pdfs = sorted(p for p in directory.iterdir() if p.suffix.lower() == ".pdf")
     if not pdfs:
         return None, []
-    # 「月」マッチ: stem == str(month) or stem == f"{month:02d}"
     candidates: list[Path] = []
     for p in pdfs:
         stem = p.stem.strip()
@@ -176,6 +209,54 @@ def find_month_pdf(monitoring_dir: Path, month: int) -> tuple[Path | None, list[
     if len(candidates) == 1:
         return candidates[0], pdfs
     return None, pdfs
+
+
+def find_month_pdf(monitoring_dir: Path, month: int) -> tuple[Path | None, list[Path]]:
+    """``{month}.pdf`` を ``monitoring_dir`` 直下 + ``R<年>`` サブフォルダから探索。
+
+    Issue #282: 本田様 PC の運用で ``{monitoring_subfolder}/R7/<月>.pdf`` 構造
+    (令和 7 年サブフォルダ) が混在することが判明。直下のみ走査だと配置漏れになる
+    ため、以下の優先順で探索する:
+
+        1. ``monitoring_dir/<月>.pdf`` (旧構造、直配置) — 既存挙動を優先
+        2. ``monitoring_dir/R<年>/<月>.pdf`` (新構造) — R 数字降順で最新年から走査
+        3. それでもなければ ``None``
+
+    R<年> フォルダ名の表記揺れ (R7 / R７ / Ｒ7 / R 7 / R.7 / r7 等) は
+    ``_parse_year_folder_name`` で NFKC 正規化 + 正規表現マッチで吸収。
+
+    Returns:
+        ``(月 PDF 1 件 or None, 走査した全 .pdf リスト)``。``None`` の場合は呼出側
+        が ``SKIPPED_NO_PDF`` (候補ゼロ) と ``SKIPPED_AMBIGUOUS`` (候補複数) を
+        list 長で判別する既存契約を維持。
+    """
+    if not monitoring_dir.exists():
+        return None, []
+
+    # step 1: 直配置 (旧構造、既存挙動維持)
+    found, direct_pdfs = _match_month_pdf_in_dir(monitoring_dir, month)
+    if found is not None:
+        return found, direct_pdfs
+
+    # step 2: R<年> サブフォルダ最新優先 (新構造、表記揺れ吸収)
+    year_dirs: list[tuple[int, Path]] = []
+    for d in monitoring_dir.iterdir():
+        if not d.is_dir():
+            continue
+        year = _parse_year_folder_name(d.name)
+        if year is not None:
+            year_dirs.append((year, d))
+    year_dirs.sort(key=lambda t: t[0], reverse=True)
+
+    aggregated_pdfs: list[Path] = list(direct_pdfs)
+    for _, year_dir in year_dirs:
+        found, year_pdfs = _match_month_pdf_in_dir(year_dir, month)
+        aggregated_pdfs.extend(year_pdfs)
+        if found is not None:
+            return found, aggregated_pdfs
+
+    # step 3: 該当なし
+    return None, aggregated_pdfs
 
 
 def resolve_facility(
