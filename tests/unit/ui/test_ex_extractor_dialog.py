@@ -1162,7 +1162,14 @@ class TestExExtractorDialogSmoke:
     def test_browse_source_calls_on_source_persisted_after_save_success(
         self, tmp_path: Path
     ) -> None:
-        """save 成功時のみ on_source_persisted callback が呼ばれる契約。"""
+        """save 成功時のみ on_source_persisted callback が呼ばれる契約。
+
+        Phase 3b (PR #272) 以降、AppConfig + PdfMergeConfig が frozen=True
+        のため、`_on_browse_source` は `replace()` 経由で新 AppConfig instance
+        を生成して callback に渡す。callback に渡される config は **元の config
+        と別インスタンス** で、**`pdf_merge.ex_source_dir` のみ選択値で更新済み**、
+        **他フィールドは元のまま保持** という契約。
+        """
         import tkinter as tk
 
         from wiseman_hub.config import PdfMergeConfig
@@ -1198,7 +1205,14 @@ class TestExExtractorDialogSmoke:
             dialog._on_browse_source()
 
             assert len(callback_calls) == 1
-            assert callback_calls[0] is config
+            called_config = callback_calls[0]
+            # frozen=True の replace() で新インスタンスが生成されることを lock-in
+            # (PR #272 Phase 3b で identity 前提が変わった contract regression 防御)
+            assert called_config is not config
+            # 選択値が反映されている
+            assert called_config.pdf_merge.ex_source_dir == str(new_source)
+            # 他フィールドは元のまま保持 (replace の scope 妥当性)
+            assert called_config.pdf_merge.facility_root_dir == str(root_dir)
             dialog._on_close()
         finally:
             root.destroy()
