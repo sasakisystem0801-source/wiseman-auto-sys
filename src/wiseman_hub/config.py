@@ -669,8 +669,33 @@ class ChecklistConfig:
             )
 
 
-@dataclass
+@dataclass(frozen=True)
 class AppConfig:
+    """アプリケーション全体の設定 (root)。
+
+    Issue #27 続編 E Phase 3b (PR #258 type-design-analyzer rating 7 対応):
+        ``frozen=True`` 化により **直下フィールドの参照差し替え** を構造的に防ぐ。
+        ``cfg.pdf_merge = ...`` / ``cfg.version = ...`` 等の attribute 代入は
+        ``FrozenInstanceError`` で拒否され、結果として post-construction で
+        ``__post_init__`` 型ガードを bypass する経路が閉鎖される。
+        フィールド更新は ``replace()`` 経由に統一し、ネスト dataclass の更新は
+        ``cfg = replace(cfg, pdf_merge=replace(cfg.pdf_merge, input_dir=...))``
+        形式で行う。
+
+    **frozen 化の対象外 (mutable leaf の内容変更)**:
+        ``reports`` は ``list[ReportTarget]`` 型のため、参照差し替え
+        (``cfg.reports = [...]``) は阻止できるが、list 内容変更
+        (``cfg.reports.append(...)`` / ``cfg.reports[0] = ...``) は阻止できない。
+        ``ReportTarget.menu_path`` の list も同様 (Phase 3a で frozen=True 化済だが
+        leaf list は別)。完全 immutability が必要なら type を
+        ``tuple[ReportTarget, ...]`` に変える別議論が必要 (umbrella §1 Literal 拡張
+        側で扱う)。
+
+    本 docstring の表現は PR #272 Codex review Low 指摘に基づき、「型ガード
+    bypass を構造的に防ぐ」を「直下フィールドの参照差し替えを防ぐ」に絞って
+    記載 (mutable leaf の内容変更まで防げると誤解されないように)。
+    """
+
     version: str = "0.1.0"
     log_level: str = "INFO"
     log_dir: str = ""

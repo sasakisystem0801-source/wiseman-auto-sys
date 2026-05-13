@@ -86,24 +86,24 @@ class FakeMatcher:
 
 
 def _make_config(tmp_path: Path) -> AppConfig:
-    cfg = AppConfig()
-    cfg.pdf_merge = PdfMergeConfig(
-        input_dir=str(tmp_path),
-        output_dir=str(tmp_path / "out"),
-        source_a_filename="A.pdf",
-        source_d_filename="",
-        source_b_pattern="B_{name}.pdf",
-        source_c_pattern="C_{name}.pdf",
-        concat_order=("A", "B", "C"),
-        user_name_bbox=UserNameBBox(x0=40.0, y0=40.0, x1=200.0, y1=80.0, dpi=100),
+    return AppConfig(
+        pdf_merge=PdfMergeConfig(
+            input_dir=str(tmp_path),
+            output_dir=str(tmp_path / "out"),
+            source_a_filename="A.pdf",
+            source_d_filename="",
+            source_b_pattern="B_{name}.pdf",
+            source_c_pattern="C_{name}.pdf",
+            concat_order=("A", "B", "C"),
+            user_name_bbox=UserNameBBox(x0=40.0, y0=40.0, x1=200.0, y1=80.0, dpi=100),
+        ),
+        ocr_backend=OcrBackendConfig(
+            endpoint_url="https://example.invalid",
+            api_key="dummy",
+            timeout_sec=10,
+            max_retries=1,
+        ),
     )
-    cfg.ocr_backend = OcrBackendConfig(
-        endpoint_url="https://example.invalid",
-        api_key="dummy",
-        timeout_sec=10,
-        max_retries=1,
-    )
-    return cfg
 
 
 def _write_a_pdf(tmp_path: Path, num_pages: int = 2) -> Path:

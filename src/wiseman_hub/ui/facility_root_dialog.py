@@ -184,11 +184,15 @@ class FacilityRootViewModel:
             for c in candidates
         ]
         if self.config is not None:
-            # Issue #27 続編 E Phase 2: PdfMergeConfig は frozen=True のため
-            # post-construction mutation 不可。``replace()`` で新インスタンス生成して差し替える。
-            self.config.pdf_merge = replace(
-                self.config.pdf_merge,
-                facility_root_dir=str(root),
+            # Issue #27 続編 E Phase 3b: AppConfig + PdfMergeConfig 共に frozen=True
+            # のため、``replace()`` を二重に重ねて新 AppConfig instance に差し替える。
+            # ``self.config`` 自体は通常 class attribute なので再代入可能。
+            self.config = replace(
+                self.config,
+                pdf_merge=replace(
+                    self.config.pdf_merge,
+                    facility_root_dir=str(root),
+                ),
             )
 
     def select_all(self) -> None:
@@ -536,6 +540,16 @@ class FacilityRootManagerDialog:
             return
 
         self._vm.set_root_and_rows(root, candidates)
+        # Issue #27 続編 E Phase 3b CRITICAL fix (silent-failure-hunter + Codex 共指摘):
+        # AppConfig が frozen=True 化されたため、ViewModel.set_root_and_rows 内の
+        # ``self.config = replace(...)`` は self._vm.config のみ新インスタンスに差し替え、
+        # Dialog 側の self._config は古い AppConfig (facility_root_dir 未更新) を保持する。
+        # 旧 (frozen でない時代) は shared reference の in-place mutation で両方反映されていた。
+        # Phase 3b 後は明示的に Dialog 側の参照も同期しないと、L547 save_config 経路で
+        # 古い facility_root_dir が TOML に書き戻される silent regression になる。
+        # set_root_and_rows 内で必ず ``self.config = replace(...)`` を通るため non-None。
+        assert self._vm.config is not None  # noqa: S101 — type narrowing for mypy
+        self._config = self._vm.config
         self._root_var.set(str(root))
         # AppConfig 更新を永続化（既存ファイルなら無条件上書き、無ければ作成）
         save_failed = False

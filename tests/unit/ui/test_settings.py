@@ -26,6 +26,7 @@ os.environ.setdefault("TK_SILENCE_DEPRECATION", "1")
 from wiseman_hub.config import (  # noqa: E402
     AppConfig,
     OcrBackendConfig,
+    PdfMergeConfig,
     UserNameBBox,
 )
 from wiseman_hub.ui.settings import (  # noqa: E402
@@ -229,21 +230,22 @@ class TestFormFromConfig:
     """AC-S-1 基盤: AppConfig → SettingsForm。"""
 
     def test_roundtrip_preserves_form_fields(self) -> None:
+        # Issue #27 続編 E Phase 3b: AppConfig + 全 nested dataclass は frozen=True のため
+        # ``replace()`` の階層構造で組み立てる (旧 attribute 代入は FrozenInstanceError)。
         base = AppConfig()
-        # Issue #27 続編 E Phase 1/2: PdfMergeConfig / WisemanConfig / UserNameBBox /
-        # OcrBackendConfig はすべて frozen=True のため ``replace()`` で差し替える。
-        # frozen 化で __post_init__ が replace 経由で再評価されるため、
-        # bbox は不変条件 (x0<x1, y0<y1) を満たす全フィールド指定で構築する。
-        base.pdf_merge = replace(
-            base.pdf_merge,
-            input_dir="/in",
-            output_dir="/out",
-            source_a_filename="A.pdf",
-            user_name_bbox=UserNameBBox(x0=1.5, y0=2.0, x1=100.0, y1=50.0, dpi=300),
-            concat_order=("B", "A", "C"),
+        base = replace(
+            base,
+            pdf_merge=replace(
+                base.pdf_merge,
+                input_dir="/in",
+                output_dir="/out",
+                source_a_filename="A.pdf",
+                user_name_bbox=UserNameBBox(x0=1.5, y0=2.0, x1=100.0, y1=50.0, dpi=300),
+                concat_order=("B", "A", "C"),
+            ),
+            ocr_backend=replace(base.ocr_backend, endpoint_url="https://api", api_key="key"),
+            wiseman=replace(base.wiseman, exe_path="C:/Wiseman/app.exe"),
         )
-        base.ocr_backend = replace(base.ocr_backend, endpoint_url="https://api", api_key="key")
-        base.wiseman = replace(base.wiseman, exe_path="C:/Wiseman/app.exe")
 
         form = form_from_config(base)
 
@@ -267,12 +269,16 @@ class TestFormToConfig:
     """AC-S-2 基盤: SettingsForm → AppConfig（既存 config の非フォーム項目を保持）。"""
 
     def test_non_form_fields_are_preserved(self) -> None:
+        # Issue #27 続編 E Phase 3b: AppConfig + nested dataclass 全て frozen=True、
+        # ``replace()`` の階層で構築する。
         base = AppConfig()
-        base.version = "0.9.9"
-        base.log_level = "DEBUG"
-        # Issue #27 続編 E Phase 3a: ScheduleConfig は frozen=True、replace() 経由。
-        base.schedule = replace(base.schedule, cron="0 3 * * *")
-        base.pdf_merge = replace(base.pdf_merge, source_d_filename="D.pdf")  # フォームに無い
+        base = replace(
+            base,
+            version="0.9.9",
+            log_level="DEBUG",
+            schedule=replace(base.schedule, cron="0 3 * * *"),
+            pdf_merge=replace(base.pdf_merge, source_d_filename="D.pdf"),  # フォームに無い
+        )
 
         new_cfg = form_to_config(_full_form(), base)
 
@@ -283,8 +289,11 @@ class TestFormToConfig:
 
     def test_form_values_override_base(self) -> None:
         base = AppConfig()
-        base.pdf_merge = replace(base.pdf_merge, input_dir="/old")
-        base.ocr_backend = replace(base.ocr_backend, api_key="old_key")
+        base = replace(
+            base,
+            pdf_merge=replace(base.pdf_merge, input_dir="/old"),
+            ocr_backend=replace(base.ocr_backend, api_key="old_key"),
+        )
 
         new_cfg = form_to_config(_full_form(), base)
 
@@ -315,14 +324,18 @@ class _FakeMessageBox:
 
 
 def _base_config() -> AppConfig:
-    cfg = AppConfig()
-    cfg.pdf_merge.input_dir = "/in"
-    cfg.pdf_merge.output_dir = "/out"
-    cfg.pdf_merge.source_a_filename = "A.pdf"
-    # Issue #27 続編 E Phase 1: UserNameBBox / OcrBackendConfig は frozen=True。
-    cfg.pdf_merge.user_name_bbox = UserNameBBox(x0=10.0, y0=20.0, x1=100.0, y1=50.0)
-    cfg.ocr_backend = OcrBackendConfig(endpoint_url="https://example.com", api_key="key")
-    return cfg
+    # Issue #27 続編 E Phase 3b: AppConfig + PdfMergeConfig + UserNameBBox +
+    # OcrBackendConfig すべて frozen=True、コンストラクタ経由で構築する。
+    # 旧 attribute 代入 (cfg.pdf_merge.input_dir = "/in") は FrozenInstanceError。
+    return AppConfig(
+        pdf_merge=PdfMergeConfig(
+            input_dir="/in",
+            output_dir="/out",
+            source_a_filename="A.pdf",
+            user_name_bbox=UserNameBBox(x0=10.0, y0=20.0, x1=100.0, y1=50.0),
+        ),
+        ocr_backend=OcrBackendConfig(endpoint_url="https://example.com", api_key="key"),
+    )
 
 
 @tk_required
@@ -389,8 +402,13 @@ class TestSettingsDialogUI:
 
         mbox = _FakeMessageBox()
 
-        cfg = _base_config()
-        cfg.pdf_merge.input_dir = ""  # 必須を欠落させる
+        # Issue #27 続編 E Phase 3b: PdfMergeConfig + AppConfig は frozen=True、
+        # ``replace()`` で input_dir を空にする (旧 attribute 代入は FrozenInstanceError)。
+        base_cfg = _base_config()
+        cfg = replace(
+            base_cfg,
+            pdf_merge=replace(base_cfg.pdf_merge, input_dir=""),  # 必須を欠落させる
+        )
 
         root = tk.Tk()
         config_path = tmp_path / "c.toml"

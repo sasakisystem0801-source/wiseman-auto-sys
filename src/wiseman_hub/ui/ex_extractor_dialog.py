@@ -714,11 +714,15 @@ class ExExtractorDialog:
         # config_path 未指定時 (テスト等) は永続化を skip して ViewModel 更新のみ。
         save_failed_type: str | None = None
         if self._config_path is not None:
-            # Issue #27 続編 E Phase 2: PdfMergeConfig は frozen=True のため
-            # post-construction mutation 不可。``replace()`` で新インスタンス生成して差し替える。
-            self._config.pdf_merge = replace(
-                self._config.pdf_merge,
-                ex_source_dir=str(selected),
+            # Issue #27 続編 E Phase 3b: AppConfig + PdfMergeConfig 共に frozen=True
+            # のため、``replace()`` を二重に重ねて新 AppConfig instance に差し替える。
+            # ``self._config`` 自体は通常 class attribute なので再代入可能。
+            self._config = replace(
+                self._config,
+                pdf_merge=replace(
+                    self._config.pdf_merge,
+                    ex_source_dir=str(selected),
+                ),
             )
             try:
                 self._save_config_fn(
