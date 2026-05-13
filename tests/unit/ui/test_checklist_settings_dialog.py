@@ -120,6 +120,70 @@ class TestStaffTomlValidation:
         assert _parse_staff_toml("   \n  ") == {}
 
 
+class TestStaffTomlPropagatesDataclassTypeGuard:
+    """Issue #27 続編 C: ``str(entry.get(...))`` 削除により、TOML 値の非文字列が
+    ``ReportStaffEntry.__post_init__`` の ``_check_str`` で TypeError として
+    起動時に拒否されることを固定する (旧版は ``"123"`` 等に silent 強制変換)。"""
+
+    def test_base_dir_must_be_str_not_int(self) -> None:
+        bad = '["宮下"]\nbase_dir = 123\nsuggest_patterns = []\n'
+        with pytest.raises(TypeError, match=r"ReportStaffEntry\.base_dir must be str"):
+            _parse_staff_toml(bad)
+
+    def test_base_dir_must_be_str_not_bool(self) -> None:
+        bad = '["宮下"]\nbase_dir = true\nsuggest_patterns = []\n'
+        with pytest.raises(TypeError, match=r"ReportStaffEntry\.base_dir must be str"):
+            _parse_staff_toml(bad)
+
+    def test_base_dir_must_be_str_not_float(self) -> None:
+        bad = '["宮下"]\nbase_dir = 1.5\nsuggest_patterns = []\n'
+        with pytest.raises(TypeError, match=r"ReportStaffEntry\.base_dir must be str"):
+            _parse_staff_toml(bad)
+
+    def test_year_subfolder_template_must_be_str(self) -> None:
+        bad = (
+            '["宮下"]\nbase_dir = "C:/x"\n'
+            "suggest_patterns = []\nyear_subfolder_template = 2026\n"
+        )
+        with pytest.raises(
+            TypeError, match=r"ReportStaffEntry\.year_subfolder_template must be str"
+        ):
+            _parse_staff_toml(bad)
+
+    def test_file_template_must_be_str(self) -> None:
+        bad = (
+            '["宮下"]\nbase_dir = "C:/x"\n'
+            "suggest_patterns = []\nfile_template = 99\n"
+        )
+        with pytest.raises(
+            TypeError, match=r"ReportStaffEntry\.file_template must be str"
+        ):
+            _parse_staff_toml(bad)
+
+    def test_valid_string_values_still_pass(self) -> None:
+        """正常系: 全フィールドが str なら成功し、値が保持されることを確認 (回帰防止)。"""
+        good = (
+            '["宮下"]\n'
+            'base_dir = "C:/PT宮下"\n'
+            'suggest_patterns = ["a/*.xlsx"]\n'
+            'year_subfolder_template = "令和{era}年"\n'
+            'file_template = "経過報告書*{month}月*.xlsx"\n'
+        )
+        result = _parse_staff_toml(good)
+        assert result["宮下"].base_dir == "C:/PT宮下"
+        assert result["宮下"].suggest_patterns == ["a/*.xlsx"]
+        assert result["宮下"].year_subfolder_template == "令和{era}年"
+        assert result["宮下"].file_template == "経過報告書*{month}月*.xlsx"
+
+    def test_missing_fields_default_to_empty_str(self) -> None:
+        """default ``""`` が dataclass の str ガードを通過することを確認 (回帰防止)。"""
+        good = '["宮下"]\nbase_dir = "C:/x"\nsuggest_patterns = []\n'
+        result = _parse_staff_toml(good)
+        # base_dir 以外が無くても default "" で構築でき、TypeError にならない
+        assert result["宮下"].year_subfolder_template == ""
+        assert result["宮下"].file_template == ""
+
+
 # ---------------------------------------------------------------------------
 # Phase 2-α (Issue #238) review 反映 (pr-test 3.1 rating 7):
 # _record_sync_timestamp 呼び出し位置を直接検証する pure-logic test。
