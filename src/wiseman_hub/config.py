@@ -202,8 +202,16 @@ class WisemanConfig:
         _check_str("WisemanConfig.window_title_pattern", self.window_title_pattern)
 
 
-@dataclass
+@dataclass(frozen=True)
 class ScheduleConfig:
+    """スケジューラ起動設定。
+
+    Issue #27 続編 E Phase 3a (PR #258 type-design-analyzer rating 7 対応):
+        ``frozen=True`` 化により post-construction mutation で ``__post_init__``
+        型ガードを bypass する経路を構造的に防ぐ。フィールド更新は ``replace()``
+        経由に統一する。
+    """
+
     enabled: bool = False
     cron: str = "0 8 * * *"
 
@@ -212,8 +220,19 @@ class ScheduleConfig:
         _check_str("ScheduleConfig.cron", self.cron)
 
 
-@dataclass
+@dataclass(frozen=True)
 class ReportTarget:
+    """個別レポート抽出ターゲット定義。
+
+    Issue #27 続編 E Phase 3a: ``frozen=True`` 化により post-construction mutation
+    で ``__post_init__`` 型ガードを bypass する経路を構造的に防ぐ。フィールド更新
+    は ``replace()`` 経由に統一する。
+
+    なお ``AppConfig.reports`` は ``list[ReportTarget]`` のため、list 自体の
+    要素追加/削除 (``cfg.reports.append(...)``) は frozen 化の対象外 (list の
+    内容変更を防ぐには ``AppConfig`` 側の type を ``tuple`` に変える別議論が必要)。
+    """
+
     name: str = ""
     menu_path: list[str] = field(default_factory=list)
     output_format: str = "csv"
@@ -224,9 +243,14 @@ class ReportTarget:
         _check_str("ReportTarget.output_format", self.output_format)
 
 
-@dataclass
+@dataclass(frozen=True)
 class GcpConfig:
     """GCP 接続設定。
+
+    Issue #27 続編 E Phase 3a (PR #258 type-design-analyzer rating 7 対応):
+        ``frozen=True`` 化により post-construction mutation で ``__post_init__``
+        型ガードを bypass する経路を構造的に防ぐ。フィールド更新は ``replace()``
+        経由に統一する。
 
     ADR-016 で bucket を data 用と release 用に分離する方針となったため、
     ``data_bucket_name`` / ``release_bucket_name`` を新規追加した。
@@ -284,8 +308,15 @@ class GcpConfig:
         return self.release_bucket_name or self.bucket_name
 
 
-@dataclass
+@dataclass(frozen=True)
 class UpdaterConfig:
+    """自動アップデータ設定 (ADR-004)。
+
+    Issue #27 続編 E Phase 3a: ``frozen=True`` 化により post-construction mutation
+    で ``__post_init__`` 型ガードを bypass する経路を構造的に防ぐ。フィールド更新
+    は ``replace()`` 経由に統一する。
+    """
+
     enabled: bool = False
     check_interval_hours: int = 1
     release_bucket: str = ""
@@ -489,9 +520,13 @@ class PdfMergeConfig:
             )
 
 
-@dataclass
+@dataclass(frozen=True)
 class ReportStaffEntry:
     """C(経過報告書) 用に、担当者ごとの xlsx 配置ルールを定義する。
+
+    Issue #27 続編 E Phase 3a: ``frozen=True`` 化により post-construction mutation
+    で ``__post_init__`` 型ガードを bypass する経路を構造的に防ぐ。フィールド更新
+    は ``replace()`` 経由に統一する。
 
     base_dir: 担当者フォルダの絶対パス（例: ``\\\\Tera-station\\share\\PT 宮下``）
     suggest_patterns: 候補 xlsx を絞り込む glob 風パターン（``{era}``/``{month}`` 埋め込み可）。
@@ -531,9 +566,18 @@ _LEGACY_MONITORING_SUBFOLDERS: Final[frozenset[str]] = frozenset({
 })
 
 
-@dataclass
+@dataclass(frozen=True)
 class ChecklistConfig:
     """スプレッドシート連携 B/C PDF 自動配置機能の設定（MVP）。
+
+    Issue #27 続編 E Phase 3a: ``frozen=True`` 化により post-construction mutation
+    で ``__post_init__`` 型ガードを bypass する経路を構造的に防ぐ。フィールド更新
+    は ``replace()`` 経由に統一する。
+
+    なお ``facility_routing`` / ``report_staff`` / ``xlsx_path_cache`` は
+    ``dict[str, ...]`` のため、dict 自体の内容変更 (``cfg.facility_routing["X"] = "Y"``)
+    は frozen 化の対象外 (参照差し替え ``cfg.facility_routing = {...}`` のみ阻止)。
+    値内容の immutability が必要なら ``frozenmap`` 等の不変 dict 型への移行を別途検討する。
 
     spreadsheet_id: Google Drive 上の xlsx file id
     karte_root: B 用カルテルート（``\\\\Tera-station\\share\\02.カルテ``）
