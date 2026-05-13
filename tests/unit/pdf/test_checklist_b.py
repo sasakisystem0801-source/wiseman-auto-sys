@@ -475,20 +475,130 @@ class TestFindMonthPdfYearFolder:
         assert found is None
         assert all_pdfs == []
 
-    def test_ambiguous_in_year_folder_returns_all_candidates(
+    def test_year_folder_other_month_pdfs_do_not_interfere(
         self, tmp_path: Path
     ) -> None:
-        """年フォルダ内で月マッチが複数 (3.pdf + 3X.pdf 等は除外、3.pdf のみ重複は
-        OS 的に作れないので 「3.pdf」 と stem=3 の別ファイル 「3.PDF」 大文字違いを
-        模す。実環境では別ファイルとして両存しないが、stem 解釈の堅牢性のため
-        他の数字違いを使う) → AMBIGUOUS シグナル (None + 候補リスト)。"""
+        """年フォルダ内に対象月以外の .pdf が混ざっていても一意確定。"""
         monitoring = tmp_path / "11.運動器機能向上計画書"
         year_dir = monitoring / "R7"
         year_dir.mkdir(parents=True)
-        # 同月マッチを意図的に複数作る (stem=3 のみが拾われる、4 は拾われない)
         (year_dir / "3.pdf").write_bytes(b"%PDF-1.4")
         (year_dir / "4.pdf").write_bytes(b"%PDF-1.4")
 
-        # month=3 でマッチは 3.pdf のみなので一意確定
         found, _ = find_month_pdf(monitoring, 3)
         assert found == year_dir / "3.pdf"
+
+    # ----- codex review (#282) 反映: 誤確定リスクの早期 return -----
+
+    def test_direct_ambiguous_does_not_fall_through_to_year_folder(
+        self, tmp_path: Path
+    ) -> None:
+        """codex High-1: 直下に月マッチ複数 (3.pdf + 03.pdf) があれば、R7 フォルダ
+        に確定 PDF があっても AMBIGUOUS で早期 return する (誤確定防止)。"""
+        monitoring = tmp_path / "11.運動器機能向上計画書"
+        monitoring.mkdir(parents=True)
+        # 直下に AMBIGUOUS (stem=3 が 2 件: 3.pdf と 03.pdf)
+        (monitoring / "3.pdf").write_bytes(b"%PDF-1.4 a")
+        (monitoring / "03.pdf").write_bytes(b"%PDF-1.4 b")
+        # R7 配下に「確定的な」3.pdf があっても、これに飛ばない
+        year_dir = monitoring / "R7"
+        year_dir.mkdir()
+        (year_dir / "3.pdf").write_bytes(b"%PDF-1.4 year")
+
+        found, all_pdfs = find_month_pdf(monitoring, 3)
+        assert found is None
+        # 直下の AMBIGUOUS のみ候補返却 (年フォルダ走査前に早期 return)
+        assert set(all_pdfs) == {monitoring / "3.pdf", monitoring / "03.pdf"}
+
+    def test_year_ambiguous_does_not_fall_through_to_older_year(
+        self, tmp_path: Path
+    ) -> None:
+        """codex High-2: 最新年 R8 で月マッチ複数 → 古い年 R7 にフォールバックせず
+        AMBIGUOUS で早期 return。"""
+        monitoring = tmp_path / "11.運動器機能向上計画書"
+        # R8 に AMBIGUOUS な月マッチ
+        r8 = monitoring / "R8"
+        r8.mkdir(parents=True)
+        (r8 / "3.pdf").write_bytes(b"%PDF-1.4 a")
+        (r8 / "03.pdf").write_bytes(b"%PDF-1.4 b")
+        # R7 に「確定的な」3.pdf — これに誤って fall through しないこと
+        r7 = monitoring / "R7"
+        r7.mkdir()
+        (r7 / "3.pdf").write_bytes(b"%PDF-1.4 r7")
+
+        found, _ = find_month_pdf(monitoring, 3)
+        assert found is None
+
+    def test_same_logical_year_multiple_folders_ambiguous(
+        self, tmp_path: Path
+    ) -> None:
+        """codex Medium-1: 同一論理年で複数物理フォルダ (R7 + Ｒ７ + 各 3.pdf) が
+        あれば、iterdir 順依存の非決定性を避けるため AMBIGUOUS で人間判断に倒す。"""
+        monitoring = tmp_path / "11.運動器機能向上計画書"
+        r7_half = monitoring / "R7"
+        r7_full = monitoring / "Ｒ７"  # NFKC で同じ R7
+        r7_half.mkdir(parents=True)
+        r7_full.mkdir(parents=True)
+        (r7_half / "3.pdf").write_bytes(b"%PDF-1.4 half")
+        (r7_full / "3.pdf").write_bytes(b"%PDF-1.4 full")
+
+        found, _ = find_month_pdf(monitoring, 3)
+        assert found is None
+
+    # ----- codex High-3: iterdir OSError graceful 復帰 -----
+
+    def test_iterdir_oserror_in_year_dir_graceful(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """年フォルダ ``iterdir`` の OSError (NAS 切断等) で例外伝播せず
+        ``(None, [])`` で graceful 復帰 + PII フリー warn ログ。"""
+        monitoring = tmp_path / "11.運動器機能向上計画書"
+        year_dir = monitoring / "R7"
+        year_dir.mkdir(parents=True)
+        # year_dir の iterdir のみ失敗させる (monitoring_dir 自体は成功)
+        original_iterdir = Path.iterdir
+
+        def _fail_iterdir(self: Path) -> object:
+            if self == year_dir:
+                raise PermissionError("simulated NAS permission denied")
+            return original_iterdir(self)
+
+        monkeypatch.setattr(Path, "iterdir", _fail_iterdir)
+
+        with caplog.at_level("WARNING"):
+            found, all_pdfs = find_month_pdf(monitoring, 3)
+        assert found is None
+        assert all_pdfs == []
+        # PII 防御: ログに path が含まれない
+        for r in caplog.records:
+            assert str(year_dir) not in r.message
+        assert any("PermissionError" in r.message for r in caplog.records)
+
+    def test_iterdir_oserror_in_monitoring_dir_returns_direct_pdfs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """``monitoring_dir`` 自体の 2 回目 iterdir (年フォルダ走査前) で OSError なら
+        直配置 PDF のみ返して graceful 復帰。"""
+        monitoring = tmp_path / "11.運動器機能向上計画書"
+        monitoring.mkdir(parents=True)
+        (monitoring / "5.pdf").write_bytes(b"%PDF-1.4")  # 月 3 ではないので fall through
+        original_iterdir = Path.iterdir
+        call_count = {"n": 0}
+
+        def _fail_second_iterdir(self: Path) -> object:
+            if self == monitoring:
+                call_count["n"] += 1
+                if call_count["n"] >= 2:
+                    raise PermissionError("simulated NAS error")
+            return original_iterdir(self)
+
+        monkeypatch.setattr(Path, "iterdir", _fail_second_iterdir)
+
+        with caplog.at_level("WARNING"):
+            found, all_pdfs = find_month_pdf(monitoring, 3)
+        assert found is None
+        # 1 回目 iterdir (直配置探索) で取得した pdfs は返る
+        assert all_pdfs == [monitoring / "5.pdf"]
+        assert any("PermissionError" in r.message for r in caplog.records)
