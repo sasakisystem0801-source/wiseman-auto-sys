@@ -205,8 +205,8 @@ output_format = "csv"
         cfg.pdf_merge.input_dir = "/tmp/in"
         cfg.pdf_merge.output_dir = "/tmp/out"
         cfg.pdf_merge.source_a_filename = "A.pdf"
-        cfg.ocr_backend.endpoint_url = "https://example.com"
-        cfg.ocr_backend.api_key = "xyz"
+        # Issue #27 続編 E Phase 1: OcrBackendConfig は frozen=True。
+        cfg.ocr_backend = replace(cfg.ocr_backend, endpoint_url="https://example.com", api_key="xyz")
 
         target = tmp_path / "new.toml"
         save_config(cfg, target, create_if_missing=True)
@@ -270,11 +270,10 @@ output_dir = ""
     def test_save_preserves_bbox_nested_section(self, tmp_path: Path) -> None:
         """ネストセクション [pdf_merge.user_name_bbox] が正しく書き戻される。"""
         cfg = AppConfig()
-        cfg.pdf_merge.user_name_bbox.x0 = 11.0
-        cfg.pdf_merge.user_name_bbox.y0 = 22.0
-        cfg.pdf_merge.user_name_bbox.x1 = 333.0
-        cfg.pdf_merge.user_name_bbox.y1 = 44.0
-        cfg.pdf_merge.user_name_bbox.dpi = 250
+        # Issue #27 続編 E Phase 1: UserNameBBox は frozen=True、全フィールド構築。
+        cfg.pdf_merge.user_name_bbox = UserNameBBox(
+            x0=11.0, y0=22.0, x1=333.0, y1=44.0, dpi=250
+        )
 
         target = tmp_path / "bbox.toml"
         save_config(cfg, target, create_if_missing=True)
@@ -966,7 +965,8 @@ dpi = 250
             encoding="utf-8",
         )
         cfg = load_config(target)
-        cfg.pdf_merge.user_name_bbox.x0 = 99.0
+        # Issue #27 続編 E Phase 1: UserNameBBox は frozen=True、replace で 1 フィールド更新。
+        cfg.pdf_merge.user_name_bbox = replace(cfg.pdf_merge.user_name_bbox, x0=99.0)
         cfg.pdf_merge.facility_aliases = {
             "本田デイケア": ["本田DC", "本田デイ"],
             "きなり": ["きなり訪問"],
@@ -1253,6 +1253,71 @@ class TestOcrBackendConfigValidation:
         """Issue #27 §2: bool / str / float / None の max_retries は TypeError。"""
         with pytest.raises(TypeError, match="max_retries must be int"):
             OcrBackendConfig(max_retries=bad_value)  # type: ignore[arg-type]
+
+
+class TestFrozenInstanceImmutability:
+    """Issue #27 続編 E Phase 1: ``UserNameBBox`` / ``OcrBackendConfig`` frozen 化検証。
+
+    PR #258 type-design-analyzer rating 7 指摘対応。post-construction mutation
+    (``cfg.endpoint_url = "  "`` 等) で ``__post_init__`` 型ガードを bypass する
+    経路を構造的に防ぐため両 dataclass を ``frozen=True`` 化する。本クラスは:
+      1. 各フィールドへの post-construction 代入が ``FrozenInstanceError`` で拒否される
+      2. ``replace()`` 経由の新インスタンス生成は ``__post_init__`` を再発火する
+    を固定する。
+    """
+
+    @pytest.mark.parametrize(
+        "field_name,new_value",
+        [
+            ("x0", 99.0),
+            ("y0", 99.0),
+            ("x1", 99.0),
+            ("y1", 99.0),
+            ("dpi", 250),
+        ],
+    )
+    def test_user_name_bbox_frozen_field_assignment_raises(
+        self, field_name: str, new_value: object
+    ) -> None:
+        """UserNameBBox の各フィールドへの post-construction 代入は FrozenInstanceError。"""
+        from dataclasses import FrozenInstanceError
+
+        bbox = UserNameBBox(x0=10.0, y0=20.0, x1=100.0, y1=50.0, dpi=200)
+        with pytest.raises(FrozenInstanceError):
+            setattr(bbox, field_name, new_value)
+
+    @pytest.mark.parametrize(
+        "field_name,new_value",
+        [
+            ("endpoint_url", "https://x"),
+            ("api_key", "x"),
+            ("timeout_sec", 60),
+            ("max_retries", 5),
+        ],
+    )
+    def test_ocr_backend_config_frozen_field_assignment_raises(
+        self, field_name: str, new_value: object
+    ) -> None:
+        """OcrBackendConfig の各フィールドへの post-construction 代入は FrozenInstanceError。"""
+        from dataclasses import FrozenInstanceError
+
+        cfg = OcrBackendConfig(endpoint_url="https://example.com", api_key="abc")
+        with pytest.raises(FrozenInstanceError):
+            setattr(cfg, field_name, new_value)
+
+    def test_user_name_bbox_replace_reapplies_post_init_validation(self) -> None:
+        """replace() で新規構築時に __post_init__ が再評価される (反転 bbox は拒否)。"""
+        bbox = UserNameBBox(x0=10.0, y0=20.0, x1=100.0, y1=50.0, dpi=200)
+        # 反転 (x0 >= x1) は __post_init__ の不変条件違反で ValueError
+        with pytest.raises(ValueError, match=r"x0 .* must be less than x1"):
+            replace(bbox, x1=5.0)
+
+    def test_ocr_backend_config_replace_reapplies_post_init_validation(self) -> None:
+        """replace() で新規構築時に __post_init__ 型ガードが再評価される。"""
+        cfg = OcrBackendConfig(endpoint_url="https://example.com", api_key="abc")
+        # bool は int サブクラスでもガード対象
+        with pytest.raises(TypeError, match="timeout_sec must be int"):
+            replace(cfg, timeout_sec=True)  # type: ignore[arg-type]
 
 
 class TestPdfMergeConfigValidation:

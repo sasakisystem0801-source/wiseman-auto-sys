@@ -251,9 +251,15 @@ class UpdaterConfig:
         _check_str("UpdaterConfig.release_bucket", self.release_bucket)
 
 
-@dataclass
+@dataclass(frozen=True)
 class OcrBackendConfig:
     """OCRバックエンド（Cloud Runプロキシ）設定。詳細はADR-008参照。
+
+    Issue #27 続編 E Phase 1 (PR #258 type-design-analyzer rating 7 対応):
+        ``frozen=True`` 化により post-construction mutation
+        (``cfg.endpoint_url = "  "`` 等) で ``__post_init__`` 型ガードを
+        bypass する経路を構造的に防ぐ。フィールド更新は ``replace()`` 経由
+        (UI 設定保存等) に統一する。
 
     不変条件:
         - timeout_sec > 0（HTTP リクエストタイムアウトは正の整数のみ）
@@ -291,9 +297,15 @@ class OcrBackendConfig:
         return bool(self.endpoint_url.strip() and self.api_key.strip())
 
 
-@dataclass
+@dataclass(frozen=True)
 class UserNameBBox:
     """利用者名が印字される固定矩形（PDFページ座標、ポイント単位）。
+
+    Issue #27 続編 E Phase 1 (PR #258 type-design-analyzer rating 7 対応):
+        ``frozen=True`` 化により post-construction mutation
+        (``bbox.x0 = float('nan')`` 等) で ``__post_init__`` 不変条件チェック
+        を bypass する経路を構造的に防ぐ。フィールド更新は ``replace()`` 経由
+        (UI 設定保存等) に統一する。
 
     不変条件:
         - dpi > 0（OCR 解像度は正の整数のみ、常時必須）

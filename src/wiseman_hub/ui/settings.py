@@ -177,8 +177,14 @@ def form_to_config(form: SettingsForm, base: AppConfig) -> AppConfig:
         concat_order=parsed_concat,
         user_name_bbox=new_bbox,
     )
-    new_config.ocr_backend.endpoint_url = form.ocr_endpoint_url.strip()
-    new_config.ocr_backend.api_key = form.ocr_api_key  # API Key は前後空白も有効値として尊重
+    # Issue #27 続編 E Phase 1: OcrBackendConfig は frozen=True のため
+    # post-construction mutation 不可。``replace()`` で新インスタンス生成して差し替える。
+    # API Key は前後空白も有効値として尊重（``form.ocr_api_key`` 生値を維持）。
+    new_config.ocr_backend = replace(
+        new_config.ocr_backend,
+        endpoint_url=form.ocr_endpoint_url.strip(),
+        api_key=form.ocr_api_key,
+    )
     new_config.wiseman.exe_path = form.wiseman_exe_path.strip()
     return new_config
 
