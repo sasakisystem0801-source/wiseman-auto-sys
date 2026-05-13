@@ -58,3 +58,21 @@ def test_decode_image_success() -> None:
 def test_decode_image_invalid_raises() -> None:
     with pytest.raises(ValueError):
         decode_image("!!!not-base64!!!")
+
+
+def test_gemini_client_empty_project_id_raises() -> None:
+    """Issue #29 §4: GeminiClient は空 project_id を起動時 ValueError で拒否する。
+
+    Cloud Run 起動時に lifespan で ``Settings.gcp_project_id`` 空チェックが先に
+    効くため通常は発火しないが、テスト・スクリプト等から直接構築するケースで
+    fail-fast することを固定する (genai.Client 呼出前に raise されるため
+    Vertex AI 接続を試みない)。
+    """
+    from app.ocr import GeminiClient
+
+    with pytest.raises(ValueError, match="GCP_PROJECT_ID is required"):
+        GeminiClient(
+            project_id="",
+            location="asia-northeast1",
+            model="gemini-2.5-flash",
+        )
