@@ -669,8 +669,24 @@ class ChecklistConfig:
             )
 
 
-@dataclass
+@dataclass(frozen=True)
 class AppConfig:
+    """アプリケーション全体の設定 (root)。
+
+    Issue #27 続編 E Phase 3b (PR #258 type-design-analyzer rating 7 対応):
+        ``frozen=True`` 化により post-construction mutation で ``__post_init__``
+        型ガードを bypass する経路を構造的に防ぐ。フィールド更新は ``replace()``
+        経由に統一する。ネスト dataclass の更新は
+        ``cfg = replace(cfg, pdf_merge=replace(cfg.pdf_merge, input_dir=...))``
+        形式で行う。
+
+    なお ``reports`` は ``list[ReportTarget]`` のため、list 自体の要素追加/削除
+    (``cfg.reports.append(...)``) は frozen 化の対象外 (参照差し替え
+    ``cfg.reports = [...]`` のみ阻止)。要素 immutability が必要なら type を
+    ``tuple[ReportTarget, ...]`` に変える別議論が必要 (umbrella §1 Literal 拡張
+    側で扱う)。
+    """
+
     version: str = "0.1.0"
     log_level: str = "INFO"
     log_dir: str = ""

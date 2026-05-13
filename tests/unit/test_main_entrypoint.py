@@ -413,9 +413,13 @@ def test_settings_callback_reloads_launcher_on_save(
 
     from wiseman_hub.config import AppConfig
 
-    saved_config = AppConfig()
-    # Issue #27 続編 E Phase 2: PdfMergeConfig は frozen=True、replace() 経由。
-    saved_config.pdf_merge = replace(saved_config.pdf_merge, input_dir="/reloaded")
+    # Issue #27 続編 E Phase 3b: AppConfig + PdfMergeConfig は frozen=True、
+    # ``replace()`` で階層構築する (旧 attribute 代入は FrozenInstanceError)。
+    base = AppConfig()
+    saved_config = replace(
+        base,
+        pdf_merge=replace(base.pdf_merge, input_dir="/reloaded"),
+    )
 
     class FakeDialog:
         def __init__(self, *args: Any, **kwargs: Any) -> None:

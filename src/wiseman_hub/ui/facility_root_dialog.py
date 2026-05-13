@@ -184,11 +184,15 @@ class FacilityRootViewModel:
             for c in candidates
         ]
         if self.config is not None:
-            # Issue #27 続編 E Phase 2: PdfMergeConfig は frozen=True のため
-            # post-construction mutation 不可。``replace()`` で新インスタンス生成して差し替える。
-            self.config.pdf_merge = replace(
-                self.config.pdf_merge,
-                facility_root_dir=str(root),
+            # Issue #27 続編 E Phase 3b: AppConfig + PdfMergeConfig 共に frozen=True
+            # のため、``replace()`` を二重に重ねて新 AppConfig instance に差し替える。
+            # ``self.config`` 自体は通常 class attribute なので再代入可能。
+            self.config = replace(
+                self.config,
+                pdf_merge=replace(
+                    self.config.pdf_merge,
+                    facility_root_dir=str(root),
+                ),
             )
 
     def select_all(self) -> None:

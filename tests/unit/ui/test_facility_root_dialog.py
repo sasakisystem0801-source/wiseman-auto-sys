@@ -19,12 +19,11 @@ Dialog smoke テスト（@pytest.mark.tk_required）:
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from wiseman_hub.config import AppConfig
+from wiseman_hub.config import AppConfig, PdfMergeConfig
 from wiseman_hub.pdf.facility_bulk_runner import (
     BulkExecutionItem,
     BulkExecutionStatus,
@@ -505,23 +504,31 @@ class TestOpenOutputAvailable:
 
 class TestPersistRoot:
     def test_set_root_writes_to_config(self, tmp_path: Path) -> None:
-        """ViewModel 経由で root を設定すると AppConfig.pdf_merge.facility_root_dir が更新される。"""
+        """ViewModel 経由で root を設定すると AppConfig.pdf_merge.facility_root_dir が更新される。
+
+        Issue #27 続編 E Phase 3b: AppConfig は frozen=True のため、ViewModel 内で
+        ``self.config = replace(...)`` で新 instance に差し替わる。元の cfg は不変、
+        ``vm.config`` 側を確認する。
+        """
         cfg = AppConfig()
         vm = FacilityRootViewModel(config=cfg)
 
         vm.set_root_and_rows(tmp_path, [])
 
-        assert cfg.pdf_merge.facility_root_dir == str(tmp_path)
+        assert vm.config.pdf_merge.facility_root_dir == str(tmp_path)
+        # 元の cfg は frozen のため不変であることも確認 (regression guard)
+        assert cfg.pdf_merge.facility_root_dir == ""
 
     def test_set_root_does_not_modify_other_fields(self, tmp_path: Path) -> None:
         """root 更新で既存フィールドが変わらない（Partial Update）。"""
-        cfg = AppConfig()
-        # Issue #27 続編 E Phase 2: PdfMergeConfig は frozen=True、replace() 経由。
-        cfg.pdf_merge = replace(
-            cfg.pdf_merge,
-            input_dir="/keep_in",
-            output_dir="/keep_out",
-            source_a_filename="keep.pdf",
+        # Issue #27 続編 E Phase 2/3b: PdfMergeConfig + AppConfig は frozen=True、
+        # 初期化は dataclass コンストラクタ経由。
+        cfg = AppConfig(
+            pdf_merge=PdfMergeConfig(
+                input_dir="/keep_in",
+                output_dir="/keep_out",
+                source_a_filename="keep.pdf",
+            ),
         )
         vm = FacilityRootViewModel(config=cfg)
 
