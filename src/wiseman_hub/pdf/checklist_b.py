@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import re
 import shutil
+import unicodedata
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -157,14 +158,64 @@ def find_monitoring_dir(
     return None, matches
 
 
-def find_month_pdf(monitoring_dir: Path, month: int) -> tuple[Path | None, list[Path]]:
-    """``{month}.pdf`` または ``{month}.PDF`` をマッチさせる。複数 PDF は候補返却。"""
-    if not monitoring_dir.exists():
-        return None, []
-    pdfs = sorted(p for p in monitoring_dir.iterdir() if p.suffix.lower() == ".pdf")
+# Issue #282: 年フォルダ (R<年>) 表記揺れ吸収用の正規表現。
+# NFKC 正規化後にマッチ判定するため、ここでは半角 R/r + 区切り文字 + 数字のみカバー。
+# 対応する表記揺れ (NFKC 後): "R7" / "R 7" / "R.7" / "R-7" / "r7"
+# (原文の "R７" / "Ｒ7" / "Ｒ７" / "R　7" は NFKC で "R7" / "R 7" に正規化される)
+_R_YEAR_RE: Final = re.compile(r"^[Rr][\s.\-]*(\d+)$")
+
+
+def _parse_year_folder_name(name: str) -> int | None:
+    """フォルダ名から R<年> の年数値を抽出。表記揺れを吸収。
+
+    対応する表記揺れ:
+        - R7, R７, Ｒ7, Ｒ７ (全角/半角ミックス)
+        - R 7, R　7 (半角/全角スペース挿入)
+        - R.7, R-7 (区切り文字挿入)
+        - r7 (小文字)
+
+    実装: ``unicodedata.normalize("NFKC", ...)`` で全角数字/アルファベット/全角
+    スペースを半角化し、正規表現 ``^[Rr][\\s.\\-]*(\\d+)$`` で年数値を抽出。
+
+    Returns:
+        int (年数値、例: ``7``) または None (R<年> 形式として解釈不能)
+    """
+    nfkc = unicodedata.normalize("NFKC", name.strip())
+    m = _R_YEAR_RE.match(nfkc)
+    if m is None:
+        return None
+    return int(m.group(1))
+
+
+def _match_month_pdf_in_dir(
+    directory: Path, month: int
+) -> tuple[Path | None, list[Path], bool]:
+    """指定ディレクトリ直下の ``{month}.pdf`` を 1 件返す (再帰なし)。
+
+    戻り値 3-tuple ``(found, pdfs, ambiguous)``:
+        - ``(Path, [...], False)``: 月マッチ単独で確定
+        - ``(None, [...], True)``: 月マッチ複数 → AMBIGUOUS (呼出側で早期 return 必須)
+        - ``(None, [...], False)``: PDF はあるが月マッチなし
+        - ``(None, [], False)``: PDF ゼロ or ``iterdir`` 失敗 (OSError は warn ログのみ、
+          PII 防御で path は出さない)
+
+    Issue #282 codex review High-3 反映: ``iterdir`` の OSError (NAS 切断 / SMB
+    permission denied / TOCTOU) を捕捉して空結果に倒す。``find_monitoring_dir`` の
+    エラー方針と整合。
+    """
+    try:
+        pdfs = sorted(
+            p for p in directory.iterdir() if p.suffix.lower() == ".pdf"
+        )
+    except OSError as exc:
+        # PII 防御: directory 絶対パスはログに出さず、型名のみ。
+        logger.warning(
+            "_match_month_pdf_in_dir: iterdir failed (%s)",
+            type(exc).__name__,
+        )
+        return None, [], False
     if not pdfs:
-        return None, []
-    # 「月」マッチ: stem == str(month) or stem == f"{month:02d}"
+        return None, [], False
     candidates: list[Path] = []
     for p in pdfs:
         stem = p.stem.strip()
@@ -174,8 +225,95 @@ def find_month_pdf(monitoring_dir: Path, month: int) -> tuple[Path | None, list[
         except ValueError:
             continue
     if len(candidates) == 1:
-        return candidates[0], pdfs
-    return None, pdfs
+        return candidates[0], pdfs, False
+    if len(candidates) >= 2:
+        # Issue #282 codex review High-1 反映: AMBIGUOUS を識別フラグで返し、
+        # find_month_pdf 側で年フォルダ走査をスキップさせる (誤確定防止)。
+        return None, pdfs, True
+    return None, pdfs, False
+
+
+def find_month_pdf(monitoring_dir: Path, month: int) -> tuple[Path | None, list[Path]]:
+    """``{month}.pdf`` を ``monitoring_dir`` 直下 + ``R<年>`` サブフォルダから探索。
+
+    Issue #282: 本田様 PC の運用で ``{monitoring_subfolder}/R7/<月>.pdf`` 構造
+    (令和 7 年サブフォルダ) が混在することが判明。直下のみ走査だと配置漏れになる
+    ため、以下の優先順で探索する:
+
+        1. ``monitoring_dir/<月>.pdf`` (旧構造、直配置) — 既存挙動を優先
+        2. ``monitoring_dir/R<年>/<月>.pdf`` (新構造) — R 数字降順で最新年から走査
+        3. それでもなければ ``None``
+
+    R<年> フォルダ名の表記揺れ (R7 / R７ / Ｒ7 / R 7 / R.7 / r7 等) は
+    ``_parse_year_folder_name`` で NFKC 正規化 + 正規表現マッチで吸収。
+
+    codex review (#282) 反映:
+        - High-1: 直下 AMBIGUOUS で年フォルダ走査に進むと誤確定 → 直下 AMBIGUOUS は
+          早期 return で「人間判断に倒す」(既存契約 ``SKIPPED_AMBIGUOUS`` 維持)
+        - High-2: 年フォルダ内 AMBIGUOUS で古い年にフォールバックすると誤確定 →
+          年フォルダ内 AMBIGUOUS でも早期 return
+        - Medium-1: 同一論理年で複数フォルダ (例: ``R7`` と ``Ｒ７`` が混在) は ``iterdir``
+          順に依存して非決定的 → 同一論理年で複数物理フォルダを発見した時点で AMBIGUOUS
+
+    Returns:
+        ``(月 PDF 1 件 or None, 走査した全 .pdf リスト)``。``None`` の場合は呼出側
+        が ``SKIPPED_NO_PDF`` (候補ゼロ) と ``SKIPPED_AMBIGUOUS`` (候補複数) を
+        list 長で判別する既存契約を維持。
+    """
+    if not monitoring_dir.exists():
+        return None, []
+
+    # step 1: 直配置 (旧構造、既存挙動維持)
+    found, direct_pdfs, direct_ambiguous = _match_month_pdf_in_dir(
+        monitoring_dir, month
+    )
+    if found is not None:
+        return found, direct_pdfs
+    if direct_ambiguous:
+        # codex review High-1: 直下 AMBIGUOUS は年フォルダ探索で誤確定させない。
+        return None, direct_pdfs
+
+    # step 2: R<年> サブフォルダ最新優先 (新構造、表記揺れ吸収)
+    # 同一論理年で複数物理フォルダがある場合は AMBIGUOUS 扱い (codex Medium-1)。
+    year_groups: dict[int, list[Path]] = {}
+    try:
+        children = list(monitoring_dir.iterdir())
+    except OSError as exc:
+        # codex High-3: monitoring_dir 自体の iterdir 失敗 (NAS 切断等) も graceful に。
+        logger.warning(
+            "find_month_pdf: iterdir failed on monitoring_dir (%s)",
+            type(exc).__name__,
+        )
+        return None, list(direct_pdfs)
+    for d in children:
+        if not d.is_dir():
+            continue
+        year = _parse_year_folder_name(d.name)
+        if year is not None:
+            year_groups.setdefault(year, []).append(d)
+
+    aggregated_pdfs: list[Path] = list(direct_pdfs)
+    # 最新年から降順走査。
+    for year in sorted(year_groups.keys(), reverse=True):
+        dirs_for_year = year_groups[year]
+        if len(dirs_for_year) >= 2:
+            # codex Medium-1: 同一論理年で表記揺れフォルダが複数 → 非決定的、AMBIGUOUS。
+            # 全フォルダ内の pdf を候補として集約してから人間判断に倒す。
+            for d in dirs_for_year:
+                _, pdfs_in_dir, _ = _match_month_pdf_in_dir(d, month)
+                aggregated_pdfs.extend(pdfs_in_dir)
+            return None, aggregated_pdfs
+        year_dir = dirs_for_year[0]
+        found, year_pdfs, year_ambiguous = _match_month_pdf_in_dir(year_dir, month)
+        aggregated_pdfs.extend(year_pdfs)
+        if found is not None:
+            return found, aggregated_pdfs
+        if year_ambiguous:
+            # codex review High-2: 当該年で AMBIGUOUS なら古い年で誤確定しない。
+            return None, aggregated_pdfs
+
+    # step 3: 該当なし
+    return None, aggregated_pdfs
 
 
 def resolve_facility(
