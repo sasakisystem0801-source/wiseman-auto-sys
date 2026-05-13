@@ -1,151 +1,135 @@
-# Session 69 完了 — Issue #27 続編 E Phase 3b (AppConfig root frozen 化、続編 E スコープ完了)
+# Session 70 完了 — Issue #238 実機検証 + Phase 3b 由来 test regression fix (PR #277) + UX 観察 3 件 Issue 化
 
-**Date**: 2026-05-13
-**Main HEAD**: `9c7f5d6` fix(config): AppConfig (root) を frozen 化 (#27 続編 E Phase 3b) (#272)
-**Test count**: main project 1801 → **1815** (+14)
-**Active Issues**: 10 (実質 5、postpone 5) [変化なし、Net 0]
+**Date**: 2026-05-14
+**Main HEAD**: `3bb1784` fix(tests): test_browse_source identity assertion を frozen replace 契約に追従 (#277)
+**Test count**: main project 1815 維持 (PR #277 は test 修正 1 件、追加なし)
+**Active Issues**: 13 (実質 8、postpone 5) [変化: +3、Net 悪化、業務価値正当]
 **Phase**: Phase 7 着手前 [変化なし]
+
+---
+
+## セッション経緯と方向修正
+
+本セッションは Session 69 完了後 `/catchup` 経由で「Phase 1-3b Windows 実機検証 + `facility_root_dialog` Critical 修正検証」を最優先と認識して開始。TeamViewer 経由で本田様 PC に接続後、ユーザーから方向修正:
+
+> 「frozen 化 (Issue #27) は内部品質改善で外から見えない。本来の最優先は **Issue #238 (GCP 同期サマリー UI) のシンプル化が本田様視点で機能しているか** の検証だ」
+
+catchup が Session 69 LATEST の「次セッション優先順 1 位」を額面通り受けて誤った scope に着地していた → **CLAUDE.md 4 原則 §1 (executor 越権)** を認め scope 切替。Issue #238 業務視点検証に方向修正。
 
 ---
 
 ## 完了内容
 
-本セッションは Session 68 から /catchup 経由で継続。Session 68 LATEST「次セッション優先順 1 位 #27 続編 E Phase 3b (`AppConfig` frozen 化、影響範囲大、要 `/impl-plan`)」を impl-plan 簡略版 (TaskCreate ベース) で実施。Phase 3b 単独 PR + 同 PR 内で review 指摘 4 件を統合修正し、続編 E 全 4 Phase (9 dataclass frozen 化) を構造的に完遂。
+### 1. 実機反映 (本田様 PC `C:\Users\sasak\Projects\wiseman-auto-sys`、TeamViewer)
 
-### PR #272 — Issue #27 続編 E Phase 3b: `AppConfig` (root) frozen 化 (9 files, +385/-190)
+`docs/handoff/1c-exe-redistribution-runbook.md` の Phase 0-3 を踏襲:
 
-**PR #258 type-design-analyzer rating 7 対応の最終フェーズ**: root dataclass を frozen 化することで全 9 dataclass の階層全層が post-construction mutation 不可となり、`__post_init__` 型ガード bypass 経路が完全閉鎖された。
+| Phase | 結果 |
+|-------|------|
+| 0: `git pull --ff-only` | HEAD = `9c4be48` (Session 69 handoff) まで反映 |
+| 0-2: backup | `wiseman_hub.exe.bak-20260514-055032` (79.26 MB、旧 LastWriteTime 2026/05/06) |
+| 0-4: `uv sync --extra dev` + `pytest -q -m "not integration"` | **4 failed, 1912 passed, 2 skipped** (詳細下記) |
+| 1: PyInstaller clean build | 成功、Hidden import warnings は無害 3 件 (`pycparser.lextab` / `yacctab` / `jinja2`) |
+| 2: 配布上書き | 84.21 MB、LastWriteTime 2026/05/14 6:00:56 (+5 MB は launcher 関連新規モジュール由来で説明可能) |
+| 3: Launcher 起動 | **成功** (コンソール窓なし、5 ボタン構成、GCP 同期サマリー上部表示) |
 
-- `src/wiseman_hub/config.py`:
-  - `AppConfig` に `@dataclass(frozen=True)` 付与
-  - docstring を「**直下フィールドの参照差し替え** を構造的に防ぐ」表現に絞り、mutable leaf (list / dict) 内容変更は frozen 対象外と明示 (Codex review Low 指摘対応)
-- Production code (UI 3 files):
-  - `ui/settings.py` `form_to_config`: `copy.deepcopy(base)` + 個別 attribute 代入を廃止し、`replace(base, pdf_merge=replace(...), ocr_backend=replace(...), wiseman=replace(...))` の 1 段 replace 構造に統一。`copy` import 削除
-  - `ui/ex_extractor_dialog.py` `_on_browse`: `self._config = replace(self._config, pdf_merge=replace(...))` の 2 段構造に変更
-  - `ui/facility_root_dialog.py` `_do_scan`: 同上 + **silent regression 修正** (後述)
-- Test code (5 files): TestSaveConfig / TestChecklistStaffPathExtension 等 17+ 箇所の旧 attribute 代入を `replace()` ベース or AppConfig コンストラクタ経由に変換
-- `TestFrozenInstanceImmutability` に AppConfig 検証 14 ケース追加:
-  - `test_app_config_frozen_field_assignment_raises` (parametrize 11 フィールド)
-  - `test_app_config_replace_reapplies_post_init_validation` (str field 型ガード再評価)
-  - `test_app_config_replace_nested_dataclass_reapplies_validation` (階層 replace + bbox 反転検出)
-  - `test_app_config_reports_list_content_mutation_not_blocked` (仕様 regression guard)
+> ⚠️ CLAUDE.md の Phase 3 チェックリスト #2 は「3 ボタン構成」と古い記述。実際は **5 ボタン** (ex_ ファイル変換 + 振り分け / B: 運動機能向上計画書 自動配置 / C: 経過報告書 自動配置 / 事業所フォルダ一括結合 / 設定)。次セッションで CLAUDE.md 更新候補。
 
-**Evaluator 評価**: 初回 AC3 FAIL (`test_settings.py:406` の Phase 2 見落とし mutation) → 修正 → **再評価で APPROVE** (AC1-6 全 PASS)
+### 2. 実機 pytest 4 件 fail の切り分け
 
-### PR #272 内 — Review 指摘 4 件の統合修正 (commit b1646b6)
+CI (Linux ubuntu-latest) では `tk_required` が **全 SKIPPED** されているため CI green、Windows 実機で初顕在化。
 
-5 並列 review (4 agent + Codex CLI) で発見された High / Medium / Low 計 4 件を merge 前に統合修正:
+| FAIL | 真の原因 | frozen 由来? | 対応 |
+|------|---------|--------------|------|
+| `test_browse_source_calls_on_source_persisted_after_save_success` | **PR #272 frozen 化由来 regression** (`replace()` で新インスタンス化、L1201 `is` チェックが構造的に常に fail) | ✅ | **PR #277 で fix (merged)** |
+| `test_clear_cache_removes_entry_and_saves` | 実機 Python 3.11 Tcl `init.tcl` 破損 (`tk.Tk()` 自体が `TclError`) | ❌ | 環境問題、別途修復 (Python 再インストール検討) |
+| `test_clicking_header_sorts_ascending_then_descending` | Windows Tk 仕様差 (`tree.heading()["command"]` が Tcl コマンド名文字列を返す) | ❌ | Issue #276 の構造解消で検出経路確保 + 別 PR で test 書き換え |
+| `test_status_column_uses_custom_priority_key` | 同上 | ❌ | 同上 |
 
-#### High — facility_root_dialog の silent regression (silent-failure-hunter + Codex 共指摘)
+### 3. Issue #238 業務視点検証 (TaskCreate ベース 5 タスク)
 
-- 旧 (frozen でない時代): `self._vm.config.pdf_merge = replace(...)` は shared reference の in-place mutation で、`self._config` と `self._vm.config` が同一 AppConfig instance を指していたため、L547 `save_config_fn(self._config, ...)` で更新後の `facility_root_dir` が永続化されていた
-- Phase 3b 後 (frozen 化): ViewModel.set_root_and_rows 内の `self.config = replace(self.config, pdf_merge=replace(...))` は self._vm.config のみ新インスタンスに差し替え、Dialog 側の `self._config` は古い AppConfig (facility_root_dir 未更新) を保持
-- **silent regression**: L547 で **古い facility_root_dir が TOML に書き戻される** → 次回起動時にルート未保持 (40 事業所運用での体験劣化)
-- **修正**: `_do_scan` で `set_root_and_rows` 直後に `self._config = self._vm.config` で参照を再同期 (mypy 型 narrowing 用 `assert self._vm.config is not None` 付き)
-- 同類問題チェック: `ex_extractor_dialog.py` は同パターンを Dialog 側で直接 `self._config = replace(...)` していたため影響なし
+| Task | 状態 | 結果 |
+|------|------|------|
+| #1 起動体験評価 | ✅ 完了 | 起動は `Start-Process` 直後表示で I-2 `defer_initial_refresh` 効果体感あり。サマリー表示 (居宅対照表 / 担当者マッピング / シート一覧) は機能 PASS、本田様視点で **UX 観察 2 件** を発見 |
+| #2 居宅マッピング pull → save | ⏭ スキップ判定 | 本番マッピング上書きリスク vs CI test (`test_on_save_records_only_when_dirty` で構造担保) の比較で実機破壊操作回避 |
+| #3 担当者マッピング pull → save | ⏭ スキップ判定 | Task #2 と同理由 |
+| #4 F4 closed-loop verify (pull → キャンセル) | ✅ **PASS** | pull で編集枠更新 → キャンセルで dialog 破棄 → Launcher サマリー「居宅対照表: 不明」のまま維持。**PR #243 F4 dirty flag が業務動線で意図通り動作** |
+| #5 まとめ + test 修正 PR | ✅ 完了 | PR #277 (frozen 由来 regression fix) merged + Issue 3 件起票 + 本 handoff |
 
-#### Medium — form_to_config の mutable leaf alias (Codex 指摘)
+### 4. Issue 起票 3 件 (本日の本セッション主成果)
 
-- `copy.deepcopy(base)` → `replace(base, ...)` で `base.reports` (list) + `ReportTarget.menu_path` (list) が new_cfg と base 間で shared
-- 将来 `new_cfg.reports.append(...)` / `new_cfg.reports[0].menu_path.append(...)` が base 側へ漏れる脆性
-- **修正**: `decoupled_reports = [replace(r, menu_path=list(r.menu_path)) for r in base.reports]` で mutable leaf を新 list に再構築、base/new_cfg alias を切る
-- tuple 化 (umbrella §1) 完了までの暫定防御として docstring に明記
+| Issue | タイトル | label | triage 根拠 | rating |
+|-------|---------|-------|------------|--------|
+| **#274** | B/C 自動配置ダイアログ「詳細」列の見切れで利用者氏名/PDF パスが読めない | enhancement, P2 | 基準 #5 (ユーザー明示指示) | 7 |
+| **#275** | ChecklistSettingsDialog の GCP 同期ボタン UI シンプル化 (Issue #238 Phase 4 候補) | enhancement, P2 | 基準 #5 | 7 |
+| **#276** | Windows runner で UI tests (tk_required) を走らせる workflow 追加 (Linux skip 構造的盲点の解消) | enhancement, P2 | 基準 ③ (CI/リリース判断を壊す) + 基準 #5 | 7 |
 
-#### Low — AppConfig docstring 表現緩和 (Codex 指摘)
+**Net +3 だが triage 基準遵守 + 業務価値正当** (本田様 UX × 2 + 構造盲点解消 × 1)。
 
-- 旧 docstring「型ガード bypass を構造的に防ぐ」は強すぎ、mutable leaf 内容変更まで防げると誤読されるリスク
-- **修正**: 「直下フィールドの参照差し替えを防ぐ」に絞って表現、frozen 化対象外 (mutable leaf list / dict の内容変更) を明示的に列挙
+### 5. PR #277 — Phase 3b 由来 test regression fix (1 file, +16/-2)
 
-### ハイライト: Phase 3b の Critical 発見と修正
-
-Phase 1-3a は機械的書換で完了したが、Phase 3b (root frozen) は **Dialog ↔ ViewModel の reference identity** が暗黙の前提だった経路を初めて壊した。5 並列 review (silent-failure-hunter + Codex CLI) が独立に同じ Critical を発見したことで、本セッションのレビュー体制 (4 agent + Codex CLI 並列) の効果が実証された。Mac セッションでテスト化が困難な領域 (Tk Dialog 統合) はコメントとハンドオフで Windows 実機検証に橋渡し。
+- **発見経緯**: 実機 pytest で `test_browse_source_calls_on_source_persisted_after_save_success` が PR #272 (Phase 3b root frozen 化) 由来の真の regression と特定
+- **原因 contract change**: `_on_browse_source` は `replace()` 経由で新 AppConfig instance を生成し callback に渡すよう変更 (PR #272 `src/wiseman_hub/ui/ex_extractor_dialog.py` L720-743)
+- **旧 test は mutation 前提**: L1201 `assert callback_calls[0] is config` は frozen 化前の「同一インスタンス維持」前提のため、Phase 3b で構造的に常に fail
+- **CI 盲点**: `tk_required` テストが Linux CI で全 skip されるため検知されず、Session 70 実機で初顕在化
+- **修正**: 3 アサーション化 — `is not config` (new instance lock-in) / `pdf_merge.ex_source_dir == str(new_source)` (選択値反映) / `pdf_merge.facility_root_dir == str(root_dir)` (replace scope 妥当性)
+- **検証**: Mac local `pytest` SKIPPED (tk_required 想定通り) / ruff PASS / production contract と整合 / lightweight review 通過 / 番号単位 merge 認可済
 
 ---
 
 ## ⚠️ 注意事項 / 次セッション着手前確認
 
-### 1. 【最優先】Windows 実機検証 (Phase 1-3b 累積 4 PR shadow 消化)
+### 1. 本田様 PC の exe は PR #277 未反映 (業務影響ゼロ、急がない)
 
-Phase 1-3b の 4 PR (`#267` / `#269` / `#270` / `#272`) はすべて **Mac セッションで完了し Windows 実機未検証**。特に Phase 3b で発見された **facility_root_dialog の Critical 修正** (`self._config = self._vm.config` 同期) は Tk Dialog 統合経路のため Mac での自動テストが困難。次セッション着手前に TeamViewer 経由で必ず実機検証を完了させる。
+実機にデプロイ済の `wiseman_hub.exe` (84.21 MB、2026/05/14 6:00:56 build) は HEAD = `9c4be48` (Session 69) 時点の内容。PR #277 (test 修正のみ、production code 変更ゼロ) は実機 exe に乗っていないが **業務影響なし**。次セッションで Issue #275 or #276 関連の production 変更が入る際に同時再ビルドで取り込めば十分。
 
-**実機検証チェックリスト**:
+### 2. Issue #238 は部分達成と判明
 
-| # | 機能 | 期待動作 | Phase 3b Critical 関連 |
-|---|------|---------|---------------------|
-| 1 | Launcher 起動 | ImportError / ModuleNotFoundError なし、3 ボタン UI 表示 | ✅ (load_config 経路) |
-| 2 | SettingsDialog → OCR endpoint / API key 保存 → 再起動で値保持 | TOML 永続化、値復元 OK | ✅ (form_to_config の replace 階層) |
-| 3 | SettingsDialog → wiseman_exe_path 保存 → 再起動で値保持 | 同上 | ✅ |
-| 4 | SettingsDialog → pdf_merge 設定 (concat_order / bbox) 保存 → 再起動で値保持 | 同上 (UserNameBBox / PdfMergeConfig frozen 経路) | ✅ |
-| 5 | **facility_root_dialog → ルート選択 → スキャン成功 → 再起動でルート保持** | **L547 save_config が新 facility_root_dir で書き戻し成功** | **🔴 Critical 修正の核心** |
-| 6 | ex_extractor_dialog → ex_source_dir 選択 → 永続化 → 再起動で保持 | 同上 (ex_extractor 経路) | ✅ |
-| 7 | 既存機能 smoke (PDF 結合 / OCR / facility_merger) | regression なし | ✅ |
+Phase 1/2-α/2-β で **表示シンプル化** (サマリー UI / pull-save closed-loop verify / 起動高速化 / silent failure 可視化) は本田様視点で機能 (Task #4 PASS で実証)。一方、**操作シンプル化** (ボタン UI 階層) は元々 scope 外で未達 → Issue #275 で Phase 4 候補として記録。
 
-実機 runbook: `docs/handoff/1c-exe-redistribution-runbook.md`
+### 3. CI 盲点 (Issue #276) は同種 PR #181 と再発、構造解消が必要
 
-#### Rollback 手順 (実機で問題発生時)
+PR #181 (2026-05-04 Windows pytest 失敗 11 件修正) と **同じ「Linux CI で tk_required skip → Windows 実機で初回顕在化」パターン** が本セッションで再発。impl-plan + 専用 workflow 追加で構造解消推奨 (Issue #276 改善候補 B)。
 
-```powershell
-$dist = "$HOME\wiseman-hub"
-$latest_bak = Get-ChildItem "$dist\wiseman_hub.exe.bak-*" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-Copy-Item -Force $latest_bak.FullName "$dist\wiseman_hub.exe"
-```
+### 4. Mac セッション着手不可項目 (前セッション継承、変化なし)
 
-### 2. Issue #27 umbrella 残作業 (続編 F/G)
+- #17 (smoke_real.py pytest 統合)
+- #16 (test_new_registration_flow Pane/Text 経路)
+- #11 (PywinautoEngine MEDIUM 5 件)
+- #6 (PoC E2E)
 
-続編 E (frozen 化 scope) は完了で **OPEN 維持**。Issue #27 close は以下の §1 / §4 完了が前提:
-
-- **§1 Literal 型導入**: `PdfMergeConfig.concat_order` の `ConcatSourceLetter` のみ完了、他 dataclass の離散集合制約 (`output_format` / `log_level` 等) は未着手
-- **§4 Path 型移行**: `input_dir` / `output_dir` 等の str → Path
-- **続編 E 追加検討項目** (Issue #27 コメント記録):
-  - `AppConfig.reports: list[ReportTarget]` → `tuple[ReportTarget, ...]` 化 (frozen leaf list mutation 阻止、PR #272 Codex Medium で暫定防御済)
-  - `ChecklistConfig.facility_routing` / `xlsx_path_cache` の frozen dict 化検討
-
-### 3. pr-test-analyzer Suggestion (任意の品質補強)
-
-PR #272 review で挙がった rating 5-7 の Suggestion 3 件。**rating < 7 のため Issue 化せず本ハンドオフで記録**:
-
-- (rating 7) `form_to_config` の reports list reference identity test: `new_cfg.reports is not base.reports` (Codex Medium 修正の lock-in)
-- (rating 6) `tk_required` skip 挙動の Linux/Windows CI 確認 (test_settings.py:406 修正の CI 実行確認)
-- (rating 5) ex_extractor_dialog の `self._config = replace(...)` rebinding test (facility_root_dialog の TestPersistRoot と pattern mirror)
-
-### 4. Phase 7 (Task #17) は引き続き pending — 要 Windows 実機
-
-業務 Phase 4 全件配置を新システムで実行。本田様 PC で launcher 経由運用切替、デスクトップショートカット更新等の運用切替計画が必要 (impl-plan 推奨)。
-
-### 5. Windows 実機必須の Issue は Mac セッションで着手不可
-
-- #17: `smoke_real.py` を pytest に統合し `WISEMAN_REAL=1` でゲート
-- #16: `test_new_registration_flow` の Pane/Text 経路 (WM_LBUTTON) カバー
-- #11: PywinautoEngine MEDIUM 5 件
-- #6: PoC E2E (ログイン→CSV抽出→GCSアップロード)
-
-### 6. handoff debt (Session 64 から繰越、整理判断必要)
+### 5. handoff debt (Session 64 から繰越、変化なし)
 
 - `build-windows-smoke.yml` に `Verifier.production(offline=True)` smoke 追加
 - Trust root staleness 監視 (warn-log)
 - sigstore-python 3.x dependency docstring
 
-### 7. Codex CLI が MCP timeout の代替手段として有効
+### 6. AskUserQuestion 過剰の教訓を memory 化
 
-PR #269 / PR #272 で `mcp__codex__codex` の代替として **Bash 版 codex CLI** (`codex exec --full-auto --sandbox read-only --cd .`) が安定動作することを確認。timeout なし、High/Medium/Low の重要度付き出力が agent と独立した観点を提供する。Phase 3b では silent-failure-hunter agent と独立に同じ Critical を発見し、review プロセスの冗長性を実証した。
+スクショ駆動 UX 評価中に 3 択主観質問を出すとユーザー認知を縛る → [feedback_screen_based_review_no_multichoice.md](~/.claude/memory/feedback_screen_based_review_no_multichoice.md) (Session 70 実例で記録)。実機/スクショ評価中は **平文で観察報告を促す** に切替済。
+
+### 7. CLAUDE.md チェックリスト #2 が古い (ボタン構成)
+
+「3 ボタン構成」記載 → 実際は **5 ボタン**。`docs/handoff/1c-exe-redistribution-runbook.md` Phase 3 も同様。次セッションで小規模 docs PR 候補。
 
 ---
 
 ## 次セッション優先順
 
-1. **【最優先】Windows 実機検証** — TeamViewer 経由で Phase 1-3b 累積 4 PR の動作確認 (上記チェックリスト 7 項目)。Critical 修正 (facility_root_dialog) を必ず先頭で確認
-2. **Issue #27 続編 F/G 検討** (Literal 拡張 / Path 移行) — umbrella close 候補化、impl-plan 起こし
-3. **pr-test-analyzer Suggestion 消化** (任意) — small follow-up PR で form_to_config identity test 等
-4. **Phase 7 (Task #17)** impl-plan 起こし — 要 Windows 実機 (本田様 PC、TeamViewer)
-5. **handoff debt 整理判断** — Session 64 繰越 3 件
-6. **Issue #11/#16/#17/#6** — Windows 実機系、Mac セッション着手不可
+1. **Issue #275** (ChecklistSettingsDialog 同期ボタン UI シンプル化) — `/brainstorm` → `/impl-plan` 推奨。本田様業務直結、Issue #238 Phase 4 として完成感のある増分。実機ヒアリングが impl-plan の前提
+2. **Issue #276** (Windows CI workflow 追加) — impl-plan + 単独 PR。改善候補 B (新 workflow `test-windows-ui.yml`) を推奨ベースに。Issue #275 / #274 完了後の Windows 実機検証経路として価値が高まる
+3. **Issue #274** (詳細列見切れ) — 1 ダイアログ局所改善、`/impl-plan` 推奨。優先度は #275/#276 より下
+4. **Issue #27 続編 F/G 検討** (Literal 拡張 §1 / Path 移行 §4) — umbrella close 候補化、impl-plan 起こし
+5. **Phase 7 (Task #17)** impl-plan 起こし — 要 Windows 実機 (本田様 PC、TeamViewer)
+6. **handoff debt 整理判断** — Session 64 繰越 3 件
+7. **Issue #11/#16/#17/#6** — Windows 実機系、Mac セッション着手不可
 
 ---
 
 ## 構造的整合性チェック
 
-- ⏭️ `/impact-analysis`: 9 dataclass の frozen 化は API 互換 (mutation 経路は `replace()` で代替可能)、production code (UI 3 ファイル) / test code (5 ファイル) で完全対応済。既存呼出元への影響は review で発見した Dialog 同期 1 件のみで対応済
-- ⏭️ `/new-resource`: 新規テーブル/API 追加なし
+- ⏭️ `/impact-analysis`: PR #277 は test 修正 1 件、production 影響ゼロ
+- ⏭️ `/new-resource`: 新規 API なし
 - ⏭️ `/trace-dataflow`: データフロー新規実装なし
 
 ---
@@ -155,10 +139,17 @@ PR #269 / PR #272 で `mcp__codex__codex` の代替として **Bash 版 codex CL
 ```
 ## Issue Net 変化
 - Close 数: 0 件
-- 起票数: 0 件
-- Net: 0 件
+- 起票数: 3 件 (#274, #275, #276)
+- Net: +3 件
 ```
 
-**Net = 0 だが、umbrella Issue #27 続編 E スコープ (9 dataclass frozen 化) を本セッション PR #272 で構造的に完遂** (Phase 3b 単独で 1 dataclass、累積 Phase 1+2+3a+3b で 9 dataclass)。umbrella 自体は §1 Literal 拡張 / §4 Path 移行が残り close 不可。続編 E 完了は Issue #27 コメント (`#issuecomment-4438204891`) に記録済。
+**Net 悪化評価**:
 
-triage 基準遵守: 本セッションで上がった review agent / Codex の Nice-to-have (rating ≤ 6: form_to_config identity test、tk_required CI 確認、rebinding test) は **本ハンドオフで記録**、新規 Issue 起票せず。PR #272 review で発見された High / Medium / Low は **同 PR 内で統合修正 + merge 前解消**、Issue 起票せず Net 削減。
+CLAUDE.md MUST「Issue は net で減らすべき KPI (Net ≤ 0 は進捗ゼロ扱い)」の観点では本セッションは進捗マイナス。ただし起票 3 件はすべて triage 基準遵守 (#5 ユーザー明示指示 / ③ CI/リリース判断を壊す) で、業務価値の根拠が明確:
+
+- **#274 / #275**: 本田様視点 UX 観察 (実機検証中に発見) — 業務動線の認知負荷削減価値
+- **#276**: CI 構造盲点 (本セッションで顕在化、PR #181 と同種再発) — 将来 regression 検知の構造解消価値
+
+「**Net 悪化は許容、業務価値の蓄積を優先**」と評価。次セッション以降で #275 / #276 / #274 を close すれば Net マイナス回収可能 (3 件中 2 件は単独 PR で close 可能サイズ)。
+
+triage 遵守: 本セッションで取りこぼした nice-to-have (rating ≤ 6) はゼロ。pr-test-analyzer Suggestion 由来の Session 69 繰越 3 件 (form_to_config identity test 等) は本 handoff で記録のみ、新規 Issue 起票せず。
