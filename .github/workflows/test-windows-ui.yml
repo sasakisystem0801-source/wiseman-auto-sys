@@ -1,0 +1,40 @@
+name: Windows UI Tests
+
+# Issue #276: tk_required 付き UI テストを Windows runner で実行し、Linux CI で
+# 全 skip される構造的盲点 (PR #181 / Session 70 で再発) を解消する。
+#
+# 既存 workflows との分担:
+#   - test-unit.yml          : Linux で全 unit (tk_required は環境的に skip)
+#   - test-windows-integration.yml : Windows で integration tests (WinForms mock)
+#   - test-windows-ui.yml (本 workflow) : Windows で tk_required unit tests
+#
+# trigger: main への push と main 向け PR で実行。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-windows-ui:
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Run UI unit tests (tk_required, Windows)
+        run: uv run pytest tests/unit/ui -v -m "tk_required and not integration" --timeout=60
+        timeout-minutes: 5
