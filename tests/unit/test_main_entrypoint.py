@@ -71,6 +71,10 @@ def test_rpa_flag_starts_wiseman_hub(tmp_path: Path, monkeypatch: Any) -> None:
     config_file.write_text("", encoding="utf-8")
 
     hub_instance = MagicMock()
+    # Issue #27 続編 F Phase 2-b: ``_apply_log_level(hub.config.log_level)`` が main 経由で
+    # 呼ばれるため、MagicMock のままだと ``getattr(logging, MagicMock, ...)`` で TypeError。
+    # log_level は AppConfig デフォルト "INFO" を明示して bootstrap と同等に振る舞わせる。
+    hub_instance.config.log_level = "INFO"
     hub_class = MagicMock(return_value=hub_instance)
     monkeypatch.setattr("wiseman_hub.app.WisemanHub", hub_class)
 
@@ -187,6 +191,8 @@ def test_nonexistent_config_path_emits_warning_on_rpa_path(
     import logging
 
     hub_class = MagicMock()
+    # Issue #27 続編 F Phase 2-b: MagicMock 子オブジェクトの log_level を "INFO" に固定 (上記参照)
+    hub_class.return_value.config.log_level = "INFO"
     monkeypatch.setattr("wiseman_hub.app.WisemanHub", hub_class)
 
     nonexistent = tmp_path / "does_not_exist.toml"
@@ -593,6 +599,79 @@ def test_main_applies_config_log_level_to_root_logger(
     main()
 
     assert logging.getLogger().getEffectiveLevel() == logging.DEBUG
+
+
+def test_main_rpa_path_applies_config_log_level_to_root_logger(
+    tmp_path: Path, monkeypatch: Any, restore_root_logger_level: Any
+) -> None:
+    """RPA 経路 (--rpa) でも ``hub.config.log_level`` が root logger に反映される。
+
+    Issue #27 続編 F Phase 2-b: Launcher 経路と対称化。WisemanHub Mock の
+    ``config.log_level`` を "DEBUG" にして main() 経由で root logger に反映される
+    こと、また ``hub.run()`` 呼出より前に level が反映されることを契約化する。
+    """
+    import logging
+
+    config_file = tmp_path / "config.toml"
+    config_file.write_text("", encoding="utf-8")  # WisemanHub Mock 化で config 内容は問わない
+
+    hub_instance = MagicMock()
+    hub_instance.config.log_level = "DEBUG"
+    hub_class = MagicMock(return_value=hub_instance)
+    monkeypatch.setattr("wiseman_hub.app.WisemanHub", hub_class)
+
+    monkeypatch.setattr(
+        sys, "argv", ["wiseman-hub", "--rpa", "--config", str(config_file)]
+    )
+
+    from wiseman_hub.__main__ import main
+
+    main()
+
+    hub_class.assert_called_once()
+    hub_instance.run.assert_called_once()
+    assert logging.getLogger().getEffectiveLevel() == logging.DEBUG
+
+
+def test_main_rpa_path_log_level_applied_before_hub_run(
+    tmp_path: Path, monkeypatch: Any, restore_root_logger_level: Any
+) -> None:
+    """RPA 経路で ``_apply_log_level`` が ``hub.run()`` より前に呼ばれる順序を契約化。
+
+    Phase 2-b コメントの「``hub.run()`` 以降は config.log_level で出力される」
+    という挙動を保証する (順序逆転で run() のログだけ bootstrap INFO になる
+    regression を防ぐ)。
+    """
+    import logging
+
+    config_file = tmp_path / "config.toml"
+    config_file.write_text("", encoding="utf-8")
+
+    hub_instance = MagicMock()
+    hub_instance.config.log_level = "WARNING"  # bootstrap INFO=20 と区別可能な値
+
+    # hub.run() が呼ばれた時点での root logger.level を記録 (順序検証用)
+    level_at_run: list[int] = []
+
+    def _capture_level_at_run() -> None:
+        level_at_run.append(logging.getLogger().getEffectiveLevel())
+
+    hub_instance.run.side_effect = _capture_level_at_run
+    hub_class = MagicMock(return_value=hub_instance)
+    monkeypatch.setattr("wiseman_hub.app.WisemanHub", hub_class)
+
+    monkeypatch.setattr(
+        sys, "argv", ["wiseman-hub", "--rpa", "--config", str(config_file)]
+    )
+
+    from wiseman_hub.__main__ import main
+
+    main()
+
+    assert level_at_run == [logging.WARNING], (
+        "hub.run() 実行時点で root logger.level が config.log_level (WARNING) に "
+        "なっていない: _apply_log_level の順序逆転 regression の疑い"
+    )
 
 
 # ===========================================================================

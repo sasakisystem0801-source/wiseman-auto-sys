@@ -486,6 +486,14 @@ def main() -> None:
                     "RPA 起動失敗: 設定エラーで中止 (config=%s)", args.config
                 )
                 sys.exit(2)
+
+            # Issue #27 続編 F Phase 2-b: RPA 経路でも log_level を root logger に
+            # 反映 (Launcher 経路 (Phase 2) と対称化)。``WisemanHub.__init__`` 内の
+            # logger.info ("Wiseman Hub v%s 初期化 ...") は bootstrap INFO で出るが、
+            # ``hub.run()`` 以降は config.log_level で出力される (Launcher 経路と同じ
+            # 「__init__ ログは bootstrap、業務処理は config 値」の二段構え)。
+            _apply_log_level(hub.config.log_level)
+
             hub.run()
         else:
             from wiseman_hub.config import load_config
