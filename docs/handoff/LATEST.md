@@ -1,8 +1,8 @@
-# Session 73 完了 — handoff debt 全 3 件消化 + Issue #276 follow-up + 新規 Tcl 問題発見
+# Session 74 完了 — Issue #27 続編 G Phase 1 (Path 型移行) 完遂
 
 **Date**: 2026-05-15
-**Main HEAD**: `93007a1` feat(launcher): bundle 同梱 trust root の staleness を warn-log (handoff debt #2) (#294)
-**Test count**: 2003 collected (Session 72 完了時 2012 → -9。PR #291 で xfail 削除 2 件 + PR #294 で新規 +12 件 + PR #292 Close で xfail 復活なし、その他は collect 仕様差と推察)
+**Main HEAD**: `d5bf7bc` feat(config): Phase 1 Path 型移行 (exe_path / SA key / log_dir) (Issue #27 続編 G §4) (#296)
+**Test count**: 1934 passed, 104 skipped (Phase 1 追加で +34 件、Codex review 対応で +6 件、既存テストの Path 化修正含む)
 **Active Issues**: 12 (実質 7、postpone 5) [変化なし、Net 0]
 **Phase**: Phase 7 着手前 [変化なし]
 
@@ -10,127 +10,138 @@
 
 ## セッション経緯
 
-Session 72 完了後 `/catchup` 経由で「優先順にすすめて」として開始。実機検証 3 件 (#274 / #282 / Launcher 5 ボタン + log_level 反映) は次回 exe 配布タイミング待ちで AI 単独不可、Issue #275 本田様ヒアリング待ちも AI 単独不可。AI 単独完結可能タスクとして:
+Session 73 完了後 `/catchup` 経由で「優先順にすすめて」として開始。ハンドオフ §4 で「最有力候補」と記載されていた **Issue #27 続編 G (Path 型移行 §4)** に着手。Mac 完結可能タスクで、AI 単独完結可能。
 
-1. **Issue #276 follow-up #1** (`tree.heading()` Windows Tk 戻り値差吸収): PR #291 で消化
-2. **Issue #276 follow-up #2** (Tcl init.tcl 不在対応): PR #292 で Python 3.12 化試行 → **CI 実測で 3.12 でも fail 再現と判明** → Close
-3. **handoff debt #1, #3** (Session 64 から繰越): PR #293 で消化
-4. **handoff debt #2** (Session 64 から繰越): PR #294 で消化、Quality Gate 全 3 段完了 (evaluator で AC-5 Critical 違反発見・修正)
+事前調査:
+- 影響範囲: 10 Path 化候補 field × 30 ファイル / 648 参照 (重複除く)
+- 続編 E (frozen 化) 4 PR 構成に倣う Phase 分割を採用
 
-PR 滞留が 4 本に達した時点でユーザー確認 → 推奨案 (PR #293 のみ先行 merge、残は CI 結果次第) を実行 → 全 PR の処理完了 (3 merge + 1 Close)。
+実装フロー:
+1. `/impl-plan` で計画立案 → Phase 分割 (1 / 2a / 2b / 3) 承認獲得
+2. Phase 1 着手 (exe_path / SA key / log_dir、計 196 consumer 参照)
+3. Quality Gate 4 段完了 (`/simplify` → `/safe-refactor` → `evaluator` 分離 → `/codex review`)
+4. PR #296 作成 → CI 全 5 ジョブ PASS → merge
+
+ユーザー承認: 「PR #296 をマージしてよい」明示認可 (CLAUDE.md 4 原則 §3 の番号単位明示認可) を受領後 squash merge。
 
 ---
 
 ## 完了内容
 
-### 1. Issue #276 follow-up #1 完了 (PR #291 merged)
+### Issue #27 続編 G Phase 1 完了 (PR #296 merged, main `d5bf7bc`)
 
-`tests/unit/ui/test_common.py` の Windows Tk 仕様差を helper で吸収:
+20 ファイル変更、+713/-136 行。
 
-- `_invoke_heading_command(tree, column)` helper を `TestMakeTreeviewSortable` 直前に追加
-  - `callable(cmd)` → 直接呼出 (Mac/Linux Tk)
-  - `else` → `tree.tk.call(cmd)` で Tcl 名解決 (Windows Tk)
-- `test_clicking_header_sorts_ascending_then_descending` / `test_status_column_uses_custom_priority_key` の `@pytest.mark.xfail(...)` マーカー削除
-- CI 検証: Windows runner で対象 2 件が **PASS** (test-windows-ui 全 100 件 PASS)
+#### config.py の新規 helper / プロパティ
 
-### 2. PR #292 Close (Issue #276 follow-up #2 試行失敗)
+| 名前 | 役割 | scope |
+|---|---|---|
+| `is_path_configured(p: object) -> bool` | 未設定 sentinel (`Path("")` = `Path(".")`) 判定の集約。非 Path / None は defensive で False | public |
+| `coerce_path(name, raw, *, echo_value=True) -> Path` | TOML str → Path 正規化。空白 strip 後の空文字 / `Path(" ")` 等空白だけの Path も `Path("")` 化 | public (UI / load 両用) |
+| `_check_path(name, value, *, echo_value=True)` | dataclass `__post_init__` 用 concrete Path 型ガード (PurePath は意図的に拒否) | private |
+| `_stringify_path_values(data)` | save_config の Path → str 境界変換。未設定 Path は `""` で書き戻し (旧版/外部ツール互換性保持) | private |
+| `_UNSET_PATH_MARKER: Final[str] = "."` | sentinel の magic literal 集約 | private |
 
-Python 3.11 → 3.12 化で `_tkinter.TclError: Can't find a usable init.tcl` を回避するはずだったが、**CI 実測で 3.12 でも同じ Tcl init.tcl 不在エラーが再現**:
+3 dataclass に `is_*_configured` プロパティ追加 (`is_exe_configured` / `is_sa_key_configured` / `is_log_dir_configured`)、すべて `is_path_configured` 経由で sentinel 判定を統一。
 
-- `actions/setup-python#1102` の WebFetch 情報 (「3.12/3.10 では発生しない」) と実態が乖離
-- Python 3.12.10 + windows-latest でも `test_clear_cache_removes_entry_and_saves` が同様に fail
-- 結論: 3.12 化は無効、PR #292 は破棄
-- `test_clear_cache_removes_entry_and_saves` の xfail マーカーは main 状態 (= 復活させた状態) のまま維持
+#### consumer 整合性 (9 ファイル、196 参照)
 
-### 3. handoff debt #1 + #3 完了 (PR #293 merged)
-
-`src/wiseman_hub_launcher/__main__.py` の `run_smoke_test()` に `Verifier.production(offline=True)` 実 init を追加し、TUF trust root の bundle 解決 + rekor_types 等の推移依存解決失敗を CI で early detect:
-
-```python
-try:
-    Verifier.production(offline=True)
-except Exception as e:  # noqa: BLE001
-    print(f"smoke test failed (Verifier.production(offline=True) init): {type(e).__name__}: {e}", file=sys.stderr)
-    return LauncherExitCode.UNEXPECTED
-```
-
-`_supply_chain/sigstore.py` の module docstring に `sigstore>=3.0,<4.0` pin の明示 (4.x major upgrade 時の検証手順を docstring 内に集約)。
-
-### 4. handoff debt #2 完了 (PR #294 merged) + Quality Gate 全 3 段
-
-`_supply_chain/sigstore.py` に `warn_if_trust_root_stale(store_dir=None)` 新規 helper を追加、`main()` の dry-run / update 経路で呼出 (smoke 経路除外):
-
-- 残り < 0 日 (既に expire): WARNING ログ ("EXPIRED N days ago")
-- 残り <= 30 日: WARNING ログ ("expires in N days")
-- 残り > 30 日: DEBUG ログ (健全)
-- 例外時: debug log で握り潰し、起動 blocking しない
-
-**実測**: bundle 同梱 root.json の `expires` は `2025-08-19T14:33:09Z` で、既に **268 日前に expire 済**。merge 後は本田様 PC で毎起動 WARNING が出る (設計どおりの挙動、sigstore-python upgrade を促すリマインダー)。
+| ファイル | 変更 |
+|---|---|
+| `app.py` | `rpa.launch(str(cfg.exe_path))` 境界変換 |
+| `audit.py` | signature `Path` 専用化、`is_path_configured` で未設定判定 |
+| `cloud/audit_uploader.py` | 同上 + `is_sa_key_configured` 化 + `str(...)` 境界変換 |
+| `cloud/sheets.py` / `storage.py` / `env_scanner.py` / `mapping_sync.py` | google-auth / google-cloud-storage の str 要求境界で `str(...)` 変換 |
+| `cloud/xlsx_path_cache_mirror.py` | `_str_or_empty` を Path 対応に拡張、`is_sa_key_configured` で空判定 |
+| `pdf/checklist_c.py` | `execute_c_placement` の `log_dir` を `Path` signature 化 |
+| `ui/settings.py` | form_to_config で `coerce_path` 再利用、form_from_config で `is_exe_configured` ベースの str 化 |
 
 #### Quality Gate 履歴 (CLAUDE.md MUST 全実施)
 
 | ステップ | 結果 |
 |---------|------|
-| `/simplify` (3 並列 reuse/quality/efficiency) | Reuse 9.5/10 Clean / Quality HIGH 1 件 (task-tracking コメント) 反映済 / Efficiency Clean (起動時 < 2ms 影響) |
-| `/safe-refactor` (型安全性・エラー処理) | LOW 1 件のみ (Z 置換イディオム、既存 manifest.py との統一性のため保留) |
-| `evaluator` 分離 (rules/quality-gate.md 新機能発動) | **AC-5 整合 Critical 違反発見** |
+| `/simplify` (3 並列 reuse/quality/efficiency) | rating 7+ の 2 件対応 (is_*_configured 重複統合、`coerce_path` UI 経路 DRY 違反解消) |
+| `/safe-refactor` (型安全性・エラー処理) | LOW 1 件対応 (`is_path_configured` 直接単体テスト追加) |
+| `evaluator` 分離 (rules/quality-gate.md 発動条件) | **MEDIUM 1 件発見** (`_stringify_path_values` がネスト table 経路を網羅せず Phase 2 で silent fail リスク) → 修正済 |
+| **`/codex review` セカンドオピニオン** ([thread 019e284d-bc09-7e71-9f74-5a63f859f08b]) | **High 1 + Medium 2 + Low 1 + Suggestion 1 全件対応**、再 review で **APPROVE** |
 
-#### evaluator Critical 修正内容
+#### Codex 致命的 High 修正内容
 
-tz-naive な expires 文字列 (RFC 3339 違反の root.json) が来た場合、`fromisoformat(expires_str.replace("Z", "+00:00"))` が tz-naive datetime を返し、tz-aware `now` との `-` 比較で TypeError raise。既存 `except` 節に `TypeError` が含まれず、`warn_if_trust_root_stale()` 呼出は top-level try/except 外なので **未捕捉 TypeError で launcher クラッシュ**経路が存在 (AC-5 違反)。`(expires - now).days` 計算箇所に専用 try/except TypeError を追加して握り潰し。
+`_stringify_path_values` が `Path("")` を `str()` 化すると `"."` になり、TOML に `log_dir = "."` として保存される silent 互換性劣化 (旧版ダウングレード / 手動編集で「カレントディレクトリ指定」と誤解)。未設定 Path を `""` に書き戻すよう修正、`test_save_config_unset_path_written_as_empty_string` で固定。
 
-加えて推奨修正として境界値テスト 2 件 (`== 30` → WARNING / `== 31` → DEBUG、`<= 30` 閾値 pin) + tz-naive エッジケーステスト 1 件を追加。
+これは続編 E PR #260 の Codex Critical「dataclass 型ガード設計を無効化する経路」と同タイプの **「型移行に伴う silent 互換性劣化」** で、AI 単独 review (simplify / safe-refactor / evaluator) では検出できなかった。Codex セカンドオピニオンの実証価値の追加事例。
 
-テスト件数: warn 系 **9 件** (基本 6 + 境界値 2 + tz-naive 1)。
+#### 設計判断 (umbrella §G で記録)
+
+- **未設定 sentinel: `Path("")` = `Path(".")`**
+  - consumer は `if cfg.path:` の falsy check ではなく `is_*_configured` プロパティで判定する規約
+  - `Path(".")` を意図的に設定値として書いた場合も未設定と判定される既知挙動
+  - **Phase 2 で `Optional[Path]` への移行を検討** (handoff debt として記録)
+- **shared 関数 signature を `Path` 専用化**
+  - `Path | str` の混在受入は型契約を曖昧にするため不採用
+  - 外部 API (google-auth / subprocess) 境界でのみ `str(...)` 変換
 
 ---
 
 ## ⚠️ 注意事項 / 次セッション着手前確認
 
-### 1. 実機検証 4 件 (Session 71/72 から繰越、次回 exe 配布タイミングで一括)
+### 1. Issue #27 続編 G Phase 2 着手判断 — **次セッション最優先候補**
+
+| Phase | フィールド | consumer 数 | 状態 |
+|---|---|---|---|
+| Phase 1 | exe_path / SA key / log_dir | 196 | ✅ 本セッション完了 (PR #296) |
+| **Phase 2a** | input_dir / output_dir / ex_source_dir | 157 | 次セッション最有力候補 |
+| Phase 2b | facility_root_dir (突出) | 157 | Phase 2a 完了後 |
+| Phase 3 | karte_root / fax_root / base_dir | 138 | Phase 2 完了後 |
+
+各 Phase は独立 PR、Phase 1 同様の Quality Gate 4 段 + Codex review 必須 (handoff §4 規約)。
+
+### 2. 新規 handoff debt (本セッション発見、Phase 2 着手時の考慮事項)
+
+#### debt #1: `Optional[Path]` 設計議論 (Codex review Medium / 続編 G umbrella §G)
+- 現状の `Path("") == Path(".")` sentinel は「`Path(".")` を意図的に設定値とした場合」と区別不能
+- Phase 2 でデータパス (`input_dir` / `karte_root` 等) を Path 化する際、`Path(".")` (current dir) を意図する利用者が皆無とは限らない
+- Phase 2 着手時に **設計議論**: `Optional[Path]` (= `Path | None`) への移行か、現状維持か
+- 移行する場合、consumer の `if cfg.x is None:` 判定への置換が広範
+
+#### debt #2: UNC パス round-trip テスト (Codex review Low)
+- Windows UNC パス (`\\Tera-station\share\...`) の `Path` round-trip 動作は Windows runner でしか検証できない
+- 本 Phase 1 では Mac CI のみで PASS、Windows CI でも全 PASS だが UNC 専用ケースのテストは未追加
+- Phase 2 で `karte_root` / `fax_root` (UNC パス確実) を Path 化する際、UNC round-trip テスト追加必須
+
+#### debt #3: `test_xlsx_path_cache_mirror.py:687` の現実乖離 (Codex review Medium、本 PR で部分対応)
+- `Path(" ")` を `_validate_gcp` に渡す test は **load_config 経路を経由しない** 直接構築テスト
+- 本 PR で `is_path_configured` の strip 拡張 + missing 名 assert 強化で部分対応
+- 完全対応するなら load_config 経由 e2e テスト (TOML に `service_account_key_path = "   "`) を追加
+
+### 3. 実機検証 5 件 (Session 71/72/73 から繰越 + 本セッション追加、次回 exe 配布タイミングで一括)
 
 次回ビルド配布後 (`docs/handoff/1c-exe-redistribution-runbook.md` Phase 0-3) に確認:
 
 | Issue / PR | 検証項目 |
 |---|---|
-| #274 Phase 1 | B/C ダイアログ詳細列 500px 表示 + 横スクロール動作 + 本田様評価で Phase 2/3 着手判断 |
-| #282 | `monitoring_subfolder/R7/<月>.pdf` 配置成功 / 旧構造 regression なし / 表記揺れ / AMBIGUOUS UI |
-| Launcher 5 ボタン (PR #285) | CLAUDE.md チェックリスト #2 通りに 5 ボタン表示確認、業務フロー順 (ex_ → B → C → 結合 → 設定) |
-| **#27 続編 F Phase 2/2-b の log_level 反映** | `[app] log_level = "DEBUG"` を `config/default.toml` に書いて Launcher 起動、stdout で DEBUG ログ確認 + `--rpa` で同様確認 |
+| #274 Phase 1 | B/C ダイアログ詳細列 500px 表示 + 横スクロール動作 |
+| #282 | `monitoring_subfolder/R7/<月>.pdf` 配置成功 / 旧構造 regression なし |
+| Launcher 5 ボタン (PR #285) | 5 ボタン表示確認、業務フロー順 |
+| #27 続編 F Phase 2/2-b の log_level 反映 | `[app] log_level = "DEBUG"` を書いて Launcher 起動 |
+| PR #294 trust root WARNING | "sigstore trust root EXPIRED 268+ days ago" log |
+| **NEW: PR #296 Path 型移行** | 本田様 PC で既存 `config/default.toml` を Path 化 load_config が正しく解釈、UI 設定保存 → 再起動で round-trip |
 
-新追加: **PR #294 の trust root staleness WARNING 表示確認**
-- Launcher 起動時に "sigstore trust root EXPIRED 268+ days ago" の WARNING が log されるか確認
-- Tk ログ画面への表示有無は本 PR scope 外、必要なら別 issue 化
+### 4. Issue #275 次セッション着手フロー (Session 71 から繰越、本セッションも待ち)
 
-### 2. Issue #275 次セッション着手フロー (Session 71 から繰越)
-
-1. 本田様にヒアリング項目 4 領域を確認 (実機 UI を見せながら平文で観察報告を促す、AskUserQuestion 過剰回避)
+1. 本田様にヒアリング項目 4 領域を確認
 2. 回答に応じて組み合わせ A / B を選択
-3. impl-plan 確定 → 実装 → tk_required test 追加 → Windows CI で PASS 確認 → PR → 本田様実機検証 → close
+3. impl-plan 確定 → 実装 → tk_required test → CI → PR → 本田様実機検証 → close
 
-ヒアリング項目は Issue #275 コメントに整理済 (Session 71 で投稿)。
+### 5. 引き続き保留中の handoff debt
 
-### 3. Issue #276 follow-up — **#1 完了、#2 は別解必要**
+#### Windows Tcl init.tcl ランダム fail 問題 (Session 73 発見、rating 6 で Issue 化基準未達)
+- 症状: GitHub Actions windows-latest で `_tkinter.TclError: Can't find a usable init.tcl` がランダム発生
+- 影響: Python 3.11 と 3.12 両方で再現確認済 (PR #292 Close で実証)
+- 暫定対応: re-trigger で逃げる (継続)
+- follow-up 候補: `TCL_LIBRARY` / `TK_LIBRARY` 環境変数明示設定、`actions/setup-python` 以外の経路試行
 
-- ✅ #1 `tree.heading()["command"]` 経路の Windows 対応 (PR #291 で消化)
-- ❌ #2 Windows + uv venv の Tcl init.tcl 環境調査 → **PR #292 で 3.12 化を試行したが効果なし**、別解必要 (下記 §7 新規 handoff debt に統合)
-
-### 4. Issue #27 続編 G 着手判断 (Path 型移行 §4) — **次セッション最優先候補**
-
-- `input_dir` / `output_dir` 等の `str` → `Path` 移行
-- 影響範囲: `config.py` + 全消費先 + テスト全般 (大規模 PR、200+ 行確実)
-- 必須: 実装前に `/codex review` セカンドオピニオン
-- AI 単独可、Mac セッション完結可能 → 次セッション最有力候補
-
-### 5. Issue #27 続編 F §1 残候補 (Session 72 で scope 外と判定、本 session でも判定維持)
-
-| 候補 | 判定 | 理由 |
-|---|---|---|
-| `GcpConfig.region` | Literal 化不適 | GCP region 集合が大きく網羅困難 |
-| `WisemanConfig.window_title_pattern` | Literal 化不適 | 自由形式 regex |
-| `ScheduleConfig.cron` | Literal 化不適 | 自由形式 cron expression |
-
-§1 で actually 進捗あるのは `AppConfig.log_level` + `ReportTarget.output_format` のみ。
+#### Issue #282 Codex 残指摘 4 件 (Session 71 で triage 済、rating 4-6)
 
 ### 6. Mac セッション着手不可項目 (前セッション継承、変化なし)
 
@@ -139,51 +150,24 @@ tz-naive な expires 文字列 (RFC 3339 違反の root.json) が来た場合、
 - #11 (PywinautoEngine MEDIUM 5 件)
 - #6 (PoC E2E)
 
-### 7. handoff debt 状況
-
-#### 繰越 3 件 (Session 64 から) — **全 3 件消化完了** ✅
-
-| # | 内容 | 消化 PR |
-|---|------|---------|
-| #1 | `build-windows-smoke.yml` で `Verifier.production(offline=True)` smoke 実 init | ✅ PR #293 |
-| #2 | Trust root staleness 監視 (warn-log) | ✅ PR #294 |
-| #3 | sigstore-python 3.x dependency docstring | ✅ PR #293 |
-
-#### 本セッション新規発見 handoff debt
-
-**Windows Tcl init.tcl ランダム fail 問題** (PR #292 Close で判明、rating 6 で Issue 化基準 (rating ≥ 7) 未達のため handoff debt として記録):
-
-- **症状**: GitHub Actions windows-latest で `_tkinter.TclError: Can't find a usable init.tcl` がランダム発生
-- **影響範囲**: Python **3.11 と 3.12 の両方** (CI 実測、`actions/setup-python#1102` の「3.12 では発生しない」記載は乖離)
-- **再現性**: ランダム (本セッションで PR #291/#294 を空 commit で re-trigger したら全 PASS)
-- **影響テスト**: `test_launcher.py::test_defer_false_renders_immediately` / `test_confirm_dialog.py::TestPersistenceFailFast::test_save_error_propagates` / `test_clear_cache_removes_entry_and_saves` 等の tk_required test
-- **follow-up 候補**: 次セッションで以下を順に試行
-  1. `TCL_LIBRARY` / `TK_LIBRARY` 環境変数の明示設定 (setup-python の Python install path から計算)
-  2. `tcl/tcl8.6/init.tcl` の存在確認 + 不在時の chocolatey install
-  3. `actions/setup-python` 以外の Python 経路 (公式 Windows installer 直 download) 試行
-- **暫定対応 (本セッション)**: re-trigger で逃げる (ランダム発生のため、`continue-on-error: true` は false positive を覆い隠すので採用しない)
-
-#### 引き続き保留中
-
-- Issue #282 Codex 残指摘 4 件 (M2 symlink / M3 性能 / L1 将来表記 / L3 PII path message) — Session 71 で triage 済 (rating 4-6、Issue 化せず handoff debt として記録のみ)
-
 ---
 
 ## 次セッション優先順
 
-1. **実機検証 4 件** (#274 Phase 1 / #282 / Launcher 5 ボタン / log_level 反映) + PR #294 trust root WARNING 表示確認 — 次回 exe 配布時にまとめて
-2. **Issue #275** (ChecklistSettingsDialog UI シンプル化) — 本田様ヒアリング → impl-plan → 実装
-3. **Issue #27 続編 G** (Path 型移行 §4) — Mac 完結可能の最有力候補。`/codex review` 必須、大規模 PR (200+ 行)
-4. **Windows Tcl init.tcl 問題** (新規 handoff debt) — `TCL_LIBRARY`/`TK_LIBRARY` 環境変数試行から
-5. **Phase 7 (Task #17)** — 要 Windows 実機
+1. **Issue #27 続編 G Phase 2a** (input_dir / output_dir / ex_source_dir) — Mac 完結可能、本セッション Phase 1 のパターン踏襲で着手容易
+2. **実機検証 5 件** — 次回 exe 配布時にまとめて (#274 / #282 / Launcher 5 ボタン / log_level / PR #294 WARNING / PR #296 Path 移行)
+3. **Issue #275** — 本田様ヒアリング待ち
+4. **Phase 2 着手前の Optional[Path] 設計議論** — handoff debt #1、Phase 2a 計画段階で扱う
+5. **Issue #27 続編 G Phase 2b / Phase 3** — Phase 2a 完了後の段階実施
+6. **Windows Tcl init.tcl 問題** — handoff debt 継続
 
 ---
 
 ## 構造的整合性チェック
 
-- ⏭️ `/impact-analysis`: 新規 helper `warn_if_trust_root_stale` 追加、影響範囲は launcher 起動経路 (dry-run/update 限定)。test 9 件 + 既存 launcher 60 件で contract gate 済、mypy 全 PASS で検証済 (PR #294)
-- ⏭️ `/new-resource`: `warn_if_trust_root_stale` を `_supply_chain/__init__.py` で public API として export、test_sigstore.py で 9 件検証 (基本 6 + 境界値 2 + tz-naive 1)
-- ⏭️ `/trace-dataflow`: root.json → expires parse → log の単方向データフロー、複雑な伝搬なし。helper 単体テストで全経路 gate 済
+- ⏭️ `/impact-analysis`: config dataclass の field 型変更で 30 ファイル / 196 参照に波及。全 consumer の整合性確認は pytest 1934 件 PASS + mypy clean で gate 済
+- ⏭️ `/new-resource`: 新規 helper `is_path_configured` / `coerce_path` を public API として export、test_config.py で 41 件 (Phase 1 関連) 検証
+- ⏭️ `/trace-dataflow`: TOML str → Path (load_config) → consumer Path API → str (save_config) の単方向データフロー、`_stringify_path_values` で境界変換責務集約。Codex で High 指摘 (未設定 Path の `"."` 書出) を発見 → 修正 → APPROVE
 
 ---
 
@@ -196,18 +180,18 @@ tz-naive な expires 文字列 (RFC 3339 違反の root.json) が来た場合、
 - Net: 0 件
 ```
 
-**Net = 0 だが進捗実体あり (handoff debt 構造の制約)**:
+**Net = 0 だが進捗実体あり (umbrella issue の構造的制約)**:
 
-- **PR #291** で Issue #276 follow-up #1 を消化 → Windows Tk 仕様差テスト書き換え完了
-- **PR #292 Close** で Issue #276 follow-up #2 試行失敗を確定 → Tcl 問題は新規 handoff debt として記録 (rating 6、Issue 化基準未達)
-- **PR #293/#294** で **handoff debt 繰越 3 件 (Session 64 から、5 セッション繰越) を全消化** → 衛生的負債整理完了
-- Issue #276 は既に close 済 (PR #279 + 本 session の follow-up 消化で完結)
-- Issue #27 (umbrella) は §4 (Path 型移行、未着手) と §1 残候補 (不適判定済) が残り close 不可
+- **PR #296** で Issue #27 §4 Phase 1 (3 field Path 化 + helper / プロパティ追加 + consumer 196 参照整合) 完遂
+- Issue #27 umbrella は Phase 2a/2b/3 + Optional[Path] 設計議論が残るため close 不可
+- 新規 Issue 起票はゼロ。Codex review で発見した懸念 (handoff debt #1/#2/#3) はいずれも triage 基準 (rating ≥ 7 / 実害 / CI 破壊 / 明示指示) 未達のため、本 handoff へ debt 記録で吸収
 
-triage 遵守: 本セッションでは新規 Issue 起票ゼロ。Tcl 問題発見 (rating 6) も Issue 化基準 (rating ≥ 7) 未達のため handoff debt として記録、`feedback_issue_triage.md` の機構化済み 3 層ゲートに従って Net ≤ 0 を維持。
+triage 遵守: 機構化済み 3 層ゲートに従って Net ≤ 0 を維持。
 
-Quality Gate 全 3 段 (`/simplify` + `/safe-refactor` + `evaluator`) を PR #294 (新機能 = warn_if_trust_root_stale 追加) で実施し、evaluator で AC-5 整合 Critical を発見・修正完了。これは rules/quality-gate.md の Generator-Evaluator 分離パターンが**実際に Critical を検出した実例**として記録価値あり (本田様 PC で警告無く launcher クラッシュする経路を未然防止)。
+Quality Gate 全 4 段を実施し、特に `/codex review` で **High 1 件 (未設定 Path の TOML `"."` 書出 silent 互換性劣化)** を発見・修正完了。これは続編 E PR #260 と同タイプの **「型移行に伴う dataclass 設計を無効化する silent 経路」** で、6 並列 review / simplify / safe-refactor / evaluator が見落とした観点を Codex が補完した実例。memory `feedback_codex_review_value.md` の追加根拠データとなる。
 
 ---
 
 ## ✅ 残留プロセスなし
+
+CI: ✅ Phase 1 PR #296 の Unit Tests (macOS/Linux) success、Windows / Linux runner 全 5 ジョブ PASS。
