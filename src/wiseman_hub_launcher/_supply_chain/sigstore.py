@@ -61,7 +61,6 @@ _CLOCK_UPPER_BOUND = dt.datetime(2030, 12, 31, tzinfo=dt.UTC)
 _DSSE_PAYLOAD_TYPE_INTOTO = "application/vnd.in-toto+json"
 _DEFAULT_GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com"
 
-# bundle 同梱 trust root の expiry warning 閾値 (handoff debt PR #255 S1)
 # 30 日: sigstore-python の minor upgrade を計画する余裕を確保する期間
 _TRUST_ROOT_STALE_WARN_DAYS = 30
 

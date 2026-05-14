@@ -453,10 +453,8 @@ def main(
             logger.exception("unexpected error in smoke-test")
             return LauncherExitCode.UNEXPECTED
 
-    # handoff debt (Session 64, PR #255 S1): bundle 同梱 trust root の staleness 監視。
-    # smoke-test 経路は副作用ゼロ entry のため除外、実 verify が走る dry-run / update
-    # 経路の前でのみ warn-log を出す (起動 blocking しない、最終 fail-close は実
-    # verify_dsse 経路に委譲)。
+    # 起動 blocking しない warn-log (最終 fail-close は実 verify_dsse 経路に委譲)。
+    # smoke-test 経路は副作用ゼロ entry のため除外。
     warn_if_trust_root_stale()
 
     if args.dry_run:
