@@ -502,11 +502,13 @@ class TestExExtractorDialogSmoke:
                 adapter=adapter,
                 messagebox_fn=messagebox,
             )
-            # 現実装の挙動: 未設定時に __init__ が Path(".") を渡し
-            # ex_extractor_dialog.py:346-349 で source_dir/facility_root_dir に "." が入る。
-            # POSIX/Windows とも Path(".").exists() == True のため can_run=True になる
-            # （CWD に ex_ ファイルがなければ実害なし、空処理）。
-            # 「未設定 → can_run=False」の本来仕様化は Optional[Path] 設計改修が必要 → 別 Issue。
+            # Phase 2a/2b 移行後: 未設定時は ex_source_dir / facility_root_dir = Path("")
+            # (default factory)。`Path("") == Path(".")` のため `.exists()` は CWD 存在
+            # 前提で True を返し、can_run = True になる (CWD に ex_ ファイルがなければ
+            # 空処理、実害なし)。本 PR (Phase 3 PR-Debt2) で _redraw の Label 表示は
+            # is_path_configured gate により _LBL_NOT_SET 表示に切替済
+            # (TestRedrawUnsetPathLabel 参照)。「未設定 → can_run=False」の本来仕様化は
+            # Optional[Path] 設計改修が必要 → handoff debt #3 で議論 (Option C で当面保留)。
             # 本 smoke は dialog が例外なく構築・close できることのみ検証する。
             assert dialog.view_model.source_dir == Path(".")
             assert dialog.view_model.facility_root_dir == Path(".")
@@ -1326,6 +1328,7 @@ class TestExExtractorDialogSmoke:
             root.destroy()
 
 
+@pytest.mark.tk_required
 class TestRedrawUnsetPathLabel:
     """debt #2 (Issue #27 続編 G Phase 3 PR-Debt2): `_redraw` の Path("").exists()
     Label 表示問題を `is_path_configured` gate で解決する仕様を契約として固定する。
