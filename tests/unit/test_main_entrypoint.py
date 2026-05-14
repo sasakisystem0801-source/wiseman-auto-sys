@@ -508,6 +508,94 @@ def test_settings_callback_does_not_reload_on_cancel(
 
 
 # ===========================================================================
+# Issue #27 続編 F Phase 2: _apply_log_level helper + config.log_level 反映
+# ===========================================================================
+
+
+@pytest.fixture
+def restore_root_logger_level() -> Any:
+    """root logger の level を test 前後で保存・復元 (テスト間副作用回避)。"""
+    import logging
+
+    original = logging.getLogger().level
+    yield
+    logging.getLogger().setLevel(original)
+
+
+class TestApplyLogLevel:
+    """``_apply_log_level`` helper の値域 + fallback 動作を契約化。
+
+    本 helper は ``AppConfig.log_level`` (Literal 5 値) を root logger に反映する。
+    続編 F Phase 1 (PR #286) で Literal 化したが、Phase 2 で実 logging に接続するまで
+    orphan だった経路を消化する。
+    """
+
+    @pytest.mark.parametrize(
+        "level_name,expected",
+        [
+            ("DEBUG", 10),
+            ("INFO", 20),
+            ("WARNING", 30),
+            ("ERROR", 40),
+            ("CRITICAL", 50),
+        ],
+    )
+    def test_applies_valid_log_level(
+        self,
+        level_name: str,
+        expected: int,
+        restore_root_logger_level: Any,
+    ) -> None:
+        """Literal 5 値で root logger の level が一致する。"""
+        import logging
+
+        from wiseman_hub.__main__ import _apply_log_level
+
+        _apply_log_level(level_name)
+        assert logging.getLogger().getEffectiveLevel() == expected
+
+    def test_fallback_to_info_for_unknown_level_name(
+        self, restore_root_logger_level: Any
+    ) -> None:
+        """defensive guard: AppConfig.__post_init__ の値域検証を通過しない経路は
+        型上は無いが、念のため getattr fallback で INFO に落ちることを保証。"""
+        import logging
+
+        from wiseman_hub.__main__ import _apply_log_level
+
+        _apply_log_level("BOGUS_LEVEL")
+        assert logging.getLogger().getEffectiveLevel() == logging.INFO
+
+
+def test_main_applies_config_log_level_to_root_logger(
+    tmp_path: Path, monkeypatch: Any, restore_root_logger_level: Any
+) -> None:
+    """Launcher 経路で ``config.log_level = "DEBUG"`` が root logger に反映される。
+
+    本テストは Phase 2 の core 契約: load_config 後に ``_apply_log_level`` が
+    呼ばれることで orphan が解消されている (旧: bootstrap INFO のままだった)。
+    """
+    import logging
+
+    config_file = tmp_path / "config.toml"
+    # ``log_level`` は AppConfig 直下フィールドで TOML 上は ``[app]`` section に格納される
+    # (config.py: ``app_data = _require_section_table("app", data.get("app", {}))``)。
+    config_file.write_text('[app]\nlog_level = "DEBUG"\n', encoding="utf-8")
+
+    launcher_instance = MagicMock()
+    launcher_class = MagicMock(return_value=launcher_instance)
+    monkeypatch.setattr("wiseman_hub.ui.launcher.Launcher", launcher_class)
+
+    monkeypatch.setattr(sys, "argv", ["wiseman-hub", "--config", str(config_file)])
+
+    from wiseman_hub.__main__ import main
+
+    main()
+
+    assert logging.getLogger().getEffectiveLevel() == logging.DEBUG
+
+
+# ===========================================================================
 # _default_config_path: Codex HIGH 指摘対応（exe ショートカット起動での CWD 相対バグ）
 # ===========================================================================
 
