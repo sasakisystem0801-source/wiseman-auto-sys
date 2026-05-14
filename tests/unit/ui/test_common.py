@@ -278,16 +278,18 @@ class TestStatusCountsToSummaryText:
 # ---------------------------------------------------------------------------
 
 
+def _invoke_heading_command(tree: Any, column: str) -> None:
+    # Mac/Linux Tk は callable な Python 関数を返すが、Windows Tk は Tcl コマンド名
+    # (str) を返す。後者は `tree.tk.call(name)` で実行する必要がある。
+    cmd = tree.heading(column)["command"]
+    if callable(cmd):
+        cmd()
+    else:
+        tree.tk.call(cmd)
+
+
 @pytest.mark.tk_required
 class TestMakeTreeviewSortable:
-    # Issue #276 follow-up: `tree.heading("name")["command"]` は Mac/Linux Tk では
-    # 直接 callable な Python 関数を返すが、Windows Tk では Tcl コマンド名 (str) を
-    # 返すため `()` 呼出で TypeError。test 書き換え (root.tk.call で Tcl 名解決 or
-    # event_generate でクリック発火) は別 PR で対応。
-    @pytest.mark.xfail(
-        reason="Windows Tk: heading()[command] が Tcl コマンド名 str を返す (Issue #276 follow-up)",
-        strict=False,
-    )
     def test_clicking_header_sorts_ascending_then_descending(self) -> None:
         import tkinter as tk
         from tkinter import ttk
@@ -304,21 +306,17 @@ class TestMakeTreeviewSortable:
             make_treeview_sortable(tree, ("name",))
 
             # 1 回目クリック → 昇順
-            tree.heading("name")["command"]()
+            _invoke_heading_command(tree, "name")
             assert [tree.set(i, "name") for i in tree.get_children()] == ["a", "b", "c"]
             assert "▲" in str(tree.heading("name", "text"))
 
             # 2 回目クリック → 降順
-            tree.heading("name")["command"]()
+            _invoke_heading_command(tree, "name")
             assert [tree.set(i, "name") for i in tree.get_children()] == ["c", "b", "a"]
             assert "▼" in str(tree.heading("name", "text"))
         finally:
             root.destroy()
 
-    @pytest.mark.xfail(
-        reason="Windows Tk: heading()[command] が Tcl コマンド名 str を返す (Issue #276 follow-up)",
-        strict=False,
-    )
     def test_status_column_uses_custom_priority_key(self) -> None:
         """業務優先度順 sort key の例 (要対応 → 完了)。"""
         import tkinter as tk
@@ -343,7 +341,8 @@ class TestMakeTreeviewSortable:
                 tree, ("status",), key_funcs={"status": status_key}
             )
 
-            tree.heading("status")["command"]()  # 昇順 = 業務優先度低い順 (要対応 → 完了)
+            # 昇順 = 業務優先度低い順 (要対応 → 完了)
+            _invoke_heading_command(tree, "status")
             order = [tree.set(i, "status") for i in tree.get_children()]
             assert order == ["要レビュー", "実行待ち", "成功"]
         finally:
