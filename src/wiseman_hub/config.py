@@ -128,6 +128,32 @@ ConcatSourceLetter = Literal["A", "B", "C"]
 # D は ``source_d_filename`` 経由で末尾に追加される別系統のため、concat_order には含めない。
 VALID_CONCAT_LETTERS: frozenset[ConcatSourceLetter] = frozenset(get_args(ConcatSourceLetter))
 
+# Issue #27 続編 F Phase 1: 離散集合制約フィールドの Literal 化。
+# 同じ ``Literal[...] + VALID_*`` パターンで mypy 静的検査と ``__post_init__`` 検証を統一する。
+
+# AppConfig.log_level: Python ``logging`` 標準 5 値。誤値 ("info" / "DEBUGGING") は
+# 起動時 ValueError で弾く (旧: ``_check_str`` のみで型はチェックするが値域は素通り)。
+LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+VALID_LOG_LEVELS: frozenset[LogLevel] = frozenset(get_args(LogLevel))
+
+# ReportTarget.output_format: 現状運用 (RPA 経由 Wiseman CSV エクスポート) は csv 単一。
+# 将来 xlsx/pdf 等を追加する際は本 Literal 拡張が起点 (Single source of truth)。
+OutputFormat = Literal["csv"]
+VALID_OUTPUT_FORMATS: frozenset[OutputFormat] = frozenset(get_args(OutputFormat))
+
+
+def _check_literal(name: str, value: object, allowed: frozenset[Any]) -> None:
+    """Literal 型フィールドの値域検証 helper。
+
+    ``__post_init__`` から呼び、許容集合外の値を ``ValueError`` で弾く。``_check_str``
+    との違いは「値域までチェックする」こと。先に str 型を ``_check_str`` で固めてから
+    本 helper で値域を絞る使い方を想定。
+    """
+    if value not in allowed:
+        raise ValueError(
+            f"{name}: {value!r} is not in allowed set {sorted(allowed)}"
+        )
+
 
 def _default_concat_order() -> tuple[ConcatSourceLetter, ...]:
     return ("A", "B", "C")
@@ -235,12 +261,15 @@ class ReportTarget:
 
     name: str = ""
     menu_path: list[str] = field(default_factory=list)
-    output_format: str = "csv"
+    output_format: OutputFormat = "csv"
 
     def __post_init__(self) -> None:
         _check_str("ReportTarget.name", self.name)
         _check_list_of_str("ReportTarget.menu_path", self.menu_path)
         _check_str("ReportTarget.output_format", self.output_format)
+        _check_literal(
+            "ReportTarget.output_format", self.output_format, VALID_OUTPUT_FORMATS
+        )
 
 
 @dataclass(frozen=True)
@@ -697,7 +726,7 @@ class AppConfig:
     """
 
     version: str = "0.1.0"
-    log_level: str = "INFO"
+    log_level: LogLevel = "INFO"
     log_dir: str = ""
     wiseman: WisemanConfig = field(default_factory=WisemanConfig)
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
@@ -717,6 +746,7 @@ class AppConfig:
         """
         _check_str("AppConfig.version", self.version)
         _check_str("AppConfig.log_level", self.log_level)
+        _check_literal("AppConfig.log_level", self.log_level, VALID_LOG_LEVELS)
         _check_str("AppConfig.log_dir", self.log_dir)
         if not isinstance(self.reports, list):
             raise TypeError(
