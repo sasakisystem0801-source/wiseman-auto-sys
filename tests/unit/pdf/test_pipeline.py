@@ -60,8 +60,8 @@ def _bbox() -> UserNameBBox:
 
 def _config(tmp_path: Path) -> PdfMergeConfig:
     return PdfMergeConfig(
-        input_dir=str(tmp_path),
-        output_dir=str(tmp_path / "out"),
+        input_dir=tmp_path,
+        output_dir=tmp_path / "out",
         source_a_filename="A.pdf",
         source_d_filename="",
         source_b_pattern="B_{name}.pdf",
@@ -1253,8 +1253,8 @@ class TestPipelineLogPiiDefense:
         )
 
         config = PdfMergeConfig(
-            input_dir=str(pii_dir),
-            output_dir=str(tmp_path / "out"),
+            input_dir=pii_dir,
+            output_dir=tmp_path / "out",
             source_a_filename="A.pdf",
             source_d_filename="",
             source_b_pattern="B_{name}.pdf",

@@ -116,8 +116,9 @@ dpi = 300
     assert config.ocr_backend.max_retries == 5
 
     # PdfMergeConfig（トップレベル）
-    assert config.pdf_merge.input_dir == "C:\\Users\\test\\input"
-    assert config.pdf_merge.output_dir == "C:\\Users\\test\\output"
+    # Issue #27 続編 G Phase 2a: input_dir / output_dir は Path 型
+    assert config.pdf_merge.input_dir == Path("C:\\Users\\test\\input")
+    assert config.pdf_merge.output_dir == Path("C:\\Users\\test\\output")
     assert config.pdf_merge.source_a_filename == "utilization.pdf"
     assert config.pdf_merge.source_d_filename == "common_footer.pdf"
     assert config.pdf_merge.source_b_pattern == "invoice_{name}.pdf"
@@ -214,8 +215,8 @@ output_format = "csv"
             cfg,
             pdf_merge=replace(
                 cfg.pdf_merge,
-                input_dir="/tmp/in",
-                output_dir="/tmp/out",
+                input_dir=Path("/tmp/in"),
+                output_dir=Path("/tmp/out"),
                 source_a_filename="A.pdf",
             ),
         )
@@ -227,7 +228,7 @@ output_format = "csv"
         assert target.exists()
         reloaded = load_config(target)
         assert reloaded.log_level == "WARNING"
-        assert reloaded.pdf_merge.input_dir == "/tmp/in"
+        assert reloaded.pdf_merge.input_dir == Path("/tmp/in")
         assert reloaded.ocr_backend.api_key == "xyz"
 
     def test_save_raises_file_not_found_by_default(self, tmp_path: Path) -> None:
@@ -259,7 +260,7 @@ output_dir = ""
             encoding="utf-8",
         )
         cfg = load_config(target)
-        cfg = replace(cfg, pdf_merge=replace(cfg.pdf_merge, input_dir="/new/in"))
+        cfg = replace(cfg, pdf_merge=replace(cfg.pdf_merge, input_dir=Path("/new/in")))
         save_config(cfg, target)
 
         written = target.read_text(encoding="utf-8")
@@ -486,8 +487,8 @@ dpi = 250
         reloaded = load_config(target)
 
         # 既存フィールドが変わらないこと（Partial Update 検証）
-        assert reloaded.pdf_merge.input_dir == "/in"
-        assert reloaded.pdf_merge.output_dir == "/out"
+        assert reloaded.pdf_merge.input_dir == Path("/in")
+        assert reloaded.pdf_merge.output_dir == Path("/out")
         assert reloaded.pdf_merge.source_a_filename == "A.pdf"
         assert reloaded.pdf_merge.source_d_filename == "D.pdf"
         assert reloaded.pdf_merge.source_b_pattern == "B_{name}.pdf"
@@ -526,7 +527,7 @@ dpi = 250
     def test_ex_source_dir_default_empty(self) -> None:
         """新規 AppConfig() で ex_source_dir はデフォルト空文字列（未設定状態）。"""
         cfg = AppConfig()
-        assert cfg.pdf_merge.ex_source_dir == ""
+        assert cfg.pdf_merge.ex_source_dir == Path("")
 
     def test_ex_source_dir_load_from_toml(self, tmp_path: Path) -> None:
         """[pdf_merge] ex_source_dir = "..." が TOML から読み込まれる。"""
@@ -543,7 +544,7 @@ ex_source_dir = "C:\\\\Users\\\\sasak\\\\OneDrive\\\\デスクトップ\\\\本�
 
         assert (
             cfg.pdf_merge.ex_source_dir
-            == "C:\\Users\\sasak\\OneDrive\\デスクトップ\\本田様"
+            == Path("C:\\Users\\sasak\\OneDrive\\デスクトップ\\本田様")
         )
 
     def test_save_ex_source_dir_roundtrip(self, tmp_path: Path) -> None:
@@ -553,7 +554,7 @@ ex_source_dir = "C:\\\\Users\\\\sasak\\\\OneDrive\\\\デスクトップ\\\\本�
             cfg,
             pdf_merge=replace(
                 cfg.pdf_merge,
-                ex_source_dir="C:\\Users\\sasak\\OneDrive\\デスクトップ\\本田様",
+                ex_source_dir=Path("C:\\Users\\sasak\\OneDrive\\デスクトップ\\本田様"),
             ),
         )
         target = tmp_path / "roundtrip_ex.toml"
@@ -562,7 +563,7 @@ ex_source_dir = "C:\\\\Users\\\\sasak\\\\OneDrive\\\\デスクトップ\\\\本�
         reloaded = load_config(target)
         assert (
             reloaded.pdf_merge.ex_source_dir
-            == "C:\\Users\\sasak\\OneDrive\\デスクトップ\\本田様"
+            == Path("C:\\Users\\sasak\\OneDrive\\デスクトップ\\本田様")
         )
 
     def test_ex_source_dir_unset_when_section_missing(self, tmp_path: Path) -> None:
@@ -571,7 +572,7 @@ ex_source_dir = "C:\\\\Users\\\\sasak\\\\OneDrive\\\\デスクトップ\\\\本�
         target.write_text('[app]\nversion = "1.0.0"\n', encoding="utf-8")
 
         cfg = load_config(target)
-        assert cfg.pdf_merge.ex_source_dir == ""
+        assert cfg.pdf_merge.ex_source_dir == Path("")
 
     def test_save_ex_source_dir_does_not_break_existing_fields(
         self, tmp_path: Path
@@ -604,13 +605,13 @@ dpi = 250
             encoding="utf-8",
         )
         cfg = load_config(target)
-        cfg = replace(cfg, pdf_merge=replace(cfg.pdf_merge, ex_source_dir="/srv/ex_source"))
+        cfg = replace(cfg, pdf_merge=replace(cfg.pdf_merge, ex_source_dir=Path("/srv/ex_source")))
         save_config(cfg, target)
         reloaded = load_config(target)
 
         # 既存フィールドが変わらないこと（Partial Update 検証）
-        assert reloaded.pdf_merge.input_dir == "/in"
-        assert reloaded.pdf_merge.output_dir == "/out"
+        assert reloaded.pdf_merge.input_dir == Path("/in")
+        assert reloaded.pdf_merge.output_dir == Path("/out")
         assert reloaded.pdf_merge.source_a_filename == "A.pdf"
         assert reloaded.pdf_merge.source_d_filename == "D.pdf"
         assert reloaded.pdf_merge.source_b_pattern == "B_{name}.pdf"
@@ -620,7 +621,7 @@ dpi = 250
         assert reloaded.pdf_merge.user_name_bbox.x0 == 11.0
         assert reloaded.pdf_merge.user_name_bbox.dpi == 250
         # 新フィールドが反映されること
-        assert reloaded.pdf_merge.ex_source_dir == "/srv/ex_source"
+        assert reloaded.pdf_merge.ex_source_dir == Path("/srv/ex_source")
 
     # --- facility_aliases (事業所名の別名辞書) ---
 
@@ -723,15 +724,15 @@ dpi = 250
         reloaded = load_config(target)
 
         # 既存フィールドが変わらないこと
-        assert reloaded.pdf_merge.input_dir == "/in"
-        assert reloaded.pdf_merge.output_dir == "/out"
+        assert reloaded.pdf_merge.input_dir == Path("/in")
+        assert reloaded.pdf_merge.output_dir == Path("/out")
         assert reloaded.pdf_merge.source_a_filename == "A.pdf"
         assert reloaded.pdf_merge.source_d_filename == "D.pdf"
         assert reloaded.pdf_merge.source_b_pattern == "B_{name}.pdf"
         assert reloaded.pdf_merge.source_c_pattern == "C_{name}.pdf"
         assert reloaded.pdf_merge.concat_order == ("A", "C", "B")
         assert reloaded.pdf_merge.facility_root_dir == "/srv/facility"
-        assert reloaded.pdf_merge.ex_source_dir == "/srv/ex"
+        assert reloaded.pdf_merge.ex_source_dir == Path("/srv/ex")
         assert reloaded.pdf_merge.user_name_bbox.x0 == 11.0
         assert reloaded.pdf_merge.user_name_bbox.dpi == 250
         # 新フィールドが反映されること
@@ -1064,7 +1065,7 @@ dpi = 250
         target.write_text('[app]\nversion = "0.1.0"\n', encoding="utf-8")
 
         cfg = AppConfig()
-        cfg = replace(cfg, pdf_merge=replace(cfg.pdf_merge, input_dir="/private/施設A/patient/山田太郎"))
+        cfg = replace(cfg, pdf_merge=replace(cfg.pdf_merge, input_dir=Path("/private/施設A/patient/山田太郎")))
 
         def _fail_replace(src: str, dst: str) -> None:
             raise PermissionError("simulated Windows file lock")
@@ -2976,6 +2977,184 @@ class TestIssue27PathMigration:
         original = Path("/tmp/foo")
         result = coerce_path("test.field", original)
         assert result is original
+
+
+class TestIssue27PathMigrationPhase2a:
+    """Issue #27 続編 G Phase 2a: PdfMergeConfig.input_dir / output_dir / ex_source_dir 移行。"""
+
+    def test_pdf_merge_config_default_paths_are_unset(self) -> None:
+        """default PdfMergeConfig は 3 path field すべて未設定 sentinel。"""
+        from wiseman_hub.config import PdfMergeConfig, is_path_configured
+
+        cfg = PdfMergeConfig()
+        assert isinstance(cfg.input_dir, Path)
+        assert isinstance(cfg.output_dir, Path)
+        assert isinstance(cfg.ex_source_dir, Path)
+        assert is_path_configured(cfg.input_dir) is False
+        assert is_path_configured(cfg.output_dir) is False
+        assert is_path_configured(cfg.ex_source_dir) is False
+
+    def test_pdf_merge_config_rejects_str_input_dir(self) -> None:
+        """str を直接渡すと TypeError (Path 専用化)。"""
+        from wiseman_hub.config import PdfMergeConfig
+
+        with pytest.raises(TypeError, match="input_dir must be Path"):
+            PdfMergeConfig(input_dir="/tmp/foo")  # type: ignore[arg-type]
+
+    def test_pdf_merge_config_rejects_str_output_dir(self) -> None:
+        from wiseman_hub.config import PdfMergeConfig
+
+        with pytest.raises(TypeError, match="output_dir must be Path"):
+            PdfMergeConfig(output_dir="/tmp/out")  # type: ignore[arg-type]
+
+    def test_pdf_merge_config_rejects_str_ex_source_dir(self) -> None:
+        from wiseman_hub.config import PdfMergeConfig
+
+        with pytest.raises(TypeError, match="ex_source_dir must be Path"):
+            PdfMergeConfig(ex_source_dir="/tmp/ex")  # type: ignore[arg-type]
+
+    def test_load_config_coerces_pdf_merge_paths(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[pdf_merge]\n'
+            'input_dir = "/tmp/in"\n'
+            'output_dir = "/tmp/out"\n'
+            'ex_source_dir = "/srv/ex"\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        assert cfg.pdf_merge.input_dir == Path("/tmp/in")
+        assert cfg.pdf_merge.output_dir == Path("/tmp/out")
+        assert cfg.pdf_merge.ex_source_dir == Path("/srv/ex")
+
+    def test_load_config_whitespace_pdf_merge_paths_are_unset(
+        self, tmp_path: Path
+    ) -> None:
+        """TOML 手書き編集での空白だけの値は未設定扱い (coerce_path 経由)。"""
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[pdf_merge]\n'
+            'input_dir = "   "\n'
+            'output_dir = "\\t"\n'
+            'ex_source_dir = ""\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        from wiseman_hub.config import is_path_configured
+        assert is_path_configured(cfg.pdf_merge.input_dir) is False
+        assert is_path_configured(cfg.pdf_merge.output_dir) is False
+        assert is_path_configured(cfg.pdf_merge.ex_source_dir) is False
+
+    def test_save_config_pdf_merge_paths_round_trip(self, tmp_path: Path) -> None:
+        """PdfMergeConfig path 3 件の save → load ラウンドトリップ。"""
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[pdf_merge]\ninput_dir = ""\noutput_dir = ""\nex_source_dir = ""\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        new_cfg = replace(
+            cfg,
+            pdf_merge=replace(
+                cfg.pdf_merge,
+                input_dir=Path("/var/in"),
+                output_dir=Path("/var/out"),
+                ex_source_dir=Path("/srv/ex"),
+            ),
+        )
+        save_config(new_cfg, cfg_path)
+
+        reloaded = load_config(cfg_path)
+        assert reloaded.pdf_merge.input_dir == Path("/var/in")
+        assert reloaded.pdf_merge.output_dir == Path("/var/out")
+        assert reloaded.pdf_merge.ex_source_dir == Path("/srv/ex")
+
+    # --- stringify_paths_recursive (Phase 2a evaluator MEDIUM 対応) ---
+
+    def test_stringify_paths_recursive_unset_path_becomes_empty_string(self) -> None:
+        """未設定 Path は "" に変換 (TOML save_config と同じ規約)。"""
+        from wiseman_hub.config import stringify_paths_recursive
+        assert stringify_paths_recursive(Path("")) == ""
+        assert stringify_paths_recursive(Path(".")) == ""
+
+    def test_stringify_paths_recursive_configured_path_becomes_str(self) -> None:
+        from wiseman_hub.config import stringify_paths_recursive
+        assert stringify_paths_recursive(Path("/tmp/foo")) == str(Path("/tmp/foo"))
+
+    def test_stringify_paths_recursive_nested_dict(self) -> None:
+        """ネスト dict 内の Path も再帰的に変換 (session.config_snapshot 経路)。"""
+        from wiseman_hub.config import stringify_paths_recursive
+        nested = {
+            "pdf_merge": {
+                "input_dir": Path(""),
+                "output_dir": Path("/var/out"),
+                "non_path": "literal",
+                "concat_order": ("A", "B"),
+            },
+            "version": "1.0",
+        }
+        result = stringify_paths_recursive(nested)
+        assert result["pdf_merge"]["input_dir"] == ""
+        assert result["pdf_merge"]["output_dir"] == str(Path("/var/out"))
+        assert result["pdf_merge"]["non_path"] == "literal"
+        # tuple は JSON 互換のため list に変換
+        assert result["pdf_merge"]["concat_order"] == ["A", "B"]
+        assert result["version"] == "1.0"
+
+    def test_stringify_paths_recursive_list_of_dicts(self) -> None:
+        from wiseman_hub.config import stringify_paths_recursive
+        data = [{"path": Path("/a")}, {"path": Path("")}]
+        result = stringify_paths_recursive(data)
+        assert result == [{"path": str(Path("/a"))}, {"path": ""}]
+
+    def test_stringify_paths_recursive_passthrough_primitive(self) -> None:
+        from wiseman_hub.config import stringify_paths_recursive
+        assert stringify_paths_recursive(42) == 42
+        assert stringify_paths_recursive("string") == "string"
+        assert stringify_paths_recursive(True) is True
+        assert stringify_paths_recursive(None) is None
+
+    def test_load_config_rejects_non_string_pdf_merge_path(
+        self, tmp_path: Path
+    ) -> None:
+        """TOML で int / bool 等を渡すと coerce_path 経由で TypeError (silent fail 防止)。"""
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[pdf_merge]\ninput_dir = 123\n', encoding="utf-8"
+        )
+        with pytest.raises(TypeError, match="input_dir must be str.*Path"):
+            load_config(cfg_path)
+
+    def test_save_config_unset_pdf_merge_paths_written_as_empty(
+        self, tmp_path: Path
+    ) -> None:
+        """未設定 Path は TOML に "" で書き戻し (Phase 1 と同じ silent 互換性劣化防御)。"""
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[pdf_merge]\ninput_dir = "/initial"\noutput_dir = "/initial"\n'
+            'ex_source_dir = "/initial"\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        cleared = replace(
+            cfg,
+            pdf_merge=replace(
+                cfg.pdf_merge,
+                input_dir=Path(""),
+                output_dir=Path(""),
+                ex_source_dir=Path(""),
+            ),
+        )
+        save_config(cleared, cfg_path)
+
+        content = cfg_path.read_text(encoding="utf-8")
+        assert 'input_dir = ""' in content
+        assert 'output_dir = ""' in content
+        assert 'ex_source_dir = ""' in content
+        # 旧 silent 劣化バグ: '"."' が書かれていないこと
+        assert 'input_dir = "."' not in content
+        assert 'output_dir = "."' not in content
+        assert 'ex_source_dir = "."' not in content
 
 
 class TestChecklistStaffPathExtension:

@@ -31,7 +31,7 @@ from pathlib import Path
 
 import fitz
 
-from wiseman_hub.config import VALID_CONCAT_LETTERS, PdfMergeConfig
+from wiseman_hub.config import VALID_CONCAT_LETTERS, PdfMergeConfig, is_path_configured
 from wiseman_hub.utils.atomic_io import save_atomically
 
 logger = logging.getLogger(__name__)
@@ -254,13 +254,14 @@ def merge_user_pdfs(
         PdfMergeError: user_name 不正、PDF 読込/書込失敗
     """
     _validate_concat_order(config.concat_order)
-    if not config.input_dir:
+    # Issue #27 続編 G Phase 2a: input_dir は Path 型、is_path_configured で空判定
+    if not is_path_configured(config.input_dir):
         raise ValueError(
             "PdfMergeConfig.input_dir is empty; must point to the directory "
             "containing B/C/D PDF files"
         )
 
-    input_dir = Path(config.input_dir)
+    input_dir = config.input_dir
     missing: list[tuple[str, str]] = []
     total_pages = 0
 

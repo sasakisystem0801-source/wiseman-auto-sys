@@ -58,7 +58,7 @@ def config(input_dir: Path) -> PdfMergeConfig:
     # 全帳票生成テスト (test_concat_order_respected / test_d_appended_at_end /
     # missing/extra source 系) で tuple 入力動作が検証される。
     return PdfMergeConfig(
-        input_dir=str(input_dir),
+        input_dir=input_dir,
         source_b_pattern="B_{name}.pdf",
         source_c_pattern="C_{name}.pdf",
         source_d_filename="D_common.pdf",
@@ -139,7 +139,7 @@ def test_empty_source_d_filename_skips_d_silently(
     (input_dir / "C_u1.pdf").write_bytes(_make_pdf(["C:u1"]))
 
     cfg = PdfMergeConfig(
-        input_dir=str(input_dir),
+        input_dir=input_dir,
         source_b_pattern="B_{name}.pdf",
         source_c_pattern="C_{name}.pdf",
         source_d_filename="",
@@ -232,7 +232,7 @@ def test_empty_users_and_no_d_raises(
 ) -> None:
     """結果が0ページになる場合はエラー（空PDFを生成しない）。"""
     cfg = PdfMergeConfig(
-        input_dir=str(input_dir),
+        input_dir=input_dir,
         source_d_filename="",
         concat_order=("A", "B", "C"),
     )
@@ -248,7 +248,7 @@ def test_order_a_only_works(
 ) -> None:
     """concat_order=['A'] だけでも動作する。"""
     cfg = PdfMergeConfig(
-        input_dir=str(input_dir),
+        input_dir=input_dir,
         source_d_filename="",
         concat_order=("A",),
     )
@@ -278,7 +278,7 @@ def test_multiple_users_missing_various(
 
 def test_empty_input_dir_raises() -> None:
     cfg = PdfMergeConfig(
-        input_dir="",
+        input_dir=Path(""),
         concat_order=("A",),
         source_d_filename="",
     )
