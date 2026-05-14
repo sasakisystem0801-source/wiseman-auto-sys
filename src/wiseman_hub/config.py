@@ -604,8 +604,9 @@ class PdfMergeConfig:
         ADR-013 で導入。
     ex_source_dir: .ex_ ファイル（WinSFX32 LZH 自己解凍EXE）の取込元フォルダ。
         ex_extractor 機能で `.ex_ → PDF 抽出 → facility_root_dir 配下事業所フォルダ
-        へ振り分け` の起点として使う。空文字列 ("") は未設定を意味し、consumer 側で
-        空チェック必須（既存 facility_root_dir / input_dir 等と同じ str 規約）。
+        へ振り分け` の起点として使う。未設定 (``Path("")``) は consumer 側で
+        ``is_path_configured`` チェック必須（既存 facility_root_dir / input_dir 等と
+        同じ Path 規約、Issue #27 続編 G Phase 2a/2b で str → Path に統一）。
     facility_aliases: 事業所名の別名辞書。正式フォルダ名（key）に対する別名・略称・
         旧名称（value 配列）を保持し、ファイル名と事業所フォルダの照合で最優先一致
         として参照される。誤配布防止のため明示 alias 一致を部分一致系より優先する。
@@ -619,9 +620,9 @@ class PdfMergeConfig:
             - alias が他事業所の正式名と一致しない（alias 一致と完全一致の衝突回避）
     """
 
-    # Issue #27 続編 G Phase 2a: input_dir / output_dir / ex_source_dir を Path 化。
-    # facility_root_dir は Phase 2b で別 PR、source_*_filename / source_*_pattern は
-    # ファイル名 / glob パターンであり Path 化対象外 (str 維持)。
+    # Issue #27 続編 G Phase 2a/2b: input_dir / output_dir / ex_source_dir / facility_root_dir
+    # を Path 化完了。source_*_filename / source_*_pattern は ファイル名 / glob パターン
+    # であり Path 化対象外 (str 維持)。
     input_dir: Path = field(default_factory=Path)
     output_dir: Path = field(default_factory=Path)
     source_a_filename: str = ""
@@ -630,7 +631,7 @@ class PdfMergeConfig:
     source_c_pattern: str = "C_{name}.pdf"
     concat_order: tuple[ConcatSourceLetter, ...] = field(default_factory=_default_concat_order)
     user_name_bbox: UserNameBBox = field(default_factory=UserNameBBox)
-    facility_root_dir: str = ""  # Phase 2b で Path 化予定
+    facility_root_dir: Path = field(default_factory=Path)
     ex_source_dir: Path = field(default_factory=Path)
     facility_aliases: dict[str, list[str]] = field(default_factory=dict)
 
@@ -650,10 +651,11 @@ class PdfMergeConfig:
         ``facility_aliases`` の検証は ``load_config`` 側の ``_validate_facility_aliases``
         が担うため、ここでは触らない（dataclass 単体生成では検証されない既存設計を維持）。
         """
-        # Issue #27 続編 G Phase 2a: path field 3 件を型ガード。
+        # Issue #27 続編 G Phase 2a/2b: path field 4 件を型ガード。
         _check_path("PdfMergeConfig.input_dir", self.input_dir)
         _check_path("PdfMergeConfig.output_dir", self.output_dir)
         _check_path("PdfMergeConfig.ex_source_dir", self.ex_source_dir)
+        _check_path("PdfMergeConfig.facility_root_dir", self.facility_root_dir)
         if not isinstance(self.concat_order, tuple):
             raise TypeError(
                 f"PdfMergeConfig.concat_order must be tuple "
@@ -1116,9 +1118,9 @@ def load_config(path: Path | None = None) -> AppConfig:
         pdf_merge_data["concat_order"] = _coerce_concat_order(
             pdf_merge_data["concat_order"]
         )
-    # Issue #27 続編 G Phase 2a: TOML str → Path coerce (空白 strip → 未設定 sentinel)。
+    # Issue #27 続編 G Phase 2a/2b: TOML str → Path coerce (空白 strip → 未設定 sentinel)。
     # 型違反 (int / bool / list 等) は coerce_path が TypeError raise (起動時 fail-close)。
-    for path_field in ("input_dir", "output_dir", "ex_source_dir"):
+    for path_field in ("input_dir", "output_dir", "ex_source_dir", "facility_root_dir"):
         if path_field in pdf_merge_data:
             pdf_merge_data[path_field] = coerce_path(
                 f"pdf_merge.{path_field}", pdf_merge_data[path_field]

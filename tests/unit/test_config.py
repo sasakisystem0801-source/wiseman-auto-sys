@@ -22,6 +22,7 @@ from wiseman_hub.config import (
     UpdaterConfig,
     UserNameBBox,
     WisemanConfig,
+    is_path_configured,
     load_config,
     save_config,
 )
@@ -416,16 +417,17 @@ output_dir = ""
         assert "集計" in written
 
     def test_facility_root_dir_default_empty(self) -> None:
-        """新規 AppConfig() で facility_root_dir はデフォルト空文字列。
+        """新規 AppConfig() で facility_root_dir はデフォルト未設定 Path。
 
-        未設定状態（初回起動）を表現するため、None ではなく "" をデフォルトとする
-        （他フィールドの慣例に合わせる）。
+        Issue #27 続編 G Phase 2b: str → Path 移行。未設定状態（初回起動）は
+        ``Path("")`` で表現し、``is_path_configured`` で gate する。
         """
         cfg = AppConfig()
-        assert cfg.pdf_merge.facility_root_dir == ""
+        assert cfg.pdf_merge.facility_root_dir == Path("")
+        assert not is_path_configured(cfg.pdf_merge.facility_root_dir)
 
     def test_facility_root_dir_load_from_toml(self, tmp_path: Path) -> None:
-        """[pdf_merge] facility_root_dir = "..." が TOML から読み込まれる。"""
+        """[pdf_merge] facility_root_dir = "..." が TOML から Path として読み込まれる。"""
         target = tmp_path / "facility_root.toml"
         target.write_text(
             """\
@@ -437,19 +439,25 @@ facility_root_dir = "//Tera-station/share/03.FAX(事業所)"
 
         cfg = load_config(target)
 
-        assert cfg.pdf_merge.facility_root_dir == "//Tera-station/share/03.FAX(事業所)"
+        assert cfg.pdf_merge.facility_root_dir == Path("//Tera-station/share/03.FAX(事業所)")
 
     def test_save_facility_root_dir_roundtrip(self, tmp_path: Path) -> None:
         """facility_root_dir の save → load ラウンドトリップ。日本語・UNC 含む。"""
         cfg = AppConfig()
-        cfg = replace(cfg, pdf_merge=replace(cfg.pdf_merge, facility_root_dir="//Tera-station/share/03.FAX(事業所)"))
+        cfg = replace(
+            cfg,
+            pdf_merge=replace(
+                cfg.pdf_merge,
+                facility_root_dir=Path("//Tera-station/share/03.FAX(事業所)"),
+            ),
+        )
         target = tmp_path / "roundtrip.toml"
         save_config(cfg, target, create_if_missing=True)
 
         reloaded = load_config(target)
         assert (
             reloaded.pdf_merge.facility_root_dir
-            == "//Tera-station/share/03.FAX(事業所)"
+            == Path("//Tera-station/share/03.FAX(事業所)")
         )
 
     def test_save_facility_root_dir_does_not_break_existing_fields(
@@ -482,7 +490,10 @@ dpi = 250
             encoding="utf-8",
         )
         cfg = load_config(target)
-        cfg = replace(cfg, pdf_merge=replace(cfg.pdf_merge, facility_root_dir="/srv/facility"))
+        cfg = replace(
+            cfg,
+            pdf_merge=replace(cfg.pdf_merge, facility_root_dir=Path("/srv/facility")),
+        )
         save_config(cfg, target)
         reloaded = load_config(target)
 
@@ -497,17 +508,17 @@ dpi = 250
         assert reloaded.pdf_merge.user_name_bbox.x0 == 11.0
         assert reloaded.pdf_merge.user_name_bbox.dpi == 250
         # 新フィールドが反映されること
-        assert reloaded.pdf_merge.facility_root_dir == "/srv/facility"
+        assert reloaded.pdf_merge.facility_root_dir == Path("/srv/facility")
 
     def test_facility_root_dir_unset_when_section_missing(
         self, tmp_path: Path
     ) -> None:
-        """[pdf_merge] セクション自体がない TOML でも facility_root_dir は "" を返す。"""
+        """[pdf_merge] セクション自体がない TOML でも facility_root_dir は未設定 Path を返す。"""
         target = tmp_path / "nopdfmerge.toml"
         target.write_text('[app]\nversion = "1.0.0"\n', encoding="utf-8")
 
         cfg = load_config(target)
-        assert cfg.pdf_merge.facility_root_dir == ""
+        assert not is_path_configured(cfg.pdf_merge.facility_root_dir)
 
     def test_save_concat_order_reorder(self, tmp_path: Path) -> None:
         """concat_order を並び替えても save/load で順序が保存される。"""
@@ -617,7 +628,7 @@ dpi = 250
         assert reloaded.pdf_merge.source_b_pattern == "B_{name}.pdf"
         assert reloaded.pdf_merge.source_c_pattern == "C_{name}.pdf"
         assert reloaded.pdf_merge.concat_order == ("A", "C", "B")
-        assert reloaded.pdf_merge.facility_root_dir == "/srv/facility"
+        assert reloaded.pdf_merge.facility_root_dir == Path("/srv/facility")
         assert reloaded.pdf_merge.user_name_bbox.x0 == 11.0
         assert reloaded.pdf_merge.user_name_bbox.dpi == 250
         # 新フィールドが反映されること
@@ -731,7 +742,7 @@ dpi = 250
         assert reloaded.pdf_merge.source_b_pattern == "B_{name}.pdf"
         assert reloaded.pdf_merge.source_c_pattern == "C_{name}.pdf"
         assert reloaded.pdf_merge.concat_order == ("A", "C", "B")
-        assert reloaded.pdf_merge.facility_root_dir == "/srv/facility"
+        assert reloaded.pdf_merge.facility_root_dir == Path("/srv/facility")
         assert reloaded.pdf_merge.ex_source_dir == Path("/srv/ex")
         assert reloaded.pdf_merge.user_name_bbox.x0 == 11.0
         assert reloaded.pdf_merge.user_name_bbox.dpi == 250
@@ -1383,15 +1394,17 @@ class TestFrozenInstanceImmutability:
     @pytest.mark.parametrize(
         "field_name,new_value",
         [
-            ("input_dir", "/new/in"),
-            ("output_dir", "/new/out"),
+            # Issue #27 続編 G Phase 2a/2b: input_dir / output_dir / ex_source_dir /
+            # facility_root_dir は Path 型 (frozen エラー検証のため Path を渡す)。
+            ("input_dir", Path("/new/in")),
+            ("output_dir", Path("/new/out")),
             ("source_a_filename", "X.pdf"),
             ("source_d_filename", "Y.pdf"),
             ("source_b_pattern", "B2_{name}.pdf"),
             ("source_c_pattern", "C2_{name}.pdf"),
             ("concat_order", ("C", "B", "A")),
-            ("facility_root_dir", "/new/facility"),
-            ("ex_source_dir", "/new/ex"),
+            ("facility_root_dir", Path("/new/facility")),
+            ("ex_source_dir", Path("/new/ex")),
             ("facility_aliases", {"X": ["Y"]}),
         ],
     )
@@ -3155,6 +3168,102 @@ class TestIssue27PathMigrationPhase2a:
         assert 'input_dir = "."' not in content
         assert 'output_dir = "."' not in content
         assert 'ex_source_dir = "."' not in content
+
+
+class TestIssue27PathMigrationPhase2b:
+    """Issue #27 続編 G Phase 2b: PdfMergeConfig.facility_root_dir 移行。
+
+    Phase 2a と同じ patterns (is_path_configured / coerce_path / _check_path) を
+    facility_root_dir に適用する。UNC パス対応の意図的な ``str(Path(...))`` 比較で
+    Windows / macOS 両環境での挙動を OS 中立に検証する (Phase 2a debt #1)。
+    """
+
+    def test_pdf_merge_config_default_facility_root_is_unset(self) -> None:
+        """default PdfMergeConfig は facility_root_dir も未設定 sentinel。"""
+        from wiseman_hub.config import PdfMergeConfig, is_path_configured
+
+        cfg = PdfMergeConfig()
+        assert isinstance(cfg.facility_root_dir, Path)
+        assert is_path_configured(cfg.facility_root_dir) is False
+
+    def test_pdf_merge_config_rejects_str_facility_root_dir(self) -> None:
+        """str を直接渡すと TypeError (Path 専用化、Phase 2a と同じ fail-close)。"""
+        from wiseman_hub.config import PdfMergeConfig
+
+        with pytest.raises(TypeError, match="facility_root_dir must be Path"):
+            PdfMergeConfig(facility_root_dir="/srv/facility")  # type: ignore[arg-type]
+
+    def test_load_config_coerces_facility_root_dir(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[pdf_merge]\nfacility_root_dir = "/srv/facility"\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        assert cfg.pdf_merge.facility_root_dir == Path("/srv/facility")
+
+    def test_load_config_whitespace_facility_root_dir_is_unset(
+        self, tmp_path: Path
+    ) -> None:
+        """TOML 手書き編集での空白だけの値は未設定扱い (coerce_path 経由)。"""
+        from wiseman_hub.config import is_path_configured
+
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[pdf_merge]\nfacility_root_dir = "   "\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        assert is_path_configured(cfg.pdf_merge.facility_root_dir) is False
+
+    def test_save_config_facility_root_dir_round_trip(self, tmp_path: Path) -> None:
+        """facility_root_dir の save → load ラウンドトリップ。"""
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[pdf_merge]\nfacility_root_dir = ""\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        new_cfg = replace(
+            cfg,
+            pdf_merge=replace(cfg.pdf_merge, facility_root_dir=Path("/srv/facility")),
+        )
+        save_config(new_cfg, cfg_path)
+
+        reloaded = load_config(cfg_path)
+        assert reloaded.pdf_merge.facility_root_dir == Path("/srv/facility")
+
+    def test_load_config_rejects_non_string_facility_root_dir(
+        self, tmp_path: Path
+    ) -> None:
+        """TOML で int / bool 等を渡すと coerce_path 経由で TypeError (silent fail 防止)。"""
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[pdf_merge]\nfacility_root_dir = 123\n', encoding="utf-8"
+        )
+        with pytest.raises(TypeError, match="facility_root_dir must be str.*Path"):
+            load_config(cfg_path)
+
+    def test_save_config_unset_facility_root_dir_written_as_empty(
+        self, tmp_path: Path
+    ) -> None:
+        """未設定 Path は TOML に "" で書き戻し (Phase 2a と同じ silent 互換性劣化防御)。"""
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[pdf_merge]\nfacility_root_dir = "/initial"\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        cleared = replace(
+            cfg,
+            pdf_merge=replace(cfg.pdf_merge, facility_root_dir=Path("")),
+        )
+        save_config(cleared, cfg_path)
+
+        content = cfg_path.read_text(encoding="utf-8")
+        assert 'facility_root_dir = ""' in content
+        # 旧 silent 劣化バグ: '"."' が書かれていないこと
+        assert 'facility_root_dir = "."' not in content
 
 
 class TestChecklistStaffPathExtension:

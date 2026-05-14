@@ -529,7 +529,7 @@ class TestExExtractorDialogSmoke:
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
                 ex_source_dir=source,
-                facility_root_dir=str(root_dir),
+                facility_root_dir=root_dir,
             )
         )
         adapter = FakeSfxAdapter()
@@ -569,7 +569,7 @@ class TestExExtractorDialogSmoke:
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
                 ex_source_dir=original_source,
-                facility_root_dir=str(root_dir),
+                facility_root_dir=root_dir,
             )
         )
 
@@ -617,7 +617,7 @@ class TestExExtractorDialogSmoke:
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
                 ex_source_dir=original_source,
-                facility_root_dir=str(root_dir),
+                facility_root_dir=root_dir,
             )
         )
 
@@ -659,7 +659,7 @@ class TestExExtractorDialogSmoke:
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
                 ex_source_dir=original_source,
-                facility_root_dir=str(root_dir),
+                facility_root_dir=root_dir,
             )
         )
 
@@ -708,7 +708,7 @@ class TestExExtractorDialogSmoke:
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
                 ex_source_dir=source,
-                facility_root_dir=str(root_dir),
+                facility_root_dir=root_dir,
             )
         )
 
@@ -759,7 +759,7 @@ class TestExExtractorDialogSmoke:
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
                 ex_source_dir=original_source,
-                facility_root_dir=str(root_dir),
+                facility_root_dir=root_dir,
             )
         )
 
@@ -825,7 +825,7 @@ class TestExExtractorDialogSmoke:
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
                 ex_source_dir=original_source,
-                facility_root_dir=str(root_dir),
+                facility_root_dir=root_dir,
             )
         )
 
@@ -888,7 +888,7 @@ class TestExExtractorDialogSmoke:
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
                 ex_source_dir=Path(""),
-                facility_root_dir=str(root_dir),
+                facility_root_dir=root_dir,
             )
         )
 
@@ -949,7 +949,7 @@ class TestExExtractorDialogSmoke:
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
                 ex_source_dir=source,
-                facility_root_dir=str(root_dir),
+                facility_root_dir=root_dir,
             )
         )
 
@@ -1011,7 +1011,7 @@ class TestExExtractorDialogSmoke:
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
                 ex_source_dir=original_source,
-                facility_root_dir=str(root_dir),
+                facility_root_dir=root_dir,
             )
         )
 
@@ -1064,7 +1064,7 @@ class TestExExtractorDialogSmoke:
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
                 ex_source_dir=original_source,
-                facility_root_dir=str(root_dir),
+                facility_root_dir=root_dir,
                 input_dir=Path("/some/input"),
                 output_dir=Path("/some/output"),
                 source_a_filename="A.pdf",
@@ -1098,7 +1098,8 @@ class TestExExtractorDialogSmoke:
             # ex_source_dir のみ更新
             assert saved_cfg.pdf_merge.ex_source_dir == new_source
             # 他キーは原値を保持 (Partial Update)
-            assert saved_cfg.pdf_merge.facility_root_dir == str(root_dir)
+            # Issue #27 続編 G Phase 2b: facility_root_dir は Path 型 (str → Path 移行)。
+            assert saved_cfg.pdf_merge.facility_root_dir == root_dir
             assert saved_cfg.pdf_merge.input_dir == Path("/some/input")
             assert saved_cfg.pdf_merge.output_dir == Path("/some/output")
             assert saved_cfg.pdf_merge.source_a_filename == "A.pdf"
@@ -1131,7 +1132,7 @@ class TestExExtractorDialogSmoke:
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
                 ex_source_dir=original_source,
-                facility_root_dir=str(root_dir),
+                facility_root_dir=root_dir,
             )
         )
 
@@ -1183,7 +1184,7 @@ class TestExExtractorDialogSmoke:
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
                 ex_source_dir=tmp_path / "original",
-                facility_root_dir=str(root_dir),
+                facility_root_dir=root_dir,
             )
         )
         (tmp_path / "original").mkdir()
@@ -1212,7 +1213,8 @@ class TestExExtractorDialogSmoke:
             # 選択値が反映されている
             assert called_config.pdf_merge.ex_source_dir == new_source
             # 他フィールドは元のまま保持 (replace の scope 妥当性)
-            assert called_config.pdf_merge.facility_root_dir == str(root_dir)
+            # Issue #27 続編 G Phase 2b: facility_root_dir は Path 型 (str → Path 移行)。
+            assert called_config.pdf_merge.facility_root_dir == root_dir
             dialog._on_close()
         finally:
             root.destroy()
@@ -1236,7 +1238,7 @@ class TestExExtractorDialogSmoke:
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
                 ex_source_dir=tmp_path / "original",
-                facility_root_dir=str(root_dir),
+                facility_root_dir=root_dir,
             )
         )
 
@@ -1292,7 +1294,7 @@ class TestExExtractorDialogSmoke:
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
                 ex_source_dir=tmp_path / "original",
-                facility_root_dir=str(root_dir),
+                facility_root_dir=root_dir,
             )
         )
 

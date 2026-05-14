@@ -527,9 +527,10 @@ class TestPersistRoot:
 
         vm.set_root_and_rows(tmp_path, [])
 
-        assert vm.config.pdf_merge.facility_root_dir == str(tmp_path)
+        # Issue #27 続編 G Phase 2b: facility_root_dir は Path 型 (str → Path 移行)。
+        assert vm.config.pdf_merge.facility_root_dir == tmp_path
         # 元の cfg は frozen のため不変であることも確認 (regression guard)
-        assert cfg.pdf_merge.facility_root_dir == ""
+        assert cfg.pdf_merge.facility_root_dir == Path("")
 
     def test_set_root_does_not_modify_other_fields(self, tmp_path: Path) -> None:
         """root 更新で既存フィールドが変わらない（Partial Update）。"""
