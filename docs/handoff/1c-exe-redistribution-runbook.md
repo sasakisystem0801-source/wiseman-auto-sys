@@ -111,7 +111,7 @@ Get-Item "$HOME\wiseman-hub\wiseman_hub.exe" | Format-List LastWriteTime, Length
 
 ## ✅ Phase 3: 動作確認（10-15 分）
 
-### 3-1. Launcher 起動 + 4 ボタン目表示確認
+### 3-1. Launcher 起動 + 「事業所フォルダ一括結合」ボタン表示確認
 
 ```powershell
 Start-Process "$HOME\wiseman-hub\wiseman_hub.exe"
@@ -120,10 +120,10 @@ Start-Process "$HOME\wiseman-hub\wiseman_hub.exe"
 | # | 確認項目 | 期待 |
 |---|---------|------|
 | 1 | Launcher ウィンドウ起動（コンソールは出ない） | ✅ |
-| 2 | ボタン 4 個表示（PDFマージ / 確認 / **事業所フォルダ結合** / 設定） | ✅ |
-| 3 | 「事業所フォルダ結合」クリック → ダイアログ表示 | ✅（新機能の決定的確認） |
+| 2 | ボタン 5 個表示（業務フロー順: ex_ ファイル変換 + 振り分け / B: 運動機能向上計画書 自動配置 / C: 経過報告書 自動配置 / **事業所フォルダ一括結合** / 設定） | ✅ |
+| 3 | 「事業所フォルダ一括結合」クリック → ダイアログ表示 | ✅（新機能の決定的確認） |
 
-「事業所フォルダ結合」ボタンが無い / クリックでエラーなら **Phase 4 (rollback) へ**。
+「事業所フォルダ一括結合」ボタンが無い / クリックでエラーなら **Phase 4 (rollback) へ**。
 
 ### 3-2. Session 19 と同一シナリオで smoke test
 
@@ -265,8 +265,8 @@ Get-ChildItem "$HOME\wiseman-hub\wiseman_hub.exe.bak-*"
 | `Failed to spawn pyinstaller` | `--extra dev` 忘れで dev extras 削除 | `uv sync --extra dev` で dev tools 復旧、Phase 1 再実行 |
 | pyinstaller が `ModuleNotFoundError` | spec の hiddenimports 漏れ | ビルドログを Phase 4 rollback 後に共有 |
 | ビルドは成功するが exe 起動で無反応 | Windows Defender が隔離 | Defender 除外設定 or SmartScreen「実行」押下 |
-| Launcher は起動するが 4 ボタン目が無い | 古い exe を掴んでいる / 上書き失敗 | Phase 2-1 を再実行、LastWriteTime を再確認 |
-| 「事業所フォルダ結合」クリックで `ImportError` | PR #111 の hiddenimports が足りていない（稀） | ビルドログの warning を精査、Phase 4 rollback |
+| Launcher は起動するが「事業所フォルダ一括結合」ボタンが無い | 古い exe を掴んでいる / 上書き失敗 | Phase 2-1 を再実行、LastWriteTime を再確認 |
+| 「事業所フォルダ一括結合」クリックで `ImportError` | PR #111 の hiddenimports が足りていない（稀） | ビルドログの warning を精査、Phase 4 rollback |
 | Session 19 シナリオで 19 件 → 0 件 | 入力パスの typo / ネットワーク切断 | `\\Tera-station\share` を Explorer で開けるか確認 |
 | 出力 PDF で別人混入 | **即中止** | Phase 4 rollback、実装バグとして緊急報告（Codex 検証済の fail-safe が破綻の可能性） |
 | SmartScreen 警告 | 新 exe の署名が違う（spec 変更で HASH が変わる） | 「詳細情報」→「実行」。一度通れば以降は警告なし |
