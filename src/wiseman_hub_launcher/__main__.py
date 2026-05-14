@@ -218,11 +218,25 @@ def run_smoke_test() -> LauncherExitCode:
     """
     try:
         from sigstore.models import Bundle  # noqa: F401
-        from sigstore.verify import Verifier  # noqa: F401
+        from sigstore.verify import Verifier
         from sigstore.verify.policy import Identity  # noqa: F401
     except ImportError as e:
         print(
             f"smoke test failed (sigstore-python import): {type(e).__name__}: {e}",
+            file=sys.stderr,
+        )
+        return LauncherExitCode.UNEXPECTED
+
+    # handoff debt (Session 64, PR #254): Verifier.production(offline=True) を smoke
+    # で実 init し、TUF trust root の bundle 解決 (_store/prod/{root,trusted_root}.json)
+    # と rekor_types 等の推移依存の解決失敗を CI で early detect する。本呼出は副作用
+    # ゼロ (network access なし、offline=True で bundle 済 trust roots のみ)。
+    try:
+        Verifier.production(offline=True)
+    except Exception as e:  # noqa: BLE001 — TUF/cryptography 系の例外を一律 catch
+        print(
+            f"smoke test failed (Verifier.production(offline=True) init): "
+            f"{type(e).__name__}: {e}",
             file=sys.stderr,
         )
         return LauncherExitCode.UNEXPECTED
@@ -239,7 +253,7 @@ def run_smoke_test() -> LauncherExitCode:
         )
         return LauncherExitCode.UNEXPECTED
 
-    print("smoke test passed: sigstore-python imports + helpers OK")
+    print("smoke test passed: sigstore-python imports + Verifier init + helpers OK")
     return LauncherExitCode.OK
 
 
