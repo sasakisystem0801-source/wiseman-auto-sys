@@ -406,7 +406,25 @@ def _run_smoke_test() -> None:
     logger.info("smoke test passed")
 
 
+def _apply_log_level(level_name: str) -> None:
+    """``config.log_level`` を root logger に反映する。
+
+    Issue #27 続編 F Phase 2: 本関数導入前は ``logging.basicConfig(level=INFO)``
+    で hardcoded、``AppConfig.log_level`` は orphan (値は load されるが消費されず)
+    だった。本関数で config 読込後に root logger の level を上書きする。
+
+    引数の ``level_name`` は ``AppConfig.log_level`` (Literal: DEBUG/INFO/WARNING/
+    ERROR/CRITICAL) を想定。``__post_init__`` で値域は保証済のため getattr が None
+    を返すケースは type 上発生しないが、誤値で起動した場合の defensive guard として
+    str 経路でも安全側に動く (getattr デフォルトを ``logging.INFO`` にして fallback)。
+    """
+    numeric_level = getattr(logging, level_name, logging.INFO)
+    logging.getLogger().setLevel(numeric_level)
+
+
 def main() -> None:
+    # bootstrap 段階: config 読込前にもログを出すため INFO で先行設定。
+    # config 読込後に ``_apply_log_level(config.log_level)`` で上書きする。
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -491,6 +509,10 @@ def main() -> None:
                     exc,
                 )
                 sys.exit(2)
+
+            # Issue #27 続編 F Phase 2: config 読込後に log_level を root logger に
+            # 反映 (本対応前は bootstrap INFO のまま orphan だった)。
+            _apply_log_level(config.log_level)
 
             # ADR-016 Phase 2: audit log の GCS upload を起動時 + 5 分間隔で実行。
             # 起動条件未達（GCP 未設定 / SA キー不在 / log_dir 未設定）の場合は
