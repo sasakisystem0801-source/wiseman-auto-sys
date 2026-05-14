@@ -24,10 +24,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Issue #276 follow-up #2: Python 3.11 + windows-latest で `_tkinter.TclError:
+      # Can't find a usable init.tcl` がランダム発生する公式 issue 報告あり
+      # (actions/setup-python#1102)。3.12/3.10 では発生しないため tk_required 限定の
+      # 本 workflow は 3.12 を採用。tk 非依存 test は test-unit.yml の matrix で
+      # 3.11/3.12 両方カバー、本番 exe は build-windows-smoke.yml が 3.11 で検証する。
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4

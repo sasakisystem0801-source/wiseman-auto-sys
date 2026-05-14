@@ -88,15 +88,6 @@ class TestCacheClearMenu:
         dlg._refresh_tree()
         return dlg, cfg
 
-    # Issue #276 follow-up: GitHub Actions windows-latest の Python 3.11 + uv venv
-    # 経路で `tk.Tk()` が `_tkinter.TclError: Can't find a usable init.tcl` を出す。
-    # 当初 Session 70 handoff で「本田様 PC 固有」と判断したが、CI 環境でも再現で
-    # 環境一般の問題と判明。Tcl/Tk install or TCL_LIBRARY 環境変数 or uv venv の
-    # Tcl 同梱方法の調査が必要 (別 PR で対応)。
-    @pytest.mark.xfail(
-        reason="Windows + uv venv で Tcl init.tcl 不在 (Issue #276 follow-up)",
-        strict=False,
-    )
     def test_clear_cache_removes_entry_and_saves(self, tmp_path: Path) -> None:
         root = tk.Tk()
         try:
