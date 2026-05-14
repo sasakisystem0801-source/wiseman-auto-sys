@@ -45,6 +45,7 @@ from wiseman_hub_launcher._runtime import (
 from wiseman_hub_launcher._supply_chain import (
     ProvenanceError,
     build_expected_identity,
+    warn_if_trust_root_stale,
 )
 from wiseman_hub_launcher.checksum import ChecksumError
 from wiseman_hub_launcher.current import CurrentReadError, read_current
@@ -451,6 +452,12 @@ def main(
         except Exception:  # noqa: BLE001 — top-level safety net
             logger.exception("unexpected error in smoke-test")
             return LauncherExitCode.UNEXPECTED
+
+    # handoff debt (Session 64, PR #255 S1): bundle 同梱 trust root の staleness 監視。
+    # smoke-test 経路は副作用ゼロ entry のため除外、実 verify が走る dry-run / update
+    # 経路の前でのみ warn-log を出す (起動 blocking しない、最終 fail-close は実
+    # verify_dsse 経路に委譲)。
+    warn_if_trust_root_stale()
 
     if args.dry_run:
         try:

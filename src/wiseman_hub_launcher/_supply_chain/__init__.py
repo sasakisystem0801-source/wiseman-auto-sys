@@ -40,6 +40,7 @@ from .sigstore import (
     SigstoreVerifyError,
     build_expected_identity,
     verify_dsse_bundle,
+    warn_if_trust_root_stale,
 )
 
 __all__ = [
@@ -61,4 +62,5 @@ __all__ = [
     "verify_dsse_bundle",
     "verify_provenance",
     "verify_statement_claims",
+    "warn_if_trust_root_stale",
 ]

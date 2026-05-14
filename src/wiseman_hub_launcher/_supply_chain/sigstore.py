@@ -61,6 +61,82 @@ _CLOCK_UPPER_BOUND = dt.datetime(2030, 12, 31, tzinfo=dt.UTC)
 _DSSE_PAYLOAD_TYPE_INTOTO = "application/vnd.in-toto+json"
 _DEFAULT_GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com"
 
+# bundle 同梱 trust root の expiry warning 閾値 (handoff debt PR #255 S1)
+# 30 日: sigstore-python の minor upgrade を計画する余裕を確保する期間
+_TRUST_ROOT_STALE_WARN_DAYS = 30
+
+
+def warn_if_trust_root_stale(store_dir: Path | None = None) -> None:
+    """bundle 同梱 trust root (``_store/prod/root.json``) の expiry を warn-log する。
+
+    ADR-016 §1.1.3 で ``Verifier.production(offline=True)`` を採用し bundle 済の
+    trust roots のみで verify するため、sigstore-python の minor upgrade を怠ると
+    root.json が expire する。本 helper は launcher 起動時に expiry を確認し、
+
+    - 残り < 0 日 (既に expire): WARNING ログ (sigstore-python upgrade 要)
+    - 残り <= 30 日: WARNING ログ (upgrade 計画開始の合図)
+    - 残り > 30 日: DEBUG ログ (健全)
+
+    を log する (起動は継続。最終的な fail-close は実 verify_dsse 経路で発火する)。
+
+    例外時は debug log で握り潰し、起動を blocking しない (最悪 ``Verifier.production``
+    が verify_dsse 経路で raise する fail-close を最終手段とする)。
+
+    Args:
+        store_dir: bundle 内 ``sigstore/_store/prod/`` 相当の path 上書き (test 用)。
+            ``None`` の場合は installed ``sigstore`` package の同梱 path を解決する。
+    """
+    if store_dir is None:
+        try:
+            import sigstore
+        except ImportError:
+            logger.debug(
+                "sigstore-python not installed, skipping trust root staleness check"
+            )
+            return
+        store_dir = Path(sigstore.__file__).parent / "_store" / "prod"
+
+    root_path = store_dir / "root.json"
+    if not root_path.is_file():
+        logger.debug(
+            "trust root not found at %s, skipping staleness check", root_path
+        )
+        return
+
+    try:
+        root = json.loads(root_path.read_text(encoding="utf-8"))
+        expires_str = root["signed"]["expires"]
+        expires = dt.datetime.fromisoformat(expires_str.replace("Z", "+00:00"))
+    except (OSError, ValueError, KeyError, json.JSONDecodeError) as e:
+        logger.debug(
+            "trust root staleness check failed: %s: %s", type(e).__name__, e
+        )
+        return
+
+    now = dt.datetime.now(tz=dt.UTC)
+    remaining_days = (expires - now).days
+
+    if remaining_days < 0:
+        logger.warning(
+            "sigstore trust root EXPIRED %d days ago (expires=%s). "
+            "Upgrade sigstore-python to refresh bundle trust roots.",
+            -remaining_days,
+            expires_str,
+        )
+    elif remaining_days <= _TRUST_ROOT_STALE_WARN_DAYS:
+        logger.warning(
+            "sigstore trust root expires in %d days (expires=%s). "
+            "Plan sigstore-python upgrade to refresh bundle trust roots.",
+            remaining_days,
+            expires_str,
+        )
+    else:
+        logger.debug(
+            "sigstore trust root expires in %d days (expires=%s), no action needed.",
+            remaining_days,
+            expires_str,
+        )
+
 
 def _verify_system_clock() -> None:
     now = dt.datetime.now(tz=dt.UTC)
