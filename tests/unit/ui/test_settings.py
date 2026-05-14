@@ -249,8 +249,10 @@ class TestFormFromConfig:
 
         form = form_from_config(base)
 
-        assert form.input_dir == "/in"
-        assert form.output_dir == "/out"
+        # Issue #27 続編 G Phase 2a: form_from_config が str(Path("/in")) を呼ぶため、
+        # Windows runner では "\\in" になる。OS 中立に str(Path("/in")) で比較。
+        assert form.input_dir == str(Path("/in"))
+        assert form.output_dir == str(Path("/out"))
         assert form.source_a_filename == "A.pdf"
         assert form.bbox_x0 == "1.5"
         assert form.bbox_dpi == "300"
@@ -357,7 +359,9 @@ class TestSettingsDialogUI:
         finally:
             root.destroy()
 
-        assert form.input_dir == "/in"
+        # Issue #27 続編 G Phase 2a: form_from_config が str(Path("/in")) を呼ぶため、
+        # Windows runner では "\\in" になる。OS 中立に str(Path("/in")) で比較。
+        assert form.input_dir == str(Path("/in"))
         assert form.ocr_api_key == "key"
 
     def test_save_with_valid_form_calls_save_fn(self, tmp_path: Path) -> None:
@@ -494,7 +498,9 @@ class TestSettingsDialogUI:
         finally:
             root.destroy()
 
-        assert form.input_dir == "/in"
+        # Issue #27 続編 G Phase 2a: form_from_config が str(Path("/in")) を呼ぶため、
+        # Windows runner では "\\in" になる。OS 中立に str(Path("/in")) で比較。
+        assert form.input_dir == str(Path("/in"))
 
     def test_api_key_field_is_masked(self, tmp_path: Path) -> None:
         """AC-S-5: API Key 欄は show='*' でマスク。"""

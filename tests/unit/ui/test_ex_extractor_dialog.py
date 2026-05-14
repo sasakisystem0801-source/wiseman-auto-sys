@@ -1210,7 +1210,7 @@ class TestExExtractorDialogSmoke:
             # (PR #272 Phase 3b で identity 前提が変わった contract regression 防御)
             assert called_config is not config
             # 選択値が反映されている
-            assert called_config.pdf_merge.ex_source_dir == str(new_source)
+            assert called_config.pdf_merge.ex_source_dir == new_source
             # 他フィールドは元のまま保持 (replace の scope 妥当性)
             assert called_config.pdf_merge.facility_root_dir == str(root_dir)
             dialog._on_close()
