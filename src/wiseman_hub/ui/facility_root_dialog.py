@@ -29,7 +29,7 @@ from pathlib import Path
 from tkinter import filedialog, ttk
 from typing import Final
 
-from wiseman_hub.config import AppConfig, save_config
+from wiseman_hub.config import AppConfig, is_path_configured, save_config
 from wiseman_hub.pdf.facility_bulk_runner import (
     BulkExecutionItem,
     BulkExecutionStatus,
@@ -191,7 +191,7 @@ class FacilityRootViewModel:
                 self.config,
                 pdf_merge=replace(
                     self.config.pdf_merge,
-                    facility_root_dir=str(root),
+                    facility_root_dir=root,
                 ),
             )
 
@@ -380,8 +380,13 @@ class FacilityRootManagerDialog:
             self._top, component="facility_root", messagebox=self._messagebox
         )
 
+        # Issue #27 続編 G Phase 2b: facility_root_dir は Path 型 (str → Path 移行)。
+        # 未設定 sentinel (``Path("")``) は str(...) で ``"."`` になるため、
+        # ``is_path_configured`` で gate して未設定なら StringVar に "" を入れる。
         self._root_var = tk.StringVar(
-            value=self._config.pdf_merge.facility_root_dir
+            value=str(self._config.pdf_merge.facility_root_dir)
+            if is_path_configured(self._config.pdf_merge.facility_root_dir)
+            else ""
         )
         self._summary_var = tk.StringVar(value="")
         self._row_widgets: list[_RowWidget] = []
@@ -389,8 +394,8 @@ class FacilityRootManagerDialog:
         self._build_ui()
 
         # 既存設定 root があれば自動スキャン（次回起動時の利便性）
-        if self._config.pdf_merge.facility_root_dir:
-            saved_root = Path(self._config.pdf_merge.facility_root_dir)
+        if is_path_configured(self._config.pdf_merge.facility_root_dir):
+            saved_root = self._config.pdf_merge.facility_root_dir
             if saved_root.exists() and saved_root.is_dir():
                 self._do_scan(saved_root)
 

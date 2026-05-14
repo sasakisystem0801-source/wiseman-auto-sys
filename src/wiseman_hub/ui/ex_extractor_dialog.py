@@ -433,11 +433,10 @@ class ExExtractorDialog:
 
         # ViewModel 初期化 (config から source/root/aliases を解決)
         if view_model is None:
-            # Issue #27 続編 G Phase 2a: ex_source_dir は Path 型 (未設定なら
-            # Path("") == Path(".") なので "or ." ガードと等価)。
-            # facility_root_dir は Phase 2b で Path 化予定、当面 str 維持。
+            # Issue #27 続編 G Phase 2a/2b: ex_source_dir / facility_root_dir 共に
+            # Path 型 (未設定なら Path("") == Path(".") なので "or ." ガードと等価)。
             source = config.pdf_merge.ex_source_dir
-            root = Path(config.pdf_merge.facility_root_dir or ".")
+            root = config.pdf_merge.facility_root_dir
             view_model = ExExtractorViewModel(
                 source_dir=source,
                 facility_root_dir=root,
