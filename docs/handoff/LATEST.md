@@ -182,8 +182,8 @@ Session 75 終了時にユーザーと合意した配布タイミング:
 
 4. **Issue #275** — 本田様ヒアリング待ち (実機配布時に同時実施推奨)
 5. **Phase 3 着手前の `Optional[Path]` 設計議論** — handoff debt #3、Phase 3 計画段階で扱う
-5. **Issue #27 続編 G Phase 3** — Phase 2b 完了後、UNC パステスト追加必須 (debt #1)
-6. **Windows Tcl init.tcl 問題** — handoff debt 継続
+6. **Issue #27 続編 G Phase 3** — Phase 2b 完了後、UNC パステスト追加必須 (debt #1)
+7. **Windows Tcl init.tcl 問題** — handoff debt 継続
 
 ---
 
