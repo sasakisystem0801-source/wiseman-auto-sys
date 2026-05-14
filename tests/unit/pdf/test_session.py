@@ -104,6 +104,46 @@ def _make_session(tmp_path: Path, **overrides) -> Session:
 
 
 class TestSaveLoad:
+    def test_config_snapshot_path_normalized_in_json(self, tmp_path: Path) -> None:
+        """Issue #27 続編 G Phase 2a (Codex Low): config_snapshot 内 Path が
+        JSON 保存時に未設定 → "" / 設定済み → str(path) に正規化される境界統合テスト。
+
+        stringify_paths_recursive 単体テストは別途あるが、session.py 側で
+        呼び忘れた場合 (今後の refactor) を捕捉するための統合層テスト。
+        """
+        import json as _json
+
+        from wiseman_hub.pdf.session import session_path
+
+        sessions_dir = tmp_path / ".sessions"
+        configured_path = tmp_path / "configured"
+        s = _make_session(
+            tmp_path,
+            config_snapshot={
+                "pdf_merge": {
+                    "input_dir": Path(""),  # 未設定 sentinel
+                    "output_dir": configured_path,  # 設定済み
+                    "ex_source_dir": Path("."),  # 未設定 sentinel (Path("") と等価)
+                    "literal": "non-path",
+                },
+                "version": "0.1.0",
+            },
+        )
+        save_session(s, sessions_dir=sessions_dir)
+
+        # JSON ファイルを直接読んで Path 化動作を pin
+        path = session_path(s.session_id, sessions_dir)
+        payload = _json.loads(path.read_text(encoding="utf-8"))
+        snap = payload["config_snapshot"]["pdf_merge"]
+        # 未設定 Path は "" (TOML save_config と同じ規約)、'.' は書き込まれない
+        assert snap["input_dir"] == ""
+        assert snap["ex_source_dir"] == ""
+        # 設定済み Path は str(path)
+        assert snap["output_dir"] == str(configured_path)
+        # 非 Path 値はそのまま
+        assert snap["literal"] == "non-path"
+        assert payload["config_snapshot"]["version"] == "0.1.0"
+
     def test_round_trip_empty_candidates(self, tmp_path: Path) -> None:
         from wiseman_hub.pdf.session import session_path
 

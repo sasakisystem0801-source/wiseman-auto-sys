@@ -528,7 +528,7 @@ class TestExExtractorDialogSmoke:
 
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
-                ex_source_dir=str(source),
+                ex_source_dir=source,
                 facility_root_dir=str(root_dir),
             )
         )
@@ -568,7 +568,7 @@ class TestExExtractorDialogSmoke:
 
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
-                ex_source_dir=str(original_source),
+                ex_source_dir=original_source,
                 facility_root_dir=str(root_dir),
             )
         )
@@ -616,7 +616,7 @@ class TestExExtractorDialogSmoke:
 
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
-                ex_source_dir=str(original_source),
+                ex_source_dir=original_source,
                 facility_root_dir=str(root_dir),
             )
         )
@@ -658,7 +658,7 @@ class TestExExtractorDialogSmoke:
 
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
-                ex_source_dir=str(original_source),
+                ex_source_dir=original_source,
                 facility_root_dir=str(root_dir),
             )
         )
@@ -707,7 +707,7 @@ class TestExExtractorDialogSmoke:
 
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
-                ex_source_dir=str(source),
+                ex_source_dir=source,
                 facility_root_dir=str(root_dir),
             )
         )
@@ -758,7 +758,7 @@ class TestExExtractorDialogSmoke:
 
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
-                ex_source_dir=str(original_source),
+                ex_source_dir=original_source,
                 facility_root_dir=str(root_dir),
             )
         )
@@ -824,7 +824,7 @@ class TestExExtractorDialogSmoke:
 
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
-                ex_source_dir=str(original_source),
+                ex_source_dir=original_source,
                 facility_root_dir=str(root_dir),
             )
         )
@@ -887,7 +887,7 @@ class TestExExtractorDialogSmoke:
         # TOML ex_source_dir 未設定 (空文字列)
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
-                ex_source_dir="",
+                ex_source_dir=Path(""),
                 facility_root_dir=str(root_dir),
             )
         )
@@ -948,7 +948,7 @@ class TestExExtractorDialogSmoke:
 
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
-                ex_source_dir=str(source),
+                ex_source_dir=source,
                 facility_root_dir=str(root_dir),
             )
         )
@@ -1010,7 +1010,7 @@ class TestExExtractorDialogSmoke:
 
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
-                ex_source_dir=str(original_source),
+                ex_source_dir=original_source,
                 facility_root_dir=str(root_dir),
             )
         )
@@ -1037,7 +1037,7 @@ class TestExExtractorDialogSmoke:
             saved_cfg, saved_path, saved_kwargs = save_calls[0]
             assert saved_path == config_path
             # ex_source_dir が選択値で更新されている
-            assert saved_cfg.pdf_merge.ex_source_dir == str(new_source)
+            assert saved_cfg.pdf_merge.ex_source_dir == new_source
             assert saved_kwargs.get("create_if_missing") is True
             dialog._on_close()
         finally:
@@ -1063,10 +1063,10 @@ class TestExExtractorDialogSmoke:
         original_aliases = {"事業所A": ["A支店", "A店"]}
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
-                ex_source_dir=str(original_source),
+                ex_source_dir=original_source,
                 facility_root_dir=str(root_dir),
-                input_dir="/some/input",
-                output_dir="/some/output",
+                input_dir=Path("/some/input"),
+                output_dir=Path("/some/output"),
                 source_a_filename="A.pdf",
                 source_d_filename="D.pdf",
                 source_b_pattern="custom_B_{name}.pdf",
@@ -1096,11 +1096,11 @@ class TestExExtractorDialogSmoke:
             assert len(save_calls) == 1
             saved_cfg = save_calls[0]
             # ex_source_dir のみ更新
-            assert saved_cfg.pdf_merge.ex_source_dir == str(new_source)
+            assert saved_cfg.pdf_merge.ex_source_dir == new_source
             # 他キーは原値を保持 (Partial Update)
             assert saved_cfg.pdf_merge.facility_root_dir == str(root_dir)
-            assert saved_cfg.pdf_merge.input_dir == "/some/input"
-            assert saved_cfg.pdf_merge.output_dir == "/some/output"
+            assert saved_cfg.pdf_merge.input_dir == Path("/some/input")
+            assert saved_cfg.pdf_merge.output_dir == Path("/some/output")
             assert saved_cfg.pdf_merge.source_a_filename == "A.pdf"
             assert saved_cfg.pdf_merge.source_d_filename == "D.pdf"
             assert saved_cfg.pdf_merge.source_b_pattern == "custom_B_{name}.pdf"
@@ -1130,7 +1130,7 @@ class TestExExtractorDialogSmoke:
 
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
-                ex_source_dir=str(original_source),
+                ex_source_dir=original_source,
                 facility_root_dir=str(root_dir),
             )
         )
@@ -1182,7 +1182,7 @@ class TestExExtractorDialogSmoke:
 
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
-                ex_source_dir=str(tmp_path / "original"),
+                ex_source_dir=tmp_path / "original",
                 facility_root_dir=str(root_dir),
             )
         )
@@ -1235,7 +1235,7 @@ class TestExExtractorDialogSmoke:
         (tmp_path / "original").mkdir()
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
-                ex_source_dir=str(tmp_path / "original"),
+                ex_source_dir=tmp_path / "original",
                 facility_root_dir=str(root_dir),
             )
         )
@@ -1291,7 +1291,7 @@ class TestExExtractorDialogSmoke:
 
         config = AppConfig(
             pdf_merge=PdfMergeConfig(
-                ex_source_dir=str(tmp_path / "original"),
+                ex_source_dir=tmp_path / "original",
                 facility_root_dir=str(root_dir),
             )
         )

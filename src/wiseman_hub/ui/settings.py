@@ -27,6 +27,7 @@ from wiseman_hub.config import (
     ConcatSourceLetter,
     UserNameBBox,
     coerce_path,
+    is_path_configured,
     save_config,
 )
 from wiseman_hub.ui.common import (
@@ -128,9 +129,19 @@ class SettingsDialogResult:
 def form_from_config(config: AppConfig) -> SettingsForm:
     """AppConfig から SettingsForm を生成（GUI 初期値用）。"""
     bbox = config.pdf_merge.user_name_bbox
+    # Issue #27 続編 G Phase 2a: input_dir / output_dir は Path 型、Tk Entry は
+    # str 保持のため未設定 sentinel は空 str に変換 (is_path_configured ベース)。
     return SettingsForm(
-        input_dir=config.pdf_merge.input_dir,
-        output_dir=config.pdf_merge.output_dir,
+        input_dir=(
+            str(config.pdf_merge.input_dir)
+            if is_path_configured(config.pdf_merge.input_dir)
+            else ""
+        ),
+        output_dir=(
+            str(config.pdf_merge.output_dir)
+            if is_path_configured(config.pdf_merge.output_dir)
+            else ""
+        ),
         source_a_filename=config.pdf_merge.source_a_filename,
         source_b_pattern=config.pdf_merge.source_b_pattern,
         source_c_pattern=config.pdf_merge.source_c_pattern,
@@ -203,8 +214,10 @@ def form_to_config(form: SettingsForm, base: AppConfig) -> AppConfig:
         reports=decoupled_reports,
         pdf_merge=replace(
             base.pdf_merge,
-            input_dir=form.input_dir.strip(),
-            output_dir=form.output_dir.strip(),
+            # Issue #27 続編 G Phase 2a: form (str) → Path 変換。coerce_path で
+            # 空白 strip + Path("") sentinel 化を TOML 経路と一致させる (DRY)。
+            input_dir=coerce_path("pdf_merge.input_dir", form.input_dir),
+            output_dir=coerce_path("pdf_merge.output_dir", form.output_dir),
             source_a_filename=form.source_a_filename.strip(),
             source_b_pattern=form.source_b_pattern.strip(),
             source_c_pattern=form.source_c_pattern.strip(),

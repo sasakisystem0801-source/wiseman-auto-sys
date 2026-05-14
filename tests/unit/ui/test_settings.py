@@ -237,8 +237,8 @@ class TestFormFromConfig:
             base,
             pdf_merge=replace(
                 base.pdf_merge,
-                input_dir="/in",
-                output_dir="/out",
+                input_dir=Path("/in"),
+                output_dir=Path("/out"),
                 source_a_filename="A.pdf",
                 user_name_bbox=UserNameBBox(x0=1.5, y0=2.0, x1=100.0, y1=50.0, dpi=300),
                 concat_order=("B", "A", "C"),
@@ -291,13 +291,13 @@ class TestFormToConfig:
         base = AppConfig()
         base = replace(
             base,
-            pdf_merge=replace(base.pdf_merge, input_dir="/old"),
+            pdf_merge=replace(base.pdf_merge, input_dir=Path("/old")),
             ocr_backend=replace(base.ocr_backend, api_key="old_key"),
         )
 
         new_cfg = form_to_config(_full_form(), base)
 
-        assert new_cfg.pdf_merge.input_dir == "/in"
+        assert new_cfg.pdf_merge.input_dir == Path("/in")
         assert new_cfg.ocr_backend.api_key == "secret"
         assert new_cfg.pdf_merge.user_name_bbox.x0 == 10.0
         assert new_cfg.pdf_merge.user_name_bbox.dpi == 200
@@ -329,8 +329,8 @@ def _base_config() -> AppConfig:
     # 旧 attribute 代入 (cfg.pdf_merge.input_dir = "/in") は FrozenInstanceError。
     return AppConfig(
         pdf_merge=PdfMergeConfig(
-            input_dir="/in",
-            output_dir="/out",
+            input_dir=Path("/in"),
+            output_dir=Path("/out"),
             source_a_filename="A.pdf",
             user_name_bbox=UserNameBBox(x0=10.0, y0=20.0, x1=100.0, y1=50.0),
         ),
@@ -387,7 +387,7 @@ class TestSettingsDialogUI:
         assert save_calls[0][1] == config_path
         assert result.saved is True
         assert result.config is not None
-        assert result.config.pdf_merge.input_dir == "/in"
+        assert result.config.pdf_merge.input_dir == Path("/in")
 
     def test_save_with_invalid_form_shows_error_and_keeps_open(
         self, tmp_path: Path
@@ -407,7 +407,7 @@ class TestSettingsDialogUI:
         base_cfg = _base_config()
         cfg = replace(
             base_cfg,
-            pdf_merge=replace(base_cfg.pdf_merge, input_dir=""),  # 必須を欠落させる
+            pdf_merge=replace(base_cfg.pdf_merge, input_dir=Path("")),  # 必須を欠落させる
         )
 
         root = tk.Tk()

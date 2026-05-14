@@ -424,7 +424,7 @@ def test_settings_callback_reloads_launcher_on_save(
     base = AppConfig()
     saved_config = replace(
         base,
-        pdf_merge=replace(base.pdf_merge, input_dir="/reloaded"),
+        pdf_merge=replace(base.pdf_merge, input_dir=Path("/reloaded")),
     )
 
     class FakeDialog:
@@ -460,7 +460,7 @@ def test_settings_callback_reloads_launcher_on_save(
     callback()
 
     assert len(reload_calls) == 1
-    assert reload_calls[0].pdf_merge.input_dir == "/reloaded"
+    assert reload_calls[0].pdf_merge.input_dir == Path("/reloaded")
 
 
 def test_settings_callback_does_not_reload_on_cancel(

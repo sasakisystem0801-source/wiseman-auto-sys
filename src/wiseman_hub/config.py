@@ -619,16 +619,19 @@ class PdfMergeConfig:
             - alias が他事業所の正式名と一致しない（alias 一致と完全一致の衝突回避）
     """
 
-    input_dir: str = ""
-    output_dir: str = ""
+    # Issue #27 続編 G Phase 2a: input_dir / output_dir / ex_source_dir を Path 化。
+    # facility_root_dir は Phase 2b で別 PR、source_*_filename / source_*_pattern は
+    # ファイル名 / glob パターンであり Path 化対象外 (str 維持)。
+    input_dir: Path = field(default_factory=Path)
+    output_dir: Path = field(default_factory=Path)
     source_a_filename: str = ""
     source_d_filename: str = ""
     source_b_pattern: str = "B_{name}.pdf"
     source_c_pattern: str = "C_{name}.pdf"
     concat_order: tuple[ConcatSourceLetter, ...] = field(default_factory=_default_concat_order)
     user_name_bbox: UserNameBBox = field(default_factory=UserNameBBox)
-    facility_root_dir: str = ""
-    ex_source_dir: str = ""
+    facility_root_dir: str = ""  # Phase 2b で Path 化予定
+    ex_source_dir: Path = field(default_factory=Path)
     facility_aliases: dict[str, list[str]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -647,6 +650,10 @@ class PdfMergeConfig:
         ``facility_aliases`` の検証は ``load_config`` 側の ``_validate_facility_aliases``
         が担うため、ここでは触らない（dataclass 単体生成では検証されない既存設計を維持）。
         """
+        # Issue #27 続編 G Phase 2a: path field 3 件を型ガード。
+        _check_path("PdfMergeConfig.input_dir", self.input_dir)
+        _check_path("PdfMergeConfig.output_dir", self.output_dir)
+        _check_path("PdfMergeConfig.ex_source_dir", self.ex_source_dir)
         if not isinstance(self.concat_order, tuple):
             raise TypeError(
                 f"PdfMergeConfig.concat_order must be tuple "
@@ -1109,6 +1116,13 @@ def load_config(path: Path | None = None) -> AppConfig:
         pdf_merge_data["concat_order"] = _coerce_concat_order(
             pdf_merge_data["concat_order"]
         )
+    # Issue #27 続編 G Phase 2a: TOML str → Path coerce (空白 strip → 未設定 sentinel)。
+    # 型違反 (int / bool / list 等) は coerce_path が TypeError raise (起動時 fail-close)。
+    for path_field in ("input_dir", "output_dir", "ex_source_dir"):
+        if path_field in pdf_merge_data:
+            pdf_merge_data[path_field] = coerce_path(
+                f"pdf_merge.{path_field}", pdf_merge_data[path_field]
+            )
     pdf_merge = PdfMergeConfig(
         **pdf_merge_data,
         user_name_bbox=UserNameBBox(**bbox_data),
@@ -1203,6 +1217,40 @@ def load_config(path: Path | None = None) -> AppConfig:
 # AppConfig に新フィールド追加時は対応する tuple に追記すること（save_config のラウンドトリップ対象）
 _APP_FIELDS: tuple[str, ...] = ("version", "log_level", "log_dir")
 _SCALAR_SECTIONS: tuple[str, ...] = ("wiseman", "schedule", "gcp", "updater", "ocr_backend")
+
+
+def stringify_paths_recursive(obj: Any) -> Any:
+    """ネスト dict / list / tuple 内の ``Path`` を再帰的に str に正規化する。
+
+    Issue #27 続編 G Phase 2a (evaluator MEDIUM 対応):
+        ``_stringify_path_values`` は shallow only (Phase 1 evaluator MEDIUM 対応で
+        ``_update_pdf_merge`` / ``_update_checklist`` の **各 nested asdict** に
+        別個適用する方針)。一方、``pdf/session.py`` の ``json.dumps(config_snapshot)``
+        経路では ``asdict(AppConfig)`` の **任意深度** nested 構造 (wiseman /
+        gcp / pdf_merge / checklist / 等) が渡される。これらに対しても TOML 規約
+        (未設定 Path → ``""``、設定済み → ``str(path)``) を適用するため、再帰版を
+        config.py に集約する。
+
+    判定:
+        - ``Path`` のうち未設定 sentinel (``is_path_configured == False``) → ``""``
+        - ``Path`` のうち設定済み → ``str(path)``
+        - ``dict`` / ``list`` / ``tuple`` → 各要素を再帰展開 (tuple は JSON 互換性
+          のため list に変換)
+        - その他 (str / int / bool / float / None) → そのまま返す
+
+    consumer: ``session.py`` の ``_to_dict`` 経由で ``config_snapshot`` の Path を
+    境界変換する。``save_config`` 経路は ``_stringify_path_values`` (shallow) で
+    各 section ごとに処理しているため別。
+    """
+    if isinstance(obj, Path):
+        return "" if not is_path_configured(obj) else str(obj)
+    if isinstance(obj, dict):
+        return {k: stringify_paths_recursive(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [stringify_paths_recursive(v) for v in obj]
+    if isinstance(obj, tuple):
+        return [stringify_paths_recursive(v) for v in obj]
+    return obj
 
 
 def _stringify_path_values(data: dict[str, Any]) -> dict[str, Any]:

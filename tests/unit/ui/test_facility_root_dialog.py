@@ -537,8 +537,8 @@ class TestPersistRoot:
         # 初期化は dataclass コンストラクタ経由。
         cfg = AppConfig(
             pdf_merge=PdfMergeConfig(
-                input_dir="/keep_in",
-                output_dir="/keep_out",
+                input_dir=Path("/keep_in"),
+                output_dir=Path("/keep_out"),
                 source_a_filename="keep.pdf",
             ),
         )
@@ -546,6 +546,6 @@ class TestPersistRoot:
 
         vm.set_root_and_rows(tmp_path, [])
 
-        assert vm.config.pdf_merge.input_dir == "/keep_in"
-        assert vm.config.pdf_merge.output_dir == "/keep_out"
+        assert vm.config.pdf_merge.input_dir == Path("/keep_in")
+        assert vm.config.pdf_merge.output_dir == Path("/keep_out")
         assert vm.config.pdf_merge.source_a_filename == "keep.pdf"

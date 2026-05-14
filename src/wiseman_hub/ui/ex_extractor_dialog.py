@@ -35,7 +35,7 @@ from pathlib import Path
 from tkinter import filedialog, ttk
 from typing import Final, Protocol
 
-from wiseman_hub.config import AppConfig, save_config
+from wiseman_hub.config import AppConfig, coerce_path, save_config
 from wiseman_hub.pdf.ex_extractor import (
     ExtractionErrorCode,
     ExtractionItem,
@@ -433,7 +433,10 @@ class ExExtractorDialog:
 
         # ViewModel 初期化 (config から source/root/aliases を解決)
         if view_model is None:
-            source = Path(config.pdf_merge.ex_source_dir or ".")
+            # Issue #27 続編 G Phase 2a: ex_source_dir は Path 型 (未設定なら
+            # Path("") == Path(".") なので "or ." ガードと等価)。
+            # facility_root_dir は Phase 2b で Path 化予定、当面 str 維持。
+            source = config.pdf_merge.ex_source_dir
             root = Path(config.pdf_merge.facility_root_dir or ".")
             view_model = ExExtractorViewModel(
                 source_dir=source,
@@ -717,11 +720,16 @@ class ExExtractorDialog:
             # Issue #27 続編 E Phase 3b: AppConfig + PdfMergeConfig 共に frozen=True
             # のため、``replace()`` を二重に重ねて新 AppConfig instance に差し替える。
             # ``self._config`` 自体は通常 class attribute なので再代入可能。
+            # Issue #27 続編 G Phase 2a: ex_source_dir は Path 型。settings.py の
+            # form_to_config と同じ coerce_path 経路で sentinel 規約を統一する
+            # (DRY、空白だけの path も Path("") に正規化)。
             self._config = replace(
                 self._config,
                 pdf_merge=replace(
                     self._config.pdf_merge,
-                    ex_source_dir=str(selected),
+                    ex_source_dir=coerce_path(
+                        "pdf_merge.ex_source_dir", selected
+                    ),
                 ),
             )
             try:

@@ -29,6 +29,7 @@ from glob import glob
 from pathlib import Path
 from typing import IO, Any
 
+from wiseman_hub.config import stringify_paths_recursive
 from wiseman_hub.pdf.matcher import MatchResult, MatchStatus, SourceKind
 from wiseman_hub.pdf.ocr_client import Confidence
 from wiseman_hub.utils.atomic_io import DEFAULT_TMP_GLOB, write_bytes_atomically
@@ -423,7 +424,13 @@ def _to_dict(session: Session) -> dict[str, Any]:
     # asdict は ``dict`` のみを再帰展開する（``MappingProxyType`` 等の純粋な ``Mapping``
     # 実装は対象外）。型は ``Mapping`` に緩和してあるが、シリアライズ時は ``dict`` に
     # 明示変換して JSON ラウンドトリップを安定させる。
-    d["config_snapshot"] = dict(session.config_snapshot)
+    # Issue #27 続編 G Phase 2a (evaluator MEDIUM 対応): config_snapshot 内のネスト
+    # Path 値を TOML 規約 (未設定 → "" / 設定済み → str(path)) で正規化する。
+    # save_config の _stringify_path_values は shallow only だが、config_snapshot は
+    # 任意深度の nested 構造を持つため stringify_paths_recursive で集約処理する。
+    d["config_snapshot"] = stringify_paths_recursive(
+        dict(session.config_snapshot)
+    )
     for cand, original in zip(d["candidates"], session.candidates, strict=True):
         cand["status"] = str(original.status)
         for sim, sim_original in zip(
@@ -548,6 +555,9 @@ def save_session(session: Session, *, sessions_dir: Path) -> Session:
     refreshed = replace(session, updated_at=datetime.now(UTC).isoformat())
 
     data = _to_dict(refreshed)
+    # Issue #27 続編 G Phase 2a: config_snapshot 内の Path は _to_dict 内で
+    # stringify_paths_recursive により str / "" (未設定 sentinel) に正規化済。
+    # default 引数は不要 (Path 以外の non-serializable 型を silent 化したくない)。
     payload = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
 
     target = session_path(refreshed.session_id, sessions_dir)
