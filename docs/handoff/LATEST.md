@@ -1,9 +1,9 @@
 # Session 72 完了 — handoff debt #6 消化 + Issue #27 続編 F Phase 1/2/2-b 完遂
 
 **Date**: 2026-05-14
-**Main HEAD**: `ef1f75d` feat(logging): RPA 経路でも config.log_level を root logger に反映 (#27 続編 F Phase 2-b) (#288)
+**Main HEAD**: `f93e16a` docs(handoff): Session 72 完了 - handoff debt #6 消化 + Issue #27 続編 F Phase 1/2/2-b 完遂 (#289)
 **Test count**: 2012 collected (Session 71 完了時 1979 → +33、PR #286 で +24、PR #287 で +7、PR #288 で +2)
-**Active Issues**: 11 (実質 6、postpone 5) [変化なし、Net 0]
+**Active Issues**: 12 (実質 7、postpone 5) [変化なし、Net 0] ※Session 71 から「11 (実質 6)」と記載していたが実カウントは 12 で誤差 1 件、本ハンドオフで訂正
 **Phase**: Phase 7 着手前 [変化なし]
 
 ---
