@@ -35,7 +35,7 @@ from pathlib import Path
 from tkinter import filedialog, ttk
 from typing import Final, Protocol
 
-from wiseman_hub.config import AppConfig, coerce_path, save_config
+from wiseman_hub.config import AppConfig, coerce_path, is_path_configured, save_config
 from wiseman_hub.pdf.ex_extractor import (
     ExtractionErrorCode,
     ExtractionItem,
@@ -549,16 +549,21 @@ class ExExtractorDialog:
     def _redraw(self) -> None:
         """vm.state に基づき UI を再描画。"""
         # Issue #155: source_dir / facility_root_dir のパス表示を毎回更新
-        # (browse 直後の _redraw で新値が即座に反映される)。存在しないパスは
-        # _LBL_NOT_SET 表示に切替えてユーザーに伝える。
+        # (browse 直後の _redraw で新値が即座に反映される)。
+        # Issue #27 続編 G Phase 3 PR-Debt2: Path("") == Path(".") で `.exists()`
+        # は CWD 存在前提で True を返す silent UX 劣化 (Path("") の str() = ".")
+        # を防ぐため、is_path_configured (sentinel 判定) と .exists() の二段 gate
+        # を採用。未設定 (Path("") / Path(".") / 空白 Path) なら _LBL_NOT_SET 表示。
         self._lbl_source.configure(
             text=str(self._vm.source_dir)
-            if self._vm.source_dir.exists()
+            if is_path_configured(self._vm.source_dir)
+            and self._vm.source_dir.exists()
             else _LBL_NOT_SET
         )
         self._lbl_facility_root.configure(
             text=str(self._vm.facility_root_dir)
-            if self._vm.facility_root_dir.exists()
+            if is_path_configured(self._vm.facility_root_dir)
+            and self._vm.facility_root_dir.exists()
             else _LBL_NOT_SET
         )
 
