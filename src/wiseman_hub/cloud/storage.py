@@ -13,9 +13,13 @@ logger = logging.getLogger(__name__)
 
 
 def create_client(config: GcpConfig) -> storage.Client:
-    """GCS クライアントを作成する。"""
+    """GCS クライアントを作成する。
+
+    Issue #27 続編 G §4: service_account_key_path は Path 型、
+    storage.Client.from_service_account_json は str を要求するため境界変換。
+    """
     return storage.Client.from_service_account_json(
-        config.service_account_key_path,
+        str(config.service_account_key_path),
         project=config.project_id,
     )
 

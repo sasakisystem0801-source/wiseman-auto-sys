@@ -46,7 +46,7 @@ def _make_config(tmp_path: Path) -> AppConfig:
         gcp=GcpConfig(
             project_id="p",
             data_bucket_name="b",
-            service_account_key_path=str(fake_sa),
+            service_account_key_path=fake_sa,
         ),
         checklist=ChecklistConfig(
             spreadsheet_id="dummy",
@@ -60,7 +60,7 @@ def _make_config(tmp_path: Path) -> AppConfig:
             },
             xlsx_path_cache={"宮下:2026:3": r"\\nas\share\PT 宮下\3月.xlsx"},
         ),
-        log_dir=str(tmp_path / "logs"),
+        log_dir=tmp_path / "logs",
     )
 
 

@@ -62,7 +62,8 @@ output_format = "csv"
     config = load_config(config_file)
     assert config.version == "1.0.0"
     assert config.log_level == "DEBUG"
-    assert config.wiseman.exe_path == "C:\\test\\wiseman.exe"
+    # Issue #27 続編 G §4: exe_path は Path 型
+    assert config.wiseman.exe_path == Path("C:\\test\\wiseman.exe")
     assert config.wiseman.startup_wait_sec == 15
     assert config.gcp.project_id == "test-project"
     assert len(config.reports) == 1
@@ -364,7 +365,8 @@ output_dir = ""
 
         reloaded = load_config(target)
         assert reloaded.wiseman.startup_wait_sec == 25
-        assert reloaded.wiseman.exe_path == "C:\\foo.exe"
+        # Issue #27 続編 G §4: exe_path は Path 型
+        assert reloaded.wiseman.exe_path == Path("C:\\foo.exe")
 
     def test_save_raises_type_error_when_section_is_not_table(self, tmp_path: Path) -> None:
         """section に table 以外（整数等）が入っている不正 TOML では TypeError を返す。"""
@@ -1365,13 +1367,13 @@ class TestFrozenInstanceImmutability:
         self, field_name: str, new_value: object
     ) -> None:
         """WisemanConfig の各フィールドへの post-construction 代入は FrozenInstanceError。"""
-        cfg = WisemanConfig(exe_path="C:/wiseman.exe")
+        cfg = WisemanConfig(exe_path=Path("C:/wiseman.exe"))
         with pytest.raises(dataclasses.FrozenInstanceError):
             setattr(cfg, field_name, new_value)
 
     def test_wiseman_config_replace_reapplies_post_init_validation(self) -> None:
         """replace() で新規構築時に __post_init__ 型ガードが再評価される。"""
-        cfg = WisemanConfig(exe_path="C:/wiseman.exe")
+        cfg = WisemanConfig(exe_path=Path("C:/wiseman.exe"))
         # bool は int サブクラスでもガード対象 (silent: True == 1 で startup_wait_sec=True
         # が sleep 経路で動作してしまう問題を起動時に弾く)
         with pytest.raises(TypeError, match="startup_wait_sec must be int"):
@@ -1585,7 +1587,7 @@ class TestFrozenInstanceImmutability:
             # 直下 list field
             ("reports", []),
             # ネスト dataclass field (参照差し替えの阻止のみ確認、内部 mutation は別議論)
-            ("wiseman", WisemanConfig(exe_path="C:/x.exe")),
+            ("wiseman", WisemanConfig(exe_path=Path("C:/x.exe"))),
             ("schedule", ScheduleConfig()),
             ("gcp", GcpConfig()),
             ("updater", UpdaterConfig()),
@@ -1903,10 +1905,14 @@ class TestDataclassTypeGuards:
     """
 
     # --- WisemanConfig --------------------------------------------------
-    def test_wiseman_non_string_exe_path_raises(self) -> None:
-        with pytest.raises(TypeError, match="WisemanConfig.exe_path must be str"):
+    def test_wiseman_non_path_exe_path_raises(self) -> None:
+        # Issue #27 続編 G §4: exe_path は Path 型、str は TypeError
+        with pytest.raises(TypeError, match="WisemanConfig.exe_path must be Path"):
             from wiseman_hub.config import WisemanConfig
             WisemanConfig(exe_path=123)  # type: ignore[arg-type]
+        with pytest.raises(TypeError, match="WisemanConfig.exe_path must be Path"):
+            from wiseman_hub.config import WisemanConfig
+            WisemanConfig(exe_path="C:/wiseman.exe")  # type: ignore[arg-type]
 
     def test_wiseman_non_int_startup_wait_raises(self) -> None:
         from wiseman_hub.config import WisemanConfig
@@ -1946,13 +1952,16 @@ class TestDataclassTypeGuards:
             GcpConfig(project_id=123)  # type: ignore[arg-type]
 
     def test_gcp_sa_key_path_typeerror_does_not_leak_value(self) -> None:
-        """PII 防御: service_account_key_path の TypeError に値を含めない。"""
+        """PII 防御: service_account_key_path の TypeError に値を含めない。
+
+        Issue #27 続編 G §4: SA key path は Path 型、list は TypeError。
+        """
         from wiseman_hub.config import GcpConfig
         sensitive_marker = "should_not_appear_in_message"
         with pytest.raises(TypeError) as exc_info:
             GcpConfig(service_account_key_path=[sensitive_marker])  # type: ignore[arg-type]
         assert sensitive_marker not in str(exc_info.value)
-        assert "service_account_key_path must be str" in str(exc_info.value)
+        assert "service_account_key_path must be Path" in str(exc_info.value)
 
     # --- UpdaterConfig --------------------------------------------------
     def test_updater_non_bool_enabled_raises(self) -> None:
@@ -2019,7 +2028,8 @@ class TestDataclassTypeGuards:
     def test_app_config_default_construction_passes_all_type_guards(self) -> None:
         """AppConfig() の default 値が全 dataclass の型ガードを通過すること (regression guard)。"""
         cfg = AppConfig()
-        assert isinstance(cfg.wiseman.exe_path, str)
+        # Issue #27 続編 G §4: exe_path は Path 型
+        assert isinstance(cfg.wiseman.exe_path, Path)
         assert isinstance(cfg.schedule.enabled, bool)
         assert isinstance(cfg.reports, list)
         assert isinstance(cfg.gcp.project_id, str)
@@ -2319,7 +2329,8 @@ class TestLoadConfigSectionTypeGuards:
         config_file.write_text(toml_content, encoding="utf-8")
 
         cfg = load_config(config_file)
-        assert cfg.wiseman.exe_path == ""
+        # Issue #27 続編 G §4: exe_path は Path 型、未設定は Path("") (= Path("."))
+        assert cfg.wiseman.exe_path == Path("")
         assert cfg.wiseman.startup_wait_sec == 15
 
     def test_checklist_facility_routing_array_raises(self, tmp_path: Path) -> None:
@@ -2616,9 +2627,8 @@ class TestSaKeyPathResolution:
             '[gcp]\nservice_account_key_path = "sa-key.json"\n', encoding="utf-8"
         )
         config = load_config(cfg_path)
-        assert config.gcp.service_account_key_path == str(
-            (cfg_dir / "sa-key.json").resolve()
-        )
+        # Issue #27 続編 G §4: service_account_key_path は Path 型
+        assert config.gcp.service_account_key_path == (cfg_dir / "sa-key.json").resolve()
 
     def test_avoids_duplicate_config_segment_for_distribution_layout(
         self, tmp_path: Path
@@ -2636,8 +2646,9 @@ class TestSaKeyPathResolution:
         )
         config = load_config(cfg_path)
         # 期待: $tmp/wiseman-hub/config/sa-key.json (重複なし)
+        # Issue #27 続編 G §4: service_account_key_path は Path 型
         expected = (dist_root / "config" / "sa-key.json").resolve()
-        assert config.gcp.service_account_key_path == str(expected)
+        assert config.gcp.service_account_key_path == expected
 
     def test_keeps_absolute_path_unchanged(self, tmp_path: Path) -> None:
         cfg_path = tmp_path / "default.toml"
@@ -2647,18 +2658,324 @@ class TestSaKeyPathResolution:
             encoding="utf-8",
         )
         config = load_config(cfg_path)
-        # _resolve_sa_key_path は str(Path) を返す = OS native 区切り
-        # （Windows: "C:\\..\\sa-key.json" / POSIX: "/.../sa-key.json"）
-        assert config.gcp.service_account_key_path == str(abs_key)
+        # Issue #27 続編 G §4: service_account_key_path は Path 型 (絶対 path をそのまま保持)
+        assert config.gcp.service_account_key_path == abs_key
 
     def test_empty_value_remains_empty(self, tmp_path: Path) -> None:
-        """GCP 機能未使用環境では空文字列のままにする (既存運用維持)。"""
+        """GCP 機能未使用環境では未設定 Path (Path("") = Path(".")) のまま (既存運用維持)。
+
+        Issue #27 続編 G §4: 空文字列 → Path("") に正規化。is_sa_key_configured で
+        consumer 側が未設定判定する規約。
+        """
         cfg_path = tmp_path / "default.toml"
         cfg_path.write_text(
             '[gcp]\nservice_account_key_path = ""\n', encoding="utf-8"
         )
         config = load_config(cfg_path)
-        assert config.gcp.service_account_key_path == ""
+        assert config.gcp.service_account_key_path == Path("")
+        assert config.gcp.is_sa_key_configured is False
+
+
+class TestIssue27PathMigration:
+    """Issue #27 続編 G Phase 1: str → Path 型移行の検証。
+
+    対象: WisemanConfig.exe_path / GcpConfig.service_account_key_path /
+    AppConfig.log_dir の 3 field。is_configured 系プロパティ・coerce_path /
+    _check_path helper・load / save の str ⇄ Path 境界変換を網羅。
+    """
+
+    # --- is_path_configured (module-level helper) ---
+
+    def test_is_path_configured_empty_path_is_false(self) -> None:
+        """Path("") は未設定 sentinel (Path(".") と等価) で is_path_configured=False。"""
+        from wiseman_hub.config import is_path_configured
+        assert is_path_configured(Path("")) is False
+
+    def test_is_path_configured_dot_path_is_false(self) -> None:
+        """Path(".") (current dir 明示) も sentinel と区別不能で False。
+
+        Phase 2 で Optional[Path] 移行を検討する根拠となる既知挙動の固定。
+        """
+        from wiseman_hub.config import is_path_configured
+        assert is_path_configured(Path(".")) is False
+
+    def test_is_path_configured_no_arg_path_is_false(self) -> None:
+        """Path() (no-arg) も Path("") と等価で False。"""
+        from wiseman_hub.config import is_path_configured
+        assert is_path_configured(Path()) is False
+
+    def test_is_path_configured_absolute_path_is_true(self) -> None:
+        from wiseman_hub.config import is_path_configured
+        assert is_path_configured(Path("/tmp/foo")) is True
+
+    def test_is_path_configured_relative_path_is_true(self) -> None:
+        from wiseman_hub.config import is_path_configured
+        assert is_path_configured(Path("relative/path")) is True
+
+    # --- is_exe_configured (WisemanConfig) ---
+
+    def test_is_exe_configured_false_for_default(self) -> None:
+        """default WisemanConfig() は is_exe_configured=False (空 Path sentinel)。"""
+        cfg = WisemanConfig()
+        assert cfg.is_exe_configured is False
+        assert str(cfg.exe_path) == "."
+
+    def test_is_exe_configured_true_for_set_path(self) -> None:
+        """非空 Path は is_exe_configured=True。"""
+        cfg = WisemanConfig(exe_path=Path("C:/wiseman.exe"))
+        assert cfg.is_exe_configured is True
+
+    def test_is_exe_configured_false_for_empty_path(self) -> None:
+        """Path("") は Path(".") と等価で is_exe_configured=False (未設定 sentinel)。"""
+        cfg = WisemanConfig(exe_path=Path(""))
+        assert cfg.is_exe_configured is False
+
+    # --- is_sa_key_configured (GcpConfig) ---
+
+    def test_is_sa_key_configured_false_for_default(self) -> None:
+        cfg = GcpConfig()
+        assert cfg.is_sa_key_configured is False
+
+    def test_is_sa_key_configured_true_for_set_path(self, tmp_path: Path) -> None:
+        cfg = GcpConfig(service_account_key_path=tmp_path / "sa.json")
+        assert cfg.is_sa_key_configured is True
+
+    # --- is_log_dir_configured (AppConfig) ---
+
+    def test_is_log_dir_configured_false_for_default(self) -> None:
+        cfg = AppConfig()
+        assert cfg.is_log_dir_configured is False
+
+    def test_is_log_dir_configured_true_for_set_path(self, tmp_path: Path) -> None:
+        cfg = AppConfig(log_dir=tmp_path)
+        assert cfg.is_log_dir_configured is True
+
+    # --- coerce_path helper (load_config 内部、TOML str → Path) ---
+
+    def testcoerce_path_none_returns_empty(self) -> None:
+        """None 入力は Path("") (未設定 sentinel)。"""
+        from wiseman_hub.config import coerce_path
+        result = coerce_path("test.field", None)
+        assert result == Path("")
+        assert str(result) == "."
+
+    def testcoerce_path_empty_string_returns_empty(self) -> None:
+        from wiseman_hub.config import coerce_path
+        result = coerce_path("test.field", "")
+        assert result == Path("")
+
+    def testcoerce_path_whitespace_only_returns_empty(self) -> None:
+        """空白だけの文字列は Path("") (未設定扱い、TOML 手書き編集対策)。"""
+        from wiseman_hub.config import coerce_path
+        result = coerce_path("test.field", "   \t  ")
+        assert result == Path("")
+
+    def testcoerce_path_strips_whitespace(self) -> None:
+        """前後空白は strip してから Path 化 (TOML 手書き編集の typo 救済)。"""
+        from wiseman_hub.config import coerce_path
+        result = coerce_path("test.field", "  /tmp/foo  ")
+        assert result == Path("/tmp/foo")
+
+    def testcoerce_path_passthrough_path_input(self) -> None:
+        """既に Path インスタンスならそのまま返す (idempotent)。"""
+        from wiseman_hub.config import coerce_path
+        original = Path("/tmp/foo")
+        result = coerce_path("test.field", original)
+        assert result is original
+
+    def testcoerce_path_rejects_int(self) -> None:
+        """型違反 (int) は TypeError で起動時 fail-close。"""
+        from wiseman_hub.config import coerce_path
+        with pytest.raises(TypeError, match="must be str.*Path"):
+            coerce_path("test.field", 123)
+
+    def testcoerce_path_rejects_bool(self) -> None:
+        """bool (int サブクラス) は明示除外 (silent: True == 1 で str 経路すり抜け防止)。"""
+        from wiseman_hub.config import coerce_path
+        with pytest.raises(TypeError, match="must be str.*Path"):
+            coerce_path("test.field", True)
+
+    def testcoerce_path_rejects_list(self) -> None:
+        from wiseman_hub.config import coerce_path
+        with pytest.raises(TypeError, match="must be str.*Path"):
+            coerce_path("test.field", ["a", "b"])
+
+    def testcoerce_path_pii_echo_value_false(self) -> None:
+        """echo_value=False で TypeError メッセージに値を出さない (PII 防御)。"""
+        from wiseman_hub.config import coerce_path
+        sensitive = "should_not_appear_in_message"
+        with pytest.raises(TypeError) as exc_info:
+            coerce_path("test.field", [sensitive], echo_value=False)
+        assert sensitive not in str(exc_info.value)
+
+    # --- load_config の str → Path 変換 (e2e) ---
+
+    def test_load_config_coerces_exe_path_to_path(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[wiseman]\nexe_path = "C:/wiseman.exe"\n', encoding="utf-8"
+        )
+        cfg = load_config(cfg_path)
+        assert isinstance(cfg.wiseman.exe_path, Path)
+        assert cfg.wiseman.exe_path == Path("C:/wiseman.exe")
+        assert cfg.wiseman.is_exe_configured is True
+
+    def test_load_config_coerces_log_dir_to_path(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[app]\nlog_dir = "/var/log/wiseman"\n', encoding="utf-8"
+        )
+        cfg = load_config(cfg_path)
+        assert isinstance(cfg.log_dir, Path)
+        assert cfg.log_dir == Path("/var/log/wiseman")
+        assert cfg.is_log_dir_configured is True
+
+    def test_load_config_empty_exe_path_is_unset(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[wiseman]\nexe_path = ""\n', encoding="utf-8"
+        )
+        cfg = load_config(cfg_path)
+        assert cfg.wiseman.exe_path == Path("")
+        assert cfg.wiseman.is_exe_configured is False
+
+    def test_load_config_whitespace_exe_path_is_unset(self, tmp_path: Path) -> None:
+        """TOML 手書き編集で空白のみが入っても未設定扱い (起動時正規化)。"""
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[wiseman]\nexe_path = "   "\n', encoding="utf-8"
+        )
+        cfg = load_config(cfg_path)
+        assert cfg.wiseman.exe_path == Path("")
+        assert cfg.wiseman.is_exe_configured is False
+
+    def test_load_config_rejects_non_string_exe_path(self, tmp_path: Path) -> None:
+        """TOML で int を渡すと coerce_path 経由で TypeError (silent fail 防止)。"""
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[wiseman]\nexe_path = 123\n', encoding="utf-8"
+        )
+        with pytest.raises(TypeError, match="exe_path must be str.*Path"):
+            load_config(cfg_path)
+
+    # --- save_config の Path → str ラウンドトリップ ---
+
+    def test_save_config_round_trip_preserves_paths(self, tmp_path: Path) -> None:
+        """Path 型 field を save → load しても Path 値が保たれる (ラウンドトリップ整合)。"""
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[wiseman]\nexe_path = ""\n[app]\nlog_dir = ""\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        # Path 値を更新
+        new_cfg = replace(
+            cfg,
+            log_dir=Path("/var/log/test"),
+            wiseman=replace(cfg.wiseman, exe_path=Path("C:/Wiseman/app.exe")),
+        )
+        save_config(new_cfg, cfg_path)
+
+        reloaded = load_config(cfg_path)
+        assert reloaded.wiseman.exe_path == Path("C:/Wiseman/app.exe")
+        assert reloaded.log_dir == Path("/var/log/test")
+        assert isinstance(reloaded.wiseman.exe_path, Path)
+        assert isinstance(reloaded.log_dir, Path)
+
+    def test_save_config_writes_path_as_string(self, tmp_path: Path) -> None:
+        """TOML 出力は str 表現 (tomlkit は Path オブジェクトを直接受け取れないため境界変換が必須)。"""
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[app]\nlog_dir = ""\n', encoding="utf-8"
+        )
+        cfg = load_config(cfg_path)
+        new_cfg = replace(cfg, log_dir=Path("/var/log/test"))
+        save_config(new_cfg, cfg_path)
+
+        # 文字列として TOML に書かれていることを直接確認 (Path repr ではない)
+        content = cfg_path.read_text(encoding="utf-8")
+        assert 'log_dir = "/var/log/test"' in content
+        # Path 型の repr (e.g. "PosixPath('/var/log/test')") が混入していないこと
+        assert "PosixPath" not in content
+        assert "WindowsPath" not in content
+
+    # --- Codex review High 対応: 未設定 Path の TOML 書出は "" を保つ ---
+
+    def test_save_config_unset_path_written_as_empty_string(
+        self, tmp_path: Path
+    ) -> None:
+        """未設定 Path (Path("") = Path(".")) は TOML に '""' で書かれる (旧 str 互換)。
+
+        Codex review High: ``str(Path(""))`` は ``"."`` だが、TOML に
+        ``log_dir = "."`` で保存されると旧版ダウングレード / 手動編集で
+        「カレントディレクトリ指定」と誤解される silent 互換性劣化を防ぐ。
+        """
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[app]\nlog_dir = "/initial/path"\n[wiseman]\nexe_path = "C:/Wiseman.exe"\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        # path を全て未設定状態に戻す
+        cleared_cfg = replace(
+            cfg,
+            log_dir=Path(""),
+            wiseman=replace(cfg.wiseman, exe_path=Path("")),
+        )
+        save_config(cleared_cfg, cfg_path)
+
+        content = cfg_path.read_text(encoding="utf-8")
+        assert 'log_dir = ""' in content
+        assert 'exe_path = ""' in content
+        # 旧 silent 劣化バグ: '"."' が書かれていないこと
+        assert 'log_dir = "."' not in content
+        assert 'exe_path = "."' not in content
+
+        # ラウンドトリップで未設定状態が保たれること
+        reloaded = load_config(cfg_path)
+        assert reloaded.is_log_dir_configured is False
+        assert reloaded.wiseman.is_exe_configured is False
+
+    # --- Codex review Medium 対応: is_path_configured の非 Path defensive ---
+
+    def test_is_path_configured_none_is_false(self) -> None:
+        """None 入力は False (legacy caller の defensive guard)。
+
+        Codex review Medium: 旧 caller が None / "" を直接渡しても、
+        後段 TypeError ではなく no-op (False) で安全側に倒す。
+        """
+        from wiseman_hub.config import is_path_configured
+        assert is_path_configured(None) is False
+
+    def test_is_path_configured_empty_string_is_false(self) -> None:
+        from wiseman_hub.config import is_path_configured
+        assert is_path_configured("") is False
+
+    def test_is_path_configured_non_path_string_is_false(self) -> None:
+        """非 Path str 入力は False (型ヒント違反時 defensive)。"""
+        from wiseman_hub.config import is_path_configured
+        assert is_path_configured("/tmp/foo") is False
+
+    # --- Codex review Medium 対応: coerce_path で空白 Path も正規化 ---
+
+    def test_coerce_path_whitespace_only_path_normalized(self) -> None:
+        """Path(" ") 等の空白だけの Path は未設定 sentinel に正規化。
+
+        Codex review Medium: TOML 経路では str strip で空白除去されるが、
+        直接構築経路 (Path(" ") を渡す) でも sentinel 規約を一致させる。
+        """
+        from wiseman_hub.config import coerce_path
+        result = coerce_path("test.field", Path(" "))
+        assert result == Path("")
+        from wiseman_hub.config import is_path_configured
+        assert is_path_configured(result) is False
+
+    def test_coerce_path_passthrough_non_empty_path(self) -> None:
+        """非空 Path は idempotent (passthrough)。"""
+        from wiseman_hub.config import coerce_path
+        original = Path("/tmp/foo")
+        result = coerce_path("test.field", original)
+        assert result is original
 
 
 class TestChecklistStaffPathExtension:

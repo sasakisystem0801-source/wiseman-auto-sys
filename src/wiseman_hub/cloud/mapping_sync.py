@@ -39,7 +39,6 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import logging
-from pathlib import Path
 from typing import Any
 
 from google.api_core import exceptions as gcs_exc
@@ -82,13 +81,14 @@ def _validate_gcp(gcp: GcpConfig) -> None:
         missing.append("project_id")
     if not gcp.bucket_name.strip():
         missing.append("bucket_name")
-    if not gcp.service_account_key_path.strip():
+    # Issue #27 続編 G §4: service_account_key_path は Path 型、is_sa_key_configured で空判定
+    if not gcp.is_sa_key_configured:
         missing.append("service_account_key_path")
     if missing:
         raise MappingConfigError(
             "GCP 設定が未入力です: " + ", ".join(missing)
         )
-    sa_path = Path(gcp.service_account_key_path)
+    sa_path = gcp.service_account_key_path
     if not sa_path.exists():
         # 過去失敗対策（feedback_project_runtime_paths.md）:
         # 絶対パスをそのまま messagebox に出すとユーザー名が露出する。
@@ -293,8 +293,9 @@ def _client(gcp: GcpConfig) -> storage.Client:
         本関数で ``MappingConfigError``（設定不足カテゴリ）に変換する。
     """
     try:
+        # Issue #27 続編 G §4: service_account_key_path は Path 型、google-cloud-storage は str 要求
         return storage.Client.from_service_account_json(
-            gcp.service_account_key_path, project=gcp.project_id
+            str(gcp.service_account_key_path), project=gcp.project_id
         )
     except (ValueError, OSError, auth_exc.GoogleAuthError) as exc:
         raise MappingConfigError(

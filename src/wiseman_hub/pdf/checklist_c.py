@@ -334,7 +334,7 @@ def apply_xlsx_selection(
 def execute_c_placement(
     results: list[CPlacementResult],
     exporter: ExcelExporter | None,
-    log_dir: str = "",
+    log_dir: Path = Path(""),
     *,
     dry_run: bool = False,
 ) -> list[CPlacementResult]:

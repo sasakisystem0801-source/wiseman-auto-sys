@@ -35,7 +35,7 @@ from typing import Any
 from google.api_core import exceptions as gcs_exc
 from google.cloud import storage
 
-from wiseman_hub.config import GcpConfig
+from wiseman_hub.config import GcpConfig, is_path_configured
 
 logger = logging.getLogger(__name__)
 
@@ -63,13 +63,14 @@ def _validate_gcp(gcp: GcpConfig) -> None:
         missing.append("project_id")
     if not gcp.effective_data_bucket.strip():
         missing.append("data_bucket_name (or bucket_name)")
-    if not gcp.service_account_key_path.strip():
+    # Issue #27 続編 G §4: service_account_key_path は Path 型、is_sa_key_configured で空判定
+    if not gcp.is_sa_key_configured:
         missing.append("service_account_key_path")
     if missing:
         raise AuditUploadConfigError(
             f"GCP config missing required fields: {', '.join(missing)}"
         )
-    sa_path = Path(gcp.service_account_key_path)
+    sa_path = gcp.service_account_key_path
     if not sa_path.exists():
         raise AuditUploadConfigError(
             f"service_account_key_path not found: {sa_path}"
@@ -77,9 +78,13 @@ def _validate_gcp(gcp: GcpConfig) -> None:
 
 
 def _client(gcp: GcpConfig) -> storage.Client:
-    """GCS client factory（テストでは patch される）。"""
+    """GCS client factory（テストでは patch される）。
+
+    Issue #27 続編 G §4: service_account_key_path は Path 型、google-cloud-storage は
+    str を要求するため境界変換。
+    """
     return storage.Client.from_service_account_json(
-        gcp.service_account_key_path, project=gcp.project_id
+        str(gcp.service_account_key_path), project=gcp.project_id
     )
 
 
@@ -301,7 +306,7 @@ def process_jsonl(
 
 
 def scan_and_upload(
-    log_dir: str,
+    log_dir: Path,
     gcp: GcpConfig,
     *,
     client: storage.Client | None = None,
@@ -309,21 +314,24 @@ def scan_and_upload(
     """log_dir/audit/ 配下の全 jsonl を scan して GCS にアップロード。
 
     Args:
-        log_dir: AppConfig.log_dir。空文字なら no-op。
+        log_dir: ``AppConfig.log_dir`` (Path 型)。空 Path (``Path("")`` = ``Path(".")``)
+            は未設定 sentinel として no-op。
+            Issue #27 続編 G §4: str → Path 移行。
         gcp: GCP 接続設定。
         client: テスト用 mock。
 
     Returns:
         集計 dict: ``{"files": N, "uploaded": M, "skipped": K, "errors": E}``
     """
-    if not log_dir:
+    # Issue #27 続編 G §4: 未設定 sentinel は is_path_configured で集約判定。
+    if not is_path_configured(log_dir):
         return {"files": 0, "uploaded": 0, "skipped": 0, "errors": 0}
 
     # review I-2 (early validation) 対策: audit dir 不存在でも GCP 設定不備は
     # fail-fast で検出する。dir 不存在の早期 return より前に validate を呼ぶ。
     _validate_gcp(gcp)
 
-    audit_dir = Path(log_dir) / _AUDIT_SUBDIR
+    audit_dir = log_dir / _AUDIT_SUBDIR
     if not audit_dir.exists():
         return {"files": 0, "uploaded": 0, "skipped": 0, "errors": 0}
 
@@ -370,7 +378,7 @@ def stop_audit_uploader() -> None:
 
 
 def start_audit_uploader(
-    log_dir: str,
+    log_dir: Path,
     gcp: GcpConfig,
     *,
     interval_sec: int = _DEFAULT_INTERVAL_SEC,
@@ -404,7 +412,8 @@ def start_audit_uploader(
     except AuditUploadConfigError as exc:
         logger.warning("audit uploader disabled: %s", exc)
         return None
-    if not log_dir:
+    # Issue #27 続編 G §4: 未設定 sentinel は is_path_configured で集約判定。
+    if not is_path_configured(log_dir):
         logger.warning("audit uploader disabled: log_dir not set")
         return None
 

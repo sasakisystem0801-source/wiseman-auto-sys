@@ -11,8 +11,9 @@ from wiseman_hub.audit import append_audit_record
 
 def test_append_creates_jsonl_with_timestamp(tmp_path: Path) -> None:
     fixed = _dt.datetime(2026, 5, 4, 12, 30, tzinfo=_dt.UTC)
+    # Issue #27 続編 G §4: log_dir は Path 型
     path = append_audit_record(
-        log_dir=str(tmp_path),
+        log_dir=tmp_path,
         kind="c_placement",
         record={"user": "テスト 太郎", "status": "success"},
         now=fixed,
@@ -28,8 +29,8 @@ def test_append_creates_jsonl_with_timestamp(tmp_path: Path) -> None:
 
 def test_append_multiple_records_appends(tmp_path: Path) -> None:
     fixed = _dt.datetime(2026, 5, 4, 9, 0, tzinfo=_dt.UTC)
-    append_audit_record(str(tmp_path), "c_placement", {"i": 1}, now=fixed)
-    append_audit_record(str(tmp_path), "c_placement", {"i": 2}, now=fixed)
+    append_audit_record(tmp_path, "c_placement", {"i": 1}, now=fixed)
+    append_audit_record(tmp_path, "c_placement", {"i": 2}, now=fixed)
     path = tmp_path / "audit" / "c_placement_2026-05-04.jsonl"
     lines = path.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 2
@@ -38,8 +39,11 @@ def test_append_multiple_records_appends(tmp_path: Path) -> None:
 
 
 def test_append_no_log_dir_returns_none(tmp_path: Path) -> None:
-    """log_dir 空文字なら no-op で None 返却（既存運用との互換性）。"""
-    result = append_audit_record(log_dir="", kind="c_placement", record={})
+    """log_dir 未設定 (Path("") = Path(".")) なら no-op で None 返却。
+
+    Issue #27 続編 G §4: 空 Path を未設定 sentinel として扱う規約。
+    """
+    result = append_audit_record(log_dir=Path(""), kind="c_placement", record={})
     assert result is None
 
 
@@ -56,7 +60,7 @@ def test_concurrent_append_no_line_corruption(tmp_path: Path) -> None:
         barrier.wait()
         for i in range(per_thread):
             append_audit_record(
-                str(tmp_path),
+                tmp_path,
                 "c_placement",
                 {"tid": tid, "i": i},
                 now=fixed,
@@ -82,7 +86,7 @@ def test_append_creates_audit_subdir(tmp_path: Path) -> None:
     """audit/ サブディレクトリが自動作成される。"""
     sub = tmp_path / "logs"
     sub.mkdir()
-    path = append_audit_record(str(sub), "c_placement", {"x": 1})
+    path = append_audit_record(sub, "c_placement", {"x": 1})
     assert path is not None
     assert path.parent.name == "audit"
     assert path.parent.exists()

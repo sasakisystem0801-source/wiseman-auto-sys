@@ -86,6 +86,97 @@ def _check_list_of_str(name: str, value: object) -> None:
             )
 
 
+_UNSET_PATH_MARKER: Final[str] = "."
+# Issue #27 続編 G §4: ``Path("") == Path()`` は ``str()`` 化すると ``.`` になる。
+# これを「未設定 sentinel」として扱う規約。consumer が ``Path(".")`` を意図的に
+# 設定値として書いた場合も未設定と判定される既知挙動 (umbrella 続編 G の Phase 2
+# 以降で ``Optional[Path]`` への移行を検討)。
+
+
+def is_path_configured(p: object) -> bool:
+    """``Path`` が未設定 sentinel でなければ True。
+
+    Issue #27 続編 G §4: 3 dataclass プロパティ + ``audit`` / ``audit_uploader``
+    consumer 内で共通利用。sentinel 判定を 1 箇所に集約することで、将来 sentinel
+    規約 (例: ``Optional[Path]`` 化) を変更しても呼出側 6+ 箇所を grep で追跡可能。
+
+    判定基準 (Codex review Medium 反映、空白 Path も網羅):
+        - ``Path("")`` (= ``Path(".")``) → False (未設定)
+        - ``Path(".")`` 明示 → False (current dir は意図的にも sentinel と区別不能、
+          Phase 2 で ``Optional[Path]`` 移行検討の根拠)
+        - ``Path(" ")`` / ``Path("\\t")`` 等空白だけ → False (dataclass 直接構築
+          経路でも sentinel 規約を一致させる)
+        - 非空 Path → True
+
+    Codex review Medium 対応 (非 Path defensive): 引数型を ``object`` に拡張し、
+    ``None`` / str / その他の非 Path 入力は ``False`` を返す (consumer guard 用途
+    に安全側で倒す)。legacy caller が ``append_audit_record(None, ...)`` 等を直接
+    呼んでも、後段 TypeError ではなく no-op 経路に入り business 動作を維持する。
+    """
+    if not isinstance(p, Path):
+        return False
+    stripped = str(p).strip()
+    return bool(stripped) and stripped != _UNSET_PATH_MARKER
+
+
+def _check_path(name: str, value: object, *, echo_value: bool = True) -> None:
+    """型が concrete ``pathlib.Path`` でなければ ``TypeError`` (Issue #27 続編 G §4)。
+
+    str を Path に移行する dataclass フィールド (exe_path / log_dir / sa key path 等)
+    で使用。空 Path (``Path("")`` = ``Path(".")``) は「未設定 sentinel」として
+    許容し、consumer 側で ``is_configured`` プロパティで判定する規約。
+
+    **PurePath subclass の取扱 (Codex review Low 対応)**: ``PurePosixPath`` /
+    ``PureWindowsPath`` は ``isinstance(value, Path) == False`` で拒否される
+    (concrete Path のみ受付)。実機 OS で path 操作 (``.exists()`` / ``.resolve()``)
+    する dataclass 用途では PurePath を意図的に弾く設計。テスト fixture や OS 非依存
+    な path 表現を扱う場合は呼出側で ``Path(str(pure_path))`` に変換すること。
+
+    ``echo_value=False`` で値を ``{v!r}`` で出さない (PII 防御、SA key path 等)。
+    """
+    if not isinstance(value, Path):
+        suffix = f": {value!r}" if echo_value else ""
+        raise TypeError(
+            f"{name} must be Path, got {type(value).__name__}{suffix}"
+        )
+
+
+def coerce_path(name: str, raw: Any, *, echo_value: bool = True) -> Path:
+    """TOML から読まれる str / 既に Path / 未指定を Path に正規化する (Issue #27 続編 G §4)。
+
+    load_config 内 + UI 経路 (``ui/settings.py`` form_to_config) で各 path
+    フィールドの coerce に使用。``None`` / 空文字列 / 空白のみの文字列はすべて
+    ``Path("")`` (未設定 sentinel) に正規化する。
+
+    Codex review Medium 対応: ``Path`` 入力でも ``str(p).strip()`` が空 (e.g.
+    ``Path(" ")``) なら ``Path("")`` (未設定) に正規化。これにより:
+        - TOML 経路: str → strip → Path("") (旧挙動)
+        - 直接構築経路: Path(" ") → strip → Path("") (Codex Medium 追加)
+        - UI 経路: form.strip 後 → coerce_path → Path("")
+    の全経路で sentinel 規約が一致する。
+
+    型違反 (int / bool / list 等) は ``TypeError`` で fail-close。frozen dataclass
+    の ``__post_init__`` ガードでも捕捉されるが、load_config 層で先に検出すると
+    エラーメッセージが TOML パス起点で出せて actionable。
+    """
+    if raw is None:
+        return Path("")
+    if isinstance(raw, Path):
+        # Path(" ") 等の空白だけの Path も未設定 sentinel に正規化 (Codex Medium 対応)。
+        if not str(raw).strip():
+            return Path("")
+        return raw
+    if isinstance(raw, bool) or not isinstance(raw, str):
+        suffix = f": {raw!r}" if echo_value else ""
+        raise TypeError(
+            f"{name} must be str (TOML) or Path, got {type(raw).__name__}{suffix}"
+        )
+    stripped = raw.strip()
+    if not stripped:
+        return Path("")
+    return Path(stripped)
+
+
 def _check_dict_str_to_str(name: str, value: object) -> None:
     """``dict[str, str]`` でなければ ``TypeError`` (キー/値とも検査)。"""
     if not isinstance(value, dict):
@@ -216,16 +307,33 @@ class WisemanConfig:
         (``cfg.exe_path = "  "`` 等) で ``__post_init__`` 型ガードを bypass する
         経路を構造的に防ぐ。フィールド更新は ``replace()`` 経由 (UI 設定保存等)
         に統一する。
+
+    Issue #27 続編 G Phase 1 (§4 Path 型移行):
+        ``exe_path`` を ``str`` → ``Path`` に移行。``Path("")`` (= ``Path(".")``)
+        を未設定 sentinel として扱い、``is_exe_configured`` プロパティで判定。
+        consumer は ``Path(cfg.exe_path)`` の重複ラップを除去できる。external API
+        (subprocess / pywinauto.Application.start) へは ``str(cfg.exe_path)`` で
+        境界変換する。
     """
 
-    exe_path: str = ""  # ワイズマンSPの実行ファイルパス
+    exe_path: Path = field(default_factory=Path)  # ワイズマンSPの実行ファイルパス
     startup_wait_sec: int = 15  # 起動・ドングル認証待機秒数
     window_title_pattern: str = ".*管理システム SP.*"  # メインウィンドウのタイトルパターン
 
     def __post_init__(self) -> None:
-        _check_str("WisemanConfig.exe_path", self.exe_path)
+        _check_path("WisemanConfig.exe_path", self.exe_path)
         _check_int("WisemanConfig.startup_wait_sec", self.startup_wait_sec)
         _check_str("WisemanConfig.window_title_pattern", self.window_title_pattern)
+
+    @property
+    def is_exe_configured(self) -> bool:
+        """exe_path が未設定 sentinel でなければ True (Issue #27 続編 G §4)。
+
+        consumer は ``cfg.exe_path / "file"`` 等の path 演算前に本プロパティで
+        guard することで、未設定 Path との誤演算を防ぐ。判定ロジックは
+        ``is_path_configured`` に集約 (sentinel 規約変更時の追従点を 1 箇所に)。
+        """
+        return is_path_configured(self.exe_path)
 
 
 @dataclass(frozen=True)
@@ -309,7 +417,7 @@ class GcpConfig:
     bucket_name: str = ""  # backward compat: 旧 mapping_sync が直接参照
     data_bucket_name: str = ""  # ADR-016: audit / cache 用
     release_bucket_name: str = ""  # ADR-016: exe / manifest / sbom 用
-    service_account_key_path: str = ""
+    service_account_key_path: Path = field(default_factory=Path)
     region: str = "asia-northeast1"
 
     def __post_init__(self) -> None:
@@ -318,13 +426,23 @@ class GcpConfig:
         _check_str("GcpConfig.data_bucket_name", self.data_bucket_name)
         _check_str("GcpConfig.release_bucket_name", self.release_bucket_name)
         # SA key path 自体は秘密ではないが key file 内容を推測されるリスクを
-        # 下げるため PII 隠蔽 (defensive)
-        _check_str(
+        # 下げるため PII 隠蔽 (defensive)。Issue #27 続編 G Phase 1: str → Path 移行。
+        _check_path(
             "GcpConfig.service_account_key_path",
             self.service_account_key_path,
             echo_value=False,
         )
         _check_str("GcpConfig.region", self.region)
+
+    @property
+    def is_sa_key_configured(self) -> bool:
+        """service_account_key_path が未設定 sentinel でなければ True。
+
+        Issue #27 続編 G §4: google-auth ライブラリ呼出前の guard として
+        consumer 側で本プロパティで先に check する規約。判定ロジックは
+        ``is_path_configured`` に集約。
+        """
+        return is_path_configured(self.service_account_key_path)
 
     @property
     def effective_data_bucket(self) -> str:
@@ -727,7 +845,7 @@ class AppConfig:
 
     version: str = "0.1.0"
     log_level: LogLevel = "INFO"
-    log_dir: str = ""
+    log_dir: Path = field(default_factory=Path)
     wiseman: WisemanConfig = field(default_factory=WisemanConfig)
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     reports: list[ReportTarget] = field(default_factory=list)
@@ -747,7 +865,8 @@ class AppConfig:
         _check_str("AppConfig.version", self.version)
         _check_str("AppConfig.log_level", self.log_level)
         _check_literal("AppConfig.log_level", self.log_level, VALID_LOG_LEVELS)
-        _check_str("AppConfig.log_dir", self.log_dir)
+        # Issue #27 続編 G Phase 1: log_dir を str → Path 移行。
+        _check_path("AppConfig.log_dir", self.log_dir)
         if not isinstance(self.reports, list):
             raise TypeError(
                 f"AppConfig.reports must be list, got "
@@ -759,6 +878,15 @@ class AppConfig:
                     f"AppConfig.reports[{i}] must be ReportTarget, got "
                     f"{type(item).__name__}"
                 )
+
+    @property
+    def is_log_dir_configured(self) -> bool:
+        """log_dir が未設定 sentinel でなければ True (Issue #27 続編 G §4)。
+
+        audit ログ / cloud uploader 等の consumer は本プロパティ、または
+        ``log_dir`` を単体で受け取る関数では ``is_path_configured(log_dir)`` で guard。
+        """
+        return is_path_configured(self.log_dir)
 
 
 def _coerce_facility_aliases(aliases_data: Any) -> dict[str, list[str]]:
@@ -874,8 +1002,8 @@ def _validate_facility_aliases(aliases: dict[str, list[str]]) -> None:
             seen_aliases[alias] = canonical
 
 
-def _resolve_sa_key_path(key_path_str: str, config_path: Path) -> str:
-    """SA キーパスを絶対パスに解決する。
+def _resolve_sa_key_path(key_path: Path, config_path: Path) -> Path:
+    """SA キーパスを絶対パスに解決する (Issue #27 続編 G §4: str → Path 移行)。
 
     - 絶対パスならそのまま返す
     - 相対パスの場合の起点:
@@ -884,21 +1012,23 @@ def _resolve_sa_key_path(key_path_str: str, config_path: Path) -> str:
             ``config/`` 配下にある場合は、重複を避けるため一段上の
             ``config_path.parent.parent`` を起点にする
             （TOML 値はプロジェクトルート起点で書かれている既存運用に追従）
-    - 空文字列はそのまま返す（GCP 機能未使用環境を許容）
+    - 空 Path (``Path("")`` = ``Path(".")``) はそのまま返す (GCP 機能未使用環境を許容)
+
+    Issue #27 続編 G Phase 1: 引数・戻り値とも ``str`` → ``Path``。空 sentinel
+    の判定は ``str(key_path) == "."`` で行う (``Path("") == Path(".")``)。
     """
-    if not key_path_str:
-        return key_path_str
-    p = Path(key_path_str)
-    if p.is_absolute():
-        return str(p)
+    if str(key_path) == ".":
+        return key_path
+    if key_path.is_absolute():
+        return key_path
     base = config_path.parent
     if (
         base.name == "config"
-        and p.parts
-        and p.parts[0] == "config"
+        and key_path.parts
+        and key_path.parts[0] == "config"
     ):
         base = base.parent
-    return str((base / p).resolve())
+    return (base / key_path).resolve()
 
 
 def load_config(path: Path | None = None) -> AppConfig:
@@ -915,13 +1045,21 @@ def load_config(path: Path | None = None) -> AppConfig:
     # Issue #27 続編 B (Codex PR #260 review 致命的 1): 各 section 値を
     # ``_require_section_table`` で厳格化。旧 ``dict(data.get(...))`` は
     # ``gcp = []`` 等を ``{}`` 化して silent 通過させていた。
-    app_data = _require_section_table("app", data.get("app", {}))
-    wiseman_data = _require_section_table("wiseman", data.get("wiseman", {}))
+    app_data = dict(_require_section_table("app", data.get("app", {})))
+    wiseman_data = dict(_require_section_table("wiseman", data.get("wiseman", {})))
     schedule_data = _require_section_table("schedule", data.get("schedule", {}))
     gcp_data = dict(_require_section_table("gcp", data.get("gcp", {})))
     if "service_account_key_path" in gcp_data:
+        # Issue #27 続編 G Phase 1: TOML str → Path coerce (空白 strip → 空 Path)
+        # coerce_path で None/空白を Path("") に正規化し、_resolve_sa_key_path で
+        # 絶対パスに展開する。型違反 (int 等) は coerce_path が TypeError raise。
         gcp_data["service_account_key_path"] = _resolve_sa_key_path(
-            gcp_data["service_account_key_path"], path
+            coerce_path(
+                "gcp.service_account_key_path",
+                gcp_data["service_account_key_path"],
+                echo_value=False,
+            ),
+            path,
         )
     updater_data = _require_section_table("updater", data.get("updater", {}))
     ocr_backend_data = _require_section_table(
@@ -1039,10 +1177,18 @@ def load_config(path: Path | None = None) -> AppConfig:
         xlsx_path_cache=xlsx_path_cache,
     )
 
+    # Issue #27 続編 G Phase 1: AppConfig.log_dir / WisemanConfig.exe_path を
+    # str → Path coerce。空白 strip → Path("") (未設定 sentinel)。型違反は
+    # coerce_path が TypeError raise (起動時 fail-close)。
+    if "exe_path" in wiseman_data:
+        wiseman_data["exe_path"] = coerce_path(
+            "wiseman.exe_path", wiseman_data["exe_path"]
+        )
+
     return AppConfig(
         version=app_data.get("version", "0.1.0"),
         log_level=app_data.get("log_level", "INFO"),
-        log_dir=app_data.get("log_dir", ""),
+        log_dir=coerce_path("app.log_dir", app_data.get("log_dir", "")),
         wiseman=WisemanConfig(**wiseman_data),
         schedule=ScheduleConfig(**schedule_data),
         reports=reports,
@@ -1059,11 +1205,46 @@ _APP_FIELDS: tuple[str, ...] = ("version", "log_level", "log_dir")
 _SCALAR_SECTIONS: tuple[str, ...] = ("wiseman", "schedule", "gcp", "updater", "ocr_backend")
 
 
+def _stringify_path_values(data: dict[str, Any]) -> dict[str, Any]:
+    """``Path`` 値を ``str`` に正規化する (Issue #27 続編 G §4: TOML 書き込み境界)。
+
+    ``asdict()`` は Path をそのまま (Path オブジェクトのまま) 返すため、tomlkit
+    に直接渡すと TOML 不正値になる。本 helper で str 変換し、save_config の
+    Path → str ラウンドトリップ責務をここに集約する。
+
+    Path 以外の値はそのまま返す。
+
+    **未設定 Path の書出規約 (Codex review High 対応)**:
+        ``Path("")`` (= ``Path(".")``) を ``str()`` 化すると ``"."`` になり、
+        TOML に ``log_dir = "."`` として保存されると **「カレントディレクトリ指定」
+        と誤解される silent 互換性劣化** を招く (旧バージョンへのダウングレード /
+        手動 TOML 編集 / 将来の外部ツール経由)。本 helper では未設定 Path を
+        空文字列 ``""`` に書き戻し、旧 str 時代の TOML 表現を保つ。
+
+    **CAUTION (shallow only)**: ネスト dict / list / dataclass の中の Path は
+    変換**されない**。Phase 2 以降で nested dataclass (例: ``ReportStaffEntry.base_dir``)
+    に Path field を追加する場合、呼出側 (``_update_pdf_merge`` / ``_update_checklist``)
+    で **各ネスト level の asdict() 結果に対しても本 helper を適用** すること。
+    現 Phase 1 では ``_update_pdf_merge`` / ``_update_checklist`` で防御的に
+    各 nested asdict に通している (Phase 2 silent fail 予防、evaluator MEDIUM 対応)。
+    """
+    result: dict[str, Any] = {}
+    for k, v in data.items():
+        if isinstance(v, Path):
+            result[k] = "" if not is_path_configured(v) else str(v)
+        else:
+            result[k] = v
+    return result
+
+
 def _update_table_from_dataclass(doc: TOMLDocument, section: str, data: dict[str, Any]) -> None:
     """既存テーブルを in-place 更新（コメント維持）、存在しなければ新規追加。
 
     標準ブロック記法 `[section]` およびインラインテーブル `section = {...}` の両方に対応。
+
+    Issue #27 続編 G Phase 1: Path 値を str に変換してから書き込み (tomlkit 互換)。
     """
+    data = _stringify_path_values(data)
     if section in doc:
         table = _require_table(doc, section)
         for key, value in data.items():
@@ -1084,11 +1265,17 @@ def _update_pdf_merge(doc: TOMLDocument, pdf_merge: PdfMergeConfig) -> None:
     そのため ``pdf_merge_dict`` から両ネスト field を pop してからスカラ更新を行い、
     ネスト系は専用ロジック（bbox は in-place 更新、aliases は完全置換）で処理する。
     """
-    bbox = asdict(pdf_merge.user_name_bbox)
+    bbox = _stringify_path_values(asdict(pdf_merge.user_name_bbox))
     aliases = pdf_merge.facility_aliases
     pdf_merge_dict = asdict(pdf_merge)
     pdf_merge_dict.pop("user_name_bbox", None)
     pdf_merge_dict.pop("facility_aliases", None)
+    # Issue #27 続編 G §4 (evaluator MEDIUM 対応): Phase 2 で本 dataclass の path
+    # field を Path 化した際に ``asdict()`` が Path をそのまま tomlkit に渡して
+    # silent fail する経路を防ぐ。現 Phase 1 では PdfMergeConfig に Path field なし
+    # で no-op だが、防御的に境界変換を入れる。bbox も dpi 等が将来 Path 化される
+    # 想定はないが対称性のため通す。
+    pdf_merge_dict = _stringify_path_values(pdf_merge_dict)
 
     if "pdf_merge" in doc:
         table = _require_table(doc, "pdf_merge")
@@ -1141,11 +1328,16 @@ def _update_checklist(doc: TOMLDocument, checklist: ChecklistConfig) -> None:
     は list[str] のため tomlkit.array() で構築する。
     """
     routing = dict(checklist.facility_routing)
+    # Issue #27 続編 G §4 (evaluator MEDIUM 対応): Phase 2/3 で ReportStaffEntry や
+    # ChecklistConfig の path field (base_dir / karte_root / fax_root 等) を Path 化
+    # した際に ``asdict()`` 経由で Path が tomlkit に直渡しされる silent fail を防ぐ。
+    # 現 Phase 1 では no-op (path field なし) だが、防御的に境界変換を通す。
     staff = {
-        name: asdict(entry) for name, entry in checklist.report_staff.items()
+        name: _stringify_path_values(asdict(entry))
+        for name, entry in checklist.report_staff.items()
     }
     cache = dict(checklist.xlsx_path_cache)
-    checklist_dict = asdict(checklist)
+    checklist_dict = _stringify_path_values(asdict(checklist))
     checklist_dict.pop("facility_routing", None)
     checklist_dict.pop("report_staff", None)
     checklist_dict.pop("xlsx_path_cache", None)

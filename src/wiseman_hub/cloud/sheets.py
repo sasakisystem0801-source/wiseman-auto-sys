@@ -51,8 +51,10 @@ _HEADER_ALIASES: dict[str, str] = {
 
 def _access_token(gcp: GcpConfig) -> str:
     """SA キーから Drive API 用のアクセストークンを取得する。"""
+    # Issue #27 続編 G §4: service_account_key_path は Path 型、google-auth は
+    # str を要求するため境界変換。
     creds = service_account.Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
-        gcp.service_account_key_path, scopes=_SCOPES
+        str(gcp.service_account_key_path), scopes=_SCOPES
     )
     creds.refresh(Request())
     return creds.token  # type: ignore[no-any-return]

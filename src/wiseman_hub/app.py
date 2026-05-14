@@ -77,7 +77,9 @@ class WisemanHub:
         # ADR-007: USBドングル認証後にシステム選択ランチャー(frmStartUp)が開くため
         # select_care_system() で目的のケア記録システム(frmMenu200)に遷移する
         logger.info("[Step 1/3] ワイズマン起動中...")
-        self.rpa.launch(self.config.wiseman.exe_path)
+        # Issue #27 続編 G §4: exe_path は Path 型、RPAEngine.launch は str 要求
+        # (subprocess / pywinauto.Application.start が str 入力前提) のため境界変換。
+        self.rpa.launch(str(self.config.wiseman.exe_path))
         self.rpa.select_care_system()
 
         # Step 2: CSV抽出

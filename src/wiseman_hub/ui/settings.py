@@ -22,7 +22,13 @@ from pathlib import Path
 from tkinter import filedialog, ttk
 from typing import Any, assert_never, cast
 
-from wiseman_hub.config import AppConfig, ConcatSourceLetter, UserNameBBox, save_config
+from wiseman_hub.config import (
+    AppConfig,
+    ConcatSourceLetter,
+    UserNameBBox,
+    coerce_path,
+    save_config,
+)
 from wiseman_hub.ui.common import (
     MessageBoxLike,
     assert_main_thread,
@@ -136,7 +142,12 @@ def form_from_config(config: AppConfig) -> SettingsForm:
         bbox_dpi=str(bbox.dpi),
         ocr_endpoint_url=config.ocr_backend.endpoint_url,
         ocr_api_key=config.ocr_backend.api_key,
-        wiseman_exe_path=config.wiseman.exe_path,
+        # Issue #27 続編 G §4: exe_path は Path 型、Tk Entry は str 保持のため
+        # 未設定 Path("") (= Path(".")) は空 str に変換する (str(Path("")) == "." なので
+        # is_exe_configured で判定)。
+        wiseman_exe_path=(
+            str(config.wiseman.exe_path) if config.wiseman.is_exe_configured else ""
+        ),
     )
 
 
@@ -207,7 +218,10 @@ def form_to_config(form: SettingsForm, base: AppConfig) -> AppConfig:
         ),
         wiseman=replace(
             base.wiseman,
-            exe_path=form.wiseman_exe_path.strip(),
+            # Issue #27 続編 G §4: form (str) → Path 変換。``coerce_path`` で TOML
+            # 経路と同じ正規化 (空白 strip → Path("") sentinel) を再利用、UI と
+            # 起動時で sentinel 規約を一元化する (DRY)。
+            exe_path=coerce_path("wiseman.exe_path", form.wiseman_exe_path),
         ),
     )
 
