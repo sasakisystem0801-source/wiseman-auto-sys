@@ -301,7 +301,13 @@ output_dir = ""
         assert reloaded.pdf_merge.user_name_bbox.dpi == 250
 
     def test_save_reports_targets_list(self, tmp_path: Path) -> None:
-        """複数の [[reports.targets]] が正しく書き戻される。"""
+        """複数の [[reports.targets]] が正しく書き戻される。
+
+        Issue #27 続編 F Phase 1: ``output_format`` を ``Literal["csv"]`` に
+        絞り込んだため、本テストは csv 固定で複数 target のラウンドトリップを
+        確認する形に変更 (旧 "xlsx" 値は許容集合外で ``ValueError``)。将来 xlsx/pdf
+        を追加する際は ``OutputFormat`` Literal の拡張が前段となる。
+        """
         from wiseman_hub.config import ReportTarget
 
         cfg = AppConfig()
@@ -309,7 +315,7 @@ output_dir = ""
             ReportTarget(name="報告書1", menu_path=["A", "B"], output_format="csv")
         )
         cfg.reports.append(
-            ReportTarget(name="報告書2", menu_path=["X"], output_format="xlsx")
+            ReportTarget(name="報告書2", menu_path=["X"], output_format="csv")
         )
 
         target = tmp_path / "reports.toml"
@@ -320,7 +326,8 @@ output_dir = ""
         assert reloaded.reports[0].name == "報告書1"
         assert reloaded.reports[0].menu_path == ["A", "B"]
         assert reloaded.reports[1].name == "報告書2"
-        assert reloaded.reports[1].output_format == "xlsx"
+        assert reloaded.reports[1].menu_path == ["X"]
+        assert reloaded.reports[1].output_format == "csv"
 
     def test_save_creates_parent_directory_if_missing(self, tmp_path: Path) -> None:
         """保存先の親ディレクトリが存在しない場合、自動作成する。"""
@@ -1641,6 +1648,94 @@ class TestFrozenInstanceImmutability:
         cfg.reports.append(ReportTarget(name="ad-hoc"))
         assert len(cfg.reports) == 1
         assert cfg.reports[0].name == "ad-hoc"
+
+
+class TestLiteralValidation:
+    """Issue #27 続編 F Phase 1: LogLevel + OutputFormat Literal 化の値域検証。
+
+    既存 ``ConcatSourceLetter`` パターン (Literal + frozenset + __post_init__ 検証)
+    を ``AppConfig.log_level`` と ``ReportTarget.output_format`` に展開した結果、
+    旧 ``_check_str`` のみでは素通りしていた誤値 ("info" 小文字 / "DEBUGGING" /
+    "xlsx") が起動時 ``ValueError`` で弾かれることを保証する。
+    """
+
+    # ---- _check_literal helper 単体 ----
+
+    def test_check_literal_passes_for_allowed_value(self) -> None:
+        from wiseman_hub.config import VALID_LOG_LEVELS, _check_literal
+
+        _check_literal("dummy", "INFO", VALID_LOG_LEVELS)  # raises nothing
+
+    def test_check_literal_raises_for_disallowed_value(self) -> None:
+        from wiseman_hub.config import VALID_LOG_LEVELS, _check_literal
+
+        with pytest.raises(ValueError, match="not in allowed set"):
+            _check_literal("dummy", "TRACE", VALID_LOG_LEVELS)
+
+    def test_check_literal_error_message_includes_field_name(self) -> None:
+        """エラー文言にフィールド名が含まれ、デバッグ時の特定が容易なことを保証。"""
+        from wiseman_hub.config import VALID_OUTPUT_FORMATS, _check_literal
+
+        with pytest.raises(ValueError, match="ReportTarget.output_format"):
+            _check_literal("ReportTarget.output_format", "xlsx", VALID_OUTPUT_FORMATS)
+
+    # ---- AppConfig.log_level ----
+
+    def test_app_config_default_log_level_is_valid(self) -> None:
+        """デフォルト 'INFO' は許容集合に含まれる (回帰防止)。"""
+        cfg = AppConfig()
+        assert cfg.log_level == "INFO"
+
+    @pytest.mark.parametrize(
+        "level",
+        ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+    )
+    def test_app_config_accepts_all_valid_log_levels(self, level: str) -> None:
+        cfg = AppConfig(log_level=level)  # type: ignore[arg-type]
+        assert cfg.log_level == level
+
+    @pytest.mark.parametrize(
+        "invalid",
+        ["info", "DEBUGGING", "TRACE", "NOTSET", "VERBOSE", ""],
+    )
+    def test_app_config_rejects_invalid_log_level(self, invalid: str) -> None:
+        with pytest.raises(ValueError, match="AppConfig.log_level"):
+            AppConfig(log_level=invalid)  # type: ignore[arg-type]
+
+    # ---- ReportTarget.output_format ----
+
+    def test_report_target_default_output_format_is_valid(self) -> None:
+        target = ReportTarget()
+        assert target.output_format == "csv"
+
+    def test_report_target_accepts_csv(self) -> None:
+        target = ReportTarget(name="X", menu_path=["a"], output_format="csv")
+        assert target.output_format == "csv"
+
+    @pytest.mark.parametrize(
+        "invalid",
+        ["xlsx", "pdf", "CSV", "tsv", ""],
+    )
+    def test_report_target_rejects_invalid_output_format(self, invalid: str) -> None:
+        with pytest.raises(ValueError, match="ReportTarget.output_format"):
+            ReportTarget(name="X", menu_path=["a"], output_format=invalid)  # type: ignore[arg-type]
+
+    # ---- frozenset の中身検証 (Literal alias と single source of truth で一致) ----
+
+    def test_valid_log_levels_matches_literal_args(self) -> None:
+        """``VALID_LOG_LEVELS`` が ``LogLevel`` Literal の引数集合と完全一致。"""
+        from typing import get_args
+
+        from wiseman_hub.config import VALID_LOG_LEVELS, LogLevel
+
+        assert frozenset(get_args(LogLevel)) == VALID_LOG_LEVELS
+
+    def test_valid_output_formats_matches_literal_args(self) -> None:
+        from typing import get_args
+
+        from wiseman_hub.config import VALID_OUTPUT_FORMATS, OutputFormat
+
+        assert frozenset(get_args(OutputFormat)) == VALID_OUTPUT_FORMATS
 
 
 class TestCoerceConcatOrder:
