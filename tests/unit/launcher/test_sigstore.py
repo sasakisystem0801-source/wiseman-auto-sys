@@ -30,6 +30,7 @@ from wiseman_hub_launcher._supply_chain.sigstore import (
     SigstoreVerifyError,
     build_expected_identity,
     verify_dsse_bundle,
+    warn_if_trust_root_stale,
 )
 
 _DSSE_INTOTO = "application/vnd.in-toto+json"
@@ -375,3 +376,168 @@ def test_build_expected_identity_does_not_url_encode() -> None:
     assert "org/repo-with-dash" in uri
     assert "@refs/tags/v0.0.0-rc1" in uri
     assert uri.startswith("https://github.com/")
+
+
+# warn_if_trust_root_stale ---------------------------------------------------
+
+
+def _write_fake_root_json(store_dir: Path, *, expires_iso: str) -> None:
+    """テスト用の最小 root.json (TUF root metadata format) を書き出す。"""
+    store_dir.mkdir(parents=True, exist_ok=True)
+    (store_dir / "root.json").write_text(
+        json.dumps({"signed": {"expires": expires_iso}, "signatures": []}),
+        encoding="utf-8",
+    )
+
+
+def test_warn_if_trust_root_stale_emits_warning_when_expired(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """既に expire 済 → WARNING ログ (EXPIRED 表記)。"""
+    fixed_now = dt.datetime(2026, 5, 14, tzinfo=dt.UTC)
+    _patch_now(monkeypatch, fixed_now)
+    _write_fake_root_json(tmp_path, expires_iso="2025-08-19T14:33:09Z")
+
+    with caplog.at_level("DEBUG", logger="wiseman_hub_launcher._supply_chain.sigstore"):
+        warn_if_trust_root_stale(store_dir=tmp_path)
+
+    assert any(
+        "EXPIRED" in r.getMessage() and r.levelname == "WARNING" for r in caplog.records
+    ), caplog.text
+
+
+def test_warn_if_trust_root_stale_emits_warning_within_window(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """残り 10 日 → WARNING ログ (近日 expire の合図)。"""
+    fixed_now = dt.datetime(2026, 5, 14, tzinfo=dt.UTC)
+    _patch_now(monkeypatch, fixed_now)
+    _write_fake_root_json(tmp_path, expires_iso="2026-05-24T00:00:00Z")
+
+    with caplog.at_level("DEBUG", logger="wiseman_hub_launcher._supply_chain.sigstore"):
+        warn_if_trust_root_stale(store_dir=tmp_path)
+
+    warns = [
+        r for r in caplog.records if r.levelname == "WARNING" and "expires in" in r.getMessage()
+    ]
+    assert warns, caplog.text
+
+
+def test_warn_if_trust_root_stale_debug_when_healthy(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """残り 100 日 → DEBUG ログのみ (健全、WARNING 出さない)。"""
+    fixed_now = dt.datetime(2026, 5, 14, tzinfo=dt.UTC)
+    _patch_now(monkeypatch, fixed_now)
+    _write_fake_root_json(tmp_path, expires_iso="2026-08-22T00:00:00Z")
+
+    with caplog.at_level("DEBUG", logger="wiseman_hub_launcher._supply_chain.sigstore"):
+        warn_if_trust_root_stale(store_dir=tmp_path)
+
+    warns = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert not warns, f"unexpected WARNING: {caplog.text}"
+
+
+def test_warn_if_trust_root_stale_missing_file_is_silent(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """root.json 不在 → 起動 blocking しない (debug log のみ、WARNING/ERROR なし)。"""
+    with caplog.at_level("DEBUG", logger="wiseman_hub_launcher._supply_chain.sigstore"):
+        warn_if_trust_root_stale(store_dir=tmp_path)  # 空 dir
+
+    elevated = [r for r in caplog.records if r.levelname in ("WARNING", "ERROR")]
+    assert not elevated, f"unexpected elevated log: {caplog.text}"
+
+
+def test_warn_if_trust_root_stale_malformed_json_is_silent(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """不正 JSON → 起動 blocking しない (debug log のみ、WARNING/ERROR なし)。"""
+    (tmp_path / "root.json").write_text("not a json {{{", encoding="utf-8")
+
+    with caplog.at_level("DEBUG", logger="wiseman_hub_launcher._supply_chain.sigstore"):
+        warn_if_trust_root_stale(store_dir=tmp_path)
+
+    elevated = [r for r in caplog.records if r.levelname in ("WARNING", "ERROR")]
+    assert not elevated, f"unexpected elevated log: {caplog.text}"
+
+
+def test_warn_if_trust_root_stale_missing_expires_key_is_silent(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`signed.expires` キー不在 → 起動 blocking しない (debug log のみ)。"""
+    (tmp_path / "root.json").write_text(
+        json.dumps({"signed": {}, "signatures": []}), encoding="utf-8"
+    )
+
+    with caplog.at_level("DEBUG", logger="wiseman_hub_launcher._supply_chain.sigstore"):
+        warn_if_trust_root_stale(store_dir=tmp_path)
+
+    elevated = [r for r in caplog.records if r.levelname in ("WARNING", "ERROR")]
+    assert not elevated, f"unexpected elevated log: {caplog.text}"
+
+
+def test_warn_if_trust_root_stale_tz_naive_expires_is_silent(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """tz-naive な expires 文字列 → TypeError 握り潰し (debug log のみ、起動継続)。
+
+    expires が RFC 3339 違反 (`Z` 接尾辞も `+HH:MM` もない) の場合、
+    `fromisoformat` は tz-naive datetime を返し、tz-aware now との比較で TypeError。
+    AC-5 (例外時は起動 blocking しない) を保つため握り潰す経路を gate する。
+    """
+    _write_fake_root_json(tmp_path, expires_iso="2026-08-22T00:00:00")  # tz なし
+
+    with caplog.at_level("DEBUG", logger="wiseman_hub_launcher._supply_chain.sigstore"):
+        warn_if_trust_root_stale(store_dir=tmp_path)
+
+    elevated = [r for r in caplog.records if r.levelname in ("WARNING", "ERROR")]
+    assert not elevated, f"unexpected elevated log: {caplog.text}"
+
+
+def test_warn_if_trust_root_stale_at_warn_threshold_boundary(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """境界値: 残り 30 日 ちょうど → WARNING を出す (`<= 30` の `=` 側 pin)。"""
+    fixed_now = dt.datetime(2026, 5, 14, tzinfo=dt.UTC)
+    _patch_now(monkeypatch, fixed_now)
+    # 30 日後 ちょうど
+    _write_fake_root_json(tmp_path, expires_iso="2026-06-13T00:00:00Z")
+
+    with caplog.at_level("DEBUG", logger="wiseman_hub_launcher._supply_chain.sigstore"):
+        warn_if_trust_root_stale(store_dir=tmp_path)
+
+    warns = [
+        r for r in caplog.records if r.levelname == "WARNING" and "expires in" in r.getMessage()
+    ]
+    assert warns, caplog.text
+
+
+def test_warn_if_trust_root_stale_above_warn_threshold_is_debug(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """境界値: 残り 31 日 → WARNING を出さない (`<= 30` の `<` 側 pin)。"""
+    fixed_now = dt.datetime(2026, 5, 14, tzinfo=dt.UTC)
+    _patch_now(monkeypatch, fixed_now)
+    # 31 日後
+    _write_fake_root_json(tmp_path, expires_iso="2026-06-14T00:00:00Z")
+
+    with caplog.at_level("DEBUG", logger="wiseman_hub_launcher._supply_chain.sigstore"):
+        warn_if_trust_root_stale(store_dir=tmp_path)
+
+    warns = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert not warns, f"unexpected WARNING: {caplog.text}"
