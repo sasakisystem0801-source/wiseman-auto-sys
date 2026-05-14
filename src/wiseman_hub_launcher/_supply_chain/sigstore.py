@@ -113,7 +113,17 @@ def warn_if_trust_root_stale(store_dir: Path | None = None) -> None:
         return
 
     now = dt.datetime.now(tz=dt.UTC)
-    remaining_days = (expires - now).days
+    # tz-naive な expires (RFC 3339 違反の root.json) は now との比較で TypeError。
+    # AC-5 (起動 blocking しない) を保つため握り潰す。
+    try:
+        remaining_days = (expires - now).days
+    except TypeError as e:
+        logger.debug(
+            "trust root staleness check failed (tz-naive expires?): %s: %s",
+            type(e).__name__,
+            e,
+        )
+        return
 
     if remaining_days < 0:
         logger.warning(
