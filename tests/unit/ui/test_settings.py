@@ -244,7 +244,7 @@ class TestFormFromConfig:
                 concat_order=("B", "A", "C"),
             ),
             ocr_backend=replace(base.ocr_backend, endpoint_url="https://api", api_key="key"),
-            wiseman=replace(base.wiseman, exe_path="C:/Wiseman/app.exe"),
+            wiseman=replace(base.wiseman, exe_path=Path("C:/Wiseman/app.exe")),
         )
 
         form = form_from_config(base)

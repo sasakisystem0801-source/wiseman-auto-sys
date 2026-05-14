@@ -70,7 +70,7 @@ class TestDryRun:
         """
         r = _make_pending_result(tmp_path)
         mock_exporter = MagicMock()
-        execute_c_placement([r], exporter=mock_exporter, log_dir="", dry_run=True)
+        execute_c_placement([r], exporter=mock_exporter, log_dir=Path(""), dry_run=True)
         mock_exporter.export_first_page.assert_not_called()
         mock_exporter.close.assert_not_called()
 
@@ -78,21 +78,21 @@ class TestDryRun:
         """dry_run=True で exporter=None も許容（呼出側が exporter を作らない用途）。"""
         r = _make_pending_result(tmp_path)
         # 例外を出さず正常完了することの確認
-        execute_c_placement([r], exporter=None, log_dir="", dry_run=True)
+        execute_c_placement([r], exporter=None, log_dir=Path(""), dry_run=True)
         assert r.status == CPlacementStatus.PENDING
         assert "dry-run" in r.message
 
     def test_dry_run_keeps_status_pending(self, tmp_path: Path) -> None:
         """dry_run 後も status=PENDING を保ち再実行可能（実配置に進める）。"""
         r = _make_pending_result(tmp_path)
-        execute_c_placement([r], exporter=None, log_dir="", dry_run=True)
+        execute_c_placement([r], exporter=None, log_dir=Path(""), dry_run=True)
         assert r.status == CPlacementStatus.PENDING
         assert "dry-run" in r.message
 
     def test_dry_run_audit_log_has_flag(self, tmp_path: Path) -> None:
         r = _make_pending_result(tmp_path)
         execute_c_placement(
-            [r], exporter=None, log_dir=str(tmp_path), dry_run=True
+            [r], exporter=None, log_dir=tmp_path, dry_run=True
         )
         lines = _read_audit_lines(tmp_path)
         assert len(lines) == 1
@@ -106,7 +106,7 @@ class TestDryRun:
         skipped.status = CPlacementStatus.SKIPPED_NO_SHEET
         skipped.message = "シート未発見"
         original_message = skipped.message
-        execute_c_placement([skipped], exporter=None, log_dir="", dry_run=True)
+        execute_c_placement([skipped], exporter=None, log_dir=Path(""), dry_run=True)
         assert skipped.status == CPlacementStatus.SKIPPED_NO_SHEET
         assert skipped.message == original_message
 
@@ -114,7 +114,7 @@ class TestDryRun:
         """xlsx_path/sheet_name/target_pdf 欠落は dry_run でも ERROR。"""
         r = _make_pending_result(tmp_path)
         r.target_pdf = None
-        execute_c_placement([r], exporter=None, log_dir="", dry_run=True)
+        execute_c_placement([r], exporter=None, log_dir=Path(""), dry_run=True)
         assert r.status == CPlacementStatus.ERROR
 
 
@@ -122,7 +122,7 @@ class TestRealRun:
     def test_real_run_requires_exporter(self, tmp_path: Path) -> None:
         r = _make_pending_result(tmp_path)
         with pytest.raises(ValueError, match="exporter must be provided"):
-            execute_c_placement([r], exporter=None, log_dir="", dry_run=False)
+            execute_c_placement([r], exporter=None, log_dir=Path(""), dry_run=False)
 
     def test_real_run_calls_export_and_marks_success(self, tmp_path: Path) -> None:
         r = _make_pending_result(tmp_path)
@@ -131,7 +131,7 @@ class TestRealRun:
         # 仕込む。これにより execute_c_placement の二重ガード（書込後の存在 +
         # サイズ確認、Hotfix）を通過できる。
         exporter.export_first_page.side_effect = _fake_write_pdf
-        execute_c_placement([r], exporter=exporter, log_dir="", dry_run=False)
+        execute_c_placement([r], exporter=exporter, log_dir=Path(""), dry_run=False)
         exporter.export_first_page.assert_called_once_with(
             r.xlsx_path, r.sheet_name, r.target_pdf
         )
@@ -143,7 +143,7 @@ class TestRealRun:
         exporter = MagicMock()
         exporter.export_first_page.side_effect = _fake_write_pdf
         execute_c_placement(
-            [r], exporter=exporter, log_dir=str(tmp_path), dry_run=False
+            [r], exporter=exporter, log_dir=tmp_path, dry_run=False
         )
         lines = _read_audit_lines(tmp_path)
         assert len(lines) == 1
@@ -161,7 +161,7 @@ class TestRealRun:
         exporter = MagicMock()
         # PDF を書かない mock (旧仕様の Excel COM のサイレント失敗を再現)
         exporter.export_first_page.return_value = None
-        execute_c_placement([r], exporter=exporter, log_dir="", dry_run=False)
+        execute_c_placement([r], exporter=exporter, log_dir=Path(""), dry_run=False)
         assert r.status == CPlacementStatus.ERROR
         assert "PDF was not written" in r.message
 
@@ -173,7 +173,7 @@ class TestRealRun:
             output_pdf.parent.mkdir(parents=True, exist_ok=True)
             output_pdf.write_bytes(b"")  # 0 bytes
         exporter.export_first_page.side_effect = _empty_write
-        execute_c_placement([r], exporter=exporter, log_dir="", dry_run=False)
+        execute_c_placement([r], exporter=exporter, log_dir=Path(""), dry_run=False)
         assert r.status == CPlacementStatus.ERROR
         assert "empty" in r.message.lower() or "0 bytes" in r.message
 
@@ -181,7 +181,7 @@ class TestRealRun:
         r = _make_pending_result(tmp_path)
         exporter = MagicMock()
         exporter.export_first_page.side_effect = RuntimeError("COM crashed")
-        execute_c_placement([r], exporter=exporter, log_dir="", dry_run=False)
+        execute_c_placement([r], exporter=exporter, log_dir=Path(""), dry_run=False)
         assert r.status == CPlacementStatus.ERROR
         assert "COM crashed" in r.message
         # close は finally で必ず呼ばれる
@@ -197,7 +197,7 @@ class TestSelectedSubset:
         r2 = _make_pending_result(tmp_path)
         r2.row = ChecklistRow(name="二郎", monitoring_raw="", staff="宮下", facility="A")
         # r2 のみ渡す → r1 は触られない
-        execute_c_placement([r2], exporter=None, log_dir="", dry_run=True)
+        execute_c_placement([r2], exporter=None, log_dir=Path(""), dry_run=True)
         assert r1.status == CPlacementStatus.PENDING
         assert r1.message == ""  # default
         assert r2.status == CPlacementStatus.PENDING

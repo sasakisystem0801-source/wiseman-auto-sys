@@ -78,8 +78,9 @@ def upload_snapshot(
     gcp: GcpConfig, fax_root: Path, folders: list[str]
 ) -> ScanResult:
     """フォルダ名一覧を JSON 化して GCS にアップロードする。"""
+    # Issue #27 続編 G §4: service_account_key_path は Path 型、google-cloud-storage は str 要求
     client = storage.Client.from_service_account_json(
-        gcp.service_account_key_path, project=gcp.project_id
+        str(gcp.service_account_key_path), project=gcp.project_id
     )
     bucket = client.bucket(gcp.bucket_name)
     now = _dt.datetime.now(_dt.UTC).astimezone()

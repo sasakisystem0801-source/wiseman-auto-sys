@@ -37,7 +37,7 @@ def gcp(fake_sa_key: Path) -> GcpConfig:
     return GcpConfig(
         project_id="test-proj",
         bucket_name="test-bucket",
-        service_account_key_path=str(fake_sa_key),
+        service_account_key_path=fake_sa_key,
     )
 
 
@@ -58,7 +58,7 @@ class TestValidateGcp:
         gcp = GcpConfig(
             project_id="",
             bucket_name="b",
-            service_account_key_path=str(fake_sa_key),
+            service_account_key_path=fake_sa_key,
         )
         with pytest.raises(MappingConfigError, match="project_id"):
             push_routing(gcp, {"a": "b"})
@@ -67,7 +67,7 @@ class TestValidateGcp:
         gcp = GcpConfig(
             project_id="p",
             bucket_name="",
-            service_account_key_path=str(fake_sa_key),
+            service_account_key_path=fake_sa_key,
         )
         with pytest.raises(MappingConfigError, match="bucket_name"):
             pull_routing(gcp)
@@ -76,7 +76,7 @@ class TestValidateGcp:
         gcp = GcpConfig(
             project_id="p",
             bucket_name="b",
-            service_account_key_path=str(tmp_path / "no-such-file.json"),
+            service_account_key_path=tmp_path / "no-such-file.json",
         )
         with pytest.raises(MappingConfigError, match="SA キー"):
             push_routing(gcp, {"a": "b"})
@@ -90,7 +90,7 @@ class TestValidateGcp:
         gcp = GcpConfig(
             project_id="p",
             bucket_name="b",
-            service_account_key_path=str(sub / "no-such-file.json"),
+            service_account_key_path=sub / "no-such-file.json",
         )
         with pytest.raises(MappingConfigError) as ei:
             push_routing(gcp, {"a": "b"})
@@ -296,7 +296,7 @@ class TestPushReportStaff:
         bad = GcpConfig(
             project_id="",
             bucket_name="b",
-            service_account_key_path=str(fake_sa_key),
+            service_account_key_path=fake_sa_key,
         )
         with pytest.raises(MappingConfigError, match="project_id"):
             push_report_staff(bad, {"宮下": ReportStaffEntry()})

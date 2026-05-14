@@ -53,7 +53,7 @@ def _make_config(tmp_path: Path) -> AppConfig:
             },
             xlsx_path_cache={"宮下:2026:3": r"\\nas\share\PT 宮下\3月.xlsx"},
         ),
-        log_dir=str(tmp_path / "logs"),
+        log_dir=tmp_path / "logs",
     )
     return cfg
 

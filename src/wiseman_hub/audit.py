@@ -28,6 +28,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from wiseman_hub.config import is_path_configured
+
 logger = logging.getLogger(__name__)
 
 _AUDIT_SUBDIR = "audit"
@@ -42,7 +44,7 @@ def _audit_path(log_dir: Path, kind: str, day: _dt.date) -> Path:
 
 
 def append_audit_record(
-    log_dir: str,
+    log_dir: Path,
     kind: str,
     record: dict[str, Any],
     *,
@@ -51,7 +53,9 @@ def append_audit_record(
     """JSON Lines 形式で 1 record を追記する。log_dir 未設定なら何もしない。
 
     Args:
-        log_dir: AppConfig.log_dir の値。空文字なら no-op で None 返却。
+        log_dir: ``AppConfig.log_dir`` の値 (Path 型)。空 Path
+            (``Path("")`` = ``Path(".")``) は未設定 sentinel として no-op で None 返却。
+            Issue #27 続編 G §4: str → Path 移行。
         kind: ログ種別（``c_placement`` 等）。ファイル名 prefix。
         record: 追記する dict。``timestamp`` を自動付与する。
         now: テスト時の固定時刻。未指定なら現在時刻。
@@ -59,9 +63,10 @@ def append_audit_record(
     Returns:
         書き込んだファイル path。log_dir 未設定なら None。
     """
-    if not log_dir:
+    # Issue #27 続編 G §4: 未設定 sentinel は is_path_configured で集約判定。
+    if not is_path_configured(log_dir):
         return None
-    base = Path(log_dir)
+    base = log_dir
     timestamp = now or _dt.datetime.now(_dt.UTC).astimezone()
     payload = {**record, "timestamp": timestamp.isoformat()}
     target = _audit_path(base, kind, timestamp.date())

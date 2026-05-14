@@ -38,7 +38,7 @@ def gcp(fake_sa_key: Path) -> GcpConfig:
     return GcpConfig(
         project_id="test-proj",
         data_bucket_name="test-data-bucket",
-        service_account_key_path=str(fake_sa_key),
+        service_account_key_path=fake_sa_key,
     )
 
 
@@ -383,7 +383,7 @@ class TestUploadEntry:
         gcp_no_sa = GcpConfig(
             project_id="p",
             data_bucket_name="b",
-            service_account_key_path=str(tmp_path / "no-such.json"),
+            service_account_key_path=tmp_path / "no-such.json",
         )
         client, _, blob = _make_mock_client()
         ok = upload_entry(
@@ -678,16 +678,28 @@ class TestValidateGcpDefensive:
         assert len(missing) >= 3  # project_id, bucket, sa_key
 
     def test_whitespace_only_strings_treated_as_missing(self) -> None:
-        """全 field が空白文字のみでも missing 判定。"""
+        """全 field が空白文字のみでも missing 判定。
+
+        Issue #27 続編 G §4: SA key path は Path 型のため、空白 str 等価の
+        ``Path(" ")`` を渡して同等の missing 判定をテスト。実運用では
+        load_config の ``coerce_path`` が空白を ``Path("")`` (未設定) に
+        正規化するため、本テストは dataclass 直接構築での後方互換挙動を確認。
+        """
         from wiseman_hub.cloud.xlsx_path_cache_mirror import _validate_gcp
 
         gcp = GcpConfig(
             project_id="   ",
             data_bucket_name="\t",
-            service_account_key_path=" ",
+            service_account_key_path=Path(" "),
         )
         missing = _validate_gcp(gcp)
-        assert len(missing) >= 3
+        # Codex review Suggestion: missing 名まで assert して
+        # "file not found" ではなく "service_account_key_path" (未設定) で
+        # 検出されることを固定。is_path_configured の strip 拡張で
+        # Path(" ") が未設定判定される現挙動を pin。
+        assert "project_id" in missing
+        assert "data_bucket_name (or bucket_name)" in missing
+        assert "service_account_key_path" in missing
 
 
 # I-1 (codex review threadId 019dfceb): fetch_all_with_errors の error 伝播

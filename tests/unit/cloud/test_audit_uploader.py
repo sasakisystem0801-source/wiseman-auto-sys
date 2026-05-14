@@ -34,7 +34,7 @@ def gcp(fake_sa_key: Path) -> GcpConfig:
     return GcpConfig(
         project_id="test-proj",
         data_bucket_name="test-data-bucket",
-        service_account_key_path=str(fake_sa_key),
+        service_account_key_path=fake_sa_key,
     )
 
 
@@ -44,7 +44,7 @@ def gcp_legacy_bucket_only(fake_sa_key: Path) -> GcpConfig:
     return GcpConfig(
         project_id="test-proj",
         bucket_name="legacy-bucket",
-        service_account_key_path=str(fake_sa_key),
+        service_account_key_path=fake_sa_key,
     )
 
 
@@ -98,10 +98,10 @@ class TestValidateGcp:
         gcp = GcpConfig(
             project_id="",
             data_bucket_name="b",
-            service_account_key_path=str(fake_sa_key),
+            service_account_key_path=fake_sa_key,
         )
         # log_dir + audit ディレクトリがあると進むので、空 dir で start_audit_uploader 経由
-        result = start_audit_uploader(str(tmp_path), gcp)
+        result = start_audit_uploader(tmp_path, gcp)
         assert result is None  # validate 失敗で thread 起動せず
 
     def test_empty_data_bucket_raises(self, fake_sa_key: Path, tmp_path: Path) -> None:
@@ -109,22 +109,22 @@ class TestValidateGcp:
             project_id="p",
             data_bucket_name="",
             bucket_name="",  # backward compat fallback も空
-            service_account_key_path=str(fake_sa_key),
+            service_account_key_path=fake_sa_key,
         )
         # audit/ ディレクトリを作って validate を必ず通すようにする
         _make_audit_file(tmp_path, "c_placement", "2026-05-06", [{"a": 1}])
         with pytest.raises(AuditUploadConfigError, match="data_bucket"):
-            scan_and_upload(str(tmp_path), gcp, client=MagicMock())
+            scan_and_upload(tmp_path, gcp, client=MagicMock())
 
     def test_missing_sa_key_raises(self, tmp_path: Path) -> None:
         gcp = GcpConfig(
             project_id="p",
             data_bucket_name="b",
-            service_account_key_path=str(tmp_path / "no-such.json"),
+            service_account_key_path=tmp_path / "no-such.json",
         )
         _make_audit_file(tmp_path, "c_placement", "2026-05-06", [{"a": 1}])
         with pytest.raises(AuditUploadConfigError, match="not found"):
-            scan_and_upload(str(tmp_path), gcp, client=MagicMock())
+            scan_and_upload(tmp_path, gcp, client=MagicMock())
 
 
 class TestBackwardCompat:
@@ -135,7 +135,7 @@ class TestBackwardCompat:
             project_id="p",
             bucket_name="legacy",
             data_bucket_name="new-data",
-            service_account_key_path=str(fake_sa_key),
+            service_account_key_path=fake_sa_key,
         )
         assert gcp.effective_data_bucket == "new-data"
 
@@ -144,7 +144,7 @@ class TestBackwardCompat:
             project_id="p",
             bucket_name="legacy",
             data_bucket_name="",
-            service_account_key_path=str(fake_sa_key),
+            service_account_key_path=fake_sa_key,
         )
         assert gcp.effective_data_bucket == "legacy"
 
@@ -253,12 +253,13 @@ class TestProcessJsonl:
 
 class TestScanAndUpload:
     def test_no_log_dir_noop(self, gcp: GcpConfig) -> None:
-        result = scan_and_upload("", gcp, client=MagicMock())
+        # Issue #27 続編 G §4: log_dir は Path 型、未設定は Path("")
+        result = scan_and_upload(Path(""), gcp, client=MagicMock())
         assert result["files"] == 0
 
     def test_no_audit_dir_noop(self, tmp_path: Path, gcp: GcpConfig) -> None:
         # log_dir はあるが audit/ はない
-        result = scan_and_upload(str(tmp_path), gcp, client=MagicMock())
+        result = scan_and_upload(tmp_path, gcp, client=MagicMock())
         assert result["files"] == 0
 
     def test_aggregate_multiple_files(
@@ -269,7 +270,7 @@ class TestScanAndUpload:
         _make_audit_file(tmp_path, "b_placement", "2026-05-06", [{"c": 1}])
 
         client, _ = _make_mock_client()
-        result = scan_and_upload(str(tmp_path), gcp, client=client)
+        result = scan_and_upload(tmp_path, gcp, client=client)
 
         assert result["files"] == 3
         assert result["uploaded"] == 4  # 1 + 2 + 1
@@ -282,8 +283,8 @@ class TestScanAndUpload:
         _make_audit_file(tmp_path, "c_placement", "2026-05-06", [{"x": 1}])
 
         client, _ = _make_mock_client()
-        first = scan_and_upload(str(tmp_path), gcp, client=client)
-        second = scan_and_upload(str(tmp_path), gcp, client=client)
+        first = scan_and_upload(tmp_path, gcp, client=client)
+        second = scan_and_upload(tmp_path, gcp, client=client)
 
         assert first["uploaded"] == 1
         assert second["uploaded"] == 0
@@ -292,12 +293,13 @@ class TestScanAndUpload:
 
 class TestStartAuditUploader:
     def test_disabled_when_no_log_dir(self, gcp: GcpConfig) -> None:
-        result = start_audit_uploader("", gcp)
+        # Issue #27 続編 G §4: log_dir は Path 型、未設定は Path("")
+        result = start_audit_uploader(Path(""), gcp)
         assert result is None
 
     def test_disabled_when_invalid_gcp(self, tmp_path: Path) -> None:
         bad_gcp = GcpConfig()  # all empty
-        result = start_audit_uploader(str(tmp_path), bad_gcp)
+        result = start_audit_uploader(tmp_path, bad_gcp)
         assert result is None
 
     def test_starts_thread_when_valid(
@@ -308,7 +310,7 @@ class TestStartAuditUploader:
 
         monkeypatch.setattr(audit_uploader, "_client", lambda g: _make_mock_client()[0])
 
-        thread = start_audit_uploader(str(tmp_path), gcp, interval_sec=3600)
+        thread = start_audit_uploader(tmp_path, gcp, interval_sec=3600)
         assert thread is not None
         assert thread.daemon
         assert thread.is_alive()
@@ -434,8 +436,8 @@ class TestEarlyValidation:
         bad_gcp = GcpConfig(
             project_id="",  # 不備
             data_bucket_name="b",
-            service_account_key_path=str(fake_sa_key),
+            service_account_key_path=fake_sa_key,
         )
         # audit/ は作らない → 旧実装なら early return で validate がスキップされた
         with pytest.raises(AuditUploadConfigError, match="project_id"):
-            scan_and_upload(str(tmp_path), bad_gcp, client=MagicMock())
+            scan_and_upload(tmp_path, bad_gcp, client=MagicMock())

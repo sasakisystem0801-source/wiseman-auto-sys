@@ -92,11 +92,18 @@ class XlsxPathCacheMirrorError(Exception):
 def _str_or_empty(value: object) -> str:
     """value を安全に str 化（None / 非 str は空文字列に正規化、I-4 反映）。
 
-    GcpConfig の field は dataclass で str 型注釈だが、TOML 経由 / dict 直渡し
-    で None や非 str が混入し得るため `.strip()` AttributeError を防ぐ。
+    GcpConfig の field は dataclass で str/Path 型注釈だが、TOML 経由 / dict 直渡し
+    で None や非対応型が混入し得るため `.strip()` AttributeError を防ぐ。
+
+    Issue #27 続編 G §4: ``service_account_key_path`` が ``Path`` 型になったため、
+    Path も str 化対象に追加 (未設定 ``Path("")`` = ``Path(".")`` は "." を返す
+    が、呼出側の ``.strip()`` 後の判定は変わらず "." が非空判定で生き残る点に
+    注意 — そのため SA key path の検証は ``is_sa_key_configured`` を別途使用)。
     """
     if isinstance(value, str):
         return value
+    if isinstance(value, Path):
+        return str(value)
     return ""
 
 
@@ -114,18 +121,23 @@ def _validate_gcp(gcp: GcpConfig) -> list[str]:
         missing.append("project_id")
     if not _str_or_empty(getattr(gcp, "effective_data_bucket", None)).strip():
         missing.append("data_bucket_name (or bucket_name)")
-    sa_key_path = _str_or_empty(getattr(gcp, "service_account_key_path", None)).strip()
-    if not sa_key_path:
+    # Issue #27 続編 G §4: SA key path は Path 型、is_sa_key_configured で空判定
+    if not getattr(gcp, "is_sa_key_configured", False):
         missing.append("service_account_key_path")
-    elif not Path(sa_key_path).exists():
-        missing.append("service_account_key_path (file not found)")
+    else:
+        sa_key_path = gcp.service_account_key_path
+        if not sa_key_path.exists():
+            missing.append("service_account_key_path (file not found)")
     return missing
 
 
 def _client(gcp: GcpConfig) -> storage.Client:
-    """GCS client factory（テストでは patch される）。"""
+    """GCS client factory（テストでは patch される）。
+
+    Issue #27 続編 G §4: SA key path は Path 型、google-cloud-storage は str 要求。
+    """
     return storage.Client.from_service_account_json(
-        gcp.service_account_key_path, project=gcp.project_id
+        str(gcp.service_account_key_path), project=gcp.project_id
     )
 
 
