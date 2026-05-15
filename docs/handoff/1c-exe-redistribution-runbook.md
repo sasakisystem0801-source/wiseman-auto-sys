@@ -59,7 +59,7 @@ cd $HOME\Projects\wiseman-auto-sys
 | 装置 | 動作 |
 |------|------|
 | バックアップ件数アサーション | バックアップサイズ ≠ exe サイズなら停止 |
-| build warning 検査 | プロジェクト由来の hidden import 不足を検出して停止（allow-list: pycparser/jinja2/user32/msvcrt） |
+| build warning 検査 | プロジェクト由来の hidden import 不足を検出して停止（allow-list: `pycparser.lextab` / `pycparser.yacctab` / `jinja2` / `user32` / `msvcrt`） |
 | Launcher プロセス検出 | Phase 2 前に起動中なら file lock 回避で停止 |
 | 配布後サイズ照合 | Copy-Item 失敗を即検出して auto-rollback |
 | プロセス起動確認 | Launcher が 10 秒以内に起動しないなら警告（SmartScreen 等） |
@@ -70,7 +70,7 @@ cd $HOME\Projects\wiseman-auto-sys
 Phase 4 のチェックリスト目視確認は対話的に実施:
 
 - [ ] Launcher ウィンドウ起動（コンソール窓なし）
-- [ ] ボタン 5 個表示（A / B / C / 事業所一括結合 / 設定）
+- [ ] ボタン 5 個表示（業務フロー順: ex_ ファイル変換 + 振り分け / B: 運動機能向上計画書 自動配置 / C: 経過報告書 自動配置 / 事業所フォルダ一括結合 / 設定）
 - [ ] 各ボタンクリックで `ImportError` / `ModuleNotFoundError` が出ない
 - [ ] 機能追加 PR がある場合は対応する UI 変化を確認
 
