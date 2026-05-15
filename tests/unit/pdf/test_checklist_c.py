@@ -158,6 +158,32 @@ def test_resolve_xlsx_no_candidates_returns_folder_tree(tmp_path: Path) -> None:
     assert result.status == CPlacementStatus.NEEDS_REVIEW
     assert result.folder_tree is not None
     assert result.folder_tree["name"] == "PT 宮下"
+    # Issue #313: 真に候補ゼロのケースは「候補なし」文言
+    assert result.message == "候補なし、フォルダから選択してください"
+    assert result.candidates == []
+
+
+def test_resolve_xlsx_fallback_hits_returns_count_message(tmp_path: Path) -> None:
+    """Issue #313: suggest_patterns 0 件 → scan_fallback が候補を拾ったとき、
+    message は「N 件候補あり、確認後に選択してください」(suggest_patterns hit と同表現)。
+    旧実装は固定で「候補なし、フォルダから選択してください」を返していたため、
+    XlsxPickerDialog で候補が出るのに Treeview 詳細列が「候補なし」と矛盾していた。
+    """
+    base = tmp_path / "PT 平瀬"
+    target_dir = base / "リハ経過報告書" / "令和8年"
+    target_dir.mkdir(parents=True)
+    # suggest_patterns には hit しないが、scan_fallback (max_depth=3 浅 walk) には hit する xlsx
+    xlsx = target_dir / "新経過報告書 R8.3.xlsx"
+    xlsx.write_text("")
+    entry = ReportStaffEntry(
+        base_dir=base,
+        # 意図的に異なる pattern (例: 月名 "3月" を含むファイル名を想定) で suggest_patterns 0 件にする
+        suggest_patterns=["リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx"],
+    )
+    result = resolve_xlsx("平瀬", entry, 2026, 3, cache={})
+    assert result.status == CPlacementStatus.NEEDS_REVIEW
+    assert result.candidates == [xlsx]
+    assert result.message == "1 件候補あり、確認後に選択してください"
 
 
 def test_resolve_xlsx_missing_base_dir_returns_skipped(tmp_path: Path) -> None:
