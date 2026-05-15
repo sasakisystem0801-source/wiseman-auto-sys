@@ -23,6 +23,7 @@ from typing import Final
 
 from wiseman_hub.cloud.sheets import ChecklistRow
 from wiseman_hub.config import ChecklistConfig
+from wiseman_hub.utils.text_norm import normalize_lookup_key
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +59,14 @@ def _strip_furigana(folder_name: str) -> str:
 
 
 def _normalize_name(name: str) -> str:
-    """氏名比較用の正規化: 全角/半角スペースを除去。"""
-    return name.replace("　", "").replace(" ", "").strip()
+    """氏名比較用の正規化 (PR-γ v2: text_norm に統合)。
+
+    PR-γ v2 まで: ``name.replace("　", "").replace(" ", "").strip()`` で **NFKC 欠落**。
+    全角→半角統一が効かず、``姫路医療生活協同組合 あぼし`` (半角) と
+    ``姫路医療生活協同組合　あぼし`` (全角) が個別正規化後も別文字列として残るバグ。
+    PR-γ v2 で ``normalize_lookup_key`` に統合 (NFKC + 全空白除去)。
+    """
+    return normalize_lookup_key(name)
 
 
 def find_user_dir(karte_root: Path, name: str) -> tuple[Path | None, list[Path]]:
@@ -319,10 +326,18 @@ def find_month_pdf(monitoring_dir: Path, month: int) -> tuple[Path | None, list[
 def resolve_facility(
     facility_name: str, routing: dict[str, str]
 ) -> str | None:
-    """居宅名 → FAX 事業所フォルダ名 を引く。MVP では完全一致のみ。"""
-    if facility_name in routing:
-        return routing[facility_name]
-    return None
+    """居宅名 → FAX 事業所フォルダ名 を引く。
+
+    PR-γ v2 (Session 78 実機デモ後): C 側 (``checklist_c.resolve_facility``) と
+    挙動を揃えて lookup 前に ``normalize_lookup_key`` を通す。``routing`` 側は
+    ``config.py:_load_checklist`` で読込時に正規化済 (line 1179) のため、
+    検索側でも同じ正規化を通さないと表記揺れで lookup が失敗する。
+
+    実機デモで判明した直接原因: スプレッドシートに ``姫路医療生活協同組合 あぼし``
+    (全角空白) が入っていたが、``routing`` の key は ``姫路医療生活協同組合あぼし``
+    (空白除去後) だったため、生 facility_name での lookup が miss していた。
+    """
+    return routing.get(normalize_lookup_key(facility_name))
 
 
 def plan_b_placement(

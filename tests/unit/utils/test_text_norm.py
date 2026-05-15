@@ -1,14 +1,19 @@
-"""``normalize_lookup_key`` の表記揺れ吸収テスト（PR-γ v1）。
+"""``normalize_lookup_key`` の表記揺れ吸収テスト（PR-γ v1 → v2 仕様）。
 
 業務責任者の運用継続性のため、lookup 用正規化が以下の表記揺れを吸収することを保証:
 
 - 全角/半角空白の同一視
+- **空白有無の同一視 (PR-γ v2 で追加、Session 78 実機デモで判明)**
 - 全角/半角英数の同一視
 - 全角/半角括弧の同一視
-- 連続/前後空白の正規化
 - 半角/全角カナの同一視
 
-過剰正規化（大文字小文字統一・業務 noise 除去等）はしない契約も固定。
+PR-γ v2 仕様変更: 「連続空白を半角 1 つに統一」→「**全空白を完全除去**」。
+実機 (`姫路医療生活協同組合 あぼし` vs `姫路医療生活協同組合　あぼし` vs
+`姫路医療生活協同組合あぼし`) で 3 パターン共存しており、業務責任者が
+「あ、ここでスペース入れてた / 入れてなかった」を意識せず登録できる必要がある。
+
+過剰正規化（大文字小文字統一・業務 noise 除去等）はしない契約は維持。
 """
 
 from __future__ import annotations
@@ -19,32 +24,46 @@ from wiseman_hub.utils.text_norm import normalize_lookup_key
 
 
 class TestSpaceVariants:
-    """全角空白 (\\u3000) と半角空白 (\\u0020) の同一視。"""
+    """全角空白 (\\u3000) / 半角空白 (\\u0020) / 空白なし の三者同一視 (PR-γ v2)。"""
 
-    def test_full_width_space_becomes_half_width(self) -> None:
-        # NFKC で 　 →   に変換される（標準仕様）
-        assert normalize_lookup_key("a　b") == "a b"
+    def test_full_width_space_removed(self) -> None:
+        # PR-γ v2: NFKC で全角→半角空白に変換後、全空白を除去
+        assert normalize_lookup_key("a　b") == "ab"
 
-    def test_full_width_and_half_width_space_compare_equal(self) -> None:
+    def test_half_width_space_removed(self) -> None:
+        assert normalize_lookup_key("a b") == "ab"
+
+    def test_no_space_unchanged(self) -> None:
+        assert normalize_lookup_key("ab") == "ab"
+
+    def test_three_patterns_compare_equal(self) -> None:
+        """全角 / 半角 / 空白なし の 3 パターンが全て同一視 (PR-γ v2 新規)。"""
         full = normalize_lookup_key("介護相談支援センター　LEBEN")
         half = normalize_lookup_key("介護相談支援センター LEBEN")
-        assert full == half
+        none = normalize_lookup_key("介護相談支援センターLEBEN")
+        assert full == half == none
 
-    def test_pt_staff_name_with_either_space_compare_equal(self) -> None:
+    def test_pt_staff_name_three_patterns_equal(self) -> None:
         full = normalize_lookup_key("PT　宮下")
         half = normalize_lookup_key("PT 宮下")
-        assert full == half
+        none = normalize_lookup_key("PT宮下")
+        assert full == half == none
 
 
 class TestSpaceCollapsing:
-    def test_consecutive_spaces_collapse_to_single(self) -> None:
-        assert normalize_lookup_key("a  b   c") == "a b c"
+    """空白を完全除去 (PR-γ v2 仕様)。"""
 
-    def test_leading_and_trailing_space_trimmed(self) -> None:
+    def test_consecutive_spaces_all_removed(self) -> None:
+        assert normalize_lookup_key("a  b   c") == "abc"
+
+    def test_leading_and_trailing_space_removed(self) -> None:
         assert normalize_lookup_key("  hello  ") == "hello"
 
-    def test_tab_and_newline_treated_as_space(self) -> None:
-        assert normalize_lookup_key("a\tb\nc") == "a b c"
+    def test_tab_and_newline_removed(self) -> None:
+        assert normalize_lookup_key("a\tb\nc") == "abc"
+
+    def test_mixed_whitespace_all_removed(self) -> None:
+        assert normalize_lookup_key("a 　\tb\n　c") == "abc"
 
 
 class TestAlphanumeric:
@@ -105,22 +124,27 @@ class TestEmptyAndIdempotent:
         s = "介護相談支援センター LEBEN"
         assert normalize_lookup_key(normalize_lookup_key(s)) == normalize_lookup_key(s)
 
-    def test_pure_ascii_unchanged(self) -> None:
-        assert normalize_lookup_key("hello world") == "hello world"
+    def test_pure_ascii_no_space_unchanged(self) -> None:
+        assert normalize_lookup_key("helloworld") == "helloworld"
 
 
 class TestRegressionCases:
-    """C 機能業務化 Phase 3 で実際に発生した表記揺れケースの regression 防止。"""
+    """過去 PR / 実機デモで実際に発生した表記揺れケースの regression 防止。"""
 
     @pytest.mark.parametrize(
         ("registered", "queried"),
         [
-            # PR #184 で投入した半角空白版が、スプレッドシート全角空白版に match する
+            # PR #184 (PR-γ v1): 半角空白版 vs 全角空白版
             ("介護相談支援センター LEBEN", "介護相談支援センター　LEBEN"),
-            # PT 担当者名の表記揺れ（NAS フォルダは半角空白、スプレッドシート登録時の揺れに耐える）
+            # PT 担当者名の表記揺れ（NAS フォルダ vs スプレッドシート登録）
             ("PT 宮下", "PT　宮下"),
-            # 連続空白
+            # PR-γ v2: 連続空白も全除去
             ("a b", "a  b"),
+            # Session 78 実機デモで判明: 全角 vs 半角
+            ("姫路医療生活協同組合 あぼし", "姫路医療生活協同組合　あぼし"),
+            # Session 78 実機デモで判明: 空白あり vs 空白なし (PR-γ v2 新規対応)
+            ("姫路医療生活協同組合 あぼし", "姫路医療生活協同組合あぼし"),
+            ("姫路医療生活協同組合　あぼし", "姫路医療生活協同組合あぼし"),
         ],
     )
     def test_registered_and_queried_match_after_normalization(

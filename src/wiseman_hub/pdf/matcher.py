@@ -17,11 +17,12 @@ B と C 両方を確認するが、片方しか存在しなくても AUTO_MATCHE
 from __future__ import annotations
 
 import re
-import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Protocol
+
+from wiseman_hub.utils.text_norm import normalize_lookup_key
 
 _SIMILAR_DISTANCE_THRESHOLD = 2
 _MAX_SIMILAR_CANDIDATES = 3
@@ -68,17 +69,16 @@ class NameMatcher(Protocol):
 # ---------------------------------------------------------------------------
 
 
-_WHITESPACE_RE = re.compile(r"[\s\u3000]+")
-
-
 def normalize_name(name: str) -> str:
-    """名前の正規化: 全角/半角空白を全て除去し、Unicode NFKC で統一。
+    """名前の正規化: NFKC + 全空白除去 (``text_norm.normalize_lookup_key`` と同等)。
 
     介護現場で発生しやすい表記揺れ（「塩津 美喜子」「塩津　美喜子」「塩津美喜子」）を
     同一文字列として扱うため。
+
+    PR-γ v2: ``text_norm.normalize_lookup_key`` に統合 (DRY)。後方互換のため
+    本関数名は維持し、内部実装を統合関数に委譲する。
     """
-    nfkc = unicodedata.normalize("NFKC", name)
-    return _WHITESPACE_RE.sub("", nfkc)
+    return normalize_lookup_key(name)
 
 
 # ---------------------------------------------------------------------------

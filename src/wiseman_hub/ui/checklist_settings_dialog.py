@@ -32,6 +32,7 @@ from wiseman_hub.config import (
     is_path_configured,
     save_config,
 )
+from wiseman_hub.utils.text_norm import normalize_lookup_key
 
 logger = logging.getLogger(__name__)
 
@@ -604,7 +605,14 @@ def _escape_toml(s: str) -> str:
 
 
 def _parse_routing_toml(text: str) -> dict[str, str]:
-    """``"居宅" = "FAX フォルダ"`` 形式を解析。空行/コメントは無視。"""
+    """``"居宅" = "FAX フォルダ"`` 形式を解析。空行/コメントは無視。
+
+    PR-γ v2 (silent-failure-hunter Important #I1): key を ``normalize_lookup_key``
+    で正規化済形式に変換して返す。``config.py:_load_checklist`` の保存経路と
+    同じ正規化を適用することで、設定ダイアログ保存直後の同一プロセス内 lookup
+    が表記揺れで silent failure する経路を防ぐ。デモ事案 (姫路医療生活協同組合
+    あぼし) の再発防止のため、UI 経路と config load 経路の両方で正規化整合を保つ。
+    """
     text = text.strip()
     if not text:
         return {}
@@ -615,7 +623,7 @@ def _parse_routing_toml(text: str) -> dict[str, str]:
     for k, v in parsed.items():
         if not isinstance(v, str):
             raise TypeError(f"routing value must be str: {k}")
-        result[str(k)] = v
+        result[normalize_lookup_key(str(k))] = v
     return result
 
 
@@ -654,7 +662,10 @@ def _parse_staff_toml(text: str) -> dict[str, ReportStaffEntry]:
         # 型違反を起動時 TypeError で拒否する。
         # Issue #27 続編 G Phase 3b: base_dir は Path 型必須化のため coerce_path 経由
         # (空白 strip → 未設定 sentinel、非 str/Path → TypeError)。
-        result[str(name)] = ReportStaffEntry(
+        # PR-γ v2 (silent-failure-hunter I1): name key も normalize_lookup_key で
+        # 正規化整合。config.py:_load_checklist:1196 と同じ正規化を UI 経路でも適用し、
+        # 保存直後の lookup で silent failure する経路を防ぐ。
+        result[normalize_lookup_key(str(name))] = ReportStaffEntry(
             base_dir=coerce_path(
                 f"checklist.report_staff.{name}.base_dir",
                 entry.get("base_dir", ""),

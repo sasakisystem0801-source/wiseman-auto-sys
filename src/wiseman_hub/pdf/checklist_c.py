@@ -187,7 +187,14 @@ def resolve_xlsx(
 
 
 def _normalize_name(name: str) -> str:
-    return name.replace("　", "").replace(" ", "").strip()
+    """氏名比較用の正規化 (PR-γ v2: text_norm に統合)。
+
+    PR-γ v2 まで: ``replace + strip`` のみで NFKC 欠落 (全角→半角効かず)。
+    本関数は xlsx シート名 lookup に使われており、シート名は人手で作成されて
+    全角/半角揺れが発生しやすい。``normalize_lookup_key`` への統合で NFKC を
+    確実に通す。
+    """
+    return normalize_lookup_key(name)
 
 
 def find_sheet_for_user(xlsx_path: Path, user_name: str) -> tuple[str | None, list[str]]:
