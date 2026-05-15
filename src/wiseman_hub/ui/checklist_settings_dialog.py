@@ -29,6 +29,7 @@ from wiseman_hub.config import (
     ChecklistConfig,
     ReportStaffEntry,
     coerce_path,
+    is_path_configured,
     save_config,
 )
 
@@ -92,17 +93,23 @@ class ChecklistSettingsDialog:
 
         self._spreadsheet_id = add_entry("スプレッドシート ID:", cfg.spreadsheet_id)
         # Issue #27 続編 G Phase 3a: karte_root / fax_root は Path 型。
-        # tk.StringVar は文字列前提のため str(Path) で渡す (未設定 sentinel
-        # Path("") は str() == "." だが add_entry の initial 値として実害なし、
-        # ユーザーが browse で上書きする)。
+        # 未設定 sentinel Path("") は str() == "." になり、`_on_scan_env` で
+        # CWD を fax_root として scan_and_upload してしまう silent 経路を生む。
+        # Phase 2a (settings.py:134) / Phase 2b (facility_root_dialog.py:386)
+        # の canonical pattern (`str(p) if is_path_configured(p) else ""`) で
+        # 未設定時を明示的に空文字列にして UX / 動作両方を防御する。
         self._karte_root = add_entry(
-            "カルテルート:", str(cfg.karte_root), browse=True
+            "カルテルート:",
+            str(cfg.karte_root) if is_path_configured(cfg.karte_root) else "",
+            browse=True,
         )
         self._monitoring_subfolder = add_entry(
             "モニタリングサブフォルダ:", cfg.monitoring_subfolder
         )
         self._fax_root = add_entry(
-            "FAX 事業所ルート:", str(cfg.fax_root), browse=True
+            "FAX 事業所ルート:",
+            str(cfg.fax_root) if is_path_configured(cfg.fax_root) else "",
+            browse=True,
         )
         self._b_output_subfolder = add_entry(
             "B 出力サブフォルダ:", cfg.b_output_subfolder

@@ -3386,6 +3386,31 @@ class TestIssue27PathMigrationPhase3a:
         assert 'karte_root = "."' not in content
         assert 'fax_root = "."' not in content
 
+    def test_load_config_accepts_backslash_unc_paths(self, tmp_path: Path) -> None:
+        """既存環境互換: TOML に backslash UNC が書かれていても load_config が正常に
+        Path 化する (本田様 PC 等で旧 default 値 ``\\\\Tera-station\\share\\...`` が
+        TOML に保存されたケース)。
+
+        OS 中立テスト: backslash UNC と forward slash UNC の意味的等価性は
+        Windows runtime 限定 (`PureWindowsPath` の UNC 解釈) のため CI Linux/macOS
+        では検証しない。代わりに「load_config が TypeError raise しない」「Path 化
+        される」「is_path_configured = True」を assert する (起動時 fail-close 防御)。
+        """
+        from wiseman_hub.config import is_path_configured
+
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            "[checklist]\n"
+            'karte_root = "\\\\\\\\Tera-station\\\\share\\\\02.カルテ"\n'
+            'fax_root = "\\\\\\\\Tera-station\\\\share\\\\03.FAX(事業所)"\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        assert isinstance(cfg.checklist.karte_root, Path)
+        assert isinstance(cfg.checklist.fax_root, Path)
+        assert is_path_configured(cfg.checklist.karte_root)
+        assert is_path_configured(cfg.checklist.fax_root)
+
     def test_partial_update_preserves_other_checklist_fields(
         self, tmp_path: Path
     ) -> None:

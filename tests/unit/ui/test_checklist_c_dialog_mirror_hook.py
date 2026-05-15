@@ -50,7 +50,7 @@ def _make_config(tmp_path: Path) -> AppConfig:
         ),
         checklist=ChecklistConfig(
             spreadsheet_id="dummy",
-            fax_root=str(tmp_path),
+            fax_root=tmp_path,
             facility_routing={"テスト居宅": "テスト居宅(FAX)"},
             report_staff={
                 "宮下": ReportStaffEntry(
