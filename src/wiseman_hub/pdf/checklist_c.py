@@ -86,6 +86,67 @@ def cache_key(staff: str, year: int, month: int) -> str:
     return f"{staff}:{year}:{month}"
 
 
+def parse_multi_staff(staff: str) -> list[str]:
+    """担当列の文字列を `/` `／` 区切りで複数担当者に分解する (Issue #314)。
+
+    スプレッドシート担当列が ``"小島/木塚"`` のような複合表記を持つ行を扱うため、
+    半角 ``/`` と全角 ``／`` の両方を区切り文字として 1 度に分解する。
+
+    順序保持 + dedupe:
+        - UI 表示順序を予測可能にするため元の出現順を保持
+        - 重複は normalize_lookup_key で正規化した後の値で判定 (例: "小島/小島"、
+          "小島／ 小島" 等の表記揺れ込み重複も 1 件として扱う)
+
+    Args:
+        staff: 担当列の生文字列。空文字や None 相当 ("" / "  ") は ``[]`` を返す。
+
+    Returns:
+        分解後の担当者名 list (元表記、空要素除去、normalize 後重複除去済み)。
+        単独担当 ("小島") は ``["小島"]`` を返す。
+    """
+    if not staff:
+        return []
+    # 全角／を半角/に正規化してから split (DRY)。NFKC では / と ／ は同一視されない
+    # ため独自処理が必要。
+    raw_parts = staff.replace("／", "/").split("/")
+    seen_keys: set[str] = set()
+    result: list[str] = []
+    for part in raw_parts:
+        trimmed = part.strip()
+        if not trimmed:
+            continue
+        key = normalize_lookup_key(trimmed)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        result.append(trimmed)
+    return result
+
+
+def staff_choice_cache_key(staffs: list[str], year: int, month: int) -> str:
+    """staff_choice_cache の dict キー形式を組み立てる (Issue #314)。
+
+    複数担当者の組合せを順序非依存で再利用できるよう、各要素を
+    normalize_lookup_key で正規化してから sort し、``|`` 区切りで連結する。
+    ``|`` を採用するのは TOML key として slash ``/`` が quote 必須になり可読性を
+    損なうため。
+
+    例:
+        staffs=["小島", "木塚"], 2026, 3 → "木塚|小島:2026:3" (sort 後)
+        staffs=["木塚", "小島"], 2026, 3 → "木塚|小島:2026:3" (順序非依存)
+        staffs=["小島"], 2026, 3 → "小島:2026:3" (単独は xlsx_path_cache と同形式)
+        staffs=[] → "" (空の場合は呼び出し側で hit しない判定)
+
+    Note:
+        単独要素時の形式は ``cache_key`` (xlsx_path_cache 用) と一致するが、
+        cache 自体が別 dict なのでキー衝突は発生しない。
+    """
+    if not staffs:
+        return ""
+    sorted_keys = sorted(normalize_lookup_key(s) for s in staffs)
+    return f"{'|'.join(sorted_keys)}:{year}:{month}"
+
+
 def resolve_xlsx_path(entry: ReportStaffEntry, year: int, month: int) -> Path:
     """[deprecated] 旧 MVP の単純 template 展開（後方互換専用）。
 

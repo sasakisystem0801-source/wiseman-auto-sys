@@ -12,8 +12,10 @@ from wiseman_hub.pdf.checklist_c import (
     CPlacementResult,
     CPlacementStatus,
     cache_key,
+    parse_multi_staff,
     plan_c_placement,
     resolve_xlsx,
+    staff_choice_cache_key,
 )
 
 
@@ -100,6 +102,100 @@ def _entry_with_xlsx(tmp_path: Path) -> tuple[ReportStaffEntry, Path]:
 
 def test_cache_key_format() -> None:
     assert cache_key("宮下", 2026, 3) == "宮下:2026:3"
+
+
+# ---------- Issue #314: parse_multi_staff / staff_choice_cache_key ----------
+
+
+def test_parse_multi_staff_single() -> None:
+    """単独担当者: 1 要素 list を返す (NFKC 経由でも表記は元のまま保持)。"""
+    assert parse_multi_staff("小島") == ["小島"]
+
+
+def test_parse_multi_staff_halfwidth_slash() -> None:
+    """半角 / 区切り: 順序保持で 2 要素に分解。"""
+    assert parse_multi_staff("小島/木塚") == ["小島", "木塚"]
+
+
+def test_parse_multi_staff_fullwidth_slash() -> None:
+    """全角 ／ 区切りも同様に分解 (実機スプレッドシート入力対応)。"""
+    assert parse_multi_staff("小島／木塚") == ["小島", "木塚"]
+
+
+def test_parse_multi_staff_mixed_slash() -> None:
+    """半角/全角混在 (例 "小島/木塚／宮下") も問題なく 3 要素になる。"""
+    assert parse_multi_staff("小島/木塚／宮下") == ["小島", "木塚", "宮下"]
+
+
+def test_parse_multi_staff_empty_input() -> None:
+    """空文字 / 空白のみは空 list (呼び出し側で SKIPPED_NO_STAFF 判定)。"""
+    assert parse_multi_staff("") == []
+    assert parse_multi_staff("   ") == []
+
+
+def test_parse_multi_staff_strips_whitespace() -> None:
+    """各要素の前後空白は除去 (スプレッドシート入力で頻出する " 小島 / 木塚 ")。"""
+    assert parse_multi_staff(" 小島 / 木塚 ") == ["小島", "木塚"]
+
+
+def test_parse_multi_staff_dedupes_normalized_duplicates() -> None:
+    """normalize_lookup_key で正規化後同値の重複は 1 件に統合 (NFKC + 全角空白吸収)。
+
+    例: "小島/小島" や "小島／ 小島" (全角空白) はどちらも 1 要素扱い。
+    元表記は最初に出現したものを保持。
+    """
+    assert parse_multi_staff("小島/小島") == ["小島"]
+    # 全角空白 + 半角 slash でも dedup
+    assert parse_multi_staff("小島／　小島") == ["小島"]
+
+
+def test_parse_multi_staff_keeps_original_order_with_dedupe() -> None:
+    """元出現順は維持しつつ後続重複のみ除去 (UI 表示で予測可能な順序)。"""
+    assert parse_multi_staff("木塚/小島/木塚") == ["木塚", "小島"]
+
+
+def test_parse_multi_staff_handles_empty_parts() -> None:
+    """区切り間が空 ("小島//木塚" や "/小島") でも空要素を除去して有効分のみ返す。"""
+    assert parse_multi_staff("小島//木塚") == ["小島", "木塚"]
+    assert parse_multi_staff("/小島") == ["小島"]
+    assert parse_multi_staff("小島/") == ["小島"]
+
+
+def test_staff_choice_cache_key_sorted_normalized() -> None:
+    """staff_choice_cache key は normalize_lookup_key sort + | 区切り (順序非依存)。"""
+    # sort は normalize 後の文字列で行う。小島 と 木塚 の Unicode 順は環境依存ではなく
+    # Python の標準 codepoint 順 ("小"=0x5C0F, "木"=0x6728 → "木" > "小" だが
+    # normalize_lookup_key 結果ベースで sort)
+    assert staff_choice_cache_key(["小島", "木塚"], 2026, 3) == staff_choice_cache_key(
+        ["木塚", "小島"], 2026, 3
+    )
+
+
+def test_staff_choice_cache_key_single() -> None:
+    """単独担当者は ``"{staff}:{year}:{month}"`` (xlsx_path_cache と同形式)。"""
+    assert staff_choice_cache_key(["小島"], 2026, 3) == "小島:2026:3"
+
+
+def test_staff_choice_cache_key_empty_list_returns_empty() -> None:
+    """空 list は空文字 (呼び出し側で hit 判定しない sentinel)。"""
+    assert staff_choice_cache_key([], 2026, 3) == ""
+
+
+def test_staff_choice_cache_key_uses_pipe_not_slash() -> None:
+    """セパレータは ``|`` であって ``/`` ではない (TOML key の quote 回避)。"""
+    key = staff_choice_cache_key(["小島", "木塚"], 2026, 3)
+    assert "|" in key
+    assert "/" not in key
+    assert "／" not in key
+
+
+def test_staff_choice_cache_key_includes_year_month() -> None:
+    """異なる年月では別 key (xlsx_path_cache の月別キャッシュと同じ思想)。"""
+    k1 = staff_choice_cache_key(["小島", "木塚"], 2026, 3)
+    k2 = staff_choice_cache_key(["小島", "木塚"], 2026, 4)
+    assert k1 != k2
+    assert k1.endswith(":2026:3")
+    assert k2.endswith(":2026:4")
 
 
 def test_resolve_xlsx_cache_hit_returns_pending(tmp_path: Path) -> None:
