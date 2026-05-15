@@ -52,9 +52,11 @@ class TestStaffTomlRoundTrip:
         }
         text = _staff_to_toml(original)
         roundtrip = _parse_staff_toml(text)
-        assert set(roundtrip.keys()) == {"小島", "OT 小林"}
+        # PR-γ v2 (silent-failure-hunter I1): UI 経路でも normalize_lookup_key で
+        # key 正規化、空白除去後の key で格納される (デモ事案再発防止)。
+        assert set(roundtrip.keys()) == {"小島", "OT小林"}
         assert roundtrip["小島"].suggest_patterns == original["小島"].suggest_patterns
-        assert roundtrip["OT 小林"].suggest_patterns == original["OT 小林"].suggest_patterns
+        assert roundtrip["OT小林"].suggest_patterns == original["OT 小林"].suggest_patterns
 
     def test_empty_suggest_patterns_emits_empty_list(self) -> None:
         original = {
@@ -93,7 +95,12 @@ class TestStaffTomlRoundTrip:
         assert "file_template" not in text
 
     def test_quoted_key_with_space_round_trip(self) -> None:
-        """key にスペース・特殊文字を含むケース（"PT 宮下" など）の round-trip。"""
+        """key にスペース・特殊文字を含むケース（"PT 宮下" など）の round-trip。
+
+        PR-γ v2 (silent-failure-hunter I1): UI 経路でも `normalize_lookup_key`
+        で正規化されるため、roundtrip 後の key は空白除去後 (`"PT宮下"`) になる。
+        TOML 上は元の `"PT 宮下"` が記録されるが、メモリ上 dict key は正規化済。
+        """
         original = {
             "PT 宮下": ReportStaffEntry(
                 base_dir=Path("C:/x"),
@@ -102,8 +109,8 @@ class TestStaffTomlRoundTrip:
         }
         text = _staff_to_toml(original)
         roundtrip = _parse_staff_toml(text)
-        assert "PT 宮下" in roundtrip
-        assert roundtrip["PT 宮下"].suggest_patterns == ["a/*.xlsx"]
+        assert "PT宮下" in roundtrip
+        assert roundtrip["PT宮下"].suggest_patterns == ["a/*.xlsx"]
 
 
 class TestStaffTomlValidation:
@@ -606,3 +613,44 @@ class TestPulledDirtyFlagBehavioral:
             assert dialog._pulled_staff is False
         finally:
             root.destroy()
+
+
+class TestParseTomlNormalization:
+    """PR-γ v2 (silent-failure-hunter I1): 設定ダイアログ保存経路の key 正規化。
+
+    `_parse_routing_toml` / `_parse_staff_toml` が dict key を `normalize_lookup_key`
+    で正規化することで、設定ダイアログから保存した直後の同一プロセス内 lookup が
+    表記揺れで silent failure する経路を防ぐ。Session 78 実機デモで判明した
+    `姫路医療生活協同組合 あぼし` 事案の再発防止。
+    """
+
+    def test_routing_full_width_space_key_normalized(self) -> None:
+        """全角空白 key が空白除去後の key で格納される。"""
+        from wiseman_hub.ui.checklist_settings_dialog import _parse_routing_toml
+        text = '"姫路医療生活協同組合　あぼし" = "FAX_NAME"'
+        result = _parse_routing_toml(text)
+        # key は normalize_lookup_key で空白除去
+        assert "姫路医療生活協同組合あぼし" in result
+        # 生の全角空白 key では引けない (= 正規化後 lookup でなければ hit しない)
+        assert "姫路医療生活協同組合　あぼし" not in result
+
+    def test_routing_half_width_and_full_width_collide_to_same_key(self) -> None:
+        """全角/半角 別 entry で書いても同一 key で衝突 (最後の値が勝つ)。"""
+        from wiseman_hub.ui.checklist_settings_dialog import _parse_routing_toml
+        text = (
+            '"姫路医療生活協同組合 あぼし" = "FAX1"\n'
+            '"姫路医療生活協同組合　あぼし" = "FAX2"'
+        )
+        result = _parse_routing_toml(text)
+        # 正規化後同一 key、最後の値が勝つ
+        assert len(result) == 1
+        assert result["姫路医療生活協同組合あぼし"] == "FAX2"
+
+    def test_staff_key_normalized(self) -> None:
+        """staff name key も normalize_lookup_key で正規化される。"""
+        from wiseman_hub.ui.checklist_settings_dialog import _parse_staff_toml
+        text = '[" PT 宮下 "]\nbase_dir = "C:\\\\test"\nsuggest_patterns = ["x.xlsx"]'
+        result = _parse_staff_toml(text)
+        # key は trim + 空白除去
+        assert "PT宮下" in result
+        assert " PT 宮下 " not in result
