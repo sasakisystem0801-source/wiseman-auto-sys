@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import logging
 import re
+import subprocess
+import sys
 import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from tkinter import messagebox as _tk_messagebox
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
@@ -241,3 +244,55 @@ def count_by_status(
         counts[label] = counts.get(label, 0) + 1
         total += 1
     return StatusCounts(total=total, by_status=counts)
+
+
+# ---------------------------------------------------------------------------
+# シート名 (タブ名) パース + OS ファイルマネージャ起動
+#   PR (xlsx-visibility): B/C ダイアログで完全重複していた `_SHEET_NAME_RE` /
+#   `_sheet_name_to_year_month` / `_open_folder` を共通化 (code-reviewer
+#   MEDIUM #1 対応)。
+# ---------------------------------------------------------------------------
+
+# 月部分を 01-12 に厳格化 (旧 \d{1,2} は "0月" "13月" を許容して downstream の
+# folder template を silently 壊す bug があった、pr-test-analyzer CG-2 で表面化)。
+# 1 桁月 ("4月") と 2 桁月 ("12月") の両方を許容するため `[1-9]|1[0-2]` パターン。
+_SHEET_NAME_RE = re.compile(r"^(\d{2})年([1-9]|1[0-2])月$")
+
+
+def parse_sheet_name(name: str) -> tuple[int, int] | None:
+    """Wiseman シート名 ``"YY年M月"`` を ``(year, month)`` にパースする。
+
+    例: ``"26年4月"`` → ``(2026, 4)``、 ``"25年12月"`` → ``(2025, 12)``。
+    マッチしなければ ``None``。
+
+    Wiseman スプレッドシートでは月別シートが「YY年M月」表記で命名される (年は
+    2 桁西暦、月は 1〜12)。本関数は B/C/将来の dialog で共通利用される。
+
+    Note:
+        旧版は ``\\d{1,2}`` で月を受けていたため、"26年0月" / "26年13月" が通過し
+        downstream の年フォルダ template (``令和{era}年/{month}月``) を silently
+        壊す可能性があった。本関数は月 = 1-12 のみを受け入れる。
+    """
+    m = _SHEET_NAME_RE.match(name)
+    if not m:
+        return None
+    yy = int(m.group(1))
+    month = int(m.group(2))
+    return (2000 + yy, month)
+
+
+def open_folder_in_os(folder: Path) -> None:
+    """OS のファイルマネージャでフォルダを開く (best-effort、失敗時はログ警告のみ)。
+
+    Windows: ``explorer`` / macOS: ``open`` / Linux: ``xdg-open``。
+    B/C ダイアログの「行ダブルクリックで親フォルダを開く」共通処理。
+    """
+    try:
+        if sys.platform == "win32":
+            subprocess.run(["explorer", str(folder)], check=False)
+        elif sys.platform == "darwin":
+            subprocess.run(["open", str(folder)], check=False)
+        else:
+            subprocess.run(["xdg-open", str(folder)], check=False)
+    except OSError:
+        logger.exception("Failed to open folder")

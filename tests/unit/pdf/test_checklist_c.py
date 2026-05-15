@@ -259,6 +259,79 @@ def test_plan_c_placement_needs_review_propagates_candidates(tmp_path: Path) -> 
     assert results[0].target_pdf is None
 
 
+def test_plan_c_placement_cache_hit_sets_auto_prefix(tmp_path: Path) -> None:
+    """AC-7: cache hit で確定した行は message に「自動: <basename>」prefix が入る。
+
+    旧仕様では message が空文字で「決まっていないような表示」になっていた
+    (xlsx 列なし + 詳細列空)。本 PR で xlsx 起源を Treeview から判別可能にする。
+    """
+    from openpyxl import Workbook
+
+    fax_root = tmp_path / "FAX"
+    fax_root.mkdir()
+    base = tmp_path / "PT 宮下"
+    base.mkdir()
+    xlsx = base / "report.xlsx"
+    wb = Workbook()
+    wb.active.title = "テスト太郎"  # 利用者シートを 1 件用意
+    wb.save(xlsx)
+    cfg = ChecklistConfig(
+        fax_root=fax_root,
+        c_output_subfolder="経過報告書",
+        facility_routing={"事業所A": "事業所A_FAX"},
+        report_staff={
+            "宮下": ReportStaffEntry(base_dir=base, suggest_patterns=["dummy"]),
+        },
+        xlsx_path_cache={"宮下:2026:3": str(xlsx)},  # cache hit を仕込む
+    )
+    rows = [
+        ChecklistRow(
+            name="テスト太郎", monitoring_raw=None, staff="宮下", facility="事業所A"
+        )
+    ]
+    results = plan_c_placement(rows, cfg, 2026, 3)
+    assert results[0].status == CPlacementStatus.PENDING
+    assert results[0].message == "自動: report.xlsx"
+
+
+def test_plan_c_placement_legacy_template_sets_auto_legacy_prefix(
+    tmp_path: Path,
+) -> None:
+    """AC-7: legacy template 経由で確定した行は「自動: <basename> (legacy)」prefix。"""
+    from openpyxl import Workbook
+
+    fax_root = tmp_path / "FAX"
+    fax_root.mkdir()
+    base = tmp_path / "PT 宮下"
+    (base / "リハ経過報告書" / "令和8年").mkdir(parents=True)
+    xlsx = base / "リハ経過報告書" / "令和8年" / "report.xlsx"
+    wb = Workbook()
+    wb.active.title = "テスト太郎"
+    wb.save(xlsx)
+    cfg = ChecklistConfig(
+        fax_root=fax_root,
+        c_output_subfolder="経過報告書",
+        facility_routing={"事業所A": "事業所A_FAX"},
+        report_staff={
+            "宮下": ReportStaffEntry(
+                base_dir=base,
+                suggest_patterns=[],  # 空にして legacy 経路に乗せる
+                year_subfolder_template="リハ経過報告書/令和{era}年",
+                file_template="report.xlsx",
+            ),
+        },
+        xlsx_path_cache={},
+    )
+    rows = [
+        ChecklistRow(
+            name="テスト太郎", monitoring_raw=None, staff="宮下", facility="事業所A"
+        )
+    ]
+    results = plan_c_placement(rows, cfg, 2026, 3)
+    assert results[0].status == CPlacementStatus.PENDING
+    assert results[0].message == "自動: report.xlsx (legacy)"
+
+
 # ---------- T4: apply_xlsx_selection ----------
 
 
@@ -301,7 +374,9 @@ def test_apply_xlsx_selection_sheet_match_sets_pending(tmp_path: Path) -> None:
     # NEEDS_REVIEW 時のフィールドはクリア
     assert result.xlsx_candidates == []
     assert result.folder_tree is None
-    assert result.message == ""
+    # PR (xlsx-visibility): 手動選択完了行は「選択: <basename>」prefix で起源を可視化。
+    # (旧仕様は空文字で「決まっていないような表示」になっていた)
+    assert result.message == f"選択: {xlsx.name}"
 
 
 def test_apply_xlsx_selection_sheet_not_found(tmp_path: Path) -> None:

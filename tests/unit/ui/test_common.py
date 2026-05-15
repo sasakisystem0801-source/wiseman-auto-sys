@@ -347,3 +347,143 @@ class TestMakeTreeviewSortable:
             assert order == ["要レビュー", "実行待ち", "成功"]
         finally:
             root.destroy()
+
+
+# ===========================================================================
+# parse_sheet_name / open_folder_in_os (PR sheet-list-binding で追加された
+# 共通 helper)。pr-test-analyzer CG-2 対応で直接 unit test を追加。
+# ===========================================================================
+
+
+from unittest.mock import patch  # noqa: E402
+
+from wiseman_hub.ui.common import (  # noqa: E402
+    open_folder_in_os,
+    parse_sheet_name,
+)
+
+
+class TestParseSheetName:
+    """Wiseman シート名 "YY年M月" のパース。"""
+
+    # ---------- happy path ----------
+
+    def test_one_digit_month(self) -> None:
+        assert parse_sheet_name("26年4月") == (2026, 4)
+
+    def test_two_digit_month(self) -> None:
+        assert parse_sheet_name("25年12月") == (2025, 12)
+
+    def test_year_boundary_00(self) -> None:
+        assert parse_sheet_name("00年1月") == (2000, 1)
+
+    def test_year_boundary_99(self) -> None:
+        assert parse_sheet_name("99年12月") == (2099, 12)
+
+    def test_month_boundary_1(self) -> None:
+        assert parse_sheet_name("26年1月") == (2026, 1)
+
+    def test_month_boundary_12(self) -> None:
+        assert parse_sheet_name("26年12月") == (2026, 12)
+
+    # ---------- 月バリデーション (旧 regex は受け入れていた、本 PR で厳格化) ----------
+
+    def test_rejects_month_zero(self) -> None:
+        """旧 regex は "26年0月" を (2026, 0) として返していた (downstream で壊れる)。"""
+        assert parse_sheet_name("26年0月") is None
+
+    def test_rejects_month_13(self) -> None:
+        """旧 regex は "26年13月" を (2026, 13) として返していた。"""
+        assert parse_sheet_name("26年13月") is None
+
+    def test_rejects_month_99(self) -> None:
+        assert parse_sheet_name("26年99月") is None
+
+    def test_rejects_month_00(self) -> None:
+        """月 "00" (2 桁ゼロパディング) も無効。"""
+        assert parse_sheet_name("26年00月") is None
+
+    # ---------- フォーマット違反 (旧 regex の動作も保持) ----------
+
+    def test_rejects_empty_string(self) -> None:
+        assert parse_sheet_name("") is None
+
+    def test_rejects_missing_month(self) -> None:
+        assert parse_sheet_name("26年") is None
+
+    def test_rejects_missing_year(self) -> None:
+        assert parse_sheet_name("年4月") is None
+
+    def test_rejects_four_digit_year(self) -> None:
+        """4 桁年は明示的に拒否 (旧 regex も同じ動作)。"""
+        assert parse_sheet_name("2026年4月") is None
+
+    def test_rejects_three_digit_month(self) -> None:
+        assert parse_sheet_name("26年123月") is None
+
+    def test_rejects_extra_whitespace(self) -> None:
+        assert parse_sheet_name("26年 4月") is None
+        assert parse_sheet_name(" 26年4月") is None
+        assert parse_sheet_name("26年4月 ") is None
+
+
+class TestOpenFolderInOs:
+    """OS 別のフォルダ起動 (subprocess.run の引数を検証)。"""
+
+    def test_uses_explorer_on_win32(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
+        with (
+            patch("wiseman_hub.ui.common.sys.platform", "win32"),
+            patch("wiseman_hub.ui.common.subprocess.run") as mock_run,
+        ):
+            open_folder_in_os(tmp_path)
+            mock_run.assert_called_once_with(
+                ["explorer", str(tmp_path)], check=False
+            )
+
+    def test_uses_open_on_darwin(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
+        with (
+            patch("wiseman_hub.ui.common.sys.platform", "darwin"),
+            patch("wiseman_hub.ui.common.subprocess.run") as mock_run,
+        ):
+            open_folder_in_os(tmp_path)
+            mock_run.assert_called_once_with(
+                ["open", str(tmp_path)], check=False
+            )
+
+    def test_uses_xdg_open_on_linux(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
+        with (
+            patch("wiseman_hub.ui.common.sys.platform", "linux"),
+            patch("wiseman_hub.ui.common.subprocess.run") as mock_run,
+        ):
+            open_folder_in_os(tmp_path)
+            mock_run.assert_called_once_with(
+                ["xdg-open", str(tmp_path)], check=False
+            )
+
+    def test_oserror_does_not_propagate(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
+        """subprocess.run が OSError を投げても caller には伝わらない (best-effort 契約)。"""
+        with (
+            patch("wiseman_hub.ui.common.sys.platform", "darwin"),
+            patch(
+                "wiseman_hub.ui.common.subprocess.run",
+                side_effect=OSError("permission denied"),
+            ),
+        ):
+            # 例外が伝播しないことが契約 (logger.exception でログのみ)
+            open_folder_in_os(tmp_path)
+
+
+class TestParseSheetNameSharedAcrossDialogs:
+    """B/C ダイアログが共通の parse_sheet_name を使う identity test (CG-3)。
+
+    将来 B または C が module-local な regex を再導入して divergence する regression
+    を防ぐ。
+    """
+
+    def test_b_and_c_dialogs_use_common_parse_sheet_name(self) -> None:
+        from wiseman_hub.ui import checklist_b_dialog as b_mod
+        from wiseman_hub.ui import checklist_c_dialog as c_mod
+        from wiseman_hub.ui.common import parse_sheet_name as common_fn
+
+        assert b_mod.parse_sheet_name is common_fn
+        assert c_mod.parse_sheet_name is common_fn
