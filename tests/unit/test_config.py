@@ -268,7 +268,11 @@ output_dir = ""
         assert "# これはトップレベルコメント" in written
         assert "# PDF マージ設定" in written
         assert "# 入力フォルダ" in written
-        assert '/new/in' in written
+        # Issue #27 続編 G Phase 3b: save_config は str(Path(...)) で文字列化するため、
+        # Windows では "\\new\\in" になり TOML 上は ``\\\\new\\\\in`` に escape される。
+        # OS 中立にするため expected も同じ Path → str → TOML escape 変換を通す。
+        expected_path_in_toml = str(Path("/new/in")).replace("\\", "\\\\")
+        assert expected_path_in_toml in written
 
     def test_save_overwrites_existing_file(self, tmp_path: Path) -> None:
         """既存ファイルを save で上書きできる。新しい値がロードされる。"""
@@ -2922,7 +2926,11 @@ class TestIssue27PathMigration:
 
         # 文字列として TOML に書かれていることを直接確認 (Path repr ではない)
         content = cfg_path.read_text(encoding="utf-8")
-        assert 'log_dir = "/var/log/test"' in content
+        # Issue #27 続編 G Phase 3b: Windows では str(Path("/var/log/test")) が
+        # "\\var\\log\\test" になり TOML 上は ``\\\\var\\\\log\\\\test`` に escape
+        # される。OS 中立に比較するため expected も同じ変換経路を通す。
+        expected_path_in_toml = str(Path("/var/log/test")).replace("\\", "\\\\")
+        assert f'log_dir = "{expected_path_in_toml}"' in content
         # Path 型の repr (e.g. "PosixPath('/var/log/test')") が混入していないこと
         assert "PosixPath" not in content
         assert "WindowsPath" not in content
