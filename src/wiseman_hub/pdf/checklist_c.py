@@ -24,7 +24,7 @@ from typing import Any
 from openpyxl import load_workbook
 
 from wiseman_hub.cloud.sheets import ChecklistRow
-from wiseman_hub.config import ChecklistConfig, ReportStaffEntry
+from wiseman_hub.config import ChecklistConfig, ReportStaffEntry, is_path_configured
 from wiseman_hub.pdf.excel_com import ExcelExporter
 from wiseman_hub.pdf.staff_path_scanner import (
     build_folder_tree,
@@ -92,7 +92,8 @@ def resolve_xlsx_path(entry: ReportStaffEntry, year: int, month: int) -> Path:
     ``exists()`` 失敗扱いになるので機能はしない。
     """
     era = western_to_reiwa(year)
-    base = Path(entry.base_dir)
+    # Issue #27 続編 G Phase 3b: entry.base_dir は Path 型に移行済 (重複ラップ除去)。
+    base = entry.base_dir
     year_sub = entry.year_subfolder_template.format(era=era, month=month)
     fname = entry.file_template.format(era=era, month=month)
     return base / year_sub / fname
@@ -168,12 +169,13 @@ def resolve_xlsx(
             )
 
     # フォールバック: base_dir 配下を浅く scan + folder_tree 提示
-    base = Path(entry.base_dir) if entry.base_dir else None
-    if base is None or not base.exists():
+    # Issue #27 続編 G Phase 3b: entry.base_dir は Path 型、is_path_configured で sentinel 判定。
+    if not is_path_configured(entry.base_dir) or not entry.base_dir.exists():
         return ResolveResult(
             status=CPlacementStatus.SKIPPED_NO_XLSX,
-            message=f"base_dir 不在または未設定: {entry.base_dir or '(empty)'}",
+            message=f"base_dir 不在または未設定: {entry.base_dir if is_path_configured(entry.base_dir) else '(empty)'}",
         )
+    base = entry.base_dir
     fallback = scan_fallback(base, max_depth=3)
     tree = build_folder_tree(base, max_depth=3)
     return ResolveResult(

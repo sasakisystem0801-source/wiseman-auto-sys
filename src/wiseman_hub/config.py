@@ -697,14 +697,18 @@ class ReportStaffEntry:
         新規入力では suggest_patterns を使うこと。
     """
 
-    base_dir: str = ""
+    # Issue #27 続編 G Phase 3b: base_dir を str → Path 化。default 空 sentinel
+    # (Path("") == Path(".") で未設定判定)、UNC default は持たない (Phase 3a の
+    # karte_root / fax_root と違い、担当者ごとに本田様 PC 設定する性質のため)。
+    base_dir: Path = field(default_factory=Path)
     suggest_patterns: list[str] = field(default_factory=list)
     # deprecated（後方互換、suggest_patterns 空時のフォールバック）
     year_subfolder_template: str = ""
     file_template: str = ""
 
     def __post_init__(self) -> None:
-        _check_str("ReportStaffEntry.base_dir", self.base_dir)
+        # Issue #27 続編 G Phase 3b: base_dir は Path 型に移行済。
+        _check_path("ReportStaffEntry.base_dir", self.base_dir)
         _check_list_of_str("ReportStaffEntry.suggest_patterns", self.suggest_patterns)
         _check_str("ReportStaffEntry.year_subfolder_template", self.year_subfolder_template)
         _check_str("ReportStaffEntry.file_template", self.file_template)
@@ -965,6 +969,14 @@ def _coerce_report_staff_entry(staff_name: str, entry_data: dict[str, Any]) -> R
                     f"got {type(element).__name__}"
                 )
             suggest_patterns.append(element)
+    # Issue #27 続編 G Phase 3b: base_dir を TOML str → Path coerce (空白 strip → 未設定 sentinel)。
+    # 型違反は coerce_path が TypeError raise (起動時 fail-close、PII 配慮で path 値は echo しない)。
+    if "base_dir" in entry_data:
+        entry_data["base_dir"] = coerce_path(
+            f"checklist.report_staff.{staff_name}.base_dir",
+            entry_data["base_dir"],
+            echo_value=False,
+        )
     return ReportStaffEntry(suggest_patterns=suggest_patterns, **entry_data)
 
 

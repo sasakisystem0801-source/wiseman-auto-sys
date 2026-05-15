@@ -47,7 +47,7 @@ def _make_config(tmp_path: Path) -> AppConfig:
             facility_routing={"テスト居宅": "テスト居宅(FAX)"},
             report_staff={
                 "宮下": ReportStaffEntry(
-                    base_dir=str(tmp_path / "PT 宮下"),
+                    base_dir=tmp_path / "PT 宮下",
                     suggest_patterns=["dummy"],
                 ),
             },

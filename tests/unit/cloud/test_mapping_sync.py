@@ -266,11 +266,11 @@ class TestPushReportStaff:
         blob = MagicMock()
         original = {
             "宮下": ReportStaffEntry(
-                base_dir="\\\\Tera-station\\share\\PT 宮下",
+                base_dir=Path("\\\\Tera-station\\share\\PT 宮下"),
                 suggest_patterns=["リハ経過報告書/令和{era}年/*{month}月*.xlsx"],
             ),
             "小林": ReportStaffEntry(
-                base_dir="\\\\Tera-station\\share\\OT小林",
+                base_dir=Path("\\\\Tera-station\\share\\OT小林"),
                 suggest_patterns=["経過報告書/R{era}/*{month}月*.xlsx"],
             ),
         }
@@ -285,7 +285,8 @@ class TestPushReportStaff:
         assert body["version"] == "1"
         assert "generated_at" in body
         assert set(body["staff"].keys()) == {"宮下", "小林"}
-        assert body["staff"]["宮下"]["base_dir"] == original["宮下"].base_dir
+        # Issue #27 続編 G Phase 3b: JSON body は str 維持 (push 側で str(Path) 変換)。
+        assert body["staff"]["宮下"]["base_dir"] == str(original["宮下"].base_dir)
         assert (
             body["staff"]["宮下"]["suggest_patterns"]
             == original["宮下"].suggest_patterns
@@ -309,6 +310,31 @@ class TestPushReportStaff:
             _make_storage_mock(blob),
         ), pytest.raises(MappingSyncError, match="push failed"):
             push_report_staff(gcp, {"宮下": ReportStaffEntry()})
+
+    def test_push_unset_base_dir_writes_empty_string(self, gcp: GcpConfig) -> None:
+        """Issue #27 続編 G Phase 3b: ``base_dir=Path("")`` (未設定 sentinel) は
+        canonical sentinel pattern により JSON では ``""`` として書出される。
+
+        過去の str 形式 JSON 表現との後方互換 (Phase 2a silent 互換性劣化防御
+        ``"."`` 書出回避) を contract test として固定。
+        """
+        blob = MagicMock()
+        original = {
+            "宮下": ReportStaffEntry(
+                base_dir=Path(""),  # 未設定 sentinel
+                suggest_patterns=[],
+            ),
+        }
+        with patch(
+            "wiseman_hub.cloud.mapping_sync.storage.Client.from_service_account_json",
+            _make_storage_mock(blob),
+        ):
+            push_report_staff(gcp, original)
+        body = json.loads(blob.upload_from_string.call_args[0][0])
+        # 未設定 Path("") → "" (not ".") が canonical sentinel pattern の仕様
+        assert body["staff"]["宮下"]["base_dir"] == ""
+        # 旧 silent 劣化バグ: "." が書かれていないこと
+        assert body["staff"]["宮下"]["base_dir"] != "."
 
 
 class TestPullReportStaff:
@@ -335,10 +361,38 @@ class TestPullReportStaff:
         ):
             result = pull_report_staff(gcp)
         assert set(result.keys()) == {"宮下"}
-        assert result["宮下"].base_dir == "\\\\Tera-station\\share\\PT 宮下"
+        # Issue #27 続編 G Phase 3b: pull 経由で Path 型に変換される (coerce_path)。
+        assert result["宮下"].base_dir == Path("\\\\Tera-station\\share\\PT 宮下")
         assert result["宮下"].suggest_patterns == [
             "リハ経過報告書/令和{era}年/*{month}月*.xlsx"
         ]
+
+    def test_pull_empty_base_dir_becomes_unset_sentinel(self, gcp: GcpConfig) -> None:
+        """Issue #27 続編 G Phase 3b: JSON ``""`` 値は coerce_path 経由で
+        ``Path("")`` (未設定 sentinel) に変換される (round-trip 不変条件)。
+        """
+        from wiseman_hub.config import is_path_configured
+
+        blob = MagicMock()
+        blob.download_as_bytes.return_value = json.dumps(
+            {
+                "version": "1",
+                "generated_at": "2026-05-15T12:00:00+09:00",
+                "staff": {
+                    "宮下": {
+                        "base_dir": "",
+                        "suggest_patterns": [],
+                    },
+                },
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+        with patch(
+            "wiseman_hub.cloud.mapping_sync.storage.Client.from_service_account_json",
+            _make_storage_mock(blob),
+        ):
+            result = pull_report_staff(gcp)
+        assert is_path_configured(result["宮下"].base_dir) is False
 
     def test_raises_not_found_when_blob_absent(self, gcp: GcpConfig) -> None:
         """初回利用ガイダンスで識別するため MappingNotFoundError 専用例外。"""
@@ -427,13 +481,13 @@ class TestReportStaffRoundTrip:
         blob.download_as_bytes.side_effect = download
         original = {
             "宮下": ReportStaffEntry(
-                base_dir="\\\\Tera-station\\share\\PT 宮下",
+                base_dir=Path("\\\\Tera-station\\share\\PT 宮下"),
                 suggest_patterns=[
                     "リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx",
                 ],
             ),
             "小林": ReportStaffEntry(
-                base_dir="\\\\Tera-station\\share\\OT小林",
+                base_dir=Path("\\\\Tera-station\\share\\OT小林"),
                 suggest_patterns=["経過報告書/R{era}/*{month}月*.xlsx"],
             ),
         }
