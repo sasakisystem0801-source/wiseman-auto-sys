@@ -369,6 +369,195 @@ def test_plan_c_placement_skipped_no_staff(tmp_path: Path) -> None:
     assert results[0].status == CPlacementStatus.SKIPPED_NO_STAFF
 
 
+# ---------- Issue #314: plan_c_placement の複数担当者解決 (T4) ----------
+
+
+def _multi_staff_cfg(tmp_path: Path) -> tuple[ChecklistConfig, Path]:
+    """複数担当者テスト用 fixture。
+
+    report_staff には "小島" / "木塚" を登録し、xlsx 解決経路は wlog "小島" のみ
+    実体ファイルを持たせる ("木塚" は staff_entry はあるが xlsx 不在で skipped 経路
+    に流す)。NEEDS_REVIEW_STAFF 経路の検証では xlsx 解決まで進まないので、
+    fixture 単体での xlsx 実体は "小島" のみで十分。
+    """
+    fax_root = tmp_path / "FAX"
+    fax_root.mkdir()
+    base_kojima = tmp_path / "PT 小島"
+    (base_kojima / "リハ経過報告書" / "令和8年").mkdir(parents=True)
+    xlsx_kojima = (
+        base_kojima
+        / "リハ経過報告書"
+        / "令和8年"
+        / "リハ経過報告書（小島）3月    .xlsx"
+    )
+    xlsx_kojima.write_text("")
+    base_kizuka = tmp_path / "PT 木塚"
+    base_kizuka.mkdir()  # xlsx 実体なし
+    entry_kojima = ReportStaffEntry(
+        base_dir=base_kojima,
+        suggest_patterns=["リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx"],
+    )
+    entry_kizuka = ReportStaffEntry(
+        base_dir=base_kizuka,
+        suggest_patterns=["リハ経過報告書/令和{era}年/*.xlsx"],
+    )
+    cfg = ChecklistConfig(
+        fax_root=fax_root,
+        c_output_subfolder="経過報告書",
+        facility_routing={"事業所A": "事業所A_FAX"},
+        report_staff={"小島": entry_kojima, "木塚": entry_kizuka},
+    )
+    return cfg, xlsx_kojima
+
+
+def test_plan_c_placement_multi_staff_all_registered_returns_needs_review_staff(
+    tmp_path: Path,
+) -> None:
+    """全員登録済の複数担当者 → NEEDS_REVIEW_STAFF、message に件数表示。
+
+    Codex review High #4: 1 名のみでも自動確定しない。本ケースは 2 名で
+    NEEDS_REVIEW_STAFF にし staff_candidates に元表記両者を入れる。
+    """
+    cfg, _ = _multi_staff_cfg(tmp_path)
+    rows = [ChecklistRow(name="X", monitoring_raw=None, staff="小島/木塚", facility="事業所A")]
+    results = plan_c_placement(rows, cfg, 2026, 3)
+    assert results[0].status == CPlacementStatus.NEEDS_REVIEW_STAFF
+    assert results[0].staff_candidates == ["小島", "木塚"]
+    # message に件数 + 「担当者を選択」が入る
+    assert "2 名" in results[0].message
+    assert "担当者を選択" in results[0].message
+    # 未登録なしの場合は marker が message に含まれない (xlsx 列フォーマッタ契約)
+    assert "未登録あり" not in results[0].message
+    # xlsx 解決前なので target_pdf / xlsx_path は None
+    assert results[0].target_pdf is None
+    assert results[0].xlsx_path is None
+
+
+def test_plan_c_placement_multi_staff_partial_hit_shows_unregistered_names(
+    tmp_path: Path,
+) -> None:
+    """部分 hit (一部 mapping 未登録) → NEEDS_REVIEW_STAFF、message に未登録名明示。
+
+    Codex review High #4: 登録済 1 名のみでも自動確定しない。message に
+    「未登録あり: <未登録名>」を含めて UI 表示契約 (_format_xlsx_cell が検出) を満たす。
+    """
+    cfg, _ = _multi_staff_cfg(tmp_path)
+    # "宮下" は report_staff に存在しない (mapping 未登録)
+    rows = [
+        ChecklistRow(
+            name="X", monitoring_raw=None, staff="小島/宮下", facility="事業所A"
+        )
+    ]
+    results = plan_c_placement(rows, cfg, 2026, 3)
+    assert results[0].status == CPlacementStatus.NEEDS_REVIEW_STAFF
+    # 元表記全員 (登録済 + 未登録) が staff_candidates に入る (UI 側で disable 制御)
+    assert results[0].staff_candidates == ["小島", "宮下"]
+    # message に未登録名 + マーカー
+    assert "未登録あり" in results[0].message
+    assert "宮下" in results[0].message
+    # 登録済件数 (1 名のみ登録済)
+    assert "1 名のみ登録済" in results[0].message
+
+
+def test_plan_c_placement_multi_staff_all_unregistered_skipped(
+    tmp_path: Path,
+) -> None:
+    """全員 mapping 未登録 → SKIPPED_NO_STAFF (NEEDS_REVIEW_STAFF にしない)。
+
+    既存単独経路 (SKIPPED_NO_STAFF) と整合性確保。staff_candidates は空のまま。
+    """
+    cfg, _ = _multi_staff_cfg(tmp_path)
+    rows = [
+        ChecklistRow(name="X", monitoring_raw=None, staff="未知A/未知B", facility="事業所A")
+    ]
+    results = plan_c_placement(rows, cfg, 2026, 3)
+    assert results[0].status == CPlacementStatus.SKIPPED_NO_STAFF
+    assert "全員未登録" in results[0].message
+    # NEEDS_REVIEW_STAFF 用の staff_candidates は埋まらない
+    assert results[0].staff_candidates == []
+
+
+def test_plan_c_placement_multi_staff_cache_hit_proceeds_to_xlsx(
+    tmp_path: Path,
+) -> None:
+    """staff_choice_cache hit → cache value (normalize_lookup_key 形式) で
+    chosen staff を復元、その後通常の xlsx 解決経路に進む (Codex review High #3)。
+
+    本テストでは xlsx 解決まで進めば候補 1 件で NEEDS_REVIEW (xlsx レビュー) に
+    なる。staff レベルでは cache hit でユーザー判断 skip 済み。
+    """
+    cfg, xlsx_kojima = _multi_staff_cfg(tmp_path)
+    # cache value は normalize_lookup_key 形式 (Codex High #1)
+    from wiseman_hub.utils.text_norm import normalize_lookup_key
+    cache_key_str = staff_choice_cache_key(["小島", "木塚"], 2026, 3)
+    cfg_with_cache = ChecklistConfig(
+        fax_root=cfg.fax_root,
+        c_output_subfolder=cfg.c_output_subfolder,
+        facility_routing=cfg.facility_routing,
+        report_staff=cfg.report_staff,
+        staff_choice_cache={cache_key_str: normalize_lookup_key("小島")},
+    )
+    rows = [
+        ChecklistRow(name="X", monitoring_raw=None, staff="小島/木塚", facility="事業所A")
+    ]
+    results = plan_c_placement(rows, cfg_with_cache, 2026, 3)
+    # cache hit で staff レベルの判断は skip、xlsx 解決経路に進み NEEDS_REVIEW
+    # (xlsx 候補単独でも自動確定しない既存仕様、Codex review High-1 経由)
+    assert results[0].status == CPlacementStatus.NEEDS_REVIEW
+    assert results[0].xlsx_candidates == [xlsx_kojima]
+
+
+def test_plan_c_placement_multi_staff_cache_stale_falls_through(
+    tmp_path: Path,
+) -> None:
+    """staff_choice_cache に parsed_staffs に含まれない値が残る (stale) → NEEDS_REVIEW_STAFF。
+
+    安全側に倒し、cache miss と同等に人間判断を求める。row.staff 自体が変わって
+    過去 cache value が無効になる場面 (利用者の担当者が変更) を想定。
+    """
+    cfg, _ = _multi_staff_cfg(tmp_path)
+    from wiseman_hub.utils.text_norm import normalize_lookup_key
+    cache_key_str = staff_choice_cache_key(["小島", "木塚"], 2026, 3)
+    # cache に "宮下" (parsed_staffs にも report_staff にも無い値) を残置
+    cfg_with_stale = ChecklistConfig(
+        fax_root=cfg.fax_root,
+        c_output_subfolder=cfg.c_output_subfolder,
+        facility_routing=cfg.facility_routing,
+        report_staff=cfg.report_staff,
+        staff_choice_cache={cache_key_str: normalize_lookup_key("宮下")},
+    )
+    rows = [
+        ChecklistRow(name="X", monitoring_raw=None, staff="小島/木塚", facility="事業所A")
+    ]
+    results = plan_c_placement(rows, cfg_with_stale, 2026, 3)
+    # stale cache value → 全員登録済の場合と同じく NEEDS_REVIEW_STAFF にフォールバック
+    assert results[0].status == CPlacementStatus.NEEDS_REVIEW_STAFF
+    assert results[0].staff_candidates == ["小島", "木塚"]
+
+
+def test_plan_c_placement_single_staff_unchanged_path(tmp_path: Path) -> None:
+    """単独担当者 (parse_multi_staff の len==1) は既存経路を通り regression なし。
+
+    Issue #314 で _resolve_chosen_staff を導入したが、単独担当者の挙動は
+    NEEDS_REVIEW (xlsx 候補単独でも自動確定しない既存仕様) のまま維持。
+    """
+    cfg, xlsx = _checklist_cfg(tmp_path)
+    rows = [ChecklistRow(name="X", monitoring_raw=None, staff="宮下", facility="事業所A")]
+    results = plan_c_placement(rows, cfg, 2026, 3)
+    assert results[0].status == CPlacementStatus.NEEDS_REVIEW
+    assert results[0].xlsx_candidates == [xlsx]
+    # 単独経路では staff_candidates は埋まらない (NEEDS_REVIEW_STAFF 専用)
+    assert results[0].staff_candidates == []
+
+
+def test_plan_c_placement_empty_staff_skipped_no_staff(tmp_path: Path) -> None:
+    """staff="" / 空白のみ → SKIPPED_NO_STAFF (既存単独経路と整合)。"""
+    cfg, _ = _checklist_cfg(tmp_path)
+    rows = [ChecklistRow(name="X", monitoring_raw=None, staff="", facility="事業所A")]
+    results = plan_c_placement(rows, cfg, 2026, 3)
+    assert results[0].status == CPlacementStatus.SKIPPED_NO_STAFF
+
+
 def test_plan_c_placement_needs_review_propagates_candidates(tmp_path: Path) -> None:
     """cache miss で candidates が CPlacementResult に伝搬。"""
     cfg, xlsx = _checklist_cfg(tmp_path)
