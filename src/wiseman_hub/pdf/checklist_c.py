@@ -184,11 +184,19 @@ def resolve_xlsx(
     base = entry.base_dir
     fallback = scan_fallback(base, max_depth=3)
     tree = build_folder_tree(base, max_depth=3)
+    # Issue #313: scan_fallback が 1 件以上拾った場合は「候補なし」と矛盾するため、
+    # suggest_patterns hit 経路と同じ「N 件候補あり」文言で統一する。
+    # XlsxPickerDialog が候補一覧を出すのは fallback 結果も含めて全て同じため、
+    # Treeview の詳細列と Dialog の表示を整合させる狙い。
+    if fallback:
+        message = f"{len(fallback)} 件候補あり、確認後に選択してください"
+    else:
+        message = "候補なし、フォルダから選択してください"
     return ResolveResult(
         status=CPlacementStatus.NEEDS_REVIEW,
         candidates=fallback,
         folder_tree=tree,
-        message="候補なし、フォルダから選択してください",
+        message=message,
     )
 
 

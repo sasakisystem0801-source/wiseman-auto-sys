@@ -106,6 +106,32 @@ def _status_column_sort_key(cell: str) -> tuple[int, str]:
     return (_STATUS_SORT_PRIORITY.get(cell, 99), cell)
 
 
+def _format_xlsx_cell(r: CPlacementResult) -> str:
+    """Treeview の xlsx 列表示を行ステータスと候補件数から組み立てる。
+
+    Issue #315: NEEDS_REVIEW 行で xlsx_path=None のため列が常に空欄になり、
+    業務責任者が「読込直後にどの行がほぼ確定／要確認／候補ゼロか」を
+    判別できなかった。配置確認モーダルを開かずに状態を一望できるよう、
+    候補件数を列に出す。
+
+    - xlsx_path 確定済（PENDING / SUCCESS 等）: basename
+    - NEEDS_REVIEW で候補 1 件: basename（人間が中身確認するだけで済む状態）
+    - NEEDS_REVIEW で候補 N 件 (N>=2): "(N 件候補)"
+    - NEEDS_REVIEW で候補なし: "(候補なし)"
+    - SKIPPED 系: 空
+    """
+    if r.xlsx_path is not None:
+        return r.xlsx_path.name
+    if r.status == CPlacementStatus.NEEDS_REVIEW:
+        n = len(r.xlsx_candidates)
+        if n == 1:
+            return r.xlsx_candidates[0].name
+        if n >= 2:
+            return f"({n} 件候補)"
+        return "(候補なし)"
+    return ""
+
+
 class ChecklistCDialog:
     """C 自動配置ダイアログ（Toplevel）。"""
 
@@ -484,10 +510,7 @@ class ChecklistCDialog:
         for item in self._tree.get_children():
             self._tree.delete(item)
         for idx, r in enumerate(self._results):
-            # PR (xlsx-column): xlsx_path が確定済み (PENDING / SUCCESS / SKIPPED_NO_SHEET
-            # 等) なら basename を表示。NEEDS_REVIEW / SKIPPED_NO_STAFF / NO_FACILITY
-            # は xlsx_path=None なので空欄。
-            xlsx_label = r.xlsx_path.name if r.xlsx_path is not None else ""
+            xlsx_label = _format_xlsx_cell(r)
             self._tree.insert(
                 "",
                 "end",
@@ -807,5 +830,3 @@ class ChecklistCDialog:
             )
             self._status_var.set(f"配置完了: 成功 {success} 件")
             self._exec_btn.configure(state="disabled")
-
-
