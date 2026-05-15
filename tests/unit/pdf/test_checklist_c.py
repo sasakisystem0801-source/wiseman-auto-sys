@@ -197,7 +197,7 @@ def _checklist_cfg(
         or ["リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx"],
     )
     cfg = ChecklistConfig(
-        fax_root=str(fax_root),
+        fax_root=fax_root,
         c_output_subfolder="経過報告書",
         facility_routing=routing or {"事業所A": "事業所A_FAX"},
         report_staff={"宮下": entry},
@@ -281,7 +281,7 @@ def test_apply_xlsx_selection_sheet_match_sets_pending(tmp_path: Path) -> None:
     fax_root = tmp_path / "FAX"
     fax_root.mkdir()
     cfg = ChecklistConfig(
-        fax_root=str(fax_root),
+        fax_root=fax_root,
         c_output_subfolder="経過報告書",
         facility_routing={"事業所A": "事業所A_FAX"},
     )
@@ -308,7 +308,7 @@ def test_apply_xlsx_selection_sheet_not_found(tmp_path: Path) -> None:
     from wiseman_hub.pdf.checklist_c import apply_xlsx_selection
 
     cfg = ChecklistConfig(
-        fax_root=str(tmp_path),
+        fax_root=tmp_path,
         c_output_subfolder="経過報告書",
         facility_routing={"事業所A": "事業所A_FAX"},
     )
@@ -327,7 +327,7 @@ def test_apply_xlsx_selection_no_facility_routing(tmp_path: Path) -> None:
     from wiseman_hub.pdf.checklist_c import apply_xlsx_selection
 
     cfg = ChecklistConfig(
-        fax_root=str(tmp_path), facility_routing={}, c_output_subfolder="経過報告書"
+        fax_root=tmp_path, facility_routing={}, c_output_subfolder="経過報告書"
     )
     xlsx = _make_xlsx_with_sheet(tmp_path / "x.xlsx", ["テスト 太郎"])
     result = CPlacementResult(

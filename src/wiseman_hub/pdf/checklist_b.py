@@ -334,8 +334,10 @@ def plan_b_placement(
 
     実行可能 (SUCCESS pending) / 各種スキップ理由 / 手動選択待ち を区別して返す。
     """
-    karte_root = Path(cfg.karte_root)
-    fax_root = Path(cfg.fax_root)
+    # Issue #27 続編 G Phase 3a: ChecklistConfig.karte_root / fax_root は Path 型に移行済。
+    # 重複ラップ (Path(Path)) 除去、Phase 2a/2b consumer 整合パターン踏襲。
+    karte_root = cfg.karte_root
+    fax_root = cfg.fax_root
     results: list[PlacementResult] = []
     for row in rows:
         result = PlacementResult(row=row)

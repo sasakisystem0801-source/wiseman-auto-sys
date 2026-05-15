@@ -232,7 +232,8 @@ def plan_c_placement(
         4. PENDING のみシート検査して target_pdf 確定
         5. NEEDS_REVIEW は xlsx_candidates / folder_tree を保持して UI に渡す
     """
-    fax_root = Path(cfg.fax_root)
+    # Issue #27 続編 G Phase 3a: ChecklistConfig.fax_root は Path 型に移行済 (重複ラップ除去)。
+    fax_root = cfg.fax_root
     results: list[CPlacementResult] = []
     for row in rows:
         result = CPlacementResult(row=row)
@@ -307,7 +308,8 @@ def apply_xlsx_selection(
     呼び出し側 (UI) は本関数の後に必要に応じて cfg.xlsx_path_cache を更新する。
     本関数は cache 操作を行わない（責務分離）。
     """
-    fax_root = Path(cfg.fax_root)
+    # Issue #27 続編 G Phase 3a: ChecklistConfig.fax_root は Path 型に移行済 (重複ラップ除去)。
+    fax_root = cfg.fax_root
     fax_folder = resolve_facility(result.row.facility, cfg.facility_routing)
     if not fax_folder:
         result.status = CPlacementStatus.SKIPPED_NO_FACILITY
