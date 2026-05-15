@@ -166,10 +166,15 @@ def find_monitoring_dir(
 
 
 def _parse_year_folder_name(name: str) -> int | None:
-    """[deprecated] フォルダ名から R<年> の年数値を抽出。
+    """[deprecated] フォルダ名から年数値を抽出 (R<年> / 令和<年>年 両対応)。
 
     PR-R<年>-C: ``pdf/year_folder.parse_year_folder_name`` に統合。
     後方互換のため本関数名は維持し、内部実装を共通モジュールに委譲する。
+
+    **動作 superset 化** (Codex review Important 反映): PR-R<年>-C で
+    ``令和{era}年`` 形式 (令和7年 / 令和07年 等) も認識するように拡張。
+    PR #283 当初の「R<年> のみ」から「R<年> + 令和N年」に受入範囲拡大。
+    既存の R<年> パターン挙動は完全保持 (regression なし)。
     """
     return parse_year_folder_name(name)
 
@@ -221,18 +226,26 @@ def _match_month_pdf_in_dir(
 
 
 def find_month_pdf(monitoring_dir: Path, month: int) -> tuple[Path | None, list[Path]]:
-    """``{month}.pdf`` を ``monitoring_dir`` 直下 + ``R<年>`` サブフォルダから探索。
+    """``{month}.pdf`` を ``monitoring_dir`` 直下 + 年フォルダから探索。
 
     Issue #282: 本田様 PC の運用で ``{monitoring_subfolder}/R7/<月>.pdf`` 構造
     (令和 7 年サブフォルダ) が混在することが判明。直下のみ走査だと配置漏れになる
     ため、以下の優先順で探索する:
 
         1. ``monitoring_dir/<月>.pdf`` (旧構造、直配置) — 既存挙動を優先
-        2. ``monitoring_dir/R<年>/<月>.pdf`` (新構造) — R 数字降順で最新年から走査
+        2. ``monitoring_dir/<年フォルダ>/<月>.pdf`` (新構造) — 数字降順で最新年から走査
         3. それでもなければ ``None``
 
-    R<年> フォルダ名の表記揺れ (R7 / R７ / Ｒ7 / R 7 / R.7 / r7 等) は
-    ``_parse_year_folder_name`` で NFKC 正規化 + 正規表現マッチで吸収。
+    PR-R<年>-C: 年フォルダ名の認識を共通モジュール ``pdf/year_folder`` に統合し、
+    以下の表記揺れ全てを吸収する:
+
+        - **R<年> 形式**: R7 / R７ / Ｒ7 / R 7 / R.7 / r7 等 (PR #283 時点で対応)
+        - **令和<年>年 形式**: 令和7年 / 令和07年 / 令和 7 年 等 (PR-R<年>-C で拡張)
+
+    動作 superset 化 (Codex review Important 反映): PR-R<年>-C で「令和7年」形式の
+    フォルダも認識するように拡張。既存 R<年> パターンの挙動は完全保持。同一年で
+    両形式が共存する場合 (例: ``R7`` と ``令和7年`` を同じフォルダに置く) は
+    ``Medium-1`` ガード経由で AMBIGUOUS 扱いとなり人間判断に倒す。
 
     codex review (#282) 反映:
         - High-1: 直下 AMBIGUOUS で年フォルダ走査に進むと誤確定 → 直下 AMBIGUOUS は

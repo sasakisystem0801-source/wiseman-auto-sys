@@ -608,6 +608,60 @@ class TestFindMonthPdfYearFolder:
         assert all_pdfs == [monitoring / "5.pdf"]
         assert any("PermissionError" in r.message for r in caplog.records)
 
+    # ----- PR-R<年>-C: 令和{era}年 形式の動作 superset 化 (Codex review Important) -----
+
+    def test_reiwa_year_folder_found(self, tmp_path: Path) -> None:
+        """令和7年フォルダ単独でも検出される (PR-R<年>-C 拡張)。
+
+        PR #283 当初は R7 形式のみだったが、PR-R<年>-C で 令和7年 形式も
+        同じ年として扱う。業務側が事業所により命名規則が違う場合に対応。
+        """
+        monitoring = tmp_path / "11.運動器機能向上計画書"
+        year_dir = monitoring / "令和7年"
+        year_dir.mkdir(parents=True)
+        (year_dir / "3.pdf").write_bytes(b"%PDF-1.4")
+
+        found, _ = find_month_pdf(monitoring, 3)
+        assert found == year_dir / "3.pdf"
+
+    def test_r_and_reiwa_same_year_ambiguous(self, tmp_path: Path) -> None:
+        """R7 と 令和7年 が共存 (同一論理年で物理フォルダ複数) → AMBIGUOUS。
+
+        PR-R<年>-C で両形式が同じ年として認識されるため、Medium-1 ガード経由で
+        AMBIGUOUS 扱い (誤確定防止)。
+        """
+        monitoring = tmp_path / "11.運動器機能向上計画書"
+        r7 = monitoring / "R7"
+        reiwa = monitoring / "令和7年"
+        r7.mkdir(parents=True)
+        reiwa.mkdir(parents=True)
+        (r7 / "3.pdf").write_bytes(b"%PDF-1.4 r7")
+        (reiwa / "3.pdf").write_bytes(b"%PDF-1.4 reiwa")
+
+        found, all_pdfs = find_month_pdf(monitoring, 3)
+        # 同一論理年 (7) で物理フォルダ複数 → AMBIGUOUS で人間判断に倒す
+        assert found is None
+        # 全候補は集約される (UI レビュー用)
+        assert len(all_pdfs) == 2
+
+    def test_reiwa_year_takes_precedence_over_older_r_year(
+        self, tmp_path: Path
+    ) -> None:
+        """令和8年 (新) と R6 (古) があれば最新年 (8) を優先。
+
+        異なる年で異なる形式 → 最新年を選択 (既存の R 数字降順走査と同じロジック)。
+        """
+        monitoring = tmp_path / "11.運動器機能向上計画書"
+        r6 = monitoring / "R6"
+        reiwa8 = monitoring / "令和8年"
+        r6.mkdir(parents=True)
+        reiwa8.mkdir(parents=True)
+        (r6 / "3.pdf").write_bytes(b"%PDF-1.4 r6")
+        (reiwa8 / "3.pdf").write_bytes(b"%PDF-1.4 reiwa8")
+
+        found, _ = find_month_pdf(monitoring, 3)
+        assert found == reiwa8 / "3.pdf"
+
 
 class TestResolveFacilityNormalization:
     """B の居宅名 lookup の表記揺れ吸収 (PR-γ v2、Session 78 実機デモ regression)。
