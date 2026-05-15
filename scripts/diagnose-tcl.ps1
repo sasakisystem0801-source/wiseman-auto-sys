@@ -7,14 +7,18 @@
     `_tkinter.TclError: Can't find a usable init.tcl` /
     `couldn't read file ...init.tcl: No error` の切り分けを支援する。
 
-    AV 動的スキャン干渉 (errno=0 で read fail + intermittent パターン) が
-    最有力仮説。本スクリプトは以下を順に確認して、対処の判断材料を出す:
+    過去事例 (Issue #316) では AV 動的スキャン干渉 (errno=0 で read fail +
+    intermittent パターン) が主因として観察されているが、将来別原因 (SMB/UNC
+    経路、Python distribution 不整合、ファイルシステム破損等) が判明する
+    可能性もあるため、本スクリプトは仮説を断定せず以下を順に確認して
+    判断材料を出す:
 
         1. Python install path と init.tcl 実在 / サイズ確認
-        2. Set-Content + Get-Content で init.tcl の read 試行 (5 回)
+        2. [System.IO.File]::ReadAllBytes で init.tcl の read 試行 (5 回)
         3. tk.Tk() 起動試行 (10 回、intermittent 性確認)
         4. Windows Defender 状態と除外設定一覧
         5. 第三者 AV プロセス検出 (Trend Micro / Kaspersky / Norton / McAfee 等)
+           注: プロセス名による検出のため candidate レベル。確定には GUI 確認推奨
 
     実行後、`docs/handoff/1c-exe-redistribution-runbook.md` の
     「🔬 Tcl init.tcl 連発失敗時の対処」セクションに従って対処してください。
@@ -25,7 +29,6 @@
 .NOTES
     対応シェル: Windows PowerShell 5.1+ / PowerShell 7+ (Windows のみ)
     関連 Issue: #316, #276
-    関連 PR: PR-Y-316 (本スクリプト追加)
 #>
 
 $ErrorActionPreference = "Continue"  # 診断スクリプトは fail-open で全項目走査
@@ -73,12 +76,15 @@ Write-Section "2. init.tcl read 試行 (5 回連続、intermittent fail 検出)"
 if ($pythonExe -and (Test-Path -LiteralPath $initTcl)) {
     $readFailCount = 0
     1..5 | ForEach-Object {
+        # PowerShell の catch スコープ内では $_ が ErrorRecord に上書きされるため、
+        # ForEach-Object のループ変数を直前で退避してから try に入る (Issue #319 review feedback)。
+        $attempt = $_
         try {
             $bytes = [System.IO.File]::ReadAllBytes($initTcl)
-            Write-Host ("  attempt {0}: OK ({1} bytes)" -f $_, $bytes.Length) -ForegroundColor Gray
+            Write-Host ("  attempt {0}: OK ({1} bytes)" -f $attempt, $bytes.Length) -ForegroundColor Gray
         } catch {
             $readFailCount++
-            Write-Fail ("attempt {0}: read 失敗 — {1}" -f $_, $_.Exception.Message)
+            Write-Fail ("attempt {0}: read 失敗 — {1}" -f $attempt, $_.Exception.Message)
         }
         Start-Sleep -Milliseconds 200
     }
@@ -214,7 +220,9 @@ foreach ($vendor in $avPatterns.Keys) {
 if ($foundAv.Count -eq 0) {
     Write-OK "既知の第三者 AV プロセスは検出されず (Defender のみと推定)"
 } else {
-    Write-Warn "第三者 AV 検出: $($foundAv -join ', ')"
+    Write-Warn "第三者 AV 検出 (候補): $($foundAv -join ', ')"
+    Write-Host "  注: プロセス名一致のみで判定。同名の非 AV 製品 (Symantec の汎用ホスト等) の"
+    Write-Host "      可能性もあるため、コントロールパネルや GUI で AV 製品を確実に特定すること。"
     Write-Host "  対処: 検出された AV ベンダーの GUI から AppData\Programs\Python\Python311 除外 (対処手順 2)"
 }
 

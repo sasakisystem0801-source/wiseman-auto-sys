@@ -333,7 +333,7 @@ if ($SkipTests) {
                 Write-Host "    対処手順: docs\handoff\1c-exe-redistribution-runbook.md" -ForegroundColor Yellow
                 Write-Host "             の 「🔬 Tcl init.tcl 連発失敗時の対処」セクション" -ForegroundColor Yellow
                 Write-Host "    暫定回避: .\scripts\deploy-windows.ps1 -SkipTests" -ForegroundColor Yellow
-                Write-Host "             (CI が PASS の前提でのみ使用、main ブランチで `gh run list` を要確認)" -ForegroundColor Yellow
+                Write-Host '             (CI が PASS の前提でのみ使用、main ブランチで [gh run list] を要確認)' -ForegroundColor Yellow
                 Write-Host ""
             }
             Stop-WithError "pytest 失敗 → Phase 1 (build) に進まず原因を共有" -BeforeDeploy
