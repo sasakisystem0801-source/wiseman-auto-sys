@@ -98,48 +98,29 @@ Development happens on macOS; Wiseman runs only on Windows.
 
 正規 runbook: **`docs/handoff/1c-exe-redistribution-runbook.md`**（Phase 0〜5、rollback / トラブル早見表あり）。
 
-**最小フル手順（コピペ可、検証済 2026-04-29）**:
+**推奨手順（Session 78〜）**: `scripts/deploy-windows.ps1` 経由で 1 コマンド配布:
 
 ```powershell
-# Phase 0: リポジトリ最新化
 cd $HOME\Projects\wiseman-auto-sys
-git checkout main
-git pull --ff-only
-git log --oneline -5
-
-# Phase 0-2: 現行 exe バックアップ（rollback 用、必須）
-$dist = "$HOME\wiseman-hub"
-$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-Copy-Item "$dist\wiseman_hub.exe" "$dist\wiseman_hub.exe.bak-$stamp"
-
-# Phase 0-4: 依存同期 + テスト（VS Build Tools 不要、integration 除外）
-uv sync --extra dev
-uv run pytest -q -m "not integration"
-
-# Phase 1: clean ビルド
-uv run pyinstaller wiseman_hub.spec --clean --noconfirm 2>&1 | Tee-Object -FilePath build.log
-
-# Phase 1-2: warning 検査（PowerShell パイプ解釈の問題回避のため 1 行で実行）
-Select-String -Path build.log -Pattern "Hidden import.*not found"
-# ↑ 出力された warning が pycparser.lextab / pycparser.yacctab / jinja2 / user32 / msvcrt のいずれかなら無害（無視）。
-#   それ以外（特に wiseman_hub / facility_merger / ex_extractor 等プロジェクト由来）が出たら進まず共有。
-
-# Phase 2: 配布先に上書き
-Copy-Item -Force dist\wiseman_hub.exe "$dist\wiseman_hub.exe"
-Get-Item "$dist\wiseman_hub.exe" | Format-List Name, Length, LastWriteTime
-
-# Phase 3: 動作確認
-Start-Process "$dist\wiseman_hub.exe"
+.\scripts\deploy-windows.ps1
+# 緊急 rollback の場合:
+.\scripts\deploy-windows.ps1 -RollbackOnly
 ```
 
-#### 動作確認チェックリスト（Phase 3）
+スクリプト内で Phase 0-3 を自動実行 + 安全装置（バックアップ件数アサーション / build warning 検査 / Launcher プロセス検出 / auto-rollback / 配布後サイズ照合）。Phase 4 のチェックリストは目視判定。
+
+手動の `git pull` + `pyinstaller` + `Copy-Item` 等を順次叩く旧手順は runbook の「📜 手動手順: disaster recovery」セクションに移行（スクリプト不調時 / .venv 損傷時用）。
+
+**手動最小フル手順（disaster recovery 専用、検証済 2026-04-29）**: スクリプト不調時のみ使用。詳細は runbook の「📜 手動手順: disaster recovery」セクション参照。
+
+#### 動作確認チェックリスト（スクリプト Phase 4 / 手動手順 Phase 3）
 
 | # | 項目 | 期待 |
 |---|------|------|
 | 1 | コンソール窓が出ずに Launcher ウィンドウ「Wiseman PDF ツール」が起動 | ✅ |
 | 2 | **5 ボタン構成**（業務フロー順: ex_ ファイル変換 + 振り分け / B: 運動機能向上計画書 自動配置 / C: 経過報告書 自動配置 / 事業所フォルダ一括結合 / 設定） | ✅ |
 | 3 | 各ボタンクリックで `ImportError` / `ModuleNotFoundError` ダイアログが出ない | ✅ |
-| 4 | 機能追加 PR がある場合は対応する UI 変化を確認（runbook Phase 3 参照） | 機能依存 |
+| 4 | 機能追加 PR がある場合は対応する UI 変化を確認（runbook の Phase 3 動作確認セクション参照） | 機能依存 |
 
 #### 既知の挙動（落とし穴）
 
