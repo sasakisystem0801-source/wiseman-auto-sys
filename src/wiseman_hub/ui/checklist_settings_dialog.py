@@ -28,6 +28,7 @@ from wiseman_hub.config import (
     AppConfig,
     ChecklistConfig,
     ReportStaffEntry,
+    coerce_path,
     save_config,
 )
 
@@ -90,13 +91,19 @@ class ChecklistSettingsDialog:
             return var
 
         self._spreadsheet_id = add_entry("スプレッドシート ID:", cfg.spreadsheet_id)
+        # Issue #27 続編 G Phase 3a: karte_root / fax_root は Path 型。
+        # tk.StringVar は文字列前提のため str(Path) で渡す (未設定 sentinel
+        # Path("") は str() == "." だが add_entry の initial 値として実害なし、
+        # ユーザーが browse で上書きする)。
         self._karte_root = add_entry(
-            "カルテルート:", cfg.karte_root, browse=True
+            "カルテルート:", str(cfg.karte_root), browse=True
         )
         self._monitoring_subfolder = add_entry(
             "モニタリングサブフォルダ:", cfg.monitoring_subfolder
         )
-        self._fax_root = add_entry("FAX 事業所ルート:", cfg.fax_root, browse=True)
+        self._fax_root = add_entry(
+            "FAX 事業所ルート:", str(cfg.fax_root), browse=True
+        )
         self._b_output_subfolder = add_entry(
             "B 出力サブフォルダ:", cfg.b_output_subfolder
         )
@@ -181,12 +188,15 @@ class ChecklistSettingsDialog:
                 parent=self._top,
             )
             return
-        from pathlib import Path
-
         from wiseman_hub.cloud.env_scanner import scan_and_upload
 
         try:
-            result = scan_and_upload(self._config.gcp, Path(fax_root_str))
+            # Issue #27 続編 G Phase 3a: 直接 Path() ラップではなく coerce_path 経由で
+            # 空白 strip + sentinel 規約に合わせる (Phase 2a/2b consumer 整合と同パターン)。
+            result = scan_and_upload(
+                self._config.gcp,
+                coerce_path("checklist.fax_root", fax_root_str),
+            )
         except (FileNotFoundError, NotADirectoryError) as exc:
             messagebox.showerror(
                 "スキャン失敗",
@@ -456,12 +466,18 @@ class ChecklistSettingsDialog:
             )
             return
 
+        # Issue #27 続編 G Phase 3a: karte_root / fax_root を Path 型に coerce
+        # (form は str だが ChecklistConfig は Path 受取り、coerce_path で sentinel 規約整合)。
         new_checklist = ChecklistConfig(
             spreadsheet_id=self._spreadsheet_id.get().strip(),
-            karte_root=self._karte_root.get().strip(),
+            karte_root=coerce_path(
+                "checklist.karte_root", self._karte_root.get().strip()
+            ),
             monitoring_subfolder=self._monitoring_subfolder.get().strip()
             or "運動器機能向上計画書",
-            fax_root=self._fax_root.get().strip(),
+            fax_root=coerce_path(
+                "checklist.fax_root", self._fax_root.get().strip()
+            ),
             b_output_subfolder=self._b_output_subfolder.get().strip()
             or "運動機能向上計画書",
             c_output_subfolder=self._c_output_subfolder.get().strip()

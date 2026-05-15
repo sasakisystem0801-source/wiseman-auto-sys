@@ -235,10 +235,13 @@ def _make_row(name: str = "三和太郎") -> ChecklistRow:
 
 
 def _make_config(karte_root: Path, fax_root: Path) -> ChecklistConfig:
-    """テスト用 ChecklistConfig (canonical name + facility_routing 1 件)。"""
+    """テスト用 ChecklistConfig (canonical name + facility_routing 1 件)。
+
+    Issue #27 続編 G Phase 3a: karte_root / fax_root は Path 型に移行済 (Path 直渡し)。
+    """
     return ChecklistConfig(
-        karte_root=str(karte_root),
-        fax_root=str(fax_root),
+        karte_root=karte_root,
+        fax_root=fax_root,
         monitoring_subfolder="運動器機能向上計画書",
         facility_routing={"きなり": "きなり(メール)※持参"},
     )

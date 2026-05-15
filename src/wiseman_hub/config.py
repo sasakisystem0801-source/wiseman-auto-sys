@@ -756,9 +756,17 @@ class ChecklistConfig:
     """
 
     spreadsheet_id: str = "18RPsg3Ya0r7djQVzED5KAa5KyhbB9YRm"
-    karte_root: str = "\\\\Tera-station\\share\\02.カルテ"
+    # Issue #27 続編 G Phase 3a: karte_root / fax_root を str → Path 化。
+    # default UNC は forward slash 表現 (Phase 2b で確立した OS 中立化規約)。
+    # TOML の backslash 表記 (`\\\\Tera-station\\share\\...`) は load_config の
+    # coerce_path 経由で Windows runtime では UNC として正常解釈される。
+    karte_root: Path = field(
+        default_factory=lambda: Path("//Tera-station/share/02.カルテ")
+    )
     monitoring_subfolder: str = "運動器機能向上計画書"
-    fax_root: str = "\\\\Tera-station\\share\\03.FAX(事業所)"
+    fax_root: Path = field(
+        default_factory=lambda: Path("//Tera-station/share/03.FAX(事業所)")
+    )
     b_output_subfolder: str = "運動機能向上計画書"
     c_output_subfolder: str = "経過報告書"
     facility_routing: dict[str, str] = field(default_factory=dict)
@@ -784,9 +792,10 @@ class ChecklistConfig:
             self.spreadsheet_id,
             echo_value=False,
         )
-        _check_str("ChecklistConfig.karte_root", self.karte_root)
+        # Issue #27 続編 G Phase 3a: karte_root / fax_root は Path 型に移行済。
+        _check_path("ChecklistConfig.karte_root", self.karte_root)
         _check_str("ChecklistConfig.monitoring_subfolder", self.monitoring_subfolder)
-        _check_str("ChecklistConfig.fax_root", self.fax_root)
+        _check_path("ChecklistConfig.fax_root", self.fax_root)
         _check_str("ChecklistConfig.b_output_subfolder", self.b_output_subfolder)
         _check_str("ChecklistConfig.c_output_subfolder", self.c_output_subfolder)
         _check_dict_str_to_str(
@@ -1186,6 +1195,13 @@ def load_config(path: Path | None = None) -> AppConfig:
                 "checklist.xlsx_path_cache values must be strings"
             )
         xlsx_path_cache[str(key)] = value
+    # Issue #27 続編 G Phase 3a: TOML str → Path coerce (空白 strip → 未設定 sentinel)。
+    # 型違反 (int / bool / list 等) は coerce_path が TypeError raise (起動時 fail-close)。
+    for path_field in ("karte_root", "fax_root"):
+        if path_field in checklist_data:
+            checklist_data[path_field] = coerce_path(
+                f"checklist.{path_field}", checklist_data[path_field]
+            )
     checklist = ChecklistConfig(
         **checklist_data,
         facility_routing=facility_routing,

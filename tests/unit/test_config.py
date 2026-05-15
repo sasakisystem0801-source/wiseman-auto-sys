@@ -1989,10 +1989,17 @@ class TestDataclassTypeGuards:
             UpdaterConfig(check_interval_hours="1")  # type: ignore[arg-type]
 
     # --- ChecklistConfig ------------------------------------------------
-    def test_checklist_non_string_karte_root_raises(self) -> None:
+    def test_checklist_non_path_karte_root_raises(self) -> None:
+        """Issue #27 続編 G Phase 3a: karte_root は Path 型必須 (None 等は TypeError)。"""
         from wiseman_hub.config import ChecklistConfig
-        with pytest.raises(TypeError, match="karte_root must be str"):
+        with pytest.raises(TypeError, match="karte_root must be Path"):
             ChecklistConfig(karte_root=None)  # type: ignore[arg-type]
+
+    def test_checklist_non_path_fax_root_raises(self) -> None:
+        """Issue #27 続編 G Phase 3a: fax_root は Path 型必須 (str / None 等は TypeError)。"""
+        from wiseman_hub.config import ChecklistConfig
+        with pytest.raises(TypeError, match="fax_root must be Path"):
+            ChecklistConfig(fax_root="\\\\Tera-station\\share\\03.FAX")  # type: ignore[arg-type]
 
     def test_checklist_non_dict_facility_routing_raises(self) -> None:
         from wiseman_hub.config import ChecklistConfig
@@ -3264,6 +3271,161 @@ class TestIssue27PathMigrationPhase2b:
         assert 'facility_root_dir = ""' in content
         # 旧 silent 劣化バグ: '"."' が書かれていないこと
         assert 'facility_root_dir = "."' not in content
+
+
+class TestIssue27PathMigrationPhase3a:
+    """Issue #27 続編 G Phase 3a: ChecklistConfig.karte_root / fax_root 移行。
+
+    Phase 2a/2b と同じ patterns (is_path_configured / coerce_path / _check_path) を
+    適用する。UNC パス default 値は forward slash 表現で OS 中立化 (Phase 2b 規約)。
+    """
+
+    def test_default_karte_root_is_unc_forward_slash(self) -> None:
+        """default ChecklistConfig.karte_root は forward slash UNC で OS 中立 (Path 型)。"""
+        from wiseman_hub.config import ChecklistConfig
+
+        cfg = ChecklistConfig()
+        assert isinstance(cfg.karte_root, Path)
+        assert cfg.karte_root == Path("//Tera-station/share/02.カルテ")
+
+    def test_default_fax_root_is_unc_forward_slash(self) -> None:
+        """default ChecklistConfig.fax_root は forward slash UNC で OS 中立 (Path 型)。"""
+        from wiseman_hub.config import ChecklistConfig
+
+        cfg = ChecklistConfig()
+        assert isinstance(cfg.fax_root, Path)
+        assert cfg.fax_root == Path("//Tera-station/share/03.FAX(事業所)")
+
+    def test_load_config_coerces_karte_root_and_fax_root(self, tmp_path: Path) -> None:
+        """TOML 文字列 → Path coerce (forward slash UNC)。"""
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            "[checklist]\n"
+            'karte_root = "//Tera-station/share/02.カルテ"\n'
+            'fax_root = "//Tera-station/share/03.FAX(事業所)"\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        assert cfg.checklist.karte_root == Path("//Tera-station/share/02.カルテ")
+        assert cfg.checklist.fax_root == Path("//Tera-station/share/03.FAX(事業所)")
+
+    def test_load_config_whitespace_paths_are_unset(self, tmp_path: Path) -> None:
+        """TOML 手書き編集での空白だけの値は未設定扱い (coerce_path 経由)。"""
+        from wiseman_hub.config import is_path_configured
+
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            "[checklist]\n"
+            'karte_root = "   "\n'
+            'fax_root = "\\t"\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        assert is_path_configured(cfg.checklist.karte_root) is False
+        assert is_path_configured(cfg.checklist.fax_root) is False
+
+    def test_save_config_round_trip_karte_root_and_fax_root(
+        self, tmp_path: Path
+    ) -> None:
+        """karte_root / fax_root の save → load ラウンドトリップ。"""
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            "[checklist]\n"
+            'karte_root = ""\n'
+            'fax_root = ""\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        new_cfg = replace(
+            cfg,
+            checklist=replace(
+                cfg.checklist,
+                karte_root=Path("//Tera-station/share/02.カルテ"),
+                fax_root=Path("//Tera-station/share/03.FAX(事業所)"),
+            ),
+        )
+        save_config(new_cfg, cfg_path)
+
+        reloaded = load_config(cfg_path)
+        assert reloaded.checklist.karte_root == Path("//Tera-station/share/02.カルテ")
+        assert reloaded.checklist.fax_root == Path("//Tera-station/share/03.FAX(事業所)")
+
+    def test_load_config_rejects_non_string_karte_root(self, tmp_path: Path) -> None:
+        """TOML で int / bool 等を渡すと coerce_path 経由で TypeError (silent fail 防止)。"""
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            "[checklist]\nkarte_root = 123\n", encoding="utf-8"
+        )
+        with pytest.raises(TypeError, match="karte_root must be str.*Path"):
+            load_config(cfg_path)
+
+    def test_save_config_unset_paths_written_as_empty(self, tmp_path: Path) -> None:
+        """未設定 Path は TOML に "" で書き戻し (Phase 2a/2b と同じ silent 互換性劣化防御)。"""
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            "[checklist]\n"
+            'karte_root = "/initial/karte"\n'
+            'fax_root = "/initial/fax"\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        cleared = replace(
+            cfg,
+            checklist=replace(
+                cfg.checklist,
+                karte_root=Path(""),
+                fax_root=Path(""),
+            ),
+        )
+        save_config(cleared, cfg_path)
+
+        content = cfg_path.read_text(encoding="utf-8")
+        assert 'karte_root = ""' in content
+        assert 'fax_root = ""' in content
+        # 旧 silent 劣化バグ: '"."' が書かれていないこと
+        assert 'karte_root = "."' not in content
+        assert 'fax_root = "."' not in content
+
+    def test_partial_update_preserves_other_checklist_fields(
+        self, tmp_path: Path
+    ) -> None:
+        """CLAUDE.md MUST: Partial Update する関数の追加 → 「更新対象外フィールド
+        の値が変化しないこと」をテストに含める。
+        """
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            "[checklist]\n"
+            'spreadsheet_id = "AbCdE12345"\n'
+            'karte_root = "//Tera-station/share/02.カルテ"\n'
+            'monitoring_subfolder = "運動器機能向上計画書"\n'
+            'fax_root = "//Tera-station/share/03.FAX(事業所)"\n'
+            'b_output_subfolder = "運動機能向上計画書"\n'
+            'c_output_subfolder = "経過報告書"\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        # karte_root のみ更新
+        cfg = replace(
+            cfg,
+            checklist=replace(
+                cfg.checklist, karte_root=Path("//Tera-station/share/02.カルテ.bak")
+            ),
+        )
+        save_config(cfg, cfg_path)
+        reloaded = load_config(cfg_path)
+
+        # 更新対象は変わる
+        assert reloaded.checklist.karte_root == Path(
+            "//Tera-station/share/02.カルテ.bak"
+        )
+        # 更新対象外フィールドの値が変化しないこと
+        assert reloaded.checklist.fax_root == Path(
+            "//Tera-station/share/03.FAX(事業所)"
+        )
+        assert reloaded.checklist.spreadsheet_id == "AbCdE12345"
+        assert reloaded.checklist.monitoring_subfolder == "運動器機能向上計画書"
+        assert reloaded.checklist.b_output_subfolder == "運動機能向上計画書"
+        assert reloaded.checklist.c_output_subfolder == "経過報告書"
 
 
 class TestChecklistStaffPathExtension:
