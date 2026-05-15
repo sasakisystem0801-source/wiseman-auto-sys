@@ -202,3 +202,42 @@ class TestSelectedSubset:
         assert r1.message == ""  # default
         assert r2.status == CPlacementStatus.PENDING
         assert "dry-run" in r2.message
+
+
+class TestDryRunPreservesOriginPrefix:
+    """PR (xlsx-visibility) + Evaluator HIGH 対応:
+    dry-run 実行後も「自動: <basename>」「選択: <basename>」起源 prefix を保持。
+
+    旧仕様は ``r.message = "dry-run: 配置可能"`` で上書きしていたため、業務責任者が
+    dry-run 後に Treeview を見ると「どの xlsx を使うのか」が消えていた。
+    """
+
+    def test_dry_run_keeps_auto_prefix(self, tmp_path: Path) -> None:
+        r = _make_pending_result(tmp_path)
+        r.message = "自動: report.xlsx"
+        execute_c_placement(
+            [r], exporter=None, log_dir=Path(""), dry_run=True
+        )
+        # 起源 + dry-run 状態の両方を文字列内に保持
+        assert "自動: report.xlsx" in r.message
+        assert "dry-run" in r.message
+
+    def test_dry_run_keeps_selected_prefix(self, tmp_path: Path) -> None:
+        r = _make_pending_result(tmp_path)
+        r.message = "選択: chosen.xlsx"
+        execute_c_placement(
+            [r], exporter=None, log_dir=Path(""), dry_run=True
+        )
+        assert "選択: chosen.xlsx" in r.message
+        assert "dry-run" in r.message
+
+    def test_dry_run_without_prev_message_unchanged_format(
+        self, tmp_path: Path
+    ) -> None:
+        """prev message が空なら旧来通り「dry-run: 配置可能」と表示 (後方互換)。"""
+        r = _make_pending_result(tmp_path)
+        # r.message は default の ""
+        execute_c_placement(
+            [r], exporter=None, log_dir=Path(""), dry_run=True
+        )
+        assert r.message == "dry-run: 配置可能"

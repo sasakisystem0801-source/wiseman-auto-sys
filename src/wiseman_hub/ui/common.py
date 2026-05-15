@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import logging
 import re
+import subprocess
+import sys
 import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from tkinter import messagebox as _tk_messagebox
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
@@ -241,3 +244,48 @@ def count_by_status(
         counts[label] = counts.get(label, 0) + 1
         total += 1
     return StatusCounts(total=total, by_status=counts)
+
+
+# ---------------------------------------------------------------------------
+# シート名 (タブ名) パース + OS ファイルマネージャ起動
+#   PR (xlsx-visibility): B/C ダイアログで完全重複していた `_SHEET_NAME_RE` /
+#   `_sheet_name_to_year_month` / `_open_folder` を共通化 (code-reviewer
+#   MEDIUM #1 対応)。
+# ---------------------------------------------------------------------------
+
+_SHEET_NAME_RE = re.compile(r"^(\d{2})年(\d{1,2})月$")
+
+
+def parse_sheet_name(name: str) -> tuple[int, int] | None:
+    """Wiseman シート名 ``"YY年M月"`` を ``(year, month)`` にパースする。
+
+    例: ``"26年4月"`` → ``(2026, 4)``。``"25年12月"`` → ``(2025, 12)``。
+    マッチしなければ ``None``。
+
+    Wiseman スプレッドシートでは月別シートが「YY年M月」表記で命名される (年は
+    2 桁西暦、月は 1〜2 桁)。本関数は B/C/将来の dialog で共通利用される (旧版は
+    各 dialog 内に同一実装が並んでいた)。
+    """
+    m = _SHEET_NAME_RE.match(name)
+    if not m:
+        return None
+    yy = int(m.group(1))
+    month = int(m.group(2))
+    return (2000 + yy, month)
+
+
+def open_folder_in_os(folder: Path) -> None:
+    """OS のファイルマネージャでフォルダを開く (best-effort、失敗時はログ警告のみ)。
+
+    Windows: ``explorer`` / macOS: ``open`` / Linux: ``xdg-open``。
+    B/C ダイアログの「行ダブルクリックで親フォルダを開く」共通処理。
+    """
+    try:
+        if sys.platform == "win32":
+            subprocess.run(["explorer", str(folder)], check=False)
+        elif sys.platform == "darwin":
+            subprocess.run(["open", str(folder)], check=False)
+        else:
+            subprocess.run(["xdg-open", str(folder)], check=False)
+    except OSError:
+        logger.exception("Failed to open folder")

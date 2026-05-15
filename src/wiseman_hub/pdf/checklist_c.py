@@ -170,7 +170,8 @@ def resolve_xlsx(
             return ResolveResult(
                 status=CPlacementStatus.PENDING,
                 xlsx_path=legacy,
-                message="legacy template 経路で解決",
+                # PR (xlsx-visibility): 「自動: <basename> (legacy)」で legacy 経路を明示。
+                message=f"自動: {legacy.name} (legacy)",
             )
 
     # フォールバック: base_dir 配下を浅く scan + folder_tree 提示
@@ -305,6 +306,10 @@ def plan_c_placement(
         result.sheet_name = sheet_name
         result.target_pdf = target
         result.status = CPlacementStatus.PENDING
+        # PR (xlsx-visibility): cache hit / legacy 経由で確定した行は「自動:」prefix。
+        # resolve_xlsx の legacy 経路は ``"自動: <name> (legacy)"`` を返すので尊重し、
+        # cache hit 経路 (resolved.message 空) は basename を埋める。
+        result.message = resolved.message or f"自動: {xlsx_path.name}"
         results.append(result)
     return results
 
@@ -344,7 +349,10 @@ def apply_xlsx_selection(
     # NEEDS_REVIEW 時のフィールドはクリア（UI に古い候補を表示させない）
     result.xlsx_candidates = []
     result.folder_tree = None
-    result.message = ""
+    # PR (xlsx-visibility): 「選択: <basename>」prefix で「人間が選択した行」を可視化。
+    # cache hit 経路の「自動: <basename>」と区別でき、業務責任者は配置確認モーダルを
+    # 開かなくても Treeview 上で起源と対象ファイルを判別できる。
+    result.message = f"選択: {xlsx_path.name}"
 
 
 def execute_c_placement(
@@ -381,7 +389,14 @@ def execute_c_placement(
                 # 実 PDF 書込なし。パス解決 + シート検査が plan_c_placement
                 # で完了済みなので、ここでは「配置可能」と確認するだけ。
                 # status は PENDING のまま、再実行（実配置）が可能な状態を保つ。
-                r.message = "dry-run: 配置可能"
+                # PR (xlsx-visibility): 「自動: <basename>」「選択: <basename>」起源
+                # prefix が plan_c_placement / apply_xlsx_selection で埋められて
+                # いるため、dry-run 実行後も Treeview で起源を確認できるよう
+                # prev message を保持する形式に変更 (Evaluator HIGH 指摘対応)。
+                prev = r.message
+                r.message = (
+                    f"dry-run: 配置可能 ({prev})" if prev else "dry-run: 配置可能"
+                )
             else:
                 assert exporter is not None  # 上の guard で保証済（mypy 用）
                 try:

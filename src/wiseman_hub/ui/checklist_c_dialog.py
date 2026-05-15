@@ -8,26 +8,12 @@ from __future__ import annotations
 
 import datetime as _dt
 import logging
-import re
-import subprocess
-import sys
 import threading
 import tkinter as tk
+from collections.abc import Callable
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-from wiseman_hub.cloud.sheet_list_cache import (
-    cache_dir_for as _sheet_cache_dir_for,
-)
-from wiseman_hub.cloud.sheet_list_cache import (
-    format_synced_at_label as _format_synced_at_label,
-)
-from wiseman_hub.cloud.sheet_list_cache import (
-    load as _load_sheet_cache,
-)
-from wiseman_hub.cloud.sheet_list_cache import (
-    save as _save_sheet_cache,
-)
 from wiseman_hub.cloud.sheets import (
     download_xlsx,
     list_sheet_names,
@@ -50,8 +36,14 @@ from wiseman_hub.pdf.checklist_c import (
     plan_c_placement,
 )
 from wiseman_hub.pdf.excel_com import create_exporter
-from wiseman_hub.ui.common import count_by_status, make_treeview_sortable
+from wiseman_hub.ui.common import (
+    count_by_status,
+    make_treeview_sortable,
+    open_folder_in_os,
+    parse_sheet_name,
+)
 from wiseman_hub.ui.placement_confirm_dialog import PlacementConfirmDialog
+from wiseman_hub.ui.sheet_list_binding import SheetListBinding
 from wiseman_hub.ui.xlsx_picker_dialog import XlsxPickerDialog
 
 logger = logging.getLogger(__name__)
@@ -114,21 +106,16 @@ def _status_column_sort_key(cell: str) -> tuple[int, str]:
     return (_STATUS_SORT_PRIORITY.get(cell, 99), cell)
 
 
-_SHEET_NAME_RE = re.compile(r"^(\d{2})年(\d{1,2})月$")
-
-
-def _sheet_name_to_year_month(name: str) -> tuple[int, int] | None:
-    m = _SHEET_NAME_RE.match(name)
-    if not m:
-        return None
-    return (2000 + int(m.group(1)), int(m.group(2)))
-
-
 class ChecklistCDialog:
     """C 自動配置ダイアログ（Toplevel）。"""
 
     def __init__(
-        self, parent: tk.Tk | tk.Toplevel | tk.Misc, config: AppConfig, config_path: Path | None = None
+        self,
+        parent: tk.Tk | tk.Toplevel | tk.Misc,
+        config: AppConfig,
+        config_path: Path | None = None,
+        *,
+        now_fn: Callable[[], _dt.datetime] | None = None,
     ) -> None:
         self._config = config
         self._config_path = config_path
@@ -140,6 +127,14 @@ class ChecklistCDialog:
 
         self._results: list[CPlacementResult] = []
         self._xlsx_bytes: bytes = b""
+        # PR (sheet-list-binding): sheet_list_cache の load/save/sync-label を helper に集約。
+        # spreadsheet_id は config 再読込で変わり得るので毎呼出で問合せ。
+        # Evaluator MEDIUM 指摘対応: now_fn を DI 可能にして B/launcher と対称化。
+        self._sheet_binding = SheetListBinding(
+            self._config_path,
+            lambda: self._config.checklist.spreadsheet_id,
+            now_fn=now_fn,
+        )
         self._build_ui()
         # PR-δ v1: 起動時にローカル cache からシート一覧を即時 populate
         # （Drive API クリック必須だった UX を解消）
@@ -180,16 +175,23 @@ class ChecklistCDialog:
 
         mid = ttk.Frame(top, padding=8)
         mid.pack(fill="both", expand=True)
-        cols = ("name", "facility", "staff", "status", "message")
+        # PR (xlsx-column): 「xlsx」列を staff の隣に追加。cache hit / 手動選択完了の
+        # どちらの経路でも PENDING 行で「どのファイルを使うのか」を一目で確認可能にする。
+        # フルパスは UNC を含む長文 + PII 漏洩懸念があるため basename のみ表示
+        # (フルパスは Treeview 行ダブルクリック → 親フォルダを explorer で開く既存挙動)。
+        cols = ("name", "facility", "staff", "xlsx", "status", "message")
         self._tree = ttk.Treeview(mid, columns=cols, show="headings", height=14)
         self._tree.heading("name", text="氏名")
         self._tree.heading("facility", text="居宅")
         self._tree.heading("staff", text="担当")
+        self._tree.heading("xlsx", text="xlsx")
         self._tree.heading("status", text="ステータス")
         self._tree.heading("message", text="詳細")
         self._tree.column("name", width=140)
         self._tree.column("facility", width=160)
         self._tree.column("staff", width=60)
+        # xlsx 列は basename 表示なので 220 で大半の業務ファイル名が収まる。
+        self._tree.column("xlsx", width=220, stretch=False)
         self._tree.column("status", width=160)
         # Issue #274 Phase 1: 詳細列を 240 → 500 に拡大、stretch=True で残幅も吸収。
         # UNC パス + 業務メッセージ (例: ``PDF 不在: \\Tera-station\share\...``) が
@@ -284,11 +286,9 @@ class ChecklistCDialog:
             self._month_combo.current(len(sheet_names) - 1)
         self._status_var.set(f"シート一覧取得完了 ({len(sheet_names)} シート)")
         # PR-δ v1: 次回起動時に即時 populate できるよう cache に永続化
-        if self._config_path is not None:
-            cache_dir = _sheet_cache_dir_for(self._config_path)
-            _save_sheet_cache(
-                cache_dir, self._config.checklist.spreadsheet_id, sheet_names
-            )
+        # PR (sheet-list-binding): helper 経由に統一 (config_path/spreadsheet_id
+        # の None ガードは helper 側に集約)。
+        self._sheet_binding.save_after_fetch(sheet_names)
         # Issue #238 Phase 1: 取得直後の sync info を「たった今」相当で表示。
         # cache から再 load して fetched_at を反映 (save 内の now と同じ値が読める)。
         self._refresh_sync_info()
@@ -301,57 +301,33 @@ class ChecklistCDialog:
         必要なら自動 download される（_on_load_rows のフロー）。
 
         Issue #238 Phase 1: cache hit 時に ``fetched_at`` を sync info label に反映。
+        PR (sheet-list-binding): cache_dir 算出 / load 呼出を helper に委譲。
         """
-        if self._config_path is None:
-            return
-        spreadsheet_id = self._config.checklist.spreadsheet_id
-        if not spreadsheet_id:
-            return
-        cache_dir = _sheet_cache_dir_for(self._config_path)
-        cached = _load_sheet_cache(cache_dir, spreadsheet_id)
-        if cached is not None and cached.names:
-            self._month_combo["values"] = cached.names
-            self._month_combo.current(len(cached.names) - 1)
+        hit_count = self._sheet_binding.populate_combo_on_open(self._month_combo)
+        if hit_count > 0:
             self._status_var.set(
-                f"シート一覧 (キャッシュ {len(cached.names)} 件) - 最新化は「シート一覧更新」"
+                f"シート一覧 (キャッシュ {hit_count} 件) - 最新化は「シート一覧更新」"
             )
             self._refresh_sync_info()
-
-    def _resolve_cached_fetched_at(self) -> _dt.datetime | None:
-        """sync info label 用に最新 cache.fetched_at を解決。cache miss / 設定欠落時 None。
-
-        review 反映 (code-reviewer): _refresh_sync_info / _refresh_sync_info_with_error
-        の両方で同一 disk I/O を行うため、抽出して 1 箇所に集約 (DRY)。
-        """
-        if self._config_path is None:
-            return None
-        spreadsheet_id = self._config.checklist.spreadsheet_id
-        if not spreadsheet_id:
-            return None
-        cache_dir = _sheet_cache_dir_for(self._config_path)
-        cached = _load_sheet_cache(cache_dir, spreadsheet_id)
-        return cached.fetched_at if cached is not None else None
 
     def _refresh_sync_info(self) -> None:
         """sync info label を最新の cache.fetched_at で再描画 (Issue #238 Phase 1)。
 
         config_path / spreadsheet_id 未設定や cache miss 時は「不明」表示。
         UI thread から呼ぶこと (Tk variable 更新は main thread 限定)。
+        PR (sheet-list-binding): 文字列組立は helper の format_sync_label に委譲。
         """
-        fetched_at = self._resolve_cached_fetched_at()
-        label = _format_synced_at_label(fetched_at, _dt.datetime.now(tz=_dt.UTC))
-        self._sync_info_var.set(f"シート一覧 最終更新: {label}")
+        self._sync_info_var.set(self._sheet_binding.format_sync_label())
 
     def _refresh_sync_info_with_error(self, err_type: str) -> None:
         """背景更新失敗時に sync_info に「※更新失敗」を併記 (review HIGH-1)。
 
         既存 cache の fetched_at は捨てずに表示、末尾に失敗マーカーを足すことで
         「いつの cache か」「最新化に失敗している」の両方をユーザーに伝える。
+        PR (sheet-list-binding): helper の format_sync_label_with_error に委譲。
         """
-        fetched_at = self._resolve_cached_fetched_at()
-        label = _format_synced_at_label(fetched_at, _dt.datetime.now(tz=_dt.UTC))
         self._sync_info_var.set(
-            f"シート一覧 最終更新: {label} ※更新失敗 ({err_type})"
+            self._sheet_binding.format_sync_label_with_error(err_type)
         )
 
     def _on_load_error(self, err_type: str) -> None:
@@ -367,7 +343,7 @@ class ChecklistCDialog:
         if not sheet:
             messagebox.showinfo("月未選択", "対象月を選択してください")
             return
-        ym = _sheet_name_to_year_month(sheet)
+        ym = parse_sheet_name(sheet)
         if ym is None:
             messagebox.showerror("シート名形式不正", f"対応外: {sheet}")
             return
@@ -410,6 +386,10 @@ class ChecklistCDialog:
         for item in self._tree.get_children():
             self._tree.delete(item)
         for idx, r in enumerate(self._results):
+            # PR (xlsx-column): xlsx_path が確定済み (PENDING / SUCCESS / SKIPPED_NO_SHEET
+            # 等) なら basename を表示。NEEDS_REVIEW / SKIPPED_NO_STAFF / NO_FACILITY
+            # は xlsx_path=None なので空欄。
+            xlsx_label = r.xlsx_path.name if r.xlsx_path is not None else ""
             self._tree.insert(
                 "",
                 "end",
@@ -418,6 +398,7 @@ class ChecklistCDialog:
                     r.row.name,
                     r.row.facility,
                     r.row.staff,
+                    xlsx_label,
                     _STATUS_LABEL.get(r.status, r.status.value),
                     r.message,
                 ),
@@ -548,7 +529,7 @@ class ChecklistCDialog:
         if not folder.exists():
             messagebox.showinfo("フォルダ未作成", str(folder))
             return
-        _open_folder(folder)
+        open_folder_in_os(folder)
 
     def _open_picker_for_review(self, idx: int, r: CPlacementResult) -> None:
         """NEEDS_REVIEW 行のレビュー UI を開き、選択結果を CPlacementResult に反映する。"""
@@ -623,7 +604,7 @@ class ChecklistCDialog:
     def _current_year_month(self) -> tuple[int | None, int | None]:
         """現在選択中の対象月から (year, month) を取り出す（cache_key 用）。"""
         sheet = self._month_var.get()
-        ym = _sheet_name_to_year_month(sheet)
+        ym = parse_sheet_name(sheet)
         if ym is None:
             return None, None
         return ym
@@ -731,13 +712,3 @@ class ChecklistCDialog:
             self._exec_btn.configure(state="disabled")
 
 
-def _open_folder(folder: Path) -> None:
-    try:
-        if sys.platform == "win32":
-            subprocess.run(["explorer", str(folder)], check=False)
-        elif sys.platform == "darwin":
-            subprocess.run(["open", str(folder)], check=False)
-        else:
-            subprocess.run(["xdg-open", str(folder)], check=False)
-    except OSError:
-        logger.exception("Failed to open folder")

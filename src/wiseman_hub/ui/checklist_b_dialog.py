@@ -6,12 +6,11 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 import logging
-import re
-import subprocess
-import sys
 import threading
 import tkinter as tk
+from collections.abc import Callable
 from pathlib import Path
 from tkinter import messagebox, ttk
 
@@ -28,6 +27,8 @@ from wiseman_hub.pdf.checklist_b import (
     execute_placement,
     plan_b_placement,
 )
+from wiseman_hub.ui.common import open_folder_in_os, parse_sheet_name
+from wiseman_hub.ui.sheet_list_binding import SheetListBinding
 
 logger = logging.getLogger(__name__)
 
@@ -42,24 +43,16 @@ _STATUS_LABEL: dict[PlacementStatus, str] = {
     PlacementStatus.ERROR: "✗ エラー",
 }
 
-_SHEET_NAME_RE = re.compile(r"^(\d{2})年(\d{1,2})月$")
-
-
-def _sheet_name_to_year_month(name: str) -> tuple[int, int] | None:
-    """``26年4月`` → ``(2026, 4)``。マッチしなければ None。"""
-    m = _SHEET_NAME_RE.match(name)
-    if not m:
-        return None
-    yy = int(m.group(1))
-    month = int(m.group(2))
-    return (2000 + yy, month)
-
-
 class ChecklistBDialog:
     """B 自動配置ダイアログ（Toplevel）。"""
 
     def __init__(
-        self, parent: tk.Tk | tk.Toplevel | tk.Misc, config: AppConfig, config_path: Path | None = None
+        self,
+        parent: tk.Tk | tk.Toplevel | tk.Misc,
+        config: AppConfig,
+        config_path: Path | None = None,
+        *,
+        now_fn: Callable[[], _dt.datetime] | None = None,
     ) -> None:
         self._config = config
         self._config_path = config_path
@@ -70,7 +63,23 @@ class ChecklistBDialog:
         self._top.grab_set()
 
         self._results: list[PlacementResult] = []
+        # PR (sheet-list-binding): cache hit 経路で xlsx_bytes が「シート一覧更新」を
+        # 介さず空のまま _on_load_rows に到達するため、空 bytes で明示初期化する
+        # (C ダイアログと同じ pattern、cache populate 後の透過 download で埋まる)。
+        self._xlsx_bytes: bytes = b""
+        # PR (sheet-list-binding): C ダイアログと同じ helper を共有してシート一覧 cache
+        # の populate/save/sync_label 表示を統一する。spreadsheet_id は config 再読込で
+        # 変わり得るため毎呼出で問合せ。
+        # Evaluator MEDIUM 指摘対応: now_fn を DI 可能にして launcher と対称化
+        # (テスト時の時刻 freeze で sync label の文言検証を deterministic 化)。
+        self._sheet_binding = SheetListBinding(
+            self._config_path,
+            lambda: self._config.checklist.spreadsheet_id,
+            now_fn=now_fn,
+        )
         self._build_ui()
+        # 起動時に cache から sheet 一覧を populate (C ダイアログと feature parity)。
+        self._try_load_sheet_cache()
 
     def get_toplevel(self) -> tk.Toplevel:
         return self._top
@@ -86,7 +95,9 @@ class ChecklistBDialog:
             head, textvariable=self._month_var, state="readonly", width=12
         )
         self._month_combo.pack(side="left", padx=4)
-        ttk.Button(head, text="シート一覧取得", command=self._on_load_sheets).pack(
+        # PR (sheet-list-binding): C ダイアログに合わせて文言を「シート一覧更新」に。
+        # cache 起動 populate があるため「取得」から「更新」へ意味も変わる。
+        ttk.Button(head, text="シート一覧更新", command=self._on_load_sheets).pack(
             side="left", padx=4
         )
         ttk.Button(head, text="対象行を読込", command=self._on_load_rows).pack(
@@ -95,6 +106,16 @@ class ChecklistBDialog:
         ttk.Button(head, text="設定...", command=self._on_open_settings).pack(
             side="right", padx=4
         )
+
+        # PR (sheet-list-binding): C ダイアログ Issue #238 Phase 1 と同じ位置・同じ文言で
+        # 「シート一覧 最終更新: ...」を表示し、業務責任者が両ダイアログ間で同じ動線で
+        # 鮮度を確認できるようにする。
+        sync_info = ttk.Frame(top, padding=(8, 0, 8, 4))
+        sync_info.pack(fill="x")
+        self._sync_info_var = tk.StringVar(value="シート一覧 最終更新: 不明")
+        ttk.Label(
+            sync_info, textvariable=self._sync_info_var, foreground="#555"
+        ).pack(side="left")
 
         # 中段: 結果テーブル
         mid = ttk.Frame(top, padding=8)
@@ -191,21 +212,74 @@ class ChecklistBDialog:
         if sheet_names:
             self._month_combo.current(len(sheet_names) - 1)
         self._status_var.set(f"シート一覧取得完了 ({len(sheet_names)} シート)")
+        # PR (sheet-list-binding): 次回起動時に即時 populate できるよう永続化 + sync
+        # label を「たった今」相当で再描画 (C ダイアログ PR-δ v1 と同じ動作)。
+        self._sheet_binding.save_after_fetch(sheet_names)
+        self._refresh_sync_info()
 
     def _on_load_error(self, err_type: str) -> None:
         self._status_var.set(f"取得失敗: {err_type}")
+        # PR (sheet-list-binding): 既存 cache の fetched_at は残しつつ「※更新失敗」を
+        # 併記 (C ダイアログ Issue #238 review HIGH-1 と同じ挙動)。
+        self._refresh_sync_info_with_error(err_type)
         messagebox.showerror("読込エラー", f"スプレッドシート読込に失敗: {err_type}")
+
+    def _try_load_sheet_cache(self) -> None:
+        """起動時に cache から sheet_names を populate (C ダイアログと同じ挙動)。
+
+        cache miss / config_path 未指定 / spreadsheet_id 未設定 時は no-op。
+        xlsx_bytes は cache していないため空のまま。「対象行を読込」時に必要なら
+        ``_on_load_rows`` の既存フローで透過 download される (本ダイアログでも
+        将来追加可能、現状は「シート一覧更新」を押すまで xlsx_bytes 空のまま)。
+        """
+        hit_count = self._sheet_binding.populate_combo_on_open(self._month_combo)
+        if hit_count > 0:
+            self._status_var.set(
+                f"シート一覧 (キャッシュ {hit_count} 件) - 最新化は「シート一覧更新」"
+            )
+            self._refresh_sync_info()
+
+    def _refresh_sync_info(self) -> None:
+        """sync info label を最新の cache.fetched_at で再描画。"""
+        self._sync_info_var.set(self._sheet_binding.format_sync_label())
+
+    def _refresh_sync_info_with_error(self, err_type: str) -> None:
+        """背景更新失敗時に「※更新失敗」を併記。"""
+        self._sync_info_var.set(
+            self._sheet_binding.format_sync_label_with_error(err_type)
+        )
 
     def _on_load_rows(self) -> None:
         sheet = self._month_var.get()
         if not sheet:
             messagebox.showinfo("月未選択", "対象月を選択してください")
             return
-        ym = _sheet_name_to_year_month(sheet)
+        ym = parse_sheet_name(sheet)
         if ym is None:
             messagebox.showerror("シート名形式不正", f"対応外: {sheet}")
             return
         _, month = ym
+        # PR (sheet-list-binding): cache hit で combo は埋まっているが xlsx_bytes が
+        # 未取得な場合、ここで透過 download する (C ダイアログ PR-δ v1 と同じフロー)。
+        # これにより業務責任者は「シート一覧更新」を意識せず即「対象行を読込」できる。
+        if not self._xlsx_bytes:
+            cfg = self._config.checklist
+            if not cfg.spreadsheet_id:
+                messagebox.showerror(
+                    "設定不足", "設定でスプレッドシートIDを登録してください"
+                )
+                return
+            self._status_var.set("xlsx をダウンロード中（初回 / キャッシュ後）...")
+            self._top.update_idletasks()
+            try:
+                self._xlsx_bytes = download_xlsx(
+                    self._config.gcp, cfg.spreadsheet_id
+                )
+            except Exception as exc:
+                err_type = type(exc).__name__
+                messagebox.showerror("ダウンロード失敗", f"{err_type}: {exc}")
+                self._status_var.set(f"ダウンロード失敗: {err_type}")
+                return
         try:
             rows = parse_sheet(self._xlsx_bytes, sheet)
         except Exception as exc:
@@ -251,7 +325,7 @@ class ChecklistBDialog:
         if not folder.exists():
             messagebox.showinfo("フォルダ未作成", str(folder))
             return
-        _open_folder(folder)
+        open_folder_in_os(folder)
 
     def _on_execute(self) -> None:
         if not messagebox.askyesno("実行確認", "PENDING 状態の行を配置します。続行しますか？"):
@@ -271,16 +345,3 @@ class ChecklistBDialog:
         success = sum(1 for r in self._results if r.status == PlacementStatus.SUCCESS)
         self._status_var.set(f"配置完了: 成功 {success} 件")
         self._exec_btn.configure(state="disabled")
-
-
-def _open_folder(folder: Path) -> None:
-    """OS のファイルマネージャでフォルダを開く（best-effort）。"""
-    try:
-        if sys.platform == "win32":
-            subprocess.run(["explorer", str(folder)], check=False)
-        elif sys.platform == "darwin":
-            subprocess.run(["open", str(folder)], check=False)
-        else:
-            subprocess.run(["xdg-open", str(folder)], check=False)
-    except OSError:
-        logger.exception("Failed to open folder")

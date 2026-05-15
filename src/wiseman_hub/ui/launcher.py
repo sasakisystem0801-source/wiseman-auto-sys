@@ -31,6 +31,7 @@ from wiseman_hub.ui.common import (
     default_messagebox,
     install_tk_exception_guard,
 )
+from wiseman_hub.ui.sheet_list_binding import SheetListBinding
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +124,13 @@ class Launcher:
         self._defer_initial_refresh = defer_initial_refresh
         # _build_sync_summary で初期化される (StringVar は Tk root 取得後でないと作れない)
         self._sync_vars: dict[str, tk.StringVar] = {}
+        # PR (sheet-list-binding): sheet 行の fetched_at 取得を B/C ダイアログと共通化。
+        # config 再読込で spreadsheet_id が変わり得るため毎呼出で問合せ。
+        self._sheet_binding = SheetListBinding(
+            self._config_path,
+            lambda: self._config.checklist.spreadsheet_id,
+            now_fn=self._now_fn,
+        )
 
         self._on_open_settings = on_open_settings
         self._on_open_facility_merger = on_open_facility_merger
@@ -280,28 +288,15 @@ class Launcher:
         sync_dir = sync_cache_dir_for(self._config_path)
         for prefix, key in _SYNC_SUMMARY_ITEMS:
             ts = (
-                self._read_sheet_fetched_at()
+                # PR (sheet-list-binding): sheets 行のみ helper 経由 (cache schema が
+                # mapping_routing 等とは異なり sheet_list_cache の構造化スキーマを使う)
+                self._sheet_binding.read_fetched_at()
                 if key == "sheets"
                 else read_sync_timestamp(sync_dir, key)
             )
             self._sync_vars[key].set(
                 f"{prefix}: {format_synced_at_label(ts, now)}"
             )
-
-    def _read_sheet_fetched_at(self) -> _dt.datetime | None:
-        """sheet_list_cache から fetched_at を取得 (spreadsheet_id 未設定時は None)。"""
-        from wiseman_hub.cloud.sheet_list_cache import (
-            cache_dir_for as _sheet_cache_dir_for,
-        )
-        from wiseman_hub.cloud.sheet_list_cache import (
-            load as _sheet_load,
-        )
-
-        spreadsheet_id = self._config.checklist.spreadsheet_id
-        if not spreadsheet_id:
-            return None
-        cached = _sheet_load(_sheet_cache_dir_for(self._config_path), spreadsheet_id)
-        return cached.fetched_at if cached is not None else None
 
     def get_root(self) -> tk.Tk:
         """子ダイアログ（SettingsDialog など）が ``tk.Toplevel(parent)`` で
