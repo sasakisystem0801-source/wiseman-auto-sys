@@ -31,6 +31,7 @@ from wiseman_hub.pdf.staff_path_scanner import (
     scan_candidates,
     scan_fallback,
 )
+from wiseman_hub.pdf.year_folder import western_to_reiwa as _shared_western_to_reiwa
 from wiseman_hub.utils.text_norm import normalize_lookup_key
 
 logger = logging.getLogger(__name__)
@@ -72,8 +73,12 @@ class CPlacementResult:
 
 
 def western_to_reiwa(year: int) -> int:
-    """西暦 → 令和年（2019 = R1）。"""
-    return year - 2018
+    """[deprecated] 西暦 → 令和年（2019 = R1）。
+
+    PR-R<年>-C: ``pdf/year_folder.western_to_reiwa`` に統合 (DRY)。
+    後方互換のため本関数名は維持し、内部実装を共通モジュールに委譲する。
+    """
+    return _shared_western_to_reiwa(year)
 
 
 def cache_key(staff: str, year: int, month: int) -> str:

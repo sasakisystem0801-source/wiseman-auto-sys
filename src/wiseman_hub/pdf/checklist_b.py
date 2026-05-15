@@ -15,7 +15,6 @@ from __future__ import annotations
 import logging
 import re
 import shutil
-import unicodedata
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -23,6 +22,7 @@ from typing import Final
 
 from wiseman_hub.cloud.sheets import ChecklistRow
 from wiseman_hub.config import ChecklistConfig
+from wiseman_hub.pdf.year_folder import parse_year_folder_name
 from wiseman_hub.utils.text_norm import normalize_lookup_key
 
 logger = logging.getLogger(__name__)
@@ -165,33 +165,13 @@ def find_monitoring_dir(
     return None, matches
 
 
-# Issue #282: 年フォルダ (R<年>) 表記揺れ吸収用の正規表現。
-# NFKC 正規化後にマッチ判定するため、ここでは半角 R/r + 区切り文字 + 数字のみカバー。
-# 対応する表記揺れ (NFKC 後): "R7" / "R 7" / "R.7" / "R-7" / "r7"
-# (原文の "R７" / "Ｒ7" / "Ｒ７" / "R　7" は NFKC で "R7" / "R 7" に正規化される)
-_R_YEAR_RE: Final = re.compile(r"^[Rr][\s.\-]*(\d+)$")
-
-
 def _parse_year_folder_name(name: str) -> int | None:
-    """フォルダ名から R<年> の年数値を抽出。表記揺れを吸収。
+    """[deprecated] フォルダ名から R<年> の年数値を抽出。
 
-    対応する表記揺れ:
-        - R7, R７, Ｒ7, Ｒ７ (全角/半角ミックス)
-        - R 7, R　7 (半角/全角スペース挿入)
-        - R.7, R-7 (区切り文字挿入)
-        - r7 (小文字)
-
-    実装: ``unicodedata.normalize("NFKC", ...)`` で全角数字/アルファベット/全角
-    スペースを半角化し、正規表現 ``^[Rr][\\s.\\-]*(\\d+)$`` で年数値を抽出。
-
-    Returns:
-        int (年数値、例: ``7``) または None (R<年> 形式として解釈不能)
+    PR-R<年>-C: ``pdf/year_folder.parse_year_folder_name`` に統合。
+    後方互換のため本関数名は維持し、内部実装を共通モジュールに委譲する。
     """
-    nfkc = unicodedata.normalize("NFKC", name.strip())
-    m = _R_YEAR_RE.match(nfkc)
-    if m is None:
-        return None
-    return int(m.group(1))
+    return parse_year_folder_name(name)
 
 
 def _match_month_pdf_in_dir(
@@ -295,7 +275,7 @@ def find_month_pdf(monitoring_dir: Path, month: int) -> tuple[Path | None, list[
     for d in children:
         if not d.is_dir():
             continue
-        year = _parse_year_folder_name(d.name)
+        year = parse_year_folder_name(d.name)
         if year is not None:
             year_groups.setdefault(year, []).append(d)
 
