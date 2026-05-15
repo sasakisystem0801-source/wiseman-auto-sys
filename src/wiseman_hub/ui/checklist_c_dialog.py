@@ -11,6 +11,7 @@ import logging
 import threading
 import tkinter as tk
 from collections.abc import Callable
+from dataclasses import replace as _dataclass_replace
 from pathlib import Path
 from tkinter import messagebox, ttk
 
@@ -33,7 +34,9 @@ from wiseman_hub.pdf.checklist_c import (
     apply_xlsx_selection,
     cache_key,
     execute_c_placement,
+    parse_multi_staff,
     plan_c_placement,
+    staff_choice_cache_key,
 )
 from wiseman_hub.pdf.excel_com import create_exporter
 from wiseman_hub.ui.common import (
@@ -44,7 +47,9 @@ from wiseman_hub.ui.common import (
 )
 from wiseman_hub.ui.placement_confirm_dialog import PlacementConfirmDialog
 from wiseman_hub.ui.sheet_list_binding import SheetListBinding
+from wiseman_hub.ui.staff_picker_dialog import StaffPickerDialog
 from wiseman_hub.ui.xlsx_picker_dialog import XlsxPickerDialog
+from wiseman_hub.utils.text_norm import normalize_lookup_key
 
 logger = logging.getLogger(__name__)
 
@@ -654,6 +659,11 @@ class ChecklistCDialog:
             return
         idx = int(sel[0])
         r = self._results[idx]
+        # Issue #314: 担当者複数の選択モーダルが xlsx 選択より前段
+        # (chosen staff 確定後に xlsx 解決が走るため、xlsx 候補は staff 選択時には未確定)
+        if r.status == CPlacementStatus.NEEDS_REVIEW_STAFF:
+            self._open_staff_picker_for_review(idx, r)
+            return
         # NEEDS_REVIEW 行は xlsx 選択モーダルを開く
         if r.status == CPlacementStatus.NEEDS_REVIEW:
             self._open_picker_for_review(idx, r)
@@ -667,6 +677,90 @@ class ChecklistCDialog:
             messagebox.showinfo("フォルダ未作成", str(folder))
             return
         open_folder_in_os(folder)
+
+    def _open_staff_picker_for_review(self, idx: int, r: CPlacementResult) -> None:
+        """NEEDS_REVIEW_STAFF 行で StaffPickerDialog を開き、選択 staff で再 plan する (Issue #314)。
+
+        Codex review High 反映:
+            - High #1: staff_choice_cache value は normalize_lookup_key 形式で保存
+            - High #2: 再 plan は ``dataclasses.replace(row, staff=selected)`` で
+              row copy (元 row 不変、staff_candidates 等の元 row.staff 情報を保護)
+            - High #3: 解決順序は parse → cache lookup (= 本フローで cache 書込) →
+              selected staff で plan_c_placement 再実行 (通常 xlsx 解決経路)
+            - High #4: StaffPickerDialog が登録済 1 名のみでも radiobutton 必須
+              なので、本メソッドは「selected が None なら no-op」のみ責務
+        """
+        year, month = self._current_year_month()
+        if year is None or month is None:
+            messagebox.showinfo(
+                "対象月未確定",
+                "対象月を選択してから担当者選択してください",
+                parent=self._top,
+            )
+            return
+
+        title_context = f"{r.row.staff} / {r.row.name} / {r.row.facility}"
+        # report_staff キーは load 時に normalize_lookup_key 済 (config.py PR-γ v1)
+        registered_keys = set(self._config.checklist.report_staff.keys())
+        picker = StaffPickerDialog(
+            parent=self._top,
+            parsed_staffs=r.staff_candidates,
+            report_staff_keys=registered_keys,
+            title_context=title_context,
+        )
+        picker.get_toplevel().wait_window()
+        selected, remember = picker.get_result()
+        if selected is None:
+            self._status_var.set("担当者選択キャンセル")
+            return
+
+        # Codex review High #2: dataclasses.replace で row copy、元 row.staff 不変。
+        # 元の row.staff (例 "小島/木塚") を残しておくと、行を再表示したときに
+        # 業務責任者は「元入力 vs 選択結果」の両方を Treeview で確認できる。
+        # ただし staff 列の Treeview 表示は plan_c_placement の chosen_staff を反映
+        # するため、ここでは row 自体を選択 staff に置き換える設計を採用 (chosen_staff
+        # 後の xlsx_path_cache key も一致して整合)。元入力の保持は status_var に委ねる。
+        new_row = _dataclass_replace(r.row, staff=selected)
+        new_results = plan_c_placement(
+            [new_row], self._config.checklist, year, month
+        )
+        if not new_results:
+            self._status_var.set("再 plan に失敗しました")
+            return
+        self._results[idx] = new_results[0]
+        self._refresh_tree()
+        self._update_exec_button()
+
+        # staff_choice_cache 永続化は remember=True 時のみ
+        # (どのような status になっても担当者選択そのものは記憶する価値あり。
+        # シート未発見 SKIPPED でも次回同じ組合せ + 月で担当者選択 UI を skip できる。
+        # 一方 xlsx_path_cache は SKIPPED 時に書込まないため整合は保たれる)
+        if remember and self._config_path is not None:
+            # Codex review High #1: value は normalize_lookup_key 適用済 (表記揺れ吸収)
+            staff_key = staff_choice_cache_key(
+                parse_multi_staff(r.row.staff), year, month
+            )
+            self._config.checklist.staff_choice_cache[staff_key] = (
+                normalize_lookup_key(selected)
+            )
+            try:
+                save_config(self._config, self._config_path)
+            except OSError as exc:
+                logger.warning(
+                    "save_config failed after staff_choice_cache write: %s",
+                    type(exc).__name__,
+                )
+                messagebox.showwarning(
+                    "担当者キャッシュ保存失敗",
+                    f"選択は反映しますが永続化に失敗: {type(exc).__name__}",
+                    parent=self._top,
+                )
+
+        new_r = self._results[idx]
+        self._status_var.set(
+            f"{r.row.name}: 担当者「{selected}」選択 → "
+            f"{_STATUS_LABEL.get(new_r.status, new_r.status.value)}"
+        )
 
     def _open_picker_for_review(self, idx: int, r: CPlacementResult) -> None:
         """NEEDS_REVIEW 行のレビュー UI を開き、選択結果を CPlacementResult に反映する。"""
