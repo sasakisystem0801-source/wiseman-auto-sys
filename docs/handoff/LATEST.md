@@ -2,7 +2,7 @@
 
 日時: 2026-05-16
 HEAD (main): `dfedbb0`
-進行中ブランチ: `feat/c-multi-staff-picker-314` (T1 commit `42680e3` 残置、PR 未作成)
+進行中ブランチ: `feat/c-multi-staff-picker-314` (T1 commit `42680e3` push 済、PR は T2-T10 完了後に作成)
 前セッション archive: [session-79-b-c-dialog-dry-xlsx-visibility.md](./archive/session-79-b-c-dialog-dry-xlsx-visibility.md)
 
 ## 本セッション完了内容
@@ -28,7 +28,7 @@ Session 79 実機 Phase 4 で発見された 2 件 (#313 bug + #315 enhancement)
 
 ### 進行中: Issue #314 担当者複数 (`/` 区切り) 対応の担当者選択 UI — T1 完了
 
-`feat/c-multi-staff-picker-314` ブランチで `42680e3` commit 済 (push 済、PR 未作成):
+`feat/c-multi-staff-picker-314` ブランチ (commit `42680e3` push 済):
 
 - `parse_multi_staff(staff: str) -> list[str]`: 半角 `/` + 全角 `／` 区切り分解、NFKC ベース dedupe、元出現順保持
 - `staff_choice_cache_key(staffs, year, month) -> str`: normalize_lookup_key sort + `|` 区切り (TOML quote 回避)
@@ -117,7 +117,7 @@ T1 (parse_multi_staff + staff_choice_cache_key + 13 tests) は commit `42680e3` 
 | `/simplify` | 適用相当 (4 ファイル局所修正) | 適用相当 (設定/PS) | スキップ (1 関数追加のみ) |
 | `/safe-refactor` | 不要 (3 ファイル未満 src 側) | 適用 (3 ファイル新規/修正) | スキップ |
 | Evaluator 分離プロトコル | 不要 (5 ファイル未満) | 不要 (新機能ではない) | T1-T10 完了時に発動 |
-| Codex セカンドオピニオン | 不要 (medium tier) | 適用 (large tier の post-fix で実質代替) | **計画段階で実施済** |
+| Codex セカンドオピニオン | 不要 (medium tier) | review 3 並列 11 件全反映で実質カバー (large tier だが Codex 別途未起動) | **計画段階で実施済 (High 4 + Medium 4 + Low 3 反映)** |
 | 並列 agent review | 3 並列 (code / test / comment) | 3 並列 (code / silent-failure / comment) | T1-T10 完了時 |
 | Single code-reviewer | (上記の 1 部) | (上記の 1 部) | - |
 
