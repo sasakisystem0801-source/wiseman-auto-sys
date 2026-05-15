@@ -22,7 +22,9 @@ from wiseman_hub.pdf.checklist_b import (
     find_monitoring_dir,
     find_month_pdf,
     plan_b_placement,
+    resolve_facility,
 )
+from wiseman_hub.utils.text_norm import normalize_lookup_key
 
 
 @pytest.fixture
@@ -605,3 +607,56 @@ class TestFindMonthPdfYearFolder:
         # 1 回目 iterdir (直配置探索) で取得した pdfs は返る
         assert all_pdfs == [monitoring / "5.pdf"]
         assert any("PermissionError" in r.message for r in caplog.records)
+
+
+class TestResolveFacilityNormalization:
+    """B の居宅名 lookup の表記揺れ吸収 (PR-γ v2、Session 78 実機デモ regression)。
+
+    実機デモ (2026-05-15) で ``姫路医療生活協同組合 あぼし`` (半角空白) が
+    routing 側 (``姫路医療生活協同組合あぼし``、normalize 後 key) と不一致で
+    「居宅マッピング未登録」となった事案を regression 防止する。
+    """
+
+    def test_resolve_with_full_width_space_input(self) -> None:
+        """スプレッドシート側が全角空白でも routing key (正規化済) と hit。"""
+        routing = {
+            normalize_lookup_key("姫路医療生活協同組合 あぼし"): "姫路医療生活協同組合 あぼし(メール)",
+        }
+        # スプレッドシート由来の生の facility_name (全角空白)
+        result = resolve_facility("姫路医療生活協同組合　あぼし", routing)
+        assert result == "姫路医療生活協同組合 あぼし(メール)"
+
+    def test_resolve_with_no_space_input(self) -> None:
+        """スプレッドシート側が空白なしでも routing key と hit (PR-γ v2 新規対応)。"""
+        routing = {
+            normalize_lookup_key("姫路医療生活協同組合 あぼし"): "姫路医療生活協同組合 あぼし(メール)",
+        }
+        result = resolve_facility("姫路医療生活協同組合あぼし", routing)
+        assert result == "姫路医療生活協同組合 あぼし(メール)"
+
+    def test_resolve_with_half_width_space_input(self) -> None:
+        """スプレッドシート側が半角空白の通常パターン (旧仕様で動いていたケース)。"""
+        routing = {
+            normalize_lookup_key("姫路医療生活協同組合 あぼし"): "姫路医療生活協同組合 あぼし(メール)",
+        }
+        result = resolve_facility("姫路医療生活協同組合 あぼし", routing)
+        assert result == "姫路医療生活協同組合 あぼし(メール)"
+
+    def test_resolve_unknown_returns_none(self) -> None:
+        """routing 未登録の facility 名は None。"""
+        routing = {
+            normalize_lookup_key("姫路医療生活協同組合 あぼし"): "姫路医療生活協同組合 あぼし(メール)",
+        }
+        assert resolve_facility("未登録居宅", routing) is None
+
+    def test_resolve_three_patterns_match_same_key(self) -> None:
+        """全角 / 半角 / 空白なし の 3 パターンが同一 routing key を引く (B/C 整合)。"""
+        routing = {
+            normalize_lookup_key("姫路医療生活協同組合 あぼし"): "FAX_NAME",
+        }
+        assert (
+            resolve_facility("姫路医療生活協同組合　あぼし", routing)
+            == resolve_facility("姫路医療生活協同組合 あぼし", routing)
+            == resolve_facility("姫路医療生活協同組合あぼし", routing)
+            == "FAX_NAME"
+        )

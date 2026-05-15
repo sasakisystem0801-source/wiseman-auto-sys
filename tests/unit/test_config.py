@@ -3786,12 +3786,16 @@ xlsx_path_cache = "not-a-table"
         assert '"PT 宮下"' in text
         assert '"OT 小林"' in text
         # round-trip
+        # PR-γ v2: report_staff の dict key は normalize_lookup_key で空白除去される。
+        # 旧仕様では半角空白 1 つに統一されていたが、新仕様で全空白除去 (Session 78 デモで判明)。
         reloaded = load_config(target)
-        assert "PT 宮下" in reloaded.checklist.report_staff
-        assert "OT 小林" in reloaded.checklist.report_staff
-        assert reloaded.checklist.report_staff["PT 宮下"].suggest_patterns == [
+        assert "PT宮下" in reloaded.checklist.report_staff
+        assert "OT小林" in reloaded.checklist.report_staff
+        assert reloaded.checklist.report_staff["PT宮下"].suggest_patterns == [
             "x/{month}.xlsx",
         ]
+        # xlsx_path_cache の key は staff lookup と独立 (現状は正規化未適用、
+        # 別 PR で staff:year:month 形式の staff 部分を text_norm 経由にする予定)
         assert reloaded.checklist.xlsx_path_cache == {
             "PT 宮下:2026:3": "\\\\Tera-station\\share\\PT 宮下\\a.xlsx",
         }
