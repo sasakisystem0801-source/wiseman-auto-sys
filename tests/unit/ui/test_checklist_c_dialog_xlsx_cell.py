@@ -1,10 +1,9 @@
-"""C ダイアログ Treeview の xlsx 列フォーマッタ ``_format_xlsx_cell`` のテスト。
+"""C ダイアログ Treeview の xlsx 列フォーマッタ ``_format_xlsx_cell`` の契約テスト。
 
-Issue #315: NEEDS_REVIEW 行で xlsx_path=None のため列が常に空欄になり、
-業務責任者が「読込直後にどの行がほぼ確定／要確認／候補ゼロか」を
-判別できなかった事象に対する修正検証。
-
-純粋関数なので Tk なしで完結する (UI dialog instance 不要)。
+5 状態分岐 (xlsx_path 確定 / NEEDS_REVIEW × {0,1,N} 件 / SKIPPED 系) と
+xlsx_path が立っているときの優先順位を Tk なしで網羅する。Treeview 表示を
+UI dialog instance ごと立ち上げず純粋関数として検証することで、
+分岐網羅 + ヘッドレス CI 実行 + 回帰検出強度を両立する。
 """
 
 from __future__ import annotations

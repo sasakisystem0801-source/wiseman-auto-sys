@@ -158,16 +158,15 @@ def test_resolve_xlsx_no_candidates_returns_folder_tree(tmp_path: Path) -> None:
     assert result.status == CPlacementStatus.NEEDS_REVIEW
     assert result.folder_tree is not None
     assert result.folder_tree["name"] == "PT 宮下"
-    # Issue #313: 真に候補ゼロのケースは「候補なし」文言
+    # 真に候補ゼロのケースは「候補なし」文言 (件数あり経路と分岐していることの担保)
     assert result.message == "候補なし、フォルダから選択してください"
     assert result.candidates == []
 
 
 def test_resolve_xlsx_fallback_hits_returns_count_message(tmp_path: Path) -> None:
-    """Issue #313: suggest_patterns 0 件 → scan_fallback が候補を拾ったとき、
-    message は「N 件候補あり、確認後に選択してください」(suggest_patterns hit と同表現)。
-    旧実装は固定で「候補なし、フォルダから選択してください」を返していたため、
-    XlsxPickerDialog で候補が出るのに Treeview 詳細列が「候補なし」と矛盾していた。
+    """suggest_patterns 0 件 + scan_fallback hit のとき message と candidates が
+    矛盾してはいけない契約を固定する (XlsxPickerDialog の候補リスト表示と
+    Treeview 詳細列の整合性が崩れないため、両経路で同一文言「N 件候補あり」)。
     """
     base = tmp_path / "PT 平瀬"
     target_dir = base / "リハ経過報告書" / "令和8年"
