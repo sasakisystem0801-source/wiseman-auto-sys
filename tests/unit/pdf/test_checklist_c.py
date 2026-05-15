@@ -92,7 +92,7 @@ def _entry_with_xlsx(tmp_path: Path) -> tuple[ReportStaffEntry, Path]:
     xlsx = base / "リハ経過報告書" / "令和8年" / "リハ経過報告書（宮下）3月    .xlsx"
     xlsx.write_text("")
     entry = ReportStaffEntry(
-        base_dir=str(base),
+        base_dir=base,
         suggest_patterns=["リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx"],
     )
     return entry, xlsx
@@ -135,7 +135,7 @@ def test_resolve_xlsx_legacy_template_fallback(tmp_path: Path) -> None:
     xlsx = base / "リハ経過報告書" / "令和8年" / "report.xlsx"
     xlsx.write_text("")
     entry = ReportStaffEntry(
-        base_dir=str(base),
+        base_dir=base,
         suggest_patterns=[],
         year_subfolder_template="リハ経過報告書/令和{era}年",
         file_template="report.xlsx",
@@ -151,7 +151,7 @@ def test_resolve_xlsx_no_candidates_returns_folder_tree(tmp_path: Path) -> None:
     (base / "リハ経過報告書").mkdir(parents=True)
     # xlsx 不在
     entry = ReportStaffEntry(
-        base_dir=str(base),
+        base_dir=base,
         suggest_patterns=["リハ経過報告書/令和{era}年/*.xlsx"],
     )
     result = resolve_xlsx("宮下", entry, 2026, 3, cache={})
@@ -162,7 +162,7 @@ def test_resolve_xlsx_no_candidates_returns_folder_tree(tmp_path: Path) -> None:
 
 def test_resolve_xlsx_missing_base_dir_returns_skipped(tmp_path: Path) -> None:
     entry = ReportStaffEntry(
-        base_dir=str(tmp_path / "nowhere"),
+        base_dir=tmp_path / "nowhere",
         suggest_patterns=["x/y.xlsx"],
     )
     result = resolve_xlsx("宮下", entry, 2026, 3, cache={})
@@ -170,7 +170,7 @@ def test_resolve_xlsx_missing_base_dir_returns_skipped(tmp_path: Path) -> None:
 
 
 def test_resolve_xlsx_empty_base_dir_returns_skipped() -> None:
-    entry = ReportStaffEntry(base_dir="", suggest_patterns=["x.xlsx"])
+    entry = ReportStaffEntry(base_dir=Path(""), suggest_patterns=["x.xlsx"])
     result = resolve_xlsx("宮下", entry, 2026, 3, cache={})
     assert result.status == CPlacementStatus.SKIPPED_NO_XLSX
 
@@ -192,7 +192,7 @@ def _checklist_cfg(
     xlsx = base / "リハ経過報告書" / "令和8年" / "リハ経過報告書（宮下）3月    .xlsx"
     xlsx.write_text("")
     entry = ReportStaffEntry(
-        base_dir=str(base),
+        base_dir=base,
         suggest_patterns=suggest
         or ["リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx"],
     )

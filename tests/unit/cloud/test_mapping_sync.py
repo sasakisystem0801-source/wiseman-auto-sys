@@ -266,11 +266,11 @@ class TestPushReportStaff:
         blob = MagicMock()
         original = {
             "宮下": ReportStaffEntry(
-                base_dir="\\\\Tera-station\\share\\PT 宮下",
+                base_dir=Path("\\\\Tera-station\\share\\PT 宮下"),
                 suggest_patterns=["リハ経過報告書/令和{era}年/*{month}月*.xlsx"],
             ),
             "小林": ReportStaffEntry(
-                base_dir="\\\\Tera-station\\share\\OT小林",
+                base_dir=Path("\\\\Tera-station\\share\\OT小林"),
                 suggest_patterns=["経過報告書/R{era}/*{month}月*.xlsx"],
             ),
         }
@@ -285,7 +285,8 @@ class TestPushReportStaff:
         assert body["version"] == "1"
         assert "generated_at" in body
         assert set(body["staff"].keys()) == {"宮下", "小林"}
-        assert body["staff"]["宮下"]["base_dir"] == original["宮下"].base_dir
+        # Issue #27 続編 G Phase 3b: JSON body は str 維持 (push 側で str(Path) 変換)。
+        assert body["staff"]["宮下"]["base_dir"] == str(original["宮下"].base_dir)
         assert (
             body["staff"]["宮下"]["suggest_patterns"]
             == original["宮下"].suggest_patterns
@@ -335,7 +336,8 @@ class TestPullReportStaff:
         ):
             result = pull_report_staff(gcp)
         assert set(result.keys()) == {"宮下"}
-        assert result["宮下"].base_dir == "\\\\Tera-station\\share\\PT 宮下"
+        # Issue #27 続編 G Phase 3b: pull 経由で Path 型に変換される (coerce_path)。
+        assert result["宮下"].base_dir == Path("\\\\Tera-station\\share\\PT 宮下")
         assert result["宮下"].suggest_patterns == [
             "リハ経過報告書/令和{era}年/*{month}月*.xlsx"
         ]
@@ -427,13 +429,13 @@ class TestReportStaffRoundTrip:
         blob.download_as_bytes.side_effect = download
         original = {
             "宮下": ReportStaffEntry(
-                base_dir="\\\\Tera-station\\share\\PT 宮下",
+                base_dir=Path("\\\\Tera-station\\share\\PT 宮下"),
                 suggest_patterns=[
                     "リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx",
                 ],
             ),
             "小林": ReportStaffEntry(
-                base_dir="\\\\Tera-station\\share\\OT小林",
+                base_dir=Path("\\\\Tera-station\\share\\OT小林"),
                 suggest_patterns=["経過報告書/R{era}/*{month}月*.xlsx"],
             ),
         }

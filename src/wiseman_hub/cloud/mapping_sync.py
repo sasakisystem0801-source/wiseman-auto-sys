@@ -45,7 +45,7 @@ from google.api_core import exceptions as gcs_exc
 from google.auth import exceptions as auth_exc
 from google.cloud import storage
 
-from wiseman_hub.config import GcpConfig, ReportStaffEntry
+from wiseman_hub.config import GcpConfig, ReportStaffEntry, coerce_path, is_path_configured
 
 logger = logging.getLogger(__name__)
 
@@ -191,9 +191,12 @@ def push_report_staff(
     payload: dict[str, Any] = {
         "version": SCHEMA_VERSION,
         "generated_at": now.isoformat(),
+        # Issue #27 続編 G Phase 3b: entry.base_dir は Path 型に移行済。GCS JSON
+        # contract は str 維持のため canonical sentinel pattern で str 変換 (未設定
+        # Path("") は "" に正規化し、過去 JSON 形式との後方互換を保つ)。
         "staff": {
             name: {
-                "base_dir": entry.base_dir,
+                "base_dir": str(entry.base_dir) if is_path_configured(entry.base_dir) else "",
                 "suggest_patterns": list(entry.suggest_patterns),
             }
             for name, entry in staff.items()
@@ -275,8 +278,14 @@ def pull_report_staff(gcp: GcpConfig) -> dict[str, ReportStaffEntry]:
                     f"staff[{name}].suggest_patterns elements must be str"
                 )
             suggest_patterns.append(element)
+        # Issue #27 続編 G Phase 3b: JSON contract は str だが ReportStaffEntry は
+        # Path 型必須化のため coerce_path 経由 (空白 strip → 未設定 sentinel)。
         result[name] = ReportStaffEntry(
-            base_dir=base_dir,
+            base_dir=coerce_path(
+                f"report_staff_pull.{name}.base_dir",
+                base_dir,
+                echo_value=False,
+            ),
             suggest_patterns=suggest_patterns,
         )
     logger.info("report_staff pull: %d entries", len(result))

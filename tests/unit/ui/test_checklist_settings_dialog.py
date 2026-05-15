@@ -10,6 +10,8 @@ PR #179 までは `_staff_to_toml` / `_parse_staff_toml` が `suggest_patterns` 
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from wiseman_hub.config import ReportStaffEntry
@@ -23,7 +25,7 @@ class TestStaffTomlRoundTrip:
     def test_suggest_patterns_round_trip_preserves_list(self) -> None:
         original = {
             "宮下": ReportStaffEntry(
-                base_dir="\\\\Tera-station\\share\\PT 宮下",
+                base_dir=Path("\\\\Tera-station\\share\\PT 宮下"),
                 suggest_patterns=[
                     "リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx",
                 ],
@@ -37,14 +39,14 @@ class TestStaffTomlRoundTrip:
     def test_multi_staff_with_multiple_patterns(self) -> None:
         original = {
             "小島": ReportStaffEntry(
-                base_dir="\\\\Tera-station\\share\\PT 小島",
+                base_dir=Path("\\\\Tera-station\\share\\PT 小島"),
                 suggest_patterns=[
                     "リハ経過報告書(新)/経過報告書*令和{era}年{month}月*.xlsx",
                     "リハ経過報告書(旧)/令和{era}年度/経過報告書*{month}月*.xlsx",
                 ],
             ),
             "OT 小林": ReportStaffEntry(
-                base_dir="\\\\Tera-station\\share\\OT小林",
+                base_dir=Path("\\\\Tera-station\\share\\OT小林"),
                 suggest_patterns=["経過報告書/R{era}/*{month}月*.xlsx"],
             ),
         }
@@ -56,7 +58,7 @@ class TestStaffTomlRoundTrip:
 
     def test_empty_suggest_patterns_emits_empty_list(self) -> None:
         original = {
-            "test": ReportStaffEntry(base_dir="C:/x", suggest_patterns=[]),
+            "test": ReportStaffEntry(base_dir=Path("C:/x"), suggest_patterns=[]),
         }
         text = _staff_to_toml(original)
         assert "suggest_patterns = []" in text
@@ -67,7 +69,7 @@ class TestStaffTomlRoundTrip:
         """旧 MVP 互換: year_subfolder_template / file_template が非空なら保持。"""
         original = {
             "legacy": ReportStaffEntry(
-                base_dir="C:/legacy",
+                base_dir=Path("C:/legacy"),
                 suggest_patterns=[],
                 year_subfolder_template="令和{era}年",
                 file_template="経過報告書*{month}月*.xlsx",
@@ -82,7 +84,7 @@ class TestStaffTomlRoundTrip:
         """新規入力では deprecated フィールドが空なら出力しない（dump 結果が読みやすい）。"""
         original = {
             "new": ReportStaffEntry(
-                base_dir="C:/x",
+                base_dir=Path("C:/x"),
                 suggest_patterns=["a/*.xlsx"],
             ),
         }
@@ -94,7 +96,7 @@ class TestStaffTomlRoundTrip:
         """key にスペース・特殊文字を含むケース（"PT 宮下" など）の round-trip。"""
         original = {
             "PT 宮下": ReportStaffEntry(
-                base_dir="C:/x",
+                base_dir=Path("C:/x"),
                 suggest_patterns=["a/*.xlsx"],
             ),
         }
@@ -125,19 +127,20 @@ class TestStaffTomlPropagatesDataclassTypeGuard:
     ``ReportStaffEntry.__post_init__`` の ``_check_str`` で TypeError として
     起動時に拒否されることを固定する (旧版は ``"123"`` 等に silent 強制変換)。"""
 
-    def test_base_dir_must_be_str_not_int(self) -> None:
+    def test_base_dir_must_be_str_or_path_not_int(self) -> None:
         bad = '["宮下"]\nbase_dir = 123\nsuggest_patterns = []\n'
-        with pytest.raises(TypeError, match=r"ReportStaffEntry\.base_dir must be str"):
+        # Issue #27 続編 G Phase 3b: coerce_path で TypeError raise (str/Path 以外)。
+        with pytest.raises(TypeError, match=r"base_dir must be str \(TOML\) or Path"):
             _parse_staff_toml(bad)
 
-    def test_base_dir_must_be_str_not_bool(self) -> None:
+    def test_base_dir_must_be_str_or_path_not_bool(self) -> None:
         bad = '["宮下"]\nbase_dir = true\nsuggest_patterns = []\n'
-        with pytest.raises(TypeError, match=r"ReportStaffEntry\.base_dir must be str"):
+        with pytest.raises(TypeError, match=r"base_dir must be str \(TOML\) or Path"):
             _parse_staff_toml(bad)
 
-    def test_base_dir_must_be_str_not_float(self) -> None:
+    def test_base_dir_must_be_str_or_path_not_float(self) -> None:
         bad = '["宮下"]\nbase_dir = 1.5\nsuggest_patterns = []\n'
-        with pytest.raises(TypeError, match=r"ReportStaffEntry\.base_dir must be str"):
+        with pytest.raises(TypeError, match=r"base_dir must be str \(TOML\) or Path"):
             _parse_staff_toml(bad)
 
     def test_year_subfolder_template_must_be_str(self) -> None:
@@ -170,7 +173,8 @@ class TestStaffTomlPropagatesDataclassTypeGuard:
             'file_template = "経過報告書*{month}月*.xlsx"\n'
         )
         result = _parse_staff_toml(good)
-        assert result["宮下"].base_dir == "C:/PT宮下"
+        # Issue #27 続編 G Phase 3b: base_dir は Path 型に移行済 (coerce_path 経由)。
+        assert result["宮下"].base_dir == Path("C:/PT宮下")
         assert result["宮下"].suggest_patterns == ["a/*.xlsx"]
         assert result["宮下"].year_subfolder_template == "令和{era}年"
         assert result["宮下"].file_template == "経過報告書*{month}月*.xlsx"

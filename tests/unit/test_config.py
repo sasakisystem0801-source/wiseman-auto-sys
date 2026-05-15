@@ -2035,10 +2035,17 @@ class TestDataclassTypeGuards:
         assert any("legacy value" in record.message for record in caplog.records)
 
     # --- ReportStaffEntry -----------------------------------------------
-    def test_report_staff_entry_non_string_base_dir_raises(self) -> None:
+    def test_report_staff_entry_non_path_base_dir_raises(self) -> None:
+        """Issue #27 続編 G Phase 3b: base_dir は Path 型必須 (str / int 等は TypeError)。"""
         from wiseman_hub.config import ReportStaffEntry
-        with pytest.raises(TypeError, match="ReportStaffEntry.base_dir must be str"):
+        with pytest.raises(TypeError, match="ReportStaffEntry.base_dir must be Path"):
             ReportStaffEntry(base_dir=123)  # type: ignore[arg-type]
+
+    def test_report_staff_entry_str_base_dir_raises(self) -> None:
+        """Issue #27 続編 G Phase 3b: str を直接渡すと TypeError (Phase 2a/2b 設計と同じ fail-close)。"""
+        from wiseman_hub.config import ReportStaffEntry
+        with pytest.raises(TypeError, match="ReportStaffEntry.base_dir must be Path"):
+            ReportStaffEntry(base_dir="\\\\Tera-station\\share\\PT 宮下")  # type: ignore[arg-type]
 
     def test_report_staff_entry_non_list_suggest_patterns_raises(self) -> None:
         from wiseman_hub.config import ReportStaffEntry
@@ -3453,6 +3460,147 @@ class TestIssue27PathMigrationPhase3a:
         assert reloaded.checklist.c_output_subfolder == "経過報告書"
 
 
+class TestIssue27PathMigrationPhase3b:
+    """Issue #27 続編 G Phase 3b: ReportStaffEntry.base_dir の Path 型移行を契約として固定。
+
+    Phase 2a/2b/3a で確立した patterns (is_path_configured / coerce_path / _check_path /
+    stringify_paths_recursive) を ReportStaffEntry.base_dir (nested dataclass field) に
+    適用する。default は ``Path("")`` 未設定 sentinel (担当者ごとに本田様 PC で設定する
+    性質のため UNC default は持たない)。
+    """
+
+    def test_default_base_dir_is_unset_path(self) -> None:
+        """default ReportStaffEntry は base_dir も未設定 sentinel (Phase 3a の karte_root
+        / fax_root と違い UNC default は持たない)。"""
+        from wiseman_hub.config import ReportStaffEntry, is_path_configured
+
+        entry = ReportStaffEntry()
+        assert isinstance(entry.base_dir, Path)
+        assert is_path_configured(entry.base_dir) is False
+
+    def test_report_staff_entry_rejects_str_base_dir(self) -> None:
+        """str を直接渡すと TypeError (Path 専用化、Phase 3a と同じ fail-close)。"""
+        from wiseman_hub.config import ReportStaffEntry
+
+        with pytest.raises(TypeError, match="ReportStaffEntry.base_dir must be Path"):
+            ReportStaffEntry(base_dir="/srv/staff")  # type: ignore[arg-type]
+
+    def test_load_config_coerces_base_dir(self, tmp_path: Path) -> None:
+        """TOML str → Path coerce (空白 strip 経由含む) を _coerce_report_staff_entry で。"""
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[checklist.report_staff."宮下"]\n'
+            'base_dir = "//Tera-station/share/PT 宮下"\n'
+            'suggest_patterns = []\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        entry = cfg.checklist.report_staff["宮下"]
+        assert entry.base_dir == Path("//Tera-station/share/PT 宮下")
+
+    def test_load_config_whitespace_base_dir_is_unset(self, tmp_path: Path) -> None:
+        """TOML 手書きでの空白 base_dir は coerce_path 経由で未設定 sentinel に。"""
+        from wiseman_hub.config import is_path_configured
+
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[checklist.report_staff."宮下"]\n'
+            'base_dir = "   "\n'
+            'suggest_patterns = []\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        assert is_path_configured(cfg.checklist.report_staff["宮下"].base_dir) is False
+
+    def test_load_config_accepts_backslash_unc_base_dir(self, tmp_path: Path) -> None:
+        """既存環境互換: TOML backslash UNC ``\\\\Tera-station\\share\\PT 宮下`` も
+        coerce_path 経由で Path 化 (Phase 3a と同じ後方互換テスト、起動時 fail-close 防御)。
+        """
+        from wiseman_hub.config import is_path_configured
+
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[checklist.report_staff."宮下"]\n'
+            'base_dir = "\\\\\\\\Tera-station\\\\share\\\\PT 宮下"\n'
+            'suggest_patterns = []\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        entry = cfg.checklist.report_staff["宮下"]
+        assert isinstance(entry.base_dir, Path)
+        assert is_path_configured(entry.base_dir)
+
+    def test_save_config_round_trip_base_dir(self, tmp_path: Path) -> None:
+        """base_dir の save → load ラウンドトリップ (ReportStaffEntry nested dataclass)。"""
+        from dataclasses import replace as dc_replace
+
+        from wiseman_hub.config import ReportStaffEntry
+
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[checklist.report_staff."宮下"]\n'
+            'base_dir = ""\n'
+            'suggest_patterns = []\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        new_staff = dict(cfg.checklist.report_staff)
+        new_staff["宮下"] = ReportStaffEntry(
+            base_dir=Path("//Tera-station/share/PT 宮下"),
+            suggest_patterns=["リハ経過報告書/令和{era}年/*{month}月*.xlsx"],
+        )
+        new_cfg = dc_replace(
+            cfg, checklist=dc_replace(cfg.checklist, report_staff=new_staff)
+        )
+        save_config(new_cfg, cfg_path)
+
+        reloaded = load_config(cfg_path)
+        assert reloaded.checklist.report_staff["宮下"].base_dir == Path(
+            "//Tera-station/share/PT 宮下"
+        )
+
+    def test_load_config_rejects_non_string_base_dir(self, tmp_path: Path) -> None:
+        """TOML で int / bool 等を渡すと coerce_path 経由で TypeError (silent fail 防止)。"""
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[checklist.report_staff."宮下"]\n'
+            "base_dir = 123\n"
+            'suggest_patterns = []\n',
+            encoding="utf-8",
+        )
+        with pytest.raises(TypeError, match=r"base_dir must be str \(TOML\) or Path"):
+            load_config(cfg_path)
+
+    def test_save_config_unset_base_dir_written_as_empty(self, tmp_path: Path) -> None:
+        """未設定 Path は TOML に "" で書き戻し (Phase 2a/3a と同じ silent 互換性劣化防御)。"""
+        from dataclasses import replace as dc_replace
+
+        from wiseman_hub.config import ReportStaffEntry
+
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            '[checklist.report_staff."宮下"]\n'
+            'base_dir = "/initial"\n'
+            'suggest_patterns = []\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        new_staff = dict(cfg.checklist.report_staff)
+        new_staff["宮下"] = ReportStaffEntry(
+            base_dir=Path(""),
+            suggest_patterns=[],
+        )
+        cleared = dc_replace(
+            cfg, checklist=dc_replace(cfg.checklist, report_staff=new_staff)
+        )
+        save_config(cleared, cfg_path)
+
+        content = cfg_path.read_text(encoding="utf-8")
+        assert 'base_dir = ""' in content
+        # 旧 silent 劣化バグ: '"."' が書かれていないこと
+        assert 'base_dir = "."' not in content
+
+
 class TestChecklistStaffPathExtension:
     """T1: report_staff suggest_patterns + xlsx_path_cache の TOML 往復・検証。"""
 
@@ -3470,7 +3618,8 @@ suggest_patterns = [
         )
         cfg = load_config(cfg_path)
         entry = cfg.checklist.report_staff["宮下"]
-        assert entry.base_dir == "\\\\Tera-station\\share\\PT 宮下"
+        # Issue #27 続編 G Phase 3b: base_dir は Path 型に移行済 (coerce_path 経由)。
+        assert entry.base_dir == Path("\\\\Tera-station\\share\\PT 宮下")
         assert entry.suggest_patterns == [
             "リハ経過報告書/令和*年/リハ経過報告書*{month}月*.xlsx",
         ]
@@ -3571,13 +3720,13 @@ xlsx_path_cache = "not-a-table"
             checklist=ChecklistConfig(
                 report_staff={
                     "宮下": ReportStaffEntry(
-                        base_dir="\\\\Tera-station\\share\\PT 宮下",
+                        base_dir=Path("\\\\Tera-station\\share\\PT 宮下"),
                         suggest_patterns=[
                             "リハ経過報告書/令和*年/リハ経過報告書*{month}月*.xlsx",
                         ],
                     ),
                     "小島": ReportStaffEntry(
-                        base_dir="\\\\Tera-station\\share\\PT 小島",
+                        base_dir=Path("\\\\Tera-station\\share\\PT 小島"),
                         suggest_patterns=[
                             "リハ経過報告書(新)/経過報告書*令和*{month}月(最新)*.xlsx",
                         ],
@@ -3617,11 +3766,11 @@ xlsx_path_cache = "not-a-table"
             checklist=ChecklistConfig(
                 report_staff={
                     "PT 宮下": ReportStaffEntry(
-                        base_dir="\\\\Tera-station\\share\\PT 宮下",
+                        base_dir=Path("\\\\Tera-station\\share\\PT 宮下"),
                         suggest_patterns=["x/{month}.xlsx"],
                     ),
                     "OT 小林": ReportStaffEntry(
-                        base_dir="\\\\Tera-station\\share\\OT小林",
+                        base_dir=Path("\\\\Tera-station\\share\\OT小林"),
                         suggest_patterns=["y/{era}.xlsx"],
                     ),
                 },
@@ -3668,7 +3817,7 @@ suggest_patterns = ""
             checklist=ChecklistConfig(
                 report_staff={
                     "宮下": ReportStaffEntry(
-                        base_dir="\\\\Tera-station\\share\\PT 宮下",
+                        base_dir=Path("\\\\Tera-station\\share\\PT 宮下"),
                         year_subfolder_template="リハ経過報告書\\令和{era}年",
                         file_template="リハ経過報告書 (宮下) {month}月 .xlsx",
                     ),

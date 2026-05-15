@@ -576,7 +576,11 @@ def _staff_to_toml(staff: dict[str, ReportStaffEntry]) -> str:
     lines: list[str] = []
     for name, entry in staff.items():
         lines.append(f'["{name}"]')
-        lines.append(f'base_dir = "{_escape_toml(entry.base_dir)}"')
+        # Issue #27 続編 G Phase 3b: base_dir は Path 型に移行済。
+        # canonical sentinel pattern (str(p) if is_path_configured(p) else "") で
+        # 未設定 Path("") を "" (= 旧 str 時代) に変換し TOML round-trip を維持。
+        base_dir_str = str(entry.base_dir) if is_path_configured(entry.base_dir) else ""
+        lines.append(f'base_dir = "{_escape_toml(base_dir_str)}"')
         if entry.suggest_patterns:
             inner = ", ".join(
                 f'"{_escape_toml(p)}"' for p in entry.suggest_patterns
@@ -645,11 +649,17 @@ def _parse_staff_toml(text: str) -> dict[str, ReportStaffEntry]:
             suggest_patterns.append(element)
         # Issue #27 続編 C: `entry.get(..., "")` を ``str(...)`` で包むと TOML 値の
         # 非文字列 (int/bool/list/dict) が ``"123"`` 等に強制変換され、
-        # ``ReportStaffEntry.__post_init__`` の ``_check_str`` を bypass する。
+        # ``ReportStaffEntry.__post_init__`` の型ガードを bypass する。
         # default 文字列 ``""`` を明示し、TOML 由来の値はそのまま dataclass に渡して
         # 型違反を起動時 TypeError で拒否する。
+        # Issue #27 続編 G Phase 3b: base_dir は Path 型必須化のため coerce_path 経由
+        # (空白 strip → 未設定 sentinel、非 str/Path → TypeError)。
         result[str(name)] = ReportStaffEntry(
-            base_dir=entry.get("base_dir", ""),
+            base_dir=coerce_path(
+                f"checklist.report_staff.{name}.base_dir",
+                entry.get("base_dir", ""),
+                echo_value=False,
+            ),
             suggest_patterns=suggest_patterns,
             year_subfolder_template=entry.get("year_subfolder_template", ""),
             file_template=entry.get("file_template", ""),

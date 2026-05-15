@@ -25,7 +25,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-from wiseman_hub.config import ReportStaffEntry
+from wiseman_hub.config import ReportStaffEntry, is_path_configured
 
 logger = logging.getLogger(__name__)
 
@@ -111,9 +111,11 @@ def scan_candidates(
         3. base_dir から再帰的に matching
         4. 結果を path 順に sorted（決定的順序）
     """
-    if not entry.base_dir or not entry.suggest_patterns:
+    # Issue #27 続編 G Phase 3b: entry.base_dir は Path 型に移行済。
+    # Path("") は `bool()` で True (Path(".") と等価) なので is_path_configured で gate。
+    if not is_path_configured(entry.base_dir) or not entry.suggest_patterns:
         return []
-    base = Path(entry.base_dir)
+    base = entry.base_dir
     era = western_to_reiwa(year)
     seen: set[Path] = set()
     results: list[Path] = []
