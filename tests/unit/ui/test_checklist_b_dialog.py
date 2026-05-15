@@ -34,30 +34,37 @@ from wiseman_hub.config import (
 from wiseman_hub.ui.checklist_b_dialog import ChecklistBDialog
 
 
-def _pump_until(
-    root: tk.Tk,
-    predicate: Callable[[], bool],
-    *,
-    timeout: float = 2.0,
-    interval: float = 0.02,
-) -> None:
-    """Tk main loop の pending after callback を pump しながら predicate 成立を待つ。
+class _SyncThread:
+    """``threading.Thread`` の同期実行 stub。
 
-    pytest 内で root.mainloop() を呼ばずに threading + after(0,...) のテストを
-    deterministic に動かすための helper。``root.update()`` は pending event を 1
-    回処理するだけなので、background thread の `_safe_after` が schedule した
-    callback も含めてループで pump する必要がある。
+    Windows + Tk runtime で ``worker_thread.after(0, ...)`` が main thread の
+    ``root.update()`` で確実に pump されない既知の制約があるため、テストでは
+    threading.Thread を同期 stub に置換して main thread 内で worker 関数を
+    実行する。これにより:
+        - ``_safe_after`` の ``after(0, ...)`` が main thread context から呼ばれる
+          (production と同じ thread から呼ばれるのと同じ enqueue 保証)
+        - 続く ``root.update()`` で確実に callback が pump される
+        - test 自体は thread 待ち polling 不要で deterministic
+
+    production code (real Tk main loop 動作下) では daemon thread の
+    ``after(0, ...)`` も Tk event loop が継続的に pump するため動作する。
+    本 stub は test setup の限界 (mainloop 不在) を吸収する。
     """
-    import time
 
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        root.update_idletasks()
-        root.update()
-        if predicate():
-            return
-        time.sleep(interval)
-    # timeout — predicate が成立しなかった (assertion で failure を出させる)
+    def __init__(self, *, target: Callable[[], None], daemon: bool = False) -> None:
+        self._target = target
+
+    def start(self) -> None:
+        self._target()
+
+
+def _patch_thread_sync(monkeypatch: pytest.MonkeyPatch, module) -> None:  # type: ignore[no-untyped-def]
+    """対象 module の ``threading.Thread`` を _SyncThread に差し替える。"""
+    import threading as _threading_module
+
+    monkeypatch.setattr(module.threading, "Thread", _SyncThread)  # type: ignore[attr-defined]
+    # threading 全体を保護 (other modules への影響はない、各 module が独立に import)
+    _ = _threading_module  # 念のため参照を残す
 
 
 def _make_config(tmp_path: Path, spreadsheet_id: str = "spread123") -> AppConfig:
@@ -295,10 +302,12 @@ class TestTransparentDownload:
             monkeypatch.setattr(mod, "select_b_rows", lambda _rows: [])
             monkeypatch.setattr(mod, "plan_b_placement", lambda *_a, **_k: [])
 
+            _patch_thread_sync(monkeypatch, mod)
             dlg._on_load_rows()
-            # background thread + Tk after(0,...) の完了を確実に待つ。
-            # 短期 sleep + update_idletasks の繰返しで pending after callback を pump。
-            _pump_until(root, lambda: dlg._xlsx_bytes == b"fake-xlsx-bytes", timeout=2.0)
+            # 同期 stub 経由なので _bg → _safe_after → after(0,...) まで main thread
+            # 内で完了。残るのは Tk event loop の after callback 消化のみ。
+            root.update_idletasks()
+            root.update()
             assert calls == ["spread123"]
             assert dlg._xlsx_bytes == b"fake-xlsx-bytes"
             dlg.get_toplevel().destroy()
@@ -361,11 +370,11 @@ class TestTransparentDownload:
                 lambda t, m, **_k: shown_errors.append((t, m)),
             )
 
+            _patch_thread_sync(monkeypatch, mod)
             dlg._on_load_rows()
-            # background 失敗 callback が走るまで pump
-            _pump_until(
-                root, lambda: "※更新失敗" in dlg._sync_info_var.get(), timeout=2.0
-            )
+            # 同期 stub 経由で _on_transparent_download_failed まで main thread 内で実行
+            root.update_idletasks()
+            root.update()
             # sync_info に失敗マーカーが付く
             assert "※更新失敗" in dlg._sync_info_var.get()
             assert "ConnectionError" in dlg._sync_info_var.get()
