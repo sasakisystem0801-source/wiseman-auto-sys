@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from wiseman_hub.config import ReportStaffEntry, is_path_configured
+from wiseman_hub.pdf.year_folder import western_to_reiwa as _shared_western_to_reiwa
 from wiseman_hub.utils.text_norm import normalize_for_path
 
 logger = logging.getLogger(__name__)
@@ -39,8 +40,12 @@ _XLSX_SUFFIX = ".xlsx"
 
 
 def western_to_reiwa(year: int) -> int:
-    """西暦 → 令和年（2019 = R1）。`checklist_c.western_to_reiwa` と同等の式。"""
-    return year - 2018
+    """[deprecated] 西暦 → 令和年（2019 = R1）。
+
+    PR-R<年>-C: ``pdf/year_folder.western_to_reiwa`` に統合 (DRY)。
+    後方互換のため本関数名は維持し、内部実装を共通モジュールに委譲する。
+    """
+    return _shared_western_to_reiwa(year)
 
 
 def _normalize(s: str) -> str:
