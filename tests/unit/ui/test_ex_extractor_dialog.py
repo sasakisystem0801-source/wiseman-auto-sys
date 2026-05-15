@@ -502,11 +502,13 @@ class TestExExtractorDialogSmoke:
                 adapter=adapter,
                 messagebox_fn=messagebox,
             )
-            # 現実装の挙動: 未設定時に __init__ が Path(".") を渡し
-            # ex_extractor_dialog.py:346-349 で source_dir/facility_root_dir に "." が入る。
-            # POSIX/Windows とも Path(".").exists() == True のため can_run=True になる
-            # （CWD に ex_ ファイルがなければ実害なし、空処理）。
-            # 「未設定 → can_run=False」の本来仕様化は Optional[Path] 設計改修が必要 → 別 Issue。
+            # Phase 2a/2b 移行後: 未設定時は ex_source_dir / facility_root_dir = Path("")
+            # (default factory)。`Path("") == Path(".")` のため `.exists()` は CWD 存在
+            # 前提で True を返し、can_run = True になる (CWD に ex_ ファイルがなければ
+            # 空処理、実害なし)。本 PR (Phase 3 PR-Debt2) で _redraw の Label 表示は
+            # is_path_configured gate により _LBL_NOT_SET 表示に切替済
+            # (TestRedrawUnsetPathLabel 参照)。「未設定 → can_run=False」の本来仕様化は
+            # Optional[Path] 設計改修が必要 → handoff debt #3 で議論 (Option C で当面保留)。
             # 本 smoke は dialog が例外なく構築・close できることのみ検証する。
             assert dialog.view_model.source_dir == Path(".")
             assert dialog.view_model.facility_root_dir == Path(".")
@@ -1321,6 +1323,177 @@ class TestExExtractorDialogSmoke:
             assert dialog._top.winfo_exists()
             # 「実行」ボタンの state が disabled でない (can_run は判定可能)
             assert dialog.view_model.can_run is True  # source/root とも存在
+            dialog._on_close()
+        finally:
+            root.destroy()
+
+
+@pytest.mark.tk_required
+class TestRedrawUnsetPathLabel:
+    """debt #2 (Issue #27 続編 G Phase 3 PR-Debt2): `_redraw` の Path("").exists()
+    Label 表示問題を `is_path_configured` gate で解決する仕様を契約として固定する。
+
+    背景:
+        Phase 2a/2b で `PdfMergeConfig.ex_source_dir` / `facility_root_dir` を
+        Path 型に変更したことで、未設定時は Path("") が ViewModel に入る。
+        Path("") == Path(".") のため `.exists()` は CWD 存在前提で True を返し、
+        `str(Path(""))` は "." → Label に "." が表示される silent UX 劣化が
+        発生していた (Phase 2b evaluator で HIGH 指摘、scope 外で handoff debt 化)。
+
+    修正方針:
+        `_redraw` で `is_path_configured(p) and p.exists()` の二段 gate に。
+        既存 helper `is_path_configured` (Path("") / Path(".") / 空白 Path → False)
+        を流用、新規プロパティ・helper は追加しない (Phase 2a/2b 設計原則踏襲)。
+    """
+
+    def test_redraw_shows_lbl_not_set_when_source_dir_is_unset(
+        self, tmp_path: Path
+    ) -> None:
+        """`source_dir = Path("")` (未設定 sentinel) なら `_LBL_NOT_SET` 表示。"""
+        import tkinter as tk
+
+        from wiseman_hub.config import PdfMergeConfig
+        from wiseman_hub.ui.ex_extractor_dialog import _LBL_NOT_SET
+
+        # facility_root_dir のみ実在パスを与え、source_dir は default Path("")
+        facility_root = tmp_path / "facility_root"
+        facility_root.mkdir()
+
+        config = AppConfig(
+            pdf_merge=PdfMergeConfig(
+                facility_root_dir=facility_root,
+            )
+        )
+
+        root = tk.Tk()
+        try:
+            dialog = ExExtractorDialog(
+                parent=root, config=config, adapter=FakeSfxAdapter()
+            )
+            # source_dir 未設定 → _LBL_NOT_SET (修正前は "." を表示していた)
+            assert dialog._lbl_source.cget("text") == _LBL_NOT_SET
+            # facility_root_dir は実在 → str(Path) 表示
+            assert dialog._lbl_facility_root.cget("text") == str(facility_root)
+            dialog._on_close()
+        finally:
+            root.destroy()
+
+    def test_redraw_shows_lbl_not_set_when_facility_root_is_unset(
+        self, tmp_path: Path
+    ) -> None:
+        """`facility_root_dir = Path("")` (未設定 sentinel) なら `_LBL_NOT_SET` 表示。"""
+        import tkinter as tk
+
+        from wiseman_hub.config import PdfMergeConfig
+        from wiseman_hub.ui.ex_extractor_dialog import _LBL_NOT_SET
+
+        source = tmp_path / "ex_source"
+        source.mkdir()
+
+        config = AppConfig(
+            pdf_merge=PdfMergeConfig(
+                ex_source_dir=source,
+            )
+        )
+
+        root = tk.Tk()
+        try:
+            dialog = ExExtractorDialog(
+                parent=root, config=config, adapter=FakeSfxAdapter()
+            )
+            # facility_root_dir 未設定 → _LBL_NOT_SET
+            assert dialog._lbl_facility_root.cget("text") == _LBL_NOT_SET
+            # source_dir は実在 → str(Path) 表示
+            assert dialog._lbl_source.cget("text") == str(source)
+            dialog._on_close()
+        finally:
+            root.destroy()
+
+    def test_redraw_shows_lbl_not_set_when_both_paths_unset(
+        self, tmp_path: Path
+    ) -> None:
+        """両方未設定なら両 Label とも `_LBL_NOT_SET` 表示。"""
+        import tkinter as tk
+
+        from wiseman_hub.ui.ex_extractor_dialog import _LBL_NOT_SET
+
+        # 全 default = 両方 Path("")
+        config = AppConfig()
+
+        root = tk.Tk()
+        try:
+            dialog = ExExtractorDialog(
+                parent=root, config=config, adapter=FakeSfxAdapter()
+            )
+            assert dialog._lbl_source.cget("text") == _LBL_NOT_SET
+            assert dialog._lbl_facility_root.cget("text") == _LBL_NOT_SET
+            dialog._on_close()
+        finally:
+            root.destroy()
+
+    def test_redraw_shows_path_when_both_paths_configured_and_existing(
+        self, tmp_path: Path
+    ) -> None:
+        """両方実在パスなら両 Label が `str(Path)` を表示 (regression guard)。
+
+        Phase 2a/2b 前後で挙動が変わらないことを保証する。
+        """
+        import tkinter as tk
+
+        from wiseman_hub.config import PdfMergeConfig
+
+        source = tmp_path / "ex_source"
+        source.mkdir()
+        facility_root = tmp_path / "facility_root"
+        facility_root.mkdir()
+
+        config = AppConfig(
+            pdf_merge=PdfMergeConfig(
+                ex_source_dir=source,
+                facility_root_dir=facility_root,
+            )
+        )
+
+        root = tk.Tk()
+        try:
+            dialog = ExExtractorDialog(
+                parent=root, config=config, adapter=FakeSfxAdapter()
+            )
+            assert dialog._lbl_source.cget("text") == str(source)
+            assert dialog._lbl_facility_root.cget("text") == str(facility_root)
+            dialog._on_close()
+        finally:
+            root.destroy()
+
+    def test_redraw_shows_lbl_not_set_when_path_is_dot_string(
+        self, tmp_path: Path
+    ) -> None:
+        """`is_path_configured` が `Path(".")` (明示) も未設定扱いすることの仕様確認。
+
+        `Path("") == Path(".")` で `_UNSET_PATH_MARKER = "."` 規約に合致。
+        consumer 経路で意図的に `Path(".")` が入っても `_LBL_NOT_SET` 表示で
+        sentinel と区別不能の Phase 2a/2b 既知仕様に整合する。
+        """
+        import tkinter as tk
+
+        from wiseman_hub.config import PdfMergeConfig
+        from wiseman_hub.ui.ex_extractor_dialog import _LBL_NOT_SET
+
+        config = AppConfig(
+            pdf_merge=PdfMergeConfig(
+                ex_source_dir=Path("."),
+                facility_root_dir=Path("."),
+            )
+        )
+
+        root = tk.Tk()
+        try:
+            dialog = ExExtractorDialog(
+                parent=root, config=config, adapter=FakeSfxAdapter()
+            )
+            # Path(".") は is_path_configured False → _LBL_NOT_SET
+            assert dialog._lbl_source.cget("text") == _LBL_NOT_SET
+            assert dialog._lbl_facility_root.cget("text") == _LBL_NOT_SET
             dialog._on_close()
         finally:
             root.destroy()
