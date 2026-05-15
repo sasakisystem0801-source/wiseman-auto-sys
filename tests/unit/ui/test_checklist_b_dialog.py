@@ -224,6 +224,190 @@ class TestOnLoadErrorShowsFailureMarker:
 
 
 @pytest.mark.tk_required
+class TestTransparentDownload:
+    """pr-test-analyzer CG-1 対応: cache hit 後 _on_load_rows の透過 download パス。
+
+    本 PR で B ダイアログに新規導入された UX の核心経路 (業務責任者は「シート一覧
+    更新」を意識せず即「対象行を読込」できる)。Codex Medium 指摘で background 化
+    + 失敗時 sync_info マーカー併記の挙動を確認する。
+    """
+
+    def _make_dialog_with_cache(
+        self, root: tk.Tk, tmp_path: Path, *, with_xlsx_bytes: bool = False
+    ) -> tuple[ChecklistBDialog, Path]:
+        cfg_path = _make_config_path(tmp_path)
+        cache_dir = _sheet_cache_dir_for(cfg_path)
+        _save_sheet_cache(cache_dir, "spread123", ["26年5月"])
+        cfg = _make_config(tmp_path)
+        dlg = ChecklistBDialog(parent=root, config=cfg, config_path=cfg_path)
+        dlg._month_var.set("26年5月")
+        if with_xlsx_bytes:
+            dlg._xlsx_bytes = b"prefetched"
+        return dlg, cfg_path
+
+    def test_cache_hit_triggers_transparent_download(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """cache hit + _xlsx_bytes 空 → download_xlsx が 1 回呼ばれる。"""
+        from wiseman_hub.ui import checklist_b_dialog as mod
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            dlg, _ = self._make_dialog_with_cache(root, tmp_path)
+            calls: list[str] = []
+
+            def _stub_download(_gcp, sid: str) -> bytes:  # type: ignore[no-untyped-def]
+                calls.append(sid)
+                return b"fake-xlsx-bytes"
+
+            # parse_sheet / select_b_rows / plan_b_placement も stub して
+            # 透過 download の経路のみを検証
+            monkeypatch.setattr(mod, "download_xlsx", _stub_download)
+            monkeypatch.setattr(mod, "parse_sheet", lambda _b, _s: [])
+            monkeypatch.setattr(mod, "select_b_rows", lambda _rows: [])
+            monkeypatch.setattr(mod, "plan_b_placement", lambda *_a, **_k: [])
+
+            dlg._on_load_rows()
+            # background thread の完了を待つ (winfo_exists ガード経由で UI 反映)
+            root.update()
+            # threading 完了まで最大 1 秒待機
+            import time
+
+            for _ in range(20):
+                if calls:
+                    root.update()
+                    break
+                root.update()
+                time.sleep(0.05)
+            assert calls == ["spread123"]
+            assert dlg._xlsx_bytes == b"fake-xlsx-bytes"
+            dlg.get_toplevel().destroy()
+        finally:
+            root.destroy()
+
+    def test_existing_xlsx_bytes_skips_download(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """_xlsx_bytes が既にある場合は download_xlsx が呼ばれない (parse のみ実行)。"""
+        from wiseman_hub.ui import checklist_b_dialog as mod
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            dlg, _ = self._make_dialog_with_cache(
+                root, tmp_path, with_xlsx_bytes=True
+            )
+            calls: list[str] = []
+
+            def _stub_download(_gcp, sid: str) -> bytes:  # type: ignore[no-untyped-def]
+                calls.append(sid)
+                return b"should-not-be-called"
+
+            monkeypatch.setattr(mod, "download_xlsx", _stub_download)
+            monkeypatch.setattr(mod, "parse_sheet", lambda _b, _s: [])
+            monkeypatch.setattr(mod, "select_b_rows", lambda _rows: [])
+            monkeypatch.setattr(mod, "plan_b_placement", lambda *_a, **_k: [])
+
+            dlg._on_load_rows()
+            root.update()
+            # _xlsx_bytes は元の値のまま、download は走らない
+            assert calls == []
+            assert dlg._xlsx_bytes == b"prefetched"
+            dlg.get_toplevel().destroy()
+        finally:
+            root.destroy()
+
+    def test_transparent_download_failure_appends_sync_marker(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """silent-failure C-2: download 失敗時に sync_info に「※更新失敗」を併記。"""
+        from wiseman_hub.ui import checklist_b_dialog as mod
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            dlg, _ = self._make_dialog_with_cache(root, tmp_path)
+
+            def _failing_download(_gcp, _sid: str) -> bytes:  # type: ignore[no-untyped-def]
+                raise ConnectionError("simulated network failure")
+
+            monkeypatch.setattr(mod, "download_xlsx", _failing_download)
+            shown_errors: list[tuple[str, str]] = []
+            monkeypatch.setattr(
+                mod.messagebox,
+                "showerror",
+                lambda t, m, **_k: shown_errors.append((t, m)),
+            )
+
+            dlg._on_load_rows()
+            root.update()
+            import time
+
+            # background 失敗 callback が走るまで待機
+            for _ in range(20):
+                if shown_errors:
+                    root.update()
+                    break
+                root.update()
+                time.sleep(0.05)
+            # sync_info に失敗マーカーが付く
+            assert "※更新失敗" in dlg._sync_info_var.get()
+            assert "ConnectionError" in dlg._sync_info_var.get()
+            # messagebox showerror も呼ばれる
+            assert any(
+                "ConnectionError" in m for _, m in shown_errors
+            )
+            dlg.get_toplevel().destroy()
+        finally:
+            root.destroy()
+
+    def test_transparent_download_empty_spreadsheet_id_shows_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """設定の spreadsheet_id が空の状態で透過 download に至ったら設定不足エラー表示。
+
+        通常は cache hit があれば spreadsheet_id 設定済みのはずだが、設定再読込で
+        spreadsheet_id が消えた + cache_path が残るレアケースを防御。
+        """
+        from wiseman_hub.ui import checklist_b_dialog as mod
+
+        cfg_path = _make_config_path(tmp_path)
+        cache_dir = _sheet_cache_dir_for(cfg_path)
+        _save_sheet_cache(cache_dir, "spread123", ["26年5月"])
+        cfg = _make_config(tmp_path, spreadsheet_id="spread123")
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            dlg = ChecklistBDialog(parent=root, config=cfg, config_path=cfg_path)
+            dlg._month_var.set("26年5月")
+            # 直後に spreadsheet_id を空に
+            dlg._config.checklist.spreadsheet_id = ""
+
+            calls: list[str] = []
+            monkeypatch.setattr(
+                mod,
+                "download_xlsx",
+                lambda _g, sid: calls.append(sid) or b"",
+            )
+            shown_errors: list[tuple[str, str]] = []
+            monkeypatch.setattr(
+                mod.messagebox,
+                "showerror",
+                lambda t, m, **_k: shown_errors.append((t, m)),
+            )
+
+            dlg._on_load_rows()
+            root.update()
+            # download は呼ばれない、エラー表示のみ
+            assert calls == []
+            assert any("設定不足" in t for t, _ in shown_errors)
+            dlg.get_toplevel().destroy()
+        finally:
+            root.destroy()
+
+
+@pytest.mark.tk_required
 class TestConfigPathNoneGuard:
     """config_path=None でも例外を出さず空状態で起動可能。"""
 

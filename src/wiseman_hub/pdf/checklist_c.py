@@ -389,14 +389,20 @@ def execute_c_placement(
                 # 実 PDF 書込なし。パス解決 + シート検査が plan_c_placement
                 # で完了済みなので、ここでは「配置可能」と確認するだけ。
                 # status は PENDING のまま、再実行（実配置）が可能な状態を保つ。
-                # PR (xlsx-visibility): 「自動: <basename>」「選択: <basename>」起源
-                # prefix が plan_c_placement / apply_xlsx_selection で埋められて
-                # いるため、dry-run 実行後も Treeview で起源を確認できるよう
-                # prev message を保持する形式に変更 (Evaluator HIGH 指摘対応)。
+                # 「自動: <basename>」「選択: <basename>」起源 prefix が
+                # plan_c_placement / apply_xlsx_selection で埋められているため、
+                # dry-run 実行後も Treeview で起源を確認できるよう prev message を
+                # 保持する。silent-failure H-4 / Codex Low 指摘対応: dry-run を
+                # 複数回実行した時に "dry-run: 配置可能 (dry-run: 配置可能 (...))"
+                # と入れ子化するのを防ぐため、既存 "dry-run:" prefix を検出して
+                # idempotent に再ラップしない。
                 prev = r.message
-                r.message = (
-                    f"dry-run: 配置可能 ({prev})" if prev else "dry-run: 配置可能"
-                )
+                if prev.startswith("dry-run:"):
+                    pass  # 既に dry-run 表示 → 再ラップしない (idempotent)
+                elif prev:
+                    r.message = f"dry-run: 配置可能 ({prev})"
+                else:
+                    r.message = "dry-run: 配置可能"
             else:
                 assert exporter is not None  # 上の guard で保証済（mypy 用）
                 try:

@@ -241,3 +241,44 @@ class TestDryRunPreservesOriginPrefix:
             [r], exporter=None, log_dir=Path(""), dry_run=True
         )
         assert r.message == "dry-run: 配置可能"
+
+    def test_dry_run_keeps_legacy_prefix(self, tmp_path: Path) -> None:
+        """pr-test-analyzer II-2: legacy 経路 prefix も保持される。"""
+        r = _make_pending_result(tmp_path)
+        r.message = "自動: report.xlsx (legacy)"
+        execute_c_placement(
+            [r], exporter=None, log_dir=Path(""), dry_run=True
+        )
+        assert r.message == "dry-run: 配置可能 (自動: report.xlsx (legacy))"
+
+    def test_dry_run_exact_format_for_auto_prefix(self, tmp_path: Path) -> None:
+        """pr-test-analyzer II-1: format をピン留め (regression 防止)。
+
+        旧版で「dry-run 自動: report.xlsx」のような括弧抜けに退化したら検出する。
+        """
+        r = _make_pending_result(tmp_path)
+        r.message = "自動: report.xlsx"
+        execute_c_placement(
+            [r], exporter=None, log_dir=Path(""), dry_run=True
+        )
+        assert r.message == "dry-run: 配置可能 (自動: report.xlsx)"
+
+    def test_dry_run_is_idempotent(self, tmp_path: Path) -> None:
+        """silent-failure H-4 / Codex Low: dry-run を 2 回実行しても入れ子化しない。
+
+        旧版は ``"dry-run: 配置可能 (dry-run: 配置可能 (自動: ...))"`` のように
+        message が無限に増えていた (audit log も汚染される)。idempotent な実装で
+        既存 ``"dry-run:"`` prefix を検出して再ラップしないことを確認。
+        """
+        r = _make_pending_result(tmp_path)
+        r.message = "自動: report.xlsx"
+        execute_c_placement(
+            [r], exporter=None, log_dir=Path(""), dry_run=True
+        )
+        first = r.message
+        execute_c_placement(
+            [r], exporter=None, log_dir=Path(""), dry_run=True
+        )
+        # 2 回目の dry-run でも message が変わらない
+        assert r.message == first
+        assert r.message == "dry-run: 配置可能 (自動: report.xlsx)"

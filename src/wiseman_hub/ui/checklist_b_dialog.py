@@ -172,6 +172,10 @@ class ChecklistBDialog:
             ChecklistSettingsDialog,
         )
 
+        # 設定変更前の spreadsheet_id を記憶しておく (Codex HIGH 指摘対応:
+        # spreadsheet_id 変更時のみ状態リセットが必要、無変更なら _xlsx_bytes など
+        # を捨てる必要なし)。
+        prev_spreadsheet_id = self._config.checklist.spreadsheet_id
         dlg = ChecklistSettingsDialog(
             parent=self._top, config=self._config, config_path=self._config_path
         )
@@ -179,13 +183,44 @@ class ChecklistBDialog:
         if dlg.saved():
             try:
                 self._config = load_config(self._config_path)
-                self._status_var.set("設定を再読込しました")
             except (OSError, ValueError, TypeError) as exc:
                 messagebox.showerror(
                     "設定再読込失敗",
                     f"{type(exc).__name__}",
                     parent=self._top,
                 )
+                return
+            # Codex HIGH 指摘: spreadsheet_id が変わった場合、cache hit で残っている
+            # 旧 spreadsheet の sheet 名 / xlsx_bytes / results を新設定で使うと
+            # 業務影響 (旧 spreadsheet の xlsx を新月で処理) が発生する。明示的に
+            # リセット + 新 spreadsheet の cache から再 populate する。
+            if self._config.checklist.spreadsheet_id != prev_spreadsheet_id:
+                self._reset_after_spreadsheet_change()
+                self._status_var.set(
+                    "設定を再読込しました (スプレッドシート変更を検知 → 再 populate)"
+                )
+            else:
+                self._status_var.set("設定を再読込しました")
+
+    def _reset_after_spreadsheet_change(self) -> None:
+        """spreadsheet_id 変更後に旧 spreadsheet の在状態を一掃して再 populate する。
+
+        Codex HIGH 指摘対応: cache hit 経路で旧 spreadsheet の月名が month_combo に
+        残っていると、ユーザーが「対象行を読込」を押すたびに `_xlsx_bytes`
+        (旧 spreadsheet のもの) + 新 spreadsheet の cache 月名で誤処理する。
+        """
+        self._xlsx_bytes = b""
+        self._month_combo["values"] = ()
+        self._month_var.set("")
+        self._results = []
+        for item in self._tree.get_children():
+            self._tree.delete(item)
+        self._exec_btn.configure(state="disabled")
+        # 新 spreadsheet の cache から再 populate (cache miss なら combo は空のまま)
+        self._try_load_sheet_cache()
+        # sync info を新 spreadsheet 基準で再描画 (cache hit なら fetched_at、
+        # cache miss なら「不明」表示に切り替わる)
+        self._refresh_sync_info()
 
     def _on_load_sheets(self) -> None:
         cfg = self._config.checklist
@@ -199,10 +234,11 @@ class ChecklistBDialog:
             try:
                 xlsx = download_xlsx(self._config.gcp, cfg.spreadsheet_id)
                 names = list_sheet_names(xlsx)
-                self._top.after(0, lambda: self._on_sheets_loaded(xlsx, names))
-            except Exception as exc:
+                self._safe_after(lambda: self._on_sheets_loaded(xlsx, names))
+            except Exception as exc:  # noqa: BLE001 (UI top-level: 詳細は logger 経由)
+                logger.exception("Drive API xlsx download failed")
                 err_type = type(exc).__name__
-                self._top.after(0, lambda: self._on_load_error(err_type))
+                self._safe_after(lambda: self._on_load_error(err_type))
 
         threading.Thread(target=_bg, daemon=True).start()
 
@@ -259,9 +295,10 @@ class ChecklistBDialog:
             messagebox.showerror("シート名形式不正", f"対応外: {sheet}")
             return
         _, month = ym
-        # PR (sheet-list-binding): cache hit で combo は埋まっているが xlsx_bytes が
-        # 未取得な場合、ここで透過 download する (C ダイアログ PR-δ v1 と同じフロー)。
-        # これにより業務責任者は「シート一覧更新」を意識せず即「対象行を読込」できる。
+        # cache hit で combo は埋まっているが xlsx_bytes が未取得な場合、ここで
+        # 透過 download する。Codex Medium 指摘対応: UI thread の同期 I/O は Tk を
+        # フリーズさせるため、background thread + after(0,...) で UI thread に
+        # 戻すパターン (_on_load_sheets と同じ) に統一。
         if not self._xlsx_bytes:
             cfg = self._config.checklist
             if not cfg.spreadsheet_id:
@@ -269,21 +306,82 @@ class ChecklistBDialog:
                     "設定不足", "設定でスプレッドシートIDを登録してください"
                 )
                 return
-            self._status_var.set("xlsx をダウンロード中（初回 / キャッシュ後）...")
-            self._top.update_idletasks()
+            self._fetch_xlsx_then_process(sheet, month)
+            return
+        self._process_rows(sheet, month)
+
+    def _fetch_xlsx_then_process(self, sheet: str, month: int) -> None:
+        """透過 download を background thread で実行、完了後に _process_rows に継続。
+
+        - silent-failure C-2 対応: download 失敗時に sync_info に「※更新失敗」を
+          併記し、業務責任者が「キャッシュは最新」と誤認するのを防ぐ。
+        - Codex Medium 対応: download 中もユーザーがダイアログを閉じられるように
+          background 化。
+        """
+        self._status_var.set("xlsx をダウンロード中（初回 / キャッシュ後）...")
+        self._top.update_idletasks()
+        spreadsheet_id = self._config.checklist.spreadsheet_id
+
+        def _bg() -> None:
             try:
-                self._xlsx_bytes = download_xlsx(
-                    self._config.gcp, cfg.spreadsheet_id
+                xlsx = download_xlsx(self._config.gcp, spreadsheet_id)
+                self._safe_after(
+                    lambda: self._on_transparent_download_done(xlsx, sheet, month)
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 (UI top-level: 各エラー型は logger に残す)
                 err_type = type(exc).__name__
-                messagebox.showerror("ダウンロード失敗", f"{err_type}: {exc}")
-                self._status_var.set(f"ダウンロード失敗: {err_type}")
+                logger.exception("transparent xlsx download failed")
+                self._safe_after(
+                    lambda: self._on_transparent_download_failed(err_type)
+                )
+
+        threading.Thread(target=_bg, daemon=True).start()
+
+    def _safe_after(self, fn: Callable[[], None]) -> None:
+        """winfo_exists ガード付きの after(0, fn).
+
+        Codex Medium 指摘対応: ダイアログ destroy 後に worker thread から after()
+        を呼ぶと TclError、または callback 内で破棄済 widget アクセスで例外。
+        launcher の after_idle race-guard と対称化。
+        """
+        def _safe_call() -> None:
+            try:
+                if not self._top.winfo_exists():
+                    return
+            except tk.TclError:
                 return
+            fn()
+
+        try:
+            if not self._top.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        self._top.after(0, _safe_call)
+
+    def _on_transparent_download_done(
+        self, xlsx: bytes, sheet: str, month: int
+    ) -> None:
+        self._xlsx_bytes = xlsx
+        self._process_rows(sheet, month)
+
+    def _on_transparent_download_failed(self, err_type: str) -> None:
+        self._status_var.set(f"ダウンロード失敗: {err_type}")
+        # silent-failure C-2: sync_info に「※更新失敗」を併記して、業務責任者が
+        # 「キャッシュは最新」と誤認するのを防ぐ (_on_load_sheets 失敗時と同等扱い)。
+        self._refresh_sync_info_with_error(err_type)
+        messagebox.showerror(
+            "ダウンロード失敗",
+            f"スプレッドシート読込に失敗: {err_type}",
+        )
+
+    def _process_rows(self, sheet: str, month: int) -> None:
+        """xlsx_bytes 取得済の状態で parse → plan → Treeview 反映。"""
         try:
             rows = parse_sheet(self._xlsx_bytes, sheet)
-        except Exception as exc:
-            messagebox.showerror("解析失敗", f"{type(exc).__name__}: {exc}")
+        except Exception as exc:  # noqa: BLE001 (UI top-level: 詳細は logger 経由)
+            logger.exception("parse_sheet failed")
+            messagebox.showerror("解析失敗", type(exc).__name__)
             return
         b_rows = select_b_rows(rows)
         self._results = plan_b_placement(b_rows, self._config.checklist, month)
@@ -336,7 +434,7 @@ class ChecklistBDialog:
 
         def _bg() -> None:
             execute_placement(self._results)
-            self._top.after(0, self._on_execute_done)
+            self._safe_after(self._on_execute_done)
 
         threading.Thread(target=_bg, daemon=True).start()
 
