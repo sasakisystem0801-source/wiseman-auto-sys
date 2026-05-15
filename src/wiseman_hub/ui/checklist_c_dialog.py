@@ -53,6 +53,7 @@ _STATUS_LABEL: dict[CPlacementStatus, str] = {
     CPlacementStatus.PENDING: "実行待ち",
     CPlacementStatus.SUCCESS: "成功",
     CPlacementStatus.NEEDS_REVIEW: "▶ 要レビュー（ダブルクリックで選択）",
+    CPlacementStatus.NEEDS_REVIEW_STAFF: "▶ 担当者を選択（ダブルクリック）",
     CPlacementStatus.SKIPPED_NO_FACILITY: "⚠ 居宅マッピング未登録",
     CPlacementStatus.SKIPPED_NO_STAFF: "⚠ 担当者マッピング未登録",
     CPlacementStatus.SKIPPED_NO_XLSX: "⚠ xlsx 不在",
@@ -66,6 +67,7 @@ _STATUS_SHORT_LABEL: dict[CPlacementStatus, str] = {
     CPlacementStatus.PENDING: "実行待ち",
     CPlacementStatus.SUCCESS: "成功",
     CPlacementStatus.NEEDS_REVIEW: "要レビュー",
+    CPlacementStatus.NEEDS_REVIEW_STAFF: "担当者選択",
     CPlacementStatus.SKIPPED_NO_FACILITY: "⚠居宅未登録",
     CPlacementStatus.SKIPPED_NO_STAFF: "⚠担当者未登録",
     CPlacementStatus.SKIPPED_NO_XLSX: "⚠xlsx不在",
@@ -75,8 +77,10 @@ _STATUS_SHORT_LABEL: dict[CPlacementStatus, str] = {
 }
 
 # サマリー表示順（業務優先度: 残作業 → エラー系 → 完了）
+# NEEDS_REVIEW_STAFF は xlsx レビューより前段の人間判断のため「要レビュー」より上。
 _STATUS_SUMMARY_ORDER: list[str] = [
     "実行待ち",
+    "担当者選択",
     "要レビュー",
     "⚠居宅未登録",
     "⚠担当者未登録",
@@ -89,7 +93,8 @@ _STATUS_SUMMARY_ORDER: list[str] = [
 
 # Treeview ステータス列 sort 用の優先度（業務優先度: 要対応が上、完了が下）
 _STATUS_SORT_PRIORITY: dict[str, int] = {
-    "▶ 要レビュー（ダブルクリックで選択）": 0,
+    "▶ 担当者を選択（ダブルクリック）": 0,
+    "▶ 要レビュー（ダブルクリックで選択）": 1,
     "⚠ 居宅マッピング未登録": 10,
     "⚠ 担当者マッピング未登録": 11,
     "⚠ xlsx 不在": 12,
@@ -118,6 +123,9 @@ def _format_xlsx_cell(r: CPlacementResult) -> str:
     - NEEDS_REVIEW で候補 1 件: basename（人間が中身確認するだけで済む状態）
     - NEEDS_REVIEW で候補 N 件 (N>=2): "(N 件候補)"
     - NEEDS_REVIEW で候補なし: "(候補なし)"
+    - NEEDS_REVIEW_STAFF (Issue #314): "(担当者 N 名)" / 部分 hit は
+      "(担当者 N 名 / 未登録あり)" — staff 確定後に xlsx 解決が走るため
+      xlsx 列では人数情報のみを表示し、未登録の有無で警戒を可視化する
     - SKIPPED 系: 空
     """
     if r.xlsx_path is not None:
@@ -129,6 +137,14 @@ def _format_xlsx_cell(r: CPlacementResult) -> str:
         if n >= 2:
             return f"({n} 件候補)"
         return "(候補なし)"
+    if r.status == CPlacementStatus.NEEDS_REVIEW_STAFF:
+        n = len(r.staff_candidates)
+        # 部分 hit (一部の担当者がマッピング未登録) は message にマーカーを残して
+        # _format_xlsx_cell 側で検出する。message 文言は plan_c_placement が
+        # "(未登録あり)" を必ず含める契約。
+        if "未登録あり" in r.message:
+            return f"(担当者 {n} 名 / 未登録あり)"
+        return f"(担当者 {n} 名)"
     return ""
 
 

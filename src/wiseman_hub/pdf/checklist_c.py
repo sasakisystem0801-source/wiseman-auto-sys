@@ -41,6 +41,7 @@ class CPlacementStatus(StrEnum):
     PENDING = "pending"
     SUCCESS = "success"
     NEEDS_REVIEW = "needs_review"  # cache miss + 候補あり/なし、人間レビュー UI で選択待ち
+    NEEDS_REVIEW_STAFF = "needs_review_staff"  # 担当者複数 (Issue #314): staff 選択 UI で確定待ち
     SKIPPED_NO_FACILITY = "skipped_no_facility"
     SKIPPED_NO_STAFF = "skipped_no_staff"  # 担当者マッピング未登録
     SKIPPED_NO_XLSX = "skipped_no_xlsx"
@@ -58,6 +59,10 @@ class CPlacementResult:
         rejected_candidates: 候補から除外したパス → 除外理由（例: "staff_token_mismatch"）
         folder_tree: 候補ゼロ時に UI で表示する base_dir 配下のフォルダツリー。
             形式は ``{"name": str, "path": str, "is_dir": bool, "children": [...]}``。
+
+    NEEDS_REVIEW_STAFF 時のフィールド (Issue #314):
+        staff_candidates: parse_multi_staff で分解した担当者名 list (元表記、出現順保持)。
+            StaffPickerDialog の radiobutton 選択肢として表示される。
     """
 
     row: ChecklistRow
@@ -69,6 +74,7 @@ class CPlacementResult:
     xlsx_candidates: list[Path] = field(default_factory=list)
     rejected_candidates: dict[Path, str] = field(default_factory=dict)
     folder_tree: dict[str, Any] | None = None
+    staff_candidates: list[str] = field(default_factory=list)
     message: str = ""
 
 

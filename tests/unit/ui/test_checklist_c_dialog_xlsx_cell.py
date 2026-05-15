@@ -115,3 +115,50 @@ def test_xlsx_cell_basename_takes_precedence_over_candidates() -> None:
         ],
     )
     assert _format_xlsx_cell(result) == "picked.xlsx"
+
+
+# Issue #314: NEEDS_REVIEW_STAFF (担当者複数) の xlsx 列表示テスト
+# staff 確定後に xlsx 解決が走るため、この状態では人数情報のみを表示する。
+
+
+def test_xlsx_cell_shows_staff_count_for_needs_review_staff_full_hit() -> None:
+    """NEEDS_REVIEW_STAFF で全員 mapping 登録済: 「(担当者 N 名)」を表示。
+
+    message に "未登録あり" マーカーがなければ全員登録済とみなす。
+    """
+    result = CPlacementResult(
+        row=_row(),
+        status=CPlacementStatus.NEEDS_REVIEW_STAFF,
+        staff_candidates=["小島", "木塚"],
+        message="2 名から担当者を選択してください",
+    )
+    assert _format_xlsx_cell(result) == "(担当者 2 名)"
+
+
+def test_xlsx_cell_shows_partial_hit_marker_for_needs_review_staff() -> None:
+    """NEEDS_REVIEW_STAFF で一部 mapping 未登録: 「(担当者 N 名 / 未登録あり)」を表示。
+
+    message に "未登録あり" が含まれていれば部分 hit と判断、UI で警戒可視化。
+    """
+    result = CPlacementResult(
+        row=_row(),
+        status=CPlacementStatus.NEEDS_REVIEW_STAFF,
+        staff_candidates=["小島", "木塚", "宮下"],
+        message="3 名中 2 名のみ登録済 (未登録あり: 木塚)、登録済から選択してください",
+    )
+    assert _format_xlsx_cell(result) == "(担当者 3 名 / 未登録あり)"
+
+
+def test_xlsx_cell_needs_review_staff_with_single_candidate() -> None:
+    """NEEDS_REVIEW_STAFF で 1 名のみ (まれ): 「(担当者 1 名)」を表示。
+
+    通常 1 名なら NEEDS_REVIEW_STAFF にせず自動確定するが、UI 防御のため
+    フォーマッタが 1 名でも崩れず描画できることを保証する。
+    """
+    result = CPlacementResult(
+        row=_row(),
+        status=CPlacementStatus.NEEDS_REVIEW_STAFF,
+        staff_candidates=["小島"],
+        message="1 名から担当者を選択してください",
+    )
+    assert _format_xlsx_cell(result) == "(担当者 1 名)"
