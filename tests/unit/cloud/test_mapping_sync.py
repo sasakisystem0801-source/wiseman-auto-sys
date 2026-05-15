@@ -311,6 +311,31 @@ class TestPushReportStaff:
         ), pytest.raises(MappingSyncError, match="push failed"):
             push_report_staff(gcp, {"宮下": ReportStaffEntry()})
 
+    def test_push_unset_base_dir_writes_empty_string(self, gcp: GcpConfig) -> None:
+        """Issue #27 続編 G Phase 3b: ``base_dir=Path("")`` (未設定 sentinel) は
+        canonical sentinel pattern により JSON では ``""`` として書出される。
+
+        過去の str 形式 JSON 表現との後方互換 (Phase 2a silent 互換性劣化防御
+        ``"."`` 書出回避) を contract test として固定。
+        """
+        blob = MagicMock()
+        original = {
+            "宮下": ReportStaffEntry(
+                base_dir=Path(""),  # 未設定 sentinel
+                suggest_patterns=[],
+            ),
+        }
+        with patch(
+            "wiseman_hub.cloud.mapping_sync.storage.Client.from_service_account_json",
+            _make_storage_mock(blob),
+        ):
+            push_report_staff(gcp, original)
+        body = json.loads(blob.upload_from_string.call_args[0][0])
+        # 未設定 Path("") → "" (not ".") が canonical sentinel pattern の仕様
+        assert body["staff"]["宮下"]["base_dir"] == ""
+        # 旧 silent 劣化バグ: "." が書かれていないこと
+        assert body["staff"]["宮下"]["base_dir"] != "."
+
 
 class TestPullReportStaff:
     def test_returns_dict_from_valid_json(self, gcp: GcpConfig) -> None:
@@ -341,6 +366,33 @@ class TestPullReportStaff:
         assert result["宮下"].suggest_patterns == [
             "リハ経過報告書/令和{era}年/*{month}月*.xlsx"
         ]
+
+    def test_pull_empty_base_dir_becomes_unset_sentinel(self, gcp: GcpConfig) -> None:
+        """Issue #27 続編 G Phase 3b: JSON ``""`` 値は coerce_path 経由で
+        ``Path("")`` (未設定 sentinel) に変換される (round-trip 不変条件)。
+        """
+        from wiseman_hub.config import is_path_configured
+
+        blob = MagicMock()
+        blob.download_as_bytes.return_value = json.dumps(
+            {
+                "version": "1",
+                "generated_at": "2026-05-15T12:00:00+09:00",
+                "staff": {
+                    "宮下": {
+                        "base_dir": "",
+                        "suggest_patterns": [],
+                    },
+                },
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+        with patch(
+            "wiseman_hub.cloud.mapping_sync.storage.Client.from_service_account_json",
+            _make_storage_mock(blob),
+        ):
+            result = pull_report_staff(gcp)
+        assert is_path_configured(result["宮下"].base_dir) is False
 
     def test_raises_not_found_when_blob_absent(self, gcp: GcpConfig) -> None:
         """初回利用ガイダンスで識別するため MappingNotFoundError 専用例外。"""
