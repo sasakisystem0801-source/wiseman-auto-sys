@@ -14,6 +14,7 @@ B ダイアログ側の検証。C ダイアログとの feature parity を保つ
 from __future__ import annotations
 
 import tkinter as tk
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,32 @@ from wiseman_hub.config import (
     WisemanConfig,
 )
 from wiseman_hub.ui.checklist_b_dialog import ChecklistBDialog
+
+
+def _pump_until(
+    root: tk.Tk,
+    predicate: Callable[[], bool],
+    *,
+    timeout: float = 2.0,
+    interval: float = 0.02,
+) -> None:
+    """Tk main loop の pending after callback を pump しながら predicate 成立を待つ。
+
+    pytest 内で root.mainloop() を呼ばずに threading + after(0,...) のテストを
+    deterministic に動かすための helper。``root.update()`` は pending event を 1
+    回処理するだけなので、background thread の `_safe_after` が schedule した
+    callback も含めてループで pump する必要がある。
+    """
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        root.update_idletasks()
+        root.update()
+        if predicate():
+            return
+        time.sleep(interval)
+    # timeout — predicate が成立しなかった (assertion で failure を出させる)
 
 
 def _make_config(tmp_path: Path, spreadsheet_id: str = "spread123") -> AppConfig:
@@ -269,17 +296,9 @@ class TestTransparentDownload:
             monkeypatch.setattr(mod, "plan_b_placement", lambda *_a, **_k: [])
 
             dlg._on_load_rows()
-            # background thread の完了を待つ (winfo_exists ガード経由で UI 反映)
-            root.update()
-            # threading 完了まで最大 1 秒待機
-            import time
-
-            for _ in range(20):
-                if calls:
-                    root.update()
-                    break
-                root.update()
-                time.sleep(0.05)
+            # background thread + Tk after(0,...) の完了を確実に待つ。
+            # 短期 sleep + update_idletasks の繰返しで pending after callback を pump。
+            _pump_until(root, lambda: dlg._xlsx_bytes == b"fake-xlsx-bytes", timeout=2.0)
             assert calls == ["spread123"]
             assert dlg._xlsx_bytes == b"fake-xlsx-bytes"
             dlg.get_toplevel().destroy()
@@ -310,7 +329,9 @@ class TestTransparentDownload:
             monkeypatch.setattr(mod, "plan_b_placement", lambda *_a, **_k: [])
 
             dlg._on_load_rows()
+            # download skip 経路は synchronous なので 1 回 pump で十分
             root.update()
+            root.update_idletasks()
             # _xlsx_bytes は元の値のまま、download は走らない
             assert calls == []
             assert dlg._xlsx_bytes == b"prefetched"
@@ -341,16 +362,10 @@ class TestTransparentDownload:
             )
 
             dlg._on_load_rows()
-            root.update()
-            import time
-
-            # background 失敗 callback が走るまで待機
-            for _ in range(20):
-                if shown_errors:
-                    root.update()
-                    break
-                root.update()
-                time.sleep(0.05)
+            # background 失敗 callback が走るまで pump
+            _pump_until(
+                root, lambda: "※更新失敗" in dlg._sync_info_var.get(), timeout=2.0
+            )
             # sync_info に失敗マーカーが付く
             assert "※更新失敗" in dlg._sync_info_var.get()
             assert "ConnectionError" in dlg._sync_info_var.get()
@@ -370,6 +385,8 @@ class TestTransparentDownload:
         通常は cache hit があれば spreadsheet_id 設定済みのはずだが、設定再読込で
         spreadsheet_id が消えた + cache_path が残るレアケースを防御。
         """
+        import dataclasses
+
         from wiseman_hub.ui import checklist_b_dialog as mod
 
         cfg_path = _make_config_path(tmp_path)
@@ -381,8 +398,12 @@ class TestTransparentDownload:
         try:
             dlg = ChecklistBDialog(parent=root, config=cfg, config_path=cfg_path)
             dlg._month_var.set("26年5月")
-            # 直後に spreadsheet_id を空に
-            dlg._config.checklist.spreadsheet_id = ""
+            # ChecklistConfig は frozen dataclass のため replace で再構築。
+            # AppConfig も frozen の可能性 → dataclasses.replace で nested 置換。
+            new_checklist = dataclasses.replace(
+                dlg._config.checklist, spreadsheet_id=""
+            )
+            dlg._config = dataclasses.replace(dlg._config, checklist=new_checklist)
 
             calls: list[str] = []
             monkeypatch.setattr(
@@ -411,6 +432,13 @@ class TestTransparentDownload:
 class TestConfigPathNoneGuard:
     """config_path=None でも例外を出さず空状態で起動可能。"""
 
+    # Issue #276 follow-up: GitHub Actions windows-latest の Python 3.11 + uv venv
+    # 経路で `tk.Tk()` が `_tkinter.TclError: Can't find a usable init.tcl` を出す。
+    # 既存 test_checklist_c_dialog_cache_clear.py と同じ xfail パターンを適用。
+    @pytest.mark.xfail(
+        reason="Windows + uv venv で Tcl init.tcl 不在 (Issue #276 follow-up)",
+        strict=False,
+    )
     def test_no_op_without_config_path(self, tmp_path: Path) -> None:
         root = tk.Tk()
         root.withdraw()

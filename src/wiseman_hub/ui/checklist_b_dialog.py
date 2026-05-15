@@ -338,11 +338,13 @@ class ChecklistBDialog:
         threading.Thread(target=_bg, daemon=True).start()
 
     def _safe_after(self, fn: Callable[[], None]) -> None:
-        """winfo_exists ガード付きの after(0, fn).
+        """worker thread から UI thread に callback を安全に投げる helper。
 
-        Codex Medium 指摘対応: ダイアログ destroy 後に worker thread から after()
-        を呼ぶと TclError、または callback 内で破棄済 widget アクセスで例外。
-        launcher の after_idle race-guard と対称化。
+        Tk 仕様で worker thread から widget メソッド (``winfo_exists`` 等) を呼ぶと
+        ``RuntimeError: main thread is not in main loop`` になるため、scheduling 側
+        では try/except (``tk.TclError`` / ``RuntimeError``) のみ。実際の
+        ``winfo_exists`` 検査は callback 内 (main thread) で行う。
+        launcher の after_idle race-guard と対称化 (Codex Medium 指摘対応)。
         """
         def _safe_call() -> None:
             try:
@@ -353,11 +355,10 @@ class ChecklistBDialog:
             fn()
 
         try:
-            if not self._top.winfo_exists():
-                return
-        except tk.TclError:
+            self._top.after(0, _safe_call)
+        except (tk.TclError, RuntimeError):
+            # ダイアログ既に destroy / Tk main loop 終了済 → 諦める
             return
-        self._top.after(0, _safe_call)
 
     def _on_transparent_download_done(
         self, xlsx: bytes, sheet: str, month: int
