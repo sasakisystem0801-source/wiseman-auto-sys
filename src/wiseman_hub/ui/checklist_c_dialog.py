@@ -34,7 +34,6 @@ from wiseman_hub.pdf.checklist_c import (
     apply_xlsx_selection,
     cache_key,
     execute_c_placement,
-    parse_multi_staff,
     plan_c_placement,
     staff_choice_cache_key,
 )
@@ -737,8 +736,12 @@ class ChecklistCDialog:
         # 一方 xlsx_path_cache は SKIPPED 時に書込まないため整合は保たれる)
         if remember and self._config_path is not None:
             # Codex review High #1: value は normalize_lookup_key 適用済 (表記揺れ吸収)
+            # evaluator MEDIUM #1 / code-reviewer Low: r.staff_candidates を直接利用。
+            # plan_c_placement の _resolve_chosen_staff で
+            # ``result.staff_candidates = parsed_staffs`` の契約を持つため、
+            # ここで parse_multi_staff を再実行する必要はない (契約を読み手に明示)。
             staff_key = staff_choice_cache_key(
-                parse_multi_staff(r.row.staff), year, month
+                r.staff_candidates, year, month
             )
             self._config.checklist.staff_choice_cache[staff_key] = (
                 normalize_lookup_key(selected)
