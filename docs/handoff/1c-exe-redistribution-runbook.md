@@ -1,22 +1,87 @@
 # タスク 1-C: exe 再ビルド + 配布先差し替え 実機ランブック
 
-**目的**: Session 19 完成の `facility_merger`（事業所フォルダ結合）機能を、配布済 exe に反映してエンドユーザーが使える状態にする。
+**目的**: 開発した新機能を本田様 PC の配布済 exe に反映してエンドユーザーが使える状態にする。
 
 **前提条件**:
 - Windows 11 PC（本番配布先）に TeamViewer で接続可能
-- `main` ブランチに Session 20 までの成果（PR #110 / #111）が merge 済
+- `main` ブランチに反映対象の PR が merge 済
 - 既存 exe が `%USERPROFILE%\wiseman-hub\wiseman_hub.exe` に配置済
-- 所要時間: 20-30 分（ビルド 3-5 分 + 配布 1 分 + 動作確認 10-15 分）
-
-**このランブックの完走で達成されること**:
-1. ✅ 新機能入り exe が本番配布先に配置される
-2. ✅ Launcher 4 ボタン目「事業所フォルダ結合」が動作する
-3. ✅ Session 19 と同じシナリオで 19 件結合を再現
-4. ✅ ADR-011 Status を `Proposed` → `Accepted` に昇格（14D 完走）
+- 所要時間:
+  - スクリプト経由（推奨）: 10-15 分（ビルド 3-5 分 + 配布 1 分 + 動作確認 5-10 分）
+  - 手動経由（disaster recovery）: 20-30 分
 
 ---
 
-## 🎯 Phase 0: 事前確認（3 分）
+## 🚀 推奨手順: `scripts/deploy-windows.ps1` 経由（Session 78〜）
+
+### A-1. 通常配布（フル自動）
+
+実機 PowerShell（user: `sasak`）で 1 コマンド:
+
+```powershell
+cd $HOME\Projects\wiseman-auto-sys
+.\scripts\deploy-windows.ps1
+```
+
+スクリプトが Phase 0-3 を自動実行:
+
+| Phase | 内容 | 自動化範囲 |
+|-------|------|----------|
+| 0-1 | リポジトリ最新化 (`git pull --ff-only`) | ✅ 全自動 |
+| 0-2 | 現行 exe バックアップ + 件数アサーション | ✅ 全自動 |
+| 0-3 | 依存同期 (`uv sync --extra dev`) | ✅ 全自動 |
+| 0-4 | テスト実行 (`pytest -m "not integration"`) | ✅ 全自動 |
+| 1 | `pyinstaller` clean build + warning 検査 | ✅ 全自動 |
+| 2 | Launcher プロセス検出 → Copy-Item 上書き | ⚠️ 確認プロンプトあり |
+| 3 | Launcher 起動 + プロセス起動確認 | ✅ 全自動 |
+| 4 | 動作チェックリスト表示 | 👤 人手判定 |
+
+各 Phase で失敗があれば即停止し、配布先 exe は無傷のまま終了する（fail-closed）。
+
+### A-2. オプション付き実行例
+
+```powershell
+# HEAD commit 検証付き（事故防止、推奨）
+.\scripts\deploy-windows.ps1 -ExpectedHead e079d41
+
+# 緊急 rollback (Phase 2 後の問題発覚時)
+.\scripts\deploy-windows.ps1 -RollbackOnly
+
+# 緊急 hotfix (テストスキップ、通常は使わない)
+.\scripts\deploy-windows.ps1 -SkipTests
+
+# 既存 dist\wiseman_hub.exe 流用 (デバッグ用、本番不可)
+.\scripts\deploy-windows.ps1 -SkipBuild
+```
+
+### A-3. スクリプトの安全装置（全て自動実行）
+
+| 装置 | 動作 |
+|------|------|
+| バックアップ件数アサーション | バックアップサイズ ≠ exe サイズなら停止 |
+| build warning 検査 | プロジェクト由来の hidden import 不足を検出して停止（allow-list: pycparser/jinja2/user32/msvcrt） |
+| Launcher プロセス検出 | Phase 2 前に起動中なら file lock 回避で停止 |
+| 配布後サイズ照合 | Copy-Item 失敗を即検出して auto-rollback |
+| プロセス起動確認 | Launcher が 10 秒以内に起動しないなら警告（SmartScreen 等） |
+| `$ErrorActionPreference = "Stop"` | 例外を握り潰さない |
+
+### A-4. スクリプトでカバーされない作業（人手判定が必要）
+
+Phase 4 のチェックリスト目視確認は対話的に実施:
+
+- [ ] Launcher ウィンドウ起動（コンソール窓なし）
+- [ ] ボタン 5 個表示（A / B / C / 事業所一括結合 / 設定）
+- [ ] 各ボタンクリックで `ImportError` / `ModuleNotFoundError` が出ない
+- [ ] 機能追加 PR がある場合は対応する UI 変化を確認
+
+---
+
+## 📜 手動手順: disaster recovery / スクリプト不調時用（旧 Phase 0-5）
+
+スクリプトが動かない（ exe 破損 / PowerShell バージョン非互換 / .venv 損傷など）
+ケースで手動で同等処理を行う場合の参照手順。**通常は推奨手順 A を使うこと**。
+
+### 🎯 Phase 0: 事前確認（3 分）
 
 ### 0-1. TeamViewer で Windows PC に接続、PowerShell 起動
 
@@ -42,16 +107,7 @@ git pull --ff-only
 git log --oneline -5
 ```
 
-**期待 commit（最新 5 件、Session 22 終了時点）**:
-```
-af46db7 docs(handoff): Session 22 終了時点のハンドオフ更新 (#121)
-5f19e08 fix(session): Issue #49 page_index invariant 検証を load 時に追加 (P1 bug) (#120)
-b7e62b2 docs(handoff): Session 21 終了時点のハンドオフ更新 (#119)
-28c1440 refactor(session): Issue #44 Session/UserCandidate 完全 immutable 化 (#116)
-0eedb5e docs(runbook): 1-C に Phase 3-B（既存機能 regression smoke）追加（Issue #80 手動部分カバー） (#115)
-```
-
-最低条件: `5059823 feat(spec): ... facility_merger モジュールの hiddenimports 追加 (#111)` が `git log` に含まれていること。含まれていない場合は **Phase 1 に進まない**（spec が未更新＝ビルドが落ちるリスク）。
+**期待 commit**: `main` の最新を `git log -5` で確認。配布前に LATEST.md の Session 番号と一致することを確認。
 
 ### 0-4. 依存同期 + ユニットテスト
 
@@ -62,7 +118,7 @@ uv run pytest -q
 
 **重要**: `uv sync` だけでは dev extras（`pyinstaller` / `ruff` / `mypy` / `pytest` 等）が削除される。Phase 1 のビルドで `Failed to spawn pyinstaller` が出るので **必ず `--extra dev` を付ける**。
 
-**期待**: `559 passed, 68 skipped`（Session 22 終了時点。`538 passed` は Session 19 時点の旧値）。fail があれば Phase 1 に進まず原因を共有。
+**期待**: `pytest -m "not integration"` で全 PASS（件数は Session ごとに増加、Mac 側 PASS 件数と Windows 側 PASS 件数は Tk 系で多少差異あり）。fail があれば Phase 1 に進まず原因を共有。
 
 ---
 
@@ -77,14 +133,13 @@ uv run pyinstaller wiseman_hub.spec --clean --noconfirm 2>&1 | Tee-Object -FileP
 ### 1-2. ビルドログの warning 検査
 
 ```powershell
-Select-String -Path build.log -Pattern "Hidden import.*not found" | Select-String -NotMatch "pycparser|jinja2|user32|msvcrt"
+# 1 段の Select-String で取得 (パイプ改行繋ぎ事故回避、CLAUDE.md memory feedback_powershell_pipe_continuation_risk.md)
+$warnings = Select-String -Path build.log -Pattern "Hidden import.*not found"
+$warnings | ForEach-Object { $_.Line }
 ```
 
-**期待**: **何も出力されない**（facility_merger 関連 3 モジュールの警告なし）。
-
-出力があれば `wiseman_hub.spec` と `.py` のモジュール名が一致していない可能性。**Phase 2 に進まず共有**。
-
-（参考: macOS build でも出る既知の無害 warning — `pycparser.lextab`, `pycparser.yacctab`, `jinja2`, `user32`, `msvcrt` — は Windows でも同様に出るが無視して良い。）
+出力された warning が **`pycparser.lextab` / `pycparser.yacctab` / `jinja2` / `user32` / `msvcrt`** のいずれかなら無害（macOS build でも出る既知 warning）。
+それ以外（特に `wiseman_hub` / `facility_merger` / `ex_extractor` 等プロジェクト由来）が出たら **Phase 2 に進まず共有**。`wiseman_hub.spec` と `.py` のモジュール名が一致していない可能性。
 
 ### 1-3. 生成物確認
 
@@ -283,8 +338,19 @@ Get-ChildItem "$HOME\wiseman-hub\wiseman_hub.exe.bak-*"
 
 ---
 
-## 次セッション（1-C 完走後）への引き継ぎ
+## 中長期方針
 
-- 1-C 完了: ADR-011 Accepted 昇格 PR merged、Session 20 ハンドオフに実機結果を追記
-- 次タスク: **1-B（B/C PDF 内容抽出によるファイル名非依存マッチ）**。設計メモは Session 20 ハンドオフ「1-B 着手メモ」参照
-- 1-A は 1-B 実装後に「残った表記揺れの観測頻度」を見て判断（Codex 方針）
+### スクリプト経由配布 → launcher 自動更新への移行（ADR-016 Phase 7）
+
+本 runbook の手動手順は **disaster recovery 専用** となる予定:
+
+1. **現在 (Session 78〜)**: `scripts/deploy-windows.ps1` 経由で開発者が TeamViewer + PowerShell から配布
+2. **ADR-016 Phase 7 切替後**: `wiseman_launcher.exe` が GCS manifest を polling して自動更新
+   - 業務責任者は起動するだけで最新版
+   - PowerShell は disaster recovery 専用（年 1-2 回）
+3. **Phase 7 切替の hard dependency**:
+   - `wiseman_launcher.exe` の本田様 PC への初回手動配布（本 runbook 経由、最後の必須回）
+   - updater orchestration の実装（`src/wiseman_hub/updater/` 既存スケルトン埋め込み）
+   - GCS manifest push の GitHub Actions ワークフロー
+
+詳細は `docs/adr/016-windows-appliance-and-mac-dev-flow.md` 参照。
