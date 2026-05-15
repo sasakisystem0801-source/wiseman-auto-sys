@@ -312,10 +312,160 @@ Get-ChildItem "$HOME\wiseman-hub\wiseman_hub.exe.bak-*"
 
 ---
 
+## 🔬 Tcl init.tcl 連発失敗時の対処（Issue #316）
+
+`scripts\deploy-windows.ps1` の Phase 0-4 (`uv run pytest`) で
+以下のエラーが intermittent で発生する場合の対処手順:
+
+```
+_tkinter.TclError: Can't find a usable init.tcl in the following directories:
+    ...
+This probably means that Tcl wasn't installed properly.
+```
+
+または
+
+```
+couldn't read file "...\tcl\tcl8.6\init.tcl": No error
+```
+
+「init.tcl 自体は実在し、サイズも妥当（25600+ bytes）、errno=0 で read fail、
+毎回違う test で失敗」が組み合わさったら、**過去事例（Issue #316）では
+アンチウイルス動的スキャン干渉が主因** として観察されている。ただし将来
+別原因（SMB/UNC 経路、Python distribution 不整合、ファイルシステム破損）が
+判明する可能性もあるため、診断スクリプトの結果で仮説を絞り込んでから
+対処手順に進むこと。
+
+### Step 0: 診断スクリプトで状況確認
+
+ファイル保存版（gh CLI が使える環境）:
+
+```powershell
+cd $HOME\Projects\wiseman-auto-sys
+.\scripts\diagnose-tcl.ps1 *> diagnose-output.txt
+notepad diagnose-output.txt
+```
+
+画面コピペ版（gh CLI を使わずに Teams / メールで共有したい場合）:
+
+```powershell
+cd $HOME\Projects\wiseman-auto-sys
+.\scripts\diagnose-tcl.ps1
+# PowerShell ウィンドウで右クリック → 「すべて選択」→ Enter → ペースト先で貼り付け
+```
+
+このスクリプトは以下を確認して、対処手順のどれを優先すべきか判断材料を出す:
+
+| 確認項目 | 判断ポイント |
+|---|---|
+| Python install path / init.tcl 実在 | ファイル自体は通常 OK |
+| `[System.IO.File]::ReadAllBytes` で 5 回 read | 1 回でも失敗 → AV 干渉確定的 |
+| `tk.Tk()` を 10 回起動 | intermittent (N/10 fail) → 干渉、10/10 fail → 環境破損 |
+| Windows Defender 状態 + ExclusionPath | Python パスが除外に無い → 対処 1 必要 |
+| 第三者 AV プロセス検出 | Trend Micro / Kaspersky 等あれば対処 2 必要 |
+
+結果を Issue #316 にコメントすると次回以降の判断が早くなる。経路 2 通り:
+
+- gh CLI: `gh issue comment 316 --body-file diagnose-output.txt`
+- Teams / メールで開発者に送付 → 開発者が代理で Issue にコメント反映
+
+### Step 1: Windows セキュリティ GUI から除外設定（最優先）
+
+`Add-MpPreference -ExclusionPath` は Tamper Protection 下で
+`0x800106ba` で失敗するため、GUI 経由で追加する:
+
+1. **「Windows セキュリティ」を起動**（スタートメニューで検索）
+2. 左ペイン **「ウイルスと脅威の防止」** → **「ウイルスと脅威の防止の設定」**
+3. **「設定の管理」** → **「除外」** → **「除外の追加または削除」**
+4. **「除外の追加」** → **「フォルダー」** で以下を順に追加（`%USERPROFILE%` は
+   PowerShell の `$HOME` と同等。本田様 PC では `C:\Users\sasak`）:
+   - `%USERPROFILE%\AppData\Local\Programs\Python\Python311`
+   - `%USERPROFILE%\Projects\wiseman-auto-sys\.venv`
+   - `%USERPROFILE%\AppData\Local\uv` （uv キャッシュ）
+
+   GUI のフォルダ選択ダイアログでは `%USERPROFILE%` 展開がされないため、
+   アドレスバーに上記をそのまま貼り付けるか、Explorer の左ペインから
+   「ユーザー\<ユーザー名>」配下を手で辿る。`$HOME` を画面で確認したい場合は
+   先に PowerShell で `Write-Host $HOME` を実行。
+5. 設定後、`diagnose-tcl.ps1` を再実行して改善確認
+
+### Step 2: 第三者 AV を確認 / 除外設定
+
+`diagnose-tcl.ps1` の Section 5 で Trend Micro / Kaspersky 等が検出された場合は、
+**そちらの GUI からも同じパスを除外する必要がある**。Windows Defender の除外設定だけでは
+不十分（第三者 AV は独立にスキャンする）。
+
+スクリプトの検出はプロセス名一致のみで候補レベル。確定には以下のいずれかを併用:
+
+- 「コントロールパネル → プログラムと機能」で AV 製品名を確認
+- 「Windows セキュリティ → ウイルスと脅威の防止」画面に「他のセキュリティプロバイダ」
+  として表示されていないか確認
+- スタートメニューでベンダー名 (Trend Micro / カスペルスキー 等) を検索
+
+確認できた AV 製品名は、開発者への共有（Issue #316 コメント or Teams / メール）に
+含めておくと、次の deploy 失敗時の判断材料になる。
+
+### Step 3: Python を再 install（GUI ベース）
+
+Step 1-2 で改善しない場合、Python 自体を再 install:
+
+1. python.org から **Python 3.11.x の Windows installer (64-bit)** をダウンロード
+2. インストーラーで **「Modify」** を選択
+3. **「tcl/tk and IDLE」が ON** であることを確認、`Repair` / `Modify` で再インストール
+4. 完了後、新しい PowerShell ウィンドウで `diagnose-tcl.ps1` を実行
+
+### Step 4: uv-managed Python に切替（根本対応、上級者向け）
+
+AppData 配下を AV が常時スキャンする問題を根本回避するため、
+uv が管理する Python に切替える方法。インストール先が変わるため要注意:
+
+```powershell
+# uv 管理 Python install (デフォルト: $HOME\.local\share\uv\python\)
+uv python install 3.11
+
+# プロジェクト側で固定
+cd $HOME\Projects\wiseman-auto-sys
+uv python pin 3.11.13
+# .python-version が更新される
+
+# 既存 .venv を削除して再構築
+Remove-Item .venv -Recurse -Force
+uv sync --extra dev
+
+# 動作確認
+.\scripts\diagnose-tcl.ps1
+uv run pytest -q -m "not integration"
+```
+
+この経路でも問題が残る場合は AV が `~\.local\share\uv\python\` も別途スキャンしている
+可能性があるので、Step 1 と同様に除外設定追加。
+
+### 暫定運用（Step 1-4 試行中に deploy が必要なとき）
+
+`deploy-windows.ps1` の Phase 0-4 を `-SkipTests` で回避して deploy 続行:
+
+```powershell
+.\scripts\deploy-windows.ps1 -SkipTests
+```
+
+ただし `-SkipTests` は **GitHub Actions windows-latest で PASS している前提**でのみ
+使用すること。`main` の CI 確認は事前に必須:
+
+```powershell
+gh run list --branch main --limit 5
+gh run view --log-failed  # 失敗あれば確認
+```
+
+CI が PASS なら、ローカル Tcl 環境問題と本質コード品質は独立しているため
+`-SkipTests` 採用は妥当。
+
+---
+
 ## 🚨 トラブル早見表
 
 | 症状 | 原因候補 | 対応 |
 |------|---------|------|
+| Phase 0-4 で `_tkinter.TclError: Can't find a usable init.tcl` | AV 動的スキャン干渉 (Issue #316) | 上記「🔬 Tcl init.tcl 連発失敗時の対処」セクションへ。診断は `scripts\diagnose-tcl.ps1` |
 | `uv sync --extra dev` で失敗 | 仮想環境破損 | `Remove-Item .venv -Recurse -Force; uv sync --extra dev` |
 | `Failed to spawn pyinstaller` | `--extra dev` 忘れで dev extras 削除 | `uv sync --extra dev` で dev tools 復旧、Phase 1 再実行 |
 | pyinstaller が `ModuleNotFoundError` | spec の hiddenimports 漏れ | ビルドログを Phase 4 rollback 後に共有 |

@@ -318,11 +318,30 @@ if ($SkipTests) {
 
     # cmd /c 経由で stderr 統合 (Codex C2 と一貫性)。pytest 出力は stdout/stderr 混在で
     # PS 5.1 ネイティブ実行だと意図しない停止が発生しうる。
-    cmd /c "uv run pytest -q -m `"not integration`" 2>&1"
-    if ($LASTEXITCODE -ne 0) {
-        Stop-WithError "pytest 失敗 → Phase 1 (build) に進まず原因を共有" -BeforeDeploy
+    # Issue #316 対応: TclError 連発が出た場合に diagnose-tcl.ps1 への誘導を出すため
+    # 出力を捕捉する (テンポラリファイル経由、PS 5.1 でも安定動作)。
+    $pytestLog = New-TemporaryFile
+    try {
+        cmd /c "uv run pytest -q -m `"not integration`" 2>&1" | Tee-Object -FilePath $pytestLog.FullName
+        if ($LASTEXITCODE -ne 0) {
+            $logContent = Get-Content -LiteralPath $pytestLog.FullName -Raw -ErrorAction SilentlyContinue
+            if ($logContent -match "TclError|init\.tcl|tcl_findLibrary") {
+                Write-Host ""
+                Write-Host "⚠️  Tcl 関連エラー検出 (Issue #316)" -ForegroundColor Yellow
+                Write-Host "    AV 動的スキャン干渉の可能性が高い。診断:" -ForegroundColor Yellow
+                Write-Host "      .\scripts\diagnose-tcl.ps1" -ForegroundColor Yellow
+                Write-Host "    対処手順: docs\handoff\1c-exe-redistribution-runbook.md" -ForegroundColor Yellow
+                Write-Host "             の 「🔬 Tcl init.tcl 連発失敗時の対処」セクション" -ForegroundColor Yellow
+                Write-Host "    暫定回避: .\scripts\deploy-windows.ps1 -SkipTests" -ForegroundColor Yellow
+                Write-Host '             (CI が PASS の前提でのみ使用、main ブランチで [gh run list] を要確認)' -ForegroundColor Yellow
+                Write-Host ""
+            }
+            Stop-WithError "pytest 失敗 → Phase 1 (build) に進まず原因を共有" -BeforeDeploy
+        }
+        Write-OK "テスト PASS"
+    } finally {
+        Remove-Item -LiteralPath $pytestLog.FullName -ErrorAction SilentlyContinue
     }
-    Write-OK "テスト PASS"
 }
 
 # ----------------------------------------------------------------------
