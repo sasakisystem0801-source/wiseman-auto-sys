@@ -259,7 +259,9 @@ class TestFormFromConfig:
         assert form.concat_order == "B,A,C"
         assert form.ocr_endpoint_url == "https://api"
         assert form.ocr_api_key == "key"
-        assert form.wiseman_exe_path == "C:/Wiseman/app.exe"
+        # Issue #27 続編 G Phase 2a: form_from_config は str(Path(...)) を呼ぶため、
+        # Windows runner では "C:\\Wiseman\\app.exe" になる。OS 中立に比較。
+        assert form.wiseman_exe_path == str(Path("C:/Wiseman/app.exe"))
 
     def test_default_config_yields_empty_required_fields(self) -> None:
         form = form_from_config(AppConfig())

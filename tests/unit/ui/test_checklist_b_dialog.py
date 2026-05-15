@@ -119,6 +119,14 @@ class TestCachePopulateOnOpen:
         finally:
             root.destroy()
 
+    # Issue #276 follow-up: 一部 Windows PC の Tcl install が不完全で
+    # `_tkinter.TclError: invalid command name "tcl_findLibrary"` が発生する。
+    # GitHub Actions windows-latest では PASS するが、本田様 PC 等で再現。
+    # Tcl/Python install or TCL_LIBRARY 環境変数の調査が必要 (別 PR で対応)。
+    @pytest.mark.xfail(
+        reason="一部 Windows PC で Tcl tcl_findLibrary 不在 (Issue #276 follow-up)",
+        strict=False,
+    )
     def test_cache_miss_keeps_combo_empty(self, tmp_path: Path) -> None:
         cfg_path = _make_config_path(tmp_path)
         root = tk.Tk()
