@@ -289,6 +289,13 @@ class PywinautoEngine(RPAEngine):
 
     def navigate_menu(self, menu_path: Sequence[str]) -> None:
         """MDIメニューを階層的に辿って指定画面に遷移する。"""
+        # Issue #27 続編 H2: Sequence[str] は str も含むため bare-str を runtime guard。
+        # base.py docstring 参照 (silent corruption "ABC"→["A","B","C"] foot-gun 防御)。
+        if isinstance(menu_path, str):
+            raise TypeError(
+                "navigate_menu: menu_path must be a sequence of str segments "
+                f"(list/tuple), not a bare str: {menu_path!r}"
+            )
         if self._main_window is None:
             raise RuntimeError("メインウィンドウが未接続です。先にlaunchを実行してください")
 

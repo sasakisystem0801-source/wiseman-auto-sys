@@ -366,6 +366,9 @@ class TestPullReportStaff:
         # Issue #27 続編 G Phase 3b: pull 経由で Path 型に変換される (coerce_path)。
         assert result["宮下"].base_dir == Path("\\\\Tera-station\\share\\PT 宮下")
         # Issue #27 続編 H2: pull で ReportStaffEntry 化された結果は tuple[str, ...]。
+        # isinstance check で coerce 経路 (mapping_sync.py:291 の `tuple(...)` ラップ)
+        # が retire しないことの直接 regression guard。
+        assert isinstance(result["宮下"].suggest_patterns, tuple)
         assert result["宮下"].suggest_patterns == (
             "リハ経過報告書/令和{era}年/*{month}月*.xlsx",
         )

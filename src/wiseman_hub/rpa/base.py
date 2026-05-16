@@ -85,6 +85,14 @@ class RPAEngine(abc.ABC):
                 ``("ケア記録", "集計表")``)。Issue #27 続編 H2 で
                 ``ReportTarget.menu_path`` が ``tuple[str, ...]`` 化されたため、
                 tuple/list 両受け入れ可能な ``Sequence`` で抽象化。
+
+        Note:
+            Python の ``Sequence[str]`` は ``str`` 自身も satisfy する (各文字が
+            ``str`` のため)。``navigate_menu("ケア記録")`` のような bare-str 渡しは
+            ``["ケ","ア","記","録"]`` で iterate される silent corruption の foot-gun
+            で、実装側 (``MockEngine`` / ``PywinautoEngine``) の冒頭で
+            ``isinstance(menu_path, str)`` の runtime guard により ``TypeError``
+            で fail-close する責務を負う。
         """
 
     @abc.abstractmethod

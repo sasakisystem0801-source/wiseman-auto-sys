@@ -334,8 +334,11 @@ output_dir = ""
         assert len(reloaded.reports) == 2
         assert reloaded.reports[0].name == "報告書1"
         # Issue #27 続編 H2: menu_path は tuple[str, ...] (load_config が TOML list を coerce)。
+        # isinstance check で「list と tuple は == False」の Python 規則に頼らない直接 verify。
+        assert isinstance(reloaded.reports[0].menu_path, tuple)
         assert reloaded.reports[0].menu_path == ("A", "B")
         assert reloaded.reports[1].name == "報告書2"
+        assert isinstance(reloaded.reports[1].menu_path, tuple)
         assert reloaded.reports[1].menu_path == ("X",)
         assert reloaded.reports[1].output_format == "csv"
 

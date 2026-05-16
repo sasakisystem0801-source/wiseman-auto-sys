@@ -353,6 +353,10 @@ class TestFormToConfig:
 
         new_cfg = form_to_config(_full_form(), base)
 
+        # H2 完了で defensive copy 不要 → base.reports と new_cfg.reports は同一 tuple
+        # で identity 共有 (tuple immutable なので alias は無害)。本 assert は
+        # 「不要な defensive copy が再追加されたら fail」の regression guard。
+        assert new_cfg.reports is base.reports
         # tuple は append を持たない (構造的 immutability)。
         with pytest.raises(AttributeError):
             new_cfg.reports[0].menu_path.append("LEAK")  # type: ignore[attr-defined]
