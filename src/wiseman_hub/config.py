@@ -734,9 +734,10 @@ class ChecklistConfig:
     で ``__post_init__`` 型ガードを bypass する経路を構造的に防ぐ。フィールド更新
     は ``replace()`` 経由に統一する。
 
-    なお ``facility_routing`` / ``report_staff`` / ``xlsx_path_cache`` は
-    ``dict[str, ...]`` のため、dict 自体の内容変更 (``cfg.facility_routing["X"] = "Y"``)
-    は frozen 化の対象外 (参照差し替え ``cfg.facility_routing = {...}`` のみ阻止)。
+    なお ``facility_routing`` / ``report_staff`` / ``xlsx_path_cache`` /
+    ``staff_choice_cache`` は ``dict[str, ...]`` のため、dict 自体の内容変更
+    (``cfg.facility_routing["X"] = "Y"``) は frozen 化の対象外
+    (参照差し替え ``cfg.facility_routing = {...}`` のみ阻止)。
     値内容の immutability が必要なら ``frozenmap`` 等の不変 dict 型への移行を別途検討する。
 
     spreadsheet_id: Google Drive 上の xlsx file id
@@ -757,6 +758,14 @@ class ChecklistConfig:
         （例: ``"宮下:2026:3"``）、値は xlsx の絶対パス文字列。レビュー UI で
         ユーザーが選択した結果を永続化し、次回以降は cache hit で自動解決する。
         cache stale（path 不在）時はミスして再 scan する。
+    staff_choice_cache: 担当者複数 (`/` `／` 区切り) 入力に対する担当者選択結果の
+        キャッシュ (Issue #314)。キー形式は ``staff_choice_cache_key`` で生成される
+        ``"{sorted_normalized_staffs}|...:{year}:{month}"`` (例: ``"木塚|小島:2026:3"``)。
+        **値は ``normalize_lookup_key`` 適用済の正規化キー** (例: ``"小島"`` を選択した
+        結果は ``"小島"`` ではなく ``normalize_lookup_key("小島")`` で正規化された値を
+        保存する)。これにより表記揺れ・同姓・全角半角差を吸収して ``report_staff``
+        lookup で確実に hit させる (Codex review High #1)。値は ``report_staff``
+        キー (= normalize_lookup_key 適用済) の 1 つでなければならない。
     """
 
     spreadsheet_id: str = "18RPsg3Ya0r7djQVzED5KAa5KyhbB9YRm"
@@ -776,6 +785,7 @@ class ChecklistConfig:
     facility_routing: dict[str, str] = field(default_factory=dict)
     report_staff: dict[str, ReportStaffEntry] = field(default_factory=dict)
     xlsx_path_cache: dict[str, str] = field(default_factory=dict)
+    staff_choice_cache: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """型ガード (#27 §2 水平展開) + legacy ``monitoring_subfolder`` 検出。
@@ -824,6 +834,9 @@ class ChecklistConfig:
                 )
         _check_dict_str_to_str(
             "ChecklistConfig.xlsx_path_cache", self.xlsx_path_cache
+        )
+        _check_dict_str_to_str(
+            "ChecklistConfig.staff_choice_cache", self.staff_choice_cache
         )
 
         if self.monitoring_subfolder in _LEGACY_MONITORING_SUBFOLDERS:
@@ -1158,6 +1171,7 @@ def load_config(path: Path | None = None) -> AppConfig:
     routing_data = checklist_data.pop("facility_routing", {})
     staff_data = checklist_data.pop("report_staff", {})
     cache_data = checklist_data.pop("xlsx_path_cache", {})
+    staff_choice_data = checklist_data.pop("staff_choice_cache", {})
 
     # Issue #27 続編 B (Codex PR #260 review): isinstance 判定を ``if routing_data:``
     # の **前** に置く。旧コード ``if routing_data: ... isinstance check`` は
@@ -1207,6 +1221,26 @@ def load_config(path: Path | None = None) -> AppConfig:
                 "checklist.xlsx_path_cache values must be strings"
             )
         xlsx_path_cache[str(key)] = value
+
+    # Issue #314: staff_choice_cache (担当者複数選択の cache)。
+    # 値は normalize_lookup_key 適用済の正規化キー (Codex review High #1)。
+    # ここでは TOML 由来の生文字列をそのまま受け取り、UI 側で書込時に正規化する。
+    # 起動時に正規化を強制 (load 時 normalize) するとレガシー TOML 値の自動修復に
+    # なるが、人手編集された表示名値の意図しない上書きにもなる。fail-loud 方針で
+    # load 時は受領のみ・format 検証は plan_c_placement の lookup 時に任せる。
+    if not isinstance(staff_choice_data, dict):
+        raise TypeError(
+            f"[checklist.staff_choice_cache] must be a table; "
+            f"got {type(staff_choice_data).__name__}: {staff_choice_data!r}"
+        )
+    staff_choice_cache: dict[str, str] = {}
+    for key, value in staff_choice_data.items():
+        if not isinstance(value, str):
+            raise TypeError(
+                "checklist.staff_choice_cache values must be strings"
+            )
+        staff_choice_cache[str(key)] = value
+
     # Issue #27 続編 G Phase 3a: TOML str → Path coerce (空白 strip → 未設定 sentinel)。
     # 型違反 (int / bool / list 等) は coerce_path が TypeError raise (起動時 fail-close)。
     for path_field in ("karte_root", "fax_root"):
@@ -1219,6 +1253,7 @@ def load_config(path: Path | None = None) -> AppConfig:
         facility_routing=facility_routing,
         report_staff=report_staff,
         xlsx_path_cache=xlsx_path_cache,
+        staff_choice_cache=staff_choice_cache,
     )
 
     # Issue #27 続編 G Phase 1: AppConfig.log_dir / WisemanConfig.exe_path を
@@ -1400,7 +1435,8 @@ def _set_facility_aliases(
 
 
 def _update_checklist(doc: TOMLDocument, checklist: ChecklistConfig) -> None:
-    """[checklist] とネスト dict（facility_routing / report_staff / xlsx_path_cache）を書き戻す。
+    """[checklist] とネスト dict（facility_routing / report_staff / xlsx_path_cache /
+    staff_choice_cache）を書き戻す。
 
     動的キー dict は pdf_merge と同じく完全置換する。report_staff entry の suggest_patterns
     は list[str] のため tomlkit.array() で構築する。
@@ -1415,10 +1451,12 @@ def _update_checklist(doc: TOMLDocument, checklist: ChecklistConfig) -> None:
         for name, entry in checklist.report_staff.items()
     }
     cache = dict(checklist.xlsx_path_cache)
+    staff_choice = dict(checklist.staff_choice_cache)
     checklist_dict = _stringify_path_values(asdict(checklist))
     checklist_dict.pop("facility_routing", None)
     checklist_dict.pop("report_staff", None)
     checklist_dict.pop("xlsx_path_cache", None)
+    checklist_dict.pop("staff_choice_cache", None)
 
     def _build_routing_table() -> Table:
         routing_table = tomlkit.table()
@@ -1447,11 +1485,25 @@ def _update_checklist(doc: TOMLDocument, checklist: ChecklistConfig) -> None:
             cache_table[k] = v
         return cache_table
 
+    def _build_staff_choice_table() -> Table:
+        # Issue #314: staff_choice_cache の TOML 書込。key は staff_choice_cache_key
+        # 形式 ("木塚|小島:2026:3" 等)、value は normalize_lookup_key 形式の担当者名。
+        # `/` を含むキーは TOML 仕様で quote 必須になるため `|` を採用済 (key 側で対処)。
+        choice_table = tomlkit.table()
+        for k, v in staff_choice.items():
+            choice_table[k] = v
+        return choice_table
+
     if "checklist" in doc:
         table = _require_table(doc, "checklist")
         for key, value in checklist_dict.items():
             table[key] = value
-        for nested in ("facility_routing", "report_staff", "xlsx_path_cache"):
+        for nested in (
+            "facility_routing",
+            "report_staff",
+            "xlsx_path_cache",
+            "staff_choice_cache",
+        ):
             if nested in table:
                 del table[nested]
         if routing:
@@ -1460,6 +1512,8 @@ def _update_checklist(doc: TOMLDocument, checklist: ChecklistConfig) -> None:
             table["report_staff"] = _build_staff_table()
         if cache:
             table["xlsx_path_cache"] = _build_cache_table()
+        if staff_choice:
+            table["staff_choice_cache"] = _build_staff_choice_table()
     else:
         new_table = tomlkit.table()
         for key, value in checklist_dict.items():
@@ -1470,6 +1524,8 @@ def _update_checklist(doc: TOMLDocument, checklist: ChecklistConfig) -> None:
             new_table["report_staff"] = _build_staff_table()
         if cache:
             new_table["xlsx_path_cache"] = _build_cache_table()
+        if staff_choice:
+            new_table["staff_choice_cache"] = _build_staff_choice_table()
         doc["checklist"] = new_table
 
 

@@ -2107,6 +2107,38 @@ class TestDataclassTypeGuards:
         with pytest.raises(TypeError, match=r"xlsx_path_cache\['宮下:2026:3'\] must be str"):
             ChecklistConfig(xlsx_path_cache={"宮下:2026:3": 123})  # type: ignore[dict-item]
 
+    # --- Issue #314: ChecklistConfig.staff_choice_cache 型ガード ----
+    def test_checklist_staff_choice_cache_defaults_to_empty(self) -> None:
+        """staff_choice_cache 未指定時は空 dict (新規 field の後方互換)。"""
+        from wiseman_hub.config import ChecklistConfig
+        cfg = ChecklistConfig()
+        assert cfg.staff_choice_cache == {}
+
+    def test_checklist_staff_choice_cache_accepts_normalized_value(self) -> None:
+        """staff_choice_cache key/value 共に str なら成功。
+
+        value は normalize_lookup_key 形式の担当者名 (Codex review High #1)。
+        ChecklistConfig レベルでは format 検証はせず、書込側 (UI) の責任で
+        正規化済みであることを保証する。
+        """
+        from wiseman_hub.config import ChecklistConfig
+        cfg = ChecklistConfig(staff_choice_cache={"木塚|小島:2026:3": "小島"})
+        assert cfg.staff_choice_cache["木塚|小島:2026:3"] == "小島"
+
+    def test_checklist_staff_choice_cache_non_dict_raises(self) -> None:
+        from wiseman_hub.config import ChecklistConfig
+        with pytest.raises(TypeError, match="staff_choice_cache must be dict"):
+            ChecklistConfig(staff_choice_cache="not-a-dict")  # type: ignore[arg-type]
+
+    def test_checklist_staff_choice_cache_non_string_value_raises(self) -> None:
+        from wiseman_hub.config import ChecklistConfig
+        with pytest.raises(
+            TypeError, match=r"staff_choice_cache\['木塚\|小島:2026:3'\] must be str"
+        ):
+            ChecklistConfig(
+                staff_choice_cache={"木塚|小島:2026:3": 123},  # type: ignore[dict-item]
+            )
+
 
 class TestTypeGuardHelpers:
     """Issue #27 続編 A: ``_check_*`` helper 関数群の単体テスト。"""
@@ -2448,6 +2480,110 @@ xlsx_path_cache = []
 
         with pytest.raises(TypeError, match=r"xlsx_path_cache\] must be a table"):
             load_config(config_file)
+
+    # --- Issue #314: staff_choice_cache TOML I/O ----
+    def test_checklist_staff_choice_cache_string_raises(self, tmp_path: Path) -> None:
+        """TOML ``staff_choice_cache = "not-a-dict"`` は TypeError。"""
+        toml_content = """\
+[checklist]
+staff_choice_cache = "not-a-dict"
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(TypeError, match=r"staff_choice_cache\] must be a table"):
+            load_config(config_file)
+
+    def test_checklist_staff_choice_cache_array_raises(self, tmp_path: Path) -> None:
+        """TOML ``staff_choice_cache = []`` (空 list) も TypeError (型 sibling 対称性)。"""
+        toml_content = """\
+[checklist]
+staff_choice_cache = []
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(TypeError, match=r"staff_choice_cache\] must be a table"):
+            load_config(config_file)
+
+    def test_checklist_staff_choice_cache_non_string_value_raises(
+        self, tmp_path: Path
+    ) -> None:
+        """TOML staff_choice_cache の value が int は TypeError。"""
+        toml_content = """\
+[checklist]
+
+[checklist.staff_choice_cache]
+"木塚|小島:2026:3" = 123
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        with pytest.raises(TypeError, match="staff_choice_cache values must be strings"):
+            load_config(config_file)
+
+    def test_checklist_staff_choice_cache_load_passes(
+        self, tmp_path: Path
+    ) -> None:
+        """通常 TOML から staff_choice_cache を読み出せる (key/value 共に str)。"""
+        toml_content = """\
+[checklist]
+
+[checklist.staff_choice_cache]
+"木塚|小島:2026:3" = "小島"
+"宮下:2026:3" = "宮下"
+"""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(toml_content, encoding="utf-8")
+
+        cfg = load_config(config_file)
+        assert cfg.checklist.staff_choice_cache == {
+            "木塚|小島:2026:3": "小島",
+            "宮下:2026:3": "宮下",
+        }
+
+    def test_checklist_staff_choice_cache_roundtrip(self, tmp_path: Path) -> None:
+        """save_config → load_config で staff_choice_cache が保たれる。
+
+        Codex review High #1: value は normalize_lookup_key 形式。本テストは
+        cache field 自体の I/O 整合性のみを検証 (value 正規化は呼出側責任)。
+        """
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text("[checklist]\n", encoding="utf-8")
+        cfg = load_config(cfg_path)
+        new_cfg = replace(
+            cfg,
+            checklist=replace(
+                cfg.checklist,
+                staff_choice_cache={
+                    "木塚|小島:2026:3": "小島",
+                    "宮下:2026:3": "宮下",
+                },
+            ),
+        )
+        save_config(new_cfg, cfg_path)
+
+        reloaded = load_config(cfg_path)
+        assert reloaded.checklist.staff_choice_cache == {
+            "木塚|小島:2026:3": "小島",
+            "宮下:2026:3": "宮下",
+        }
+        # 書出形式が `|` 区切りキーで保たれている (TOML quote されつつも key 自体は不変)
+        content = cfg_path.read_text(encoding="utf-8")
+        assert "木塚|小島:2026:3" in content
+        assert "staff_choice_cache" in content
+
+    def test_checklist_staff_choice_cache_empty_not_emitted(
+        self, tmp_path: Path
+    ) -> None:
+        """staff_choice_cache が空 dict なら TOML に section を出さない (既存 cache 群と対称)。"""
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text("[checklist]\n", encoding="utf-8")
+        cfg = load_config(cfg_path)
+        save_config(cfg, cfg_path)
+
+        content = cfg_path.read_text(encoding="utf-8")
+        assert "staff_choice_cache" not in content
 
     def test_pdf_merge_facility_aliases_array_raises(self, tmp_path: Path) -> None:
         """Codex PR #261 review 致命的残存: facility_aliases = [] が silent 通過していた。
