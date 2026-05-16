@@ -7,6 +7,7 @@ PywinautoEngine でGUI操作をテストする。Windows環境でのみ実行可
 from __future__ import annotations
 
 import contextlib
+import os
 import shutil
 import subprocess
 import sys
@@ -63,7 +64,15 @@ def build_mock_app():
     """テストセッション開始時にモックアプリをビルドする。
 
     ソース(.cs/.csproj)が exe より新しい場合のみ再ビルドする。
+
+    Issue #17: ``WISEMAN_REAL=1`` の実機 smoke テスト実行時はモックアプリ
+    ビルドを skip する。実機テストは MSBuild 不要、本田様 PC 等 (VS Build
+    Tools 未導入) でも ``pytest tests/integration/test_smoke_real.py
+    -m wiseman_real`` を起動可能にする。
     """
+    if os.environ.get("WISEMAN_REAL") == "1":
+        return
+
     if not _sources_newer_than_exe():
         return
 

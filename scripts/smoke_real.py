@@ -1,6 +1,11 @@
 """実機ワイズマン最小E2E検証スクリプト (#3)。
 
-使い方:
+pytest 経由 (Issue #17 で追加、CI assert + 手動 input 待機なしで推奨):
+    $env:WISEMAN_REAL = "1"
+    $env:WISEMAN_LNK_PATH = "C:\\Users\\<you>\\...\\ワイズマンASPサービス起動.lnk"
+    uv run pytest tests/integration/test_smoke_real.py -m wiseman_real
+
+スクリプト直接実行 (旧、手動操作付):
     # 環境変数で指定
     $env:WISEMAN_LNK_PATH = "C:\\Users\\<you>\\...\\ワイズマンASPサービス起動.lnk"
     uv run python scripts/smoke_real.py
