@@ -600,7 +600,15 @@ class ChecklistCDialog:
         )
         if not confirm:
             return
-        del cache[key]
+        # Issue #27 続編 H3: xlsx_path_cache は MappingProxyType ラップ済のため
+        # ``del cache[key]`` は不可。``replace()`` で ChecklistConfig / AppConfig
+        # を再生成し、self._config を新インスタンスに差し替える (PR #272 教訓:
+        # facility_root_dialog 永続化 silent regression 防止)。
+        new_cache = {k: v for k, v in cache.items() if k != key}
+        new_checklist = _dataclass_replace(
+            self._config.checklist, xlsx_path_cache=new_cache
+        )
+        self._config = _dataclass_replace(self._config, checklist=new_checklist)
         # 永続化
         save_ok = False
         if self._config_path is not None:
@@ -743,8 +751,18 @@ class ChecklistCDialog:
             staff_key = staff_choice_cache_key(
                 r.staff_candidates, year, month
             )
-            self._config.checklist.staff_choice_cache[staff_key] = (
-                normalize_lookup_key(selected)
+            # Issue #27 続編 H3: staff_choice_cache は MappingProxyType ラップ済
+            # のため直接代入は不可。``replace()`` で ChecklistConfig / AppConfig
+            # を再生成し、self._config を新インスタンスに差し替える。
+            new_staff_choice = {
+                **self._config.checklist.staff_choice_cache,
+                staff_key: normalize_lookup_key(selected),
+            }
+            new_checklist = _dataclass_replace(
+                self._config.checklist, staff_choice_cache=new_staff_choice
+            )
+            self._config = _dataclass_replace(
+                self._config, checklist=new_checklist
             )
             try:
                 save_config(self._config, self._config_path)
@@ -801,7 +819,19 @@ class ChecklistCDialog:
             year, month = self._current_year_month()
             if year is not None and month is not None:
                 key = cache_key(r.row.staff, year, month)
-                self._config.checklist.xlsx_path_cache[key] = str(selected)
+                # Issue #27 続編 H3: xlsx_path_cache は MappingProxyType ラップ済
+                # のため直接代入は不可。``replace()`` で ChecklistConfig /
+                # AppConfig を再生成し、self._config を新インスタンスに差し替える。
+                new_xlsx_cache = {
+                    **self._config.checklist.xlsx_path_cache,
+                    key: str(selected),
+                }
+                new_checklist = _dataclass_replace(
+                    self._config.checklist, xlsx_path_cache=new_xlsx_cache
+                )
+                self._config = _dataclass_replace(
+                    self._config, checklist=new_checklist
+                )
                 save_ok = False
                 try:
                     save_config(self._config, self._config_path)

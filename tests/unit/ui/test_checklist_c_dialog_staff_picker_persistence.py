@@ -125,8 +125,12 @@ def test_staff_picker_persists_cache_value_in_normalized_form(tmp_path: Path) ->
     ) as mock_save:
         dlg._open_staff_picker_for_review(0, result)
 
+    # Issue #27 続編 H3: hotpath は ``replace()`` で self._config を差し替える
+    # ため、``cfg`` (元参照) ではなく ``dlg._config`` (最新) を assert する。
+    # 元 ``cfg`` の cache は依然空 (新 ChecklistConfig には波及しない)。
+    assert len(cfg.checklist.staff_choice_cache) == 0  # 元インスタンスは不変
     # cache 書込内容: key は "木塚|小島:2026:3" (sort + `|`)、value は normalize 後
-    cache = cfg.checklist.staff_choice_cache
+    cache = dlg._config.checklist.staff_choice_cache
     assert len(cache) == 1
     # value は normalize_lookup_key("小島") (= "小島" だが正規化経路を通している保証)
     value = next(iter(cache.values()))
@@ -161,6 +165,183 @@ def test_staff_picker_uses_dataclasses_replace_for_row_copy(tmp_path: Path) -> N
     assert new_result.row.facility == original_row.facility
 
 
+def test_staff_picker_replaces_self_config_with_new_appconfig(tmp_path: Path) -> None:
+    """Issue #27 続編 H3: hotpath は ``replace()`` で self._config を差し替える。
+
+    元 cfg (``ChecklistConfig`` の MappingProxyType ラップ) を直接変更できない
+    ため、``replace()`` で新 ChecklistConfig + 新 AppConfig を生成して
+    ``self._config`` を差し替える必要がある (PR #272 教訓: facility_root_dialog
+    の永続化 silent regression 防止と同パターン)。
+
+    本テストは以下を verify:
+        - 永続化経路通過後、``dlg._config`` が元 ``cfg`` と異なる AppConfig
+          オブジェクトに差し替わっている (identity check)
+        - 新 ``dlg._config.checklist.staff_choice_cache`` に entry が反映されている
+        - 元 ``cfg`` の cache は不変 (immutability 保証)
+    """
+    dlg, result, cfg, _ = _make_dialog_with_needs_review_staff_row(tmp_path)
+    original_cfg_identity = id(cfg)
+
+    with _patch_staff_picker("小島", True), patch(
+        "wiseman_hub.ui.checklist_c_dialog.save_config"
+    ):
+        dlg._open_staff_picker_for_review(0, result)
+
+    # self._config は新 AppConfig に差し替わっている (identity 変更)
+    assert dlg._config is not cfg
+    assert id(dlg._config) != original_cfg_identity
+    # 新 cfg の cache に entry あり
+    assert len(dlg._config.checklist.staff_choice_cache) == 1
+    # 元 cfg の cache は不変 (MappingProxyType + 防御コピーで参照断絶)
+    assert len(cfg.checklist.staff_choice_cache) == 0
+
+
+# ---------- pr-test-analyzer Gap 1 反映: xlsx picker hotpath の identity test ----
+
+
+def _make_dialog_with_needs_review_xlsx_row(
+    tmp_path: Path,
+) -> tuple[ChecklistCDialog, CPlacementResult, AppConfig, Path]:
+    """Tk 不要で ``_open_picker_for_review`` (xlsx_path_cache 書込側 hotpath) の
+    前提状態を組む。NEEDS_REVIEW 1 行を仕込み、xlsx 選択 + cache 書込経路を
+    呼び出せるようにする。
+    """
+    cfg = _make_appconfig(tmp_path)
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text("[checklist]\n", encoding="utf-8")
+
+    row = ChecklistRow(
+        name="テスト 太郎", monitoring_raw=None, staff="小島", facility="事業所A"
+    )
+    result = CPlacementResult(
+        row=row,
+        status=CPlacementStatus.NEEDS_REVIEW,
+        xlsx_candidates=[tmp_path / "PT 小島" / "3月.xlsx"],
+        folder_tree=[],
+        message="xlsx 選択待ち",
+    )
+
+    dlg = ChecklistCDialog.__new__(ChecklistCDialog)
+    dlg._config = cfg  # type: ignore[attr-defined]
+    dlg._config_path = cfg_path  # type: ignore[attr-defined]
+    dlg._results = [result]  # type: ignore[attr-defined]
+    dlg._top = MagicMock()  # type: ignore[attr-defined]
+    dlg._status_var = MagicMock()  # type: ignore[attr-defined]
+    dlg._refresh_tree = MagicMock()  # type: ignore[attr-defined]
+    dlg._update_exec_button = MagicMock()  # type: ignore[attr-defined]
+    dlg._current_year_month = MagicMock(return_value=(2026, 3))  # type: ignore[attr-defined]
+    return dlg, result, cfg, cfg_path
+
+
+def test_xlsx_picker_replaces_self_config_with_new_appconfig(tmp_path: Path) -> None:
+    """Issue #27 続編 H3 (pr-test-analyzer Gap 1 反映): xlsx picker hotpath も
+    ``replace()`` で ``self._config`` を新 AppConfig に差し替える。
+
+    `_open_staff_picker_for_review` と並列構造の identity 差し替え regression guard。
+    PR #272 教訓の構造的予防を、3 hotpath すべてで verify する。
+    """
+    dlg, result, cfg, _ = _make_dialog_with_needs_review_xlsx_row(tmp_path)
+    selected_xlsx = tmp_path / "PT 小島" / "3月.xlsx"
+
+    # XlsxPickerDialog が selected_xlsx + remember=True を返す
+    picker_mock = MagicMock()
+    picker_mock.get_toplevel.return_value.wait_window = MagicMock()
+    picker_mock.get_result.return_value = (selected_xlsx, True)
+    # apply_xlsx_selection を mock し、status=PENDING に遷移させる
+    def _fake_apply(r: CPlacementResult, xlsx: Path, _ck: object) -> None:
+        r.status = CPlacementStatus.PENDING
+        r.xlsx_path = xlsx
+
+    with patch(
+        "wiseman_hub.ui.checklist_c_dialog.XlsxPickerDialog",
+        MagicMock(return_value=picker_mock),
+    ), patch(
+        "wiseman_hub.ui.checklist_c_dialog.apply_xlsx_selection",
+        side_effect=_fake_apply,
+    ), patch(
+        "wiseman_hub.ui.checklist_c_dialog.save_config"
+    ), patch(
+        "wiseman_hub.ui.checklist_c_dialog._mirror_upload_entry_async"
+    ):
+        dlg._open_picker_for_review(0, result)
+
+    # self._config は新 AppConfig に差し替わっている (identity 変更)
+    assert dlg._config is not cfg
+    # 新 cfg の xlsx_path_cache に entry あり (key 形式: "小島:2026:3")
+    assert "小島:2026:3" in dlg._config.checklist.xlsx_path_cache
+    assert dlg._config.checklist.xlsx_path_cache["小島:2026:3"] == str(selected_xlsx)
+    # 元 cfg は不変
+    assert "小島:2026:3" not in cfg.checklist.xlsx_path_cache
+
+
+# ---------- pr-test-analyzer Gap 2 反映: cache clear hotpath の identity test ----
+
+
+def test_clear_cache_replaces_self_config_with_new_appconfig(tmp_path: Path) -> None:
+    """Issue #27 続編 H3 (pr-test-analyzer Gap 2 反映): cache clear hotpath も
+    ``replace()`` で ``self._config`` を新 AppConfig に差し替える。
+
+    `_clear_cache_for_row` は削除経路のため del cache[k] が動かない MappingProxyType
+    対応として replace() 経由になっている。identity 差し替えが正しく実行される
+    regression guard (PR #272 教訓の構造的予防の最終 hotpath)。
+    """
+    # PENDING 行 + cache 1 件入りの状態を仕込む
+    cfg = AppConfig(
+        wiseman=WisemanConfig(),
+        gcp=GcpConfig(),
+        checklist=ChecklistConfig(
+            spreadsheet_id="dummy",
+            fax_root=tmp_path,
+            facility_routing={"事業所A": "事業所A_FAX"},
+            report_staff={
+                "宮下": ReportStaffEntry(
+                    base_dir=tmp_path / "PT 宮下", suggest_patterns=("x",)
+                ),
+            },
+            xlsx_path_cache={"宮下:2026:3": str(tmp_path / "3月.xlsx")},
+        ),
+        log_dir=tmp_path / "logs",
+    )
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text("[checklist]\n", encoding="utf-8")
+
+    row = ChecklistRow(
+        name="テスト 太郎", monitoring_raw=None, staff="宮下", facility="事業所A"
+    )
+    result = CPlacementResult(row=row, status=CPlacementStatus.PENDING)
+
+    dlg = ChecklistCDialog.__new__(ChecklistCDialog)
+    dlg._config = cfg  # type: ignore[attr-defined]
+    dlg._config_path = cfg_path  # type: ignore[attr-defined]
+    dlg._results = [result]  # type: ignore[attr-defined]
+    dlg._top = MagicMock()  # type: ignore[attr-defined]
+    dlg._status_var = MagicMock()  # type: ignore[attr-defined]
+    dlg._refresh_tree = MagicMock()  # type: ignore[attr-defined]
+    dlg._update_exec_button = MagicMock()  # type: ignore[attr-defined]
+    dlg._update_status_summary = MagicMock()  # type: ignore[attr-defined]
+    dlg._current_year_month = MagicMock(return_value=(2026, 3))  # type: ignore[attr-defined]
+
+    with patch(
+        "wiseman_hub.ui.checklist_c_dialog.messagebox.askyesno",
+        return_value=True,
+    ), patch(
+        "wiseman_hub.ui.checklist_c_dialog.save_config"
+    ), patch(
+        "wiseman_hub.ui.checklist_c_dialog._mirror_delete_entry_async"
+    ), patch(
+        "wiseman_hub.ui.checklist_c_dialog.plan_c_placement",
+        return_value=[result],
+    ):
+        dlg._clear_cache_for_row(0)
+
+    # self._config は新 AppConfig に差し替わっている (identity 変更)
+    assert dlg._config is not cfg
+    # 新 cfg の cache は空 (削除済)
+    assert "宮下:2026:3" not in dlg._config.checklist.xlsx_path_cache
+    # 元 cfg は不変 (MappingProxyType + 防御コピーで参照断絶)
+    assert "宮下:2026:3" in cfg.checklist.xlsx_path_cache
+
+
 # ---------- Critical #2: save_config 失敗 + remember=False 分岐 ----------
 
 
@@ -177,8 +358,10 @@ def test_staff_picker_remember_false_does_not_write_cache(tmp_path: Path) -> Non
     ) as mock_save:
         dlg._open_staff_picker_for_review(0, result)
 
-    # cache は空のまま
+    # cache は空のまま (remember=False では replace() も走らないため self._config 不変)
     assert cfg.checklist.staff_choice_cache == {}
+    assert dlg._config.checklist.staff_choice_cache == {}
+    assert dlg._config is cfg  # H3: 差し替わらないこと
     # save_config も呼ばれない
     mock_save.assert_not_called()
     # ただし行は再 plan されている (選択は反映)
@@ -204,8 +387,10 @@ def test_staff_picker_save_config_oserror_shows_warning(tmp_path: Path) -> None:
 
     # messagebox.showwarning が呼ばれる (silent fail 防止)
     mock_warn.assert_called_once()
-    # ただし cache dict 自体は更新済 (次回 save まで保留)
-    assert len(cfg.checklist.staff_choice_cache) == 1
+    # Issue #27 続編 H3: hotpath で self._config を ``replace()`` で差し替えてから
+    # save_config を呼ぶ経路。OSError が出ても self._config 側の cache は更新済
+    # (次回 save 成功時に永続化されるという挙動を維持)。元 cfg 参照は不変。
+    assert len(dlg._config.checklist.staff_choice_cache) == 1
     # 選択結果も反映
     assert dlg._results[0].row.staff == "小島"
 
@@ -235,8 +420,9 @@ def test_staff_picker_year_month_unset_early_returns(tmp_path: Path) -> None:
     mock_info.assert_called_once()
     # StaffPickerDialog は開かれない (early return)
     picker_cls_mock.assert_not_called()
-    # cache 書込も save_config も走らない
+    # cache 書込も save_config も走らない (early return で replace() も skip)
     assert cfg.checklist.staff_choice_cache == {}
+    assert dlg._config is cfg  # H3: early return 経路は self._config 不変
     mock_save.assert_not_called()
 
 
@@ -250,8 +436,9 @@ def test_staff_picker_cancel_is_noop_no_cache_write(tmp_path: Path) -> None:
     ) as mock_save:
         dlg._open_staff_picker_for_review(0, result)
 
-    # cache 書込なし
+    # cache 書込なし (キャンセル経路は replace() も走らない)
     assert cfg.checklist.staff_choice_cache == {}
+    assert dlg._config is cfg  # H3: キャンセル経路は self._config 不変
     mock_save.assert_not_called()
     # 再 plan も走らない (元 result が残る)
     assert dlg._results[0] is result
@@ -283,5 +470,8 @@ def test_staff_picker_cache_key_matches_staff_choice_cache_key(
     ):
         dlg._open_staff_picker_for_review(0, result)
 
-    assert expected_key in cfg.checklist.staff_choice_cache
-    assert cfg.checklist.staff_choice_cache[expected_key] == expected_normalized
+    # Issue #27 続編 H3: replace() で self._config が差し替わるため最新参照を assert。
+    assert expected_key in dlg._config.checklist.staff_choice_cache
+    assert (
+        dlg._config.checklist.staff_choice_cache[expected_key] == expected_normalized
+    )

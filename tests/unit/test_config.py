@@ -3,6 +3,7 @@
 import dataclasses
 import logging
 import math
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
@@ -2137,7 +2138,13 @@ class TestDataclassTypeGuards:
         assert isinstance(cfg.reports, tuple)
         assert isinstance(cfg.gcp.project_id, str)
         assert isinstance(cfg.updater.enabled, bool)
-        assert isinstance(cfg.checklist.facility_routing, dict)
+        # Issue #27 続編 H3: ChecklistConfig の 4 dict は MappingProxyType でラップ済。
+        # ``isinstance(..., dict)`` ではなく ``Mapping`` で判定 (immutability 構造化)。
+        assert isinstance(cfg.checklist.facility_routing, Mapping)
+        assert not isinstance(cfg.checklist.facility_routing, dict)
+        assert isinstance(cfg.checklist.report_staff, Mapping)
+        assert isinstance(cfg.checklist.xlsx_path_cache, Mapping)
+        assert isinstance(cfg.checklist.staff_choice_cache, Mapping)
 
     # --- AppConfig 自身の field 型ガード (silent-failure review 反映) ----
     def test_app_config_non_string_version_raises(self) -> None:
@@ -2214,6 +2221,162 @@ class TestDataclassTypeGuards:
             ChecklistConfig(
                 staff_choice_cache={"木塚|小島:2026:3": 123},  # type: ignore[dict-item]
             )
+
+
+class TestChecklistConfigDictImmutability:
+    """Issue #27 続編 H3: ChecklistConfig 4 dict の MappingProxyType ラップ検証。
+
+    ``cfg.checklist.X[k] = v`` / ``del cfg.checklist.X[k]`` 等の dict 内容変更
+    が構造的に阻止されることを regression guard する。要素追加・更新・削除は
+    ``dataclasses.replace()`` 経由でのみ可能 (hotpath: ``checklist_c_dialog.py``)。
+    """
+
+    def test_facility_routing_is_mapping_proxy_not_dict(self) -> None:
+        """``facility_routing`` は ``MappingProxyType`` ラップ後の Mapping 型。"""
+        from types import MappingProxyType
+        cfg = ChecklistConfig(facility_routing={"事業所A": "FAX A"})
+        assert isinstance(cfg.facility_routing, MappingProxyType)
+        assert isinstance(cfg.facility_routing, Mapping)
+        # dict ではない (構造的 immutability)
+        assert not isinstance(cfg.facility_routing, dict)
+        # 読み出しは可
+        assert cfg.facility_routing["事業所A"] == "FAX A"
+
+    def test_report_staff_is_mapping_proxy_not_dict(self) -> None:
+        cfg = ChecklistConfig(
+            report_staff={"宮下": ReportStaffEntry(suggest_patterns=("a",))},
+        )
+        from types import MappingProxyType
+        assert isinstance(cfg.report_staff, MappingProxyType)
+        assert not isinstance(cfg.report_staff, dict)
+        assert cfg.report_staff["宮下"].suggest_patterns == ("a",)
+
+    def test_xlsx_path_cache_is_mapping_proxy_not_dict(self) -> None:
+        cfg = ChecklistConfig(xlsx_path_cache={"宮下:2026:3": "/path/to.xlsx"})
+        from types import MappingProxyType
+        assert isinstance(cfg.xlsx_path_cache, MappingProxyType)
+        assert not isinstance(cfg.xlsx_path_cache, dict)
+
+    def test_staff_choice_cache_is_mapping_proxy_not_dict(self) -> None:
+        cfg = ChecklistConfig(staff_choice_cache={"木塚|小島:2026:3": "小島"})
+        from types import MappingProxyType
+        assert isinstance(cfg.staff_choice_cache, MappingProxyType)
+        assert not isinstance(cfg.staff_choice_cache, dict)
+
+    def test_facility_routing_setitem_raises_typeerror(self) -> None:
+        """``cfg.facility_routing[k] = v`` は ``TypeError`` で構造的に阻止される。"""
+        cfg = ChecklistConfig(facility_routing={"事業所A": "FAX A"})
+        with pytest.raises(TypeError, match="does not support item assignment"):
+            cfg.facility_routing["事業所B"] = "FAX B"  # type: ignore[index]
+
+    def test_report_staff_setitem_raises_typeerror(self) -> None:
+        cfg = ChecklistConfig()
+        with pytest.raises(TypeError, match="does not support item assignment"):
+            cfg.report_staff["宮下"] = ReportStaffEntry()  # type: ignore[index]
+
+    def test_xlsx_path_cache_setitem_raises_typeerror(self) -> None:
+        cfg = ChecklistConfig()
+        with pytest.raises(TypeError, match="does not support item assignment"):
+            cfg.xlsx_path_cache["宮下:2026:3"] = "/path/to.xlsx"  # type: ignore[index]
+
+    def test_staff_choice_cache_setitem_raises_typeerror(self) -> None:
+        cfg = ChecklistConfig()
+        with pytest.raises(TypeError, match="does not support item assignment"):
+            cfg.staff_choice_cache["木塚|小島:2026:3"] = "小島"  # type: ignore[index]
+
+    def test_facility_routing_delitem_raises_typeerror(self) -> None:
+        """``del cfg.facility_routing[k]`` も ``TypeError`` で阻止される。"""
+        cfg = ChecklistConfig(facility_routing={"事業所A": "FAX A"})
+        with pytest.raises(TypeError, match="does not support item deletion"):
+            del cfg.facility_routing["事業所A"]  # type: ignore[attr-defined]
+
+    def test_xlsx_path_cache_delitem_raises_typeerror(self) -> None:
+        cfg = ChecklistConfig(xlsx_path_cache={"宮下:2026:3": "/p"})
+        with pytest.raises(TypeError, match="does not support item deletion"):
+            del cfg.xlsx_path_cache["宮下:2026:3"]  # type: ignore[attr-defined]
+
+    def test_external_dict_mutation_does_not_propagate(self) -> None:
+        """呼出側が持ち続けている元 dict を変更しても ChecklistConfig 側は不変。
+
+        ``__post_init__`` の ``MappingProxyType(dict(self.X))`` で防御コピーを
+        取っているため、元 dict 経由の外部 mutation は新インスタンスには波及
+        しない (参照断絶)。
+        """
+        external = {"事業所A": "FAX A"}
+        cfg = ChecklistConfig(facility_routing=external)
+        # 外部 dict を改変
+        external["事業所B"] = "FAX B"
+        external["事業所A"] = "FAX A modified"
+        # ChecklistConfig 側は元の値を保持
+        assert cfg.facility_routing == {"事業所A": "FAX A"}
+        assert "事業所B" not in cfg.facility_routing
+
+    def test_replace_creates_new_instance_with_updated_dict(self) -> None:
+        """``replace()`` で ChecklistConfig 全体を再生成し、新インスタンスのみが更新される。
+
+        hotpath パターン (``checklist_c_dialog.py``): ``replace(cfg.checklist,
+        xlsx_path_cache=new_dict)`` で新 ChecklistConfig を作る経路。元
+        ChecklistConfig の dict は不変であり続ける。
+        """
+        cfg = ChecklistConfig(xlsx_path_cache={"宮下:2026:3": "/old.xlsx"})
+        new_cfg = replace(
+            cfg,
+            xlsx_path_cache={**cfg.xlsx_path_cache, "宮下:2026:4": "/new.xlsx"},
+        )
+        # 元 cfg は変わらない
+        assert dict(cfg.xlsx_path_cache) == {"宮下:2026:3": "/old.xlsx"}
+        # 新 cfg は両方の entry を持つ
+        assert dict(new_cfg.xlsx_path_cache) == {
+            "宮下:2026:3": "/old.xlsx",
+            "宮下:2026:4": "/new.xlsx",
+        }
+        # 新 cfg の dict も MappingProxyType ラップされている
+        from types import MappingProxyType
+        assert isinstance(new_cfg.xlsx_path_cache, MappingProxyType)
+
+    def test_load_config_returns_mapping_proxy(self, tmp_path: Path) -> None:
+        """``load_config`` 経由でも 4 dict は ``MappingProxyType`` ラップされる。"""
+        from types import MappingProxyType
+        toml = tmp_path / "config.toml"
+        toml.write_text(
+            "[checklist.facility_routing]\n"
+            '"事業所A" = "FAX A"\n'
+            "[checklist.xlsx_path_cache]\n"
+            '"宮下:2026:3" = "/path.xlsx"\n'
+            "[checklist.staff_choice_cache]\n"
+            '"木塚|小島:2026:3" = "小島"\n',
+            encoding="utf-8",
+        )
+        cfg = load_config(toml)
+        assert isinstance(cfg.checklist.facility_routing, MappingProxyType)
+        assert isinstance(cfg.checklist.report_staff, MappingProxyType)
+        assert isinstance(cfg.checklist.xlsx_path_cache, MappingProxyType)
+        assert isinstance(cfg.checklist.staff_choice_cache, MappingProxyType)
+        # 読み出し値が正しく load されている
+        # facility_routing は normalize_lookup_key 適用済キーで保存される
+        assert "/path.xlsx" in cfg.checklist.xlsx_path_cache.values()
+
+    def test_save_config_roundtrip_preserves_dict_contents(
+        self, tmp_path: Path
+    ) -> None:
+        """save_config → load_config ラウンドトリップで 4 dict の内容が保持される。"""
+        toml = tmp_path / "config.toml"
+        toml.write_text("", encoding="utf-8")
+        cfg = AppConfig(
+            checklist=ChecklistConfig(
+                spreadsheet_id="test",
+                xlsx_path_cache={"宮下:2026:3": "/path.xlsx"},
+                staff_choice_cache={"木塚|小島:2026:3": "小島"},
+            ),
+        )
+        save_config(cfg, toml, create_if_missing=True)
+        reloaded = load_config(toml)
+        assert dict(reloaded.checklist.xlsx_path_cache) == {
+            "宮下:2026:3": "/path.xlsx"
+        }
+        assert dict(reloaded.checklist.staff_choice_cache) == {
+            "木塚|小島:2026:3": "小島"
+        }
 
 
 class TestTypeGuardHelpers:

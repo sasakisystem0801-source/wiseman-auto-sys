@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import io
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -194,7 +195,7 @@ def resolve_xlsx(
     entry: ReportStaffEntry,
     year: int,
     month: int,
-    cache: dict[str, str],
+    cache: Mapping[str, str],
 ) -> ResolveResult:
     """担当者ごとの xlsx パス解決。cache hit → PENDING / miss → NEEDS_REVIEW。
 
@@ -295,7 +296,7 @@ def find_sheet_for_user(xlsx_path: Path, user_name: str) -> tuple[str | None, li
     return None, names
 
 
-def resolve_facility(facility_name: str, routing: dict[str, str]) -> str | None:
+def resolve_facility(facility_name: str, routing: Mapping[str, str]) -> str | None:
     """居宅名 → FAX フォルダ名 を解決する。
 
     PR-γ v1: 表記揺れ吸収のため lookup 時に ``normalize_lookup_key`` で正規化する。

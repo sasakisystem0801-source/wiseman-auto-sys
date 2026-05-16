@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import re
 import shutil
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -317,7 +318,7 @@ def find_month_pdf(monitoring_dir: Path, month: int) -> tuple[Path | None, list[
 
 
 def resolve_facility(
-    facility_name: str, routing: dict[str, str]
+    facility_name: str, routing: Mapping[str, str]
 ) -> str | None:
     """居宅名 → FAX 事業所フォルダ名 を引く。
 

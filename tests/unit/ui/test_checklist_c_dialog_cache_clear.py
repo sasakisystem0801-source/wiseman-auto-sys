@@ -111,7 +111,10 @@ class TestCacheClearMenu:
                 "wiseman_hub.ui.checklist_c_dialog._mirror_delete_entry_async"
             ) as mock_mirror_del:
                 dlg._clear_cache_for_row(0)
-            assert "宮下:2026:3" not in cfg.checklist.xlsx_path_cache
+            # Issue #27 続編 H3: replace() で self._config が差し替わるため、
+            # 元 ``cfg`` ではなく ``dlg._config`` を assert する。元 cfg は不変。
+            assert "宮下:2026:3" not in dlg._config.checklist.xlsx_path_cache
+            assert "宮下:2026:3" in cfg.checklist.xlsx_path_cache  # 元 cfg 不変
             mock_save.assert_called_once()
             # ADR-016 PR-2: GCS mirror delete hook が呼ばれる
             mock_mirror_del.assert_called_once()
@@ -147,7 +150,14 @@ class TestCacheClearMenu:
         root = tk.Tk()
         try:
             dlg, cfg = self._make_dialog(root, tmp_path)
-            cfg.checklist.xlsx_path_cache.clear()
+            # Issue #27 続編 H3: xlsx_path_cache は MappingProxyType でラップ済
+            # のため ``.clear()`` 不可。``replace()`` で空 cache の新 ChecklistConfig
+            # に差し替える。
+            from dataclasses import replace as _dc_replace
+            dlg._config = _dc_replace(
+                dlg._config,
+                checklist=_dc_replace(dlg._config.checklist, xlsx_path_cache={}),
+            )
             with patch(
                 "wiseman_hub.ui.checklist_c_dialog.messagebox.askyesno"
             ) as mock_msg, patch(
@@ -192,8 +202,10 @@ class TestCacheClearMenu:
                 "wiseman_hub.ui.checklist_c_dialog._mirror_delete_entry_async"
             ) as mock_mirror_del:
                 dlg._clear_cache_for_row(0)
-            # in-memory は消えている
-            assert "宮下:2026:3" not in cfg.checklist.xlsx_path_cache
+            # Issue #27 続編 H3: replace() で self._config が差し替わる経路。
+            # OSError が出ても dlg._config は新 cache 反映済 (元 cfg は不変)。
+            assert "宮下:2026:3" not in dlg._config.checklist.xlsx_path_cache
+            assert "宮下:2026:3" in cfg.checklist.xlsx_path_cache  # 元不変
             # warning が出ている
             mock_warn.assert_called_once()
             # ADR-016 PR-2: save_config 失敗時は GCS mirror も呼ばれない
@@ -220,8 +232,8 @@ class TestCacheClearMenu:
             ):
                 # 例外を吸収（warn-only）して UI 側は完遂する
                 dlg._clear_cache_for_row(0)
-            # cache は削除済（mirror 失敗は影響しない）
-            assert "宮下:2026:3" not in cfg.checklist.xlsx_path_cache
+            # Issue #27 続編 H3: replace() で self._config 差し替え (mirror 失敗は影響しない)。
+            assert "宮下:2026:3" not in dlg._config.checklist.xlsx_path_cache
         finally:
             root.destroy()
 
