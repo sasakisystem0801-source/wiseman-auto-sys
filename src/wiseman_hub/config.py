@@ -362,9 +362,14 @@ class ReportTarget:
     で ``__post_init__`` 型ガードを bypass する経路を構造的に防ぐ。フィールド更新
     は ``replace()`` 経由に統一する。
 
-    なお ``AppConfig.reports`` は ``list[ReportTarget]`` のため、list 自体の
-    要素追加/削除 (``cfg.reports.append(...)``) は frozen 化の対象外 (list の
-    内容変更を防ぐには ``AppConfig`` 側の type を ``tuple`` に変える別議論が必要)。
+    なお ``AppConfig.reports`` は Issue #27 続編 H1 で ``tuple[ReportTarget, ...]``
+    化済 (詳細は ``AppConfig`` docstring 参照)。tuple 化により ``append`` /
+    ``__setitem__`` 経路の mutation は ``AttributeError`` / ``TypeError`` で構造的
+    に阻止される。要素追加・差し替えは
+    ``replace(cfg, reports=(*cfg.reports, new_target))`` 形式に統一。
+
+    一方、本 ``ReportTarget.menu_path`` 自体は依然 ``list[str]`` で内容変更可能
+    (umbrella 続編 H2 で tuple 化予定)。
     """
 
     name: str = ""
@@ -874,8 +879,9 @@ class AppConfig:
         ``ReportTarget.menu_path`` の ``list[str]`` は依然 mutable
         (Phase 3a で ``ReportTarget`` 自体は frozen=True 化済だが leaf list は別)。
         ``ReportStaffEntry.suggest_patterns`` も同様。
-        ``ChecklistConfig.{facility_routing, xlsx_path_cache, staff_choice_cache}``
-        の dict も同様。これらは umbrella の続編 H2/H3 で対応する。
+        ``ChecklistConfig.{facility_routing, report_staff, xlsx_path_cache, staff_choice_cache}``
+        の dict も同様 (``ChecklistConfig`` docstring の対応節を参照)。これらは
+        umbrella の続編 H2/H3 で対応する。
 
     本 docstring の表現は PR #272 Codex review Low 指摘に基づき、「型ガード
     bypass を構造的に防ぐ」を「直下フィールドの参照差し替えを防ぐ」に絞って
