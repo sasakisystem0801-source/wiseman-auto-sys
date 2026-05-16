@@ -85,6 +85,7 @@ addopts = "-v --tb=short"
 pythonpath = ["src"]
 markers = [
     "integration: Windows-only integration tests requiring mock WinForms app",
+    "wiseman_real: real Wiseman smoke E2E test (requires WISEMAN_REAL=1 + USB dongle + WISEMAN_LNK_PATH; skipped by default)",
 ]
 
 [tool.uv]
