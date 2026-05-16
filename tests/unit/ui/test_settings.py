@@ -27,6 +27,7 @@ from wiseman_hub.config import (  # noqa: E402
     AppConfig,
     OcrBackendConfig,
     PdfMergeConfig,
+    ReportTarget,
     UserNameBBox,
 )
 from wiseman_hub.ui.settings import (  # noqa: E402
@@ -306,6 +307,49 @@ class TestFormToConfig:
         assert new_cfg.pdf_merge.user_name_bbox.x0 == 10.0
         assert new_cfg.pdf_merge.user_name_bbox.dpi == 200
         assert new_cfg.pdf_merge.concat_order == ("A", "B", "C")
+
+    def test_form_to_config_preserves_reports_as_tuple(self) -> None:
+        """Issue #27 続編 H1: form_to_config の戻り値で reports が tuple を維持する。
+
+        settings.py:219 の ``decoupled_reports: tuple[ReportTarget, ...] = tuple(...)``
+        が将来 ``list(...)`` に退化した場合、``replace(base, reports=...)`` 経由で
+        ``AppConfig.__post_init__`` の ``isinstance(tuple)`` チェックが TypeError を
+        raise して UI save 経路が壊れる。本テストはその regression guard。
+        """
+        base = replace(
+            AppConfig(),
+            reports=(
+                ReportTarget(name="A", menu_path=["m1"]),
+                ReportTarget(name="B", menu_path=["m2", "m3"]),
+            ),
+        )
+
+        new_cfg = form_to_config(_full_form(), base)
+
+        assert isinstance(new_cfg.reports, tuple)
+        assert len(new_cfg.reports) == 2
+        assert new_cfg.reports[0].name == "A"
+        assert new_cfg.reports[1].menu_path == ["m2", "m3"]
+
+    def test_form_to_config_cuts_menu_path_alias(self) -> None:
+        """Issue #27 続編 H1 / PR #272 Codex Medium 暫定防御の verify。
+
+        ``base.reports[i].menu_path`` と ``new_cfg.reports[i].menu_path`` が別
+        オブジェクトで、new_cfg 側 menu_path への mutation が base 側に漏れない
+        ことを確認する。settings.py:220 の
+        ``replace(r, menu_path=list(r.menu_path))`` の regression guard。
+        umbrella 続編 H2 で ``menu_path`` も tuple 化されると本暫定防御は不要
+        になるが、それまでは本テストで明示的に防御する。
+        """
+        base = replace(
+            AppConfig(),
+            reports=(ReportTarget(name="A", menu_path=["m1", "m2"]),),
+        )
+
+        new_cfg = form_to_config(_full_form(), base)
+        new_cfg.reports[0].menu_path.append("LEAK")
+
+        assert base.reports[0].menu_path == ["m1", "m2"]  # base に漏れていない
 
 
 # ---------------------------------------------------------------------------
