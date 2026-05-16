@@ -53,8 +53,8 @@ def _make_appconfig(tmp_path: Path) -> AppConfig:
             fax_root=tmp_path,
             facility_routing={"事業所A": "事業所A_FAX"},
             report_staff={
-                "小島": ReportStaffEntry(base_dir=base_kojima, suggest_patterns=["x"]),
-                "木塚": ReportStaffEntry(base_dir=base_kizuka, suggest_patterns=["x"]),
+                "小島": ReportStaffEntry(base_dir=base_kojima, suggest_patterns=("x",)),
+                "木塚": ReportStaffEntry(base_dir=base_kizuka, suggest_patterns=("x",)),
             },
         ),
         log_dir=tmp_path / "logs",

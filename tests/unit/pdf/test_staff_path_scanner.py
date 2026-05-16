@@ -95,7 +95,7 @@ def test_scan_candidates_miyashita_picks_only_target_year(tmp_path: Path) -> Non
     base = _make_miyashita(tmp_path)
     entry = ReportStaffEntry(
         base_dir=base,
-        suggest_patterns=["リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx"],
+        suggest_patterns=("リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx",),
     )
     cands = scan_candidates(entry, year=2026, month=3)
     assert len(cands) == 1
@@ -107,7 +107,7 @@ def test_scan_candidates_miyashita_no_match_for_other_year(tmp_path: Path) -> No
     base = _make_miyashita(tmp_path)
     entry = ReportStaffEntry(
         base_dir=base,
-        suggest_patterns=["リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx"],
+        suggest_patterns=("リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx",),
     )
     cands = scan_candidates(entry, year=2025, month=3)
     assert len(cands) == 1
@@ -118,7 +118,7 @@ def test_scan_candidates_excludes_office_lock_file(tmp_path: Path) -> None:
     base = _make_miyashita(tmp_path)
     entry = ReportStaffEntry(
         base_dir=base,
-        suggest_patterns=["リハ経過報告書/令和{era}年/*.xlsx"],
+        suggest_patterns=("リハ経過報告書/令和{era}年/*.xlsx",),
     )
     cands = scan_candidates(entry, year=2026, month=3)
     names = [p.name for p in cands]
@@ -134,7 +134,7 @@ def test_scan_candidates_kizuka_includes_higashiura_for_review(
     base = _make_kizuka(tmp_path)
     entry = ReportStaffEntry(
         base_dir=base,
-        suggest_patterns=["経過報告書/令和{era}年度 経過報告書/*{month}月*.xlsx"],
+        suggest_patterns=("経過報告書/令和{era}年度 経過報告書/*{month}月*.xlsx",),
     )
     cands = scan_candidates(entry, year=2025, month=3)
     names = [p.name for p in cands]
@@ -148,9 +148,9 @@ def test_scan_candidates_kizuka_filtered_by_staff_token(tmp_path: Path) -> None:
     base = _make_kizuka(tmp_path)
     entry = ReportStaffEntry(
         base_dir=base,
-        suggest_patterns=[
+        suggest_patterns=(
             "経過報告書/令和{era}年度 経過報告書/*木塚*{month}月*.xlsx",
-        ],
+        ),
     )
     cands = scan_candidates(entry, year=2025, month=3)
     names = [p.name for p in cands]
@@ -162,9 +162,9 @@ def test_scan_candidates_kojima_excludes_old_system(tmp_path: Path) -> None:
     base = _make_kojima(tmp_path)
     entry = ReportStaffEntry(
         base_dir=base,
-        suggest_patterns=[
+        suggest_patterns=(
             "リハ経過報告書(新)/経過報告書*令和{era}年{month}月*.xlsx",
-        ],
+        ),
     )
     cands = scan_candidates(entry, year=2026, month=3)
     names = [p.name for p in cands]
@@ -179,7 +179,7 @@ def test_scan_candidates_hirase_no_staff_token_in_filename(tmp_path: Path) -> No
     base = _make_hirase(tmp_path)
     entry = ReportStaffEntry(
         base_dir=base,
-        suggest_patterns=["リハ経過報告書/令和{era}年/新経過報告書 {month}月*.xlsx"],
+        suggest_patterns=("リハ経過報告書/令和{era}年/新経過報告書 {month}月*.xlsx",),
     )
     cands = scan_candidates(entry, year=2026, month=3)
     assert len(cands) == 1
@@ -190,7 +190,7 @@ def test_scan_candidates_kobayashi_R_prefix(tmp_path: Path) -> None:
     base = _make_kobayashi(tmp_path)
     entry = ReportStaffEntry(
         base_dir=base,
-        suggest_patterns=["経過報告書/R{era}/*{month}月*.xlsx"],
+        suggest_patterns=("経過報告書/R{era}/*{month}月*.xlsx",),
     )
     cands = scan_candidates(entry, year=2026, month=3)
     assert len(cands) == 1
@@ -199,12 +199,12 @@ def test_scan_candidates_kobayashi_R_prefix(tmp_path: Path) -> None:
 def test_scan_candidates_empty_patterns_returns_empty(tmp_path: Path) -> None:
     """suggest_patterns 空なら scan_fallback / template フォールバックは scan_candidates の責務外。"""
     base = _make_miyashita(tmp_path)
-    entry = ReportStaffEntry(base_dir=base, suggest_patterns=[])
+    entry = ReportStaffEntry(base_dir=base, suggest_patterns=())
     assert scan_candidates(entry, year=2026, month=3) == []
 
 
 def test_scan_candidates_no_base_dir(tmp_path: Path) -> None:
-    entry = ReportStaffEntry(base_dir=Path(""), suggest_patterns=["x/y.xlsx"])
+    entry = ReportStaffEntry(base_dir=Path(""), suggest_patterns=("x/y.xlsx",))
     assert scan_candidates(entry, year=2026, month=3) == []
 
 
@@ -213,10 +213,10 @@ def test_scan_candidates_dedup_across_patterns(tmp_path: Path) -> None:
     base = _make_miyashita(tmp_path)
     entry = ReportStaffEntry(
         base_dir=base,
-        suggest_patterns=[
+        suggest_patterns=(
             "リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx",
             "リハ経過報告書/令和{era}年/*{month}月*.xlsx",  # より広い、同じファイルにヒット
-        ],
+        ),
     )
     cands = scan_candidates(entry, year=2026, month=3)
     assert len(cands) == 1

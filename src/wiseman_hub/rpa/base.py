@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import abc
+from collections.abc import Sequence
 from pathlib import Path
 
 
@@ -76,11 +77,14 @@ class RPAEngine(abc.ABC):
         """
 
     @abc.abstractmethod
-    def navigate_menu(self, menu_path: list[str]) -> None:
+    def navigate_menu(self, menu_path: Sequence[str]) -> None:
         """MDIメニューを階層的に辿って指定画面に遷移する。
 
         Args:
-            menu_path: メニューの階層パス (例: ["ケア記録", "集計表"])
+            menu_path: メニューの階層パス (例: ``["ケア記録", "集計表"]`` または
+                ``("ケア記録", "集計表")``)。Issue #27 続編 H2 で
+                ``ReportTarget.menu_path`` が ``tuple[str, ...]`` 化されたため、
+                tuple/list 両受け入れ可能な ``Sequence`` で抽象化。
         """
 
     @abc.abstractmethod

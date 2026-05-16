@@ -319,8 +319,8 @@ class TestFormToConfig:
         base = replace(
             AppConfig(),
             reports=(
-                ReportTarget(name="A", menu_path=["m1"]),
-                ReportTarget(name="B", menu_path=["m2", "m3"]),
+                ReportTarget(name="A", menu_path=("m1",)),
+                ReportTarget(name="B", menu_path=("m2", "m3")),
             ),
         )
 
@@ -329,27 +329,36 @@ class TestFormToConfig:
         assert isinstance(new_cfg.reports, tuple)
         assert len(new_cfg.reports) == 2
         assert new_cfg.reports[0].name == "A"
-        assert new_cfg.reports[1].menu_path == ["m2", "m3"]
+        assert new_cfg.reports[1].menu_path == ("m2", "m3")
 
-    def test_form_to_config_cuts_menu_path_alias(self) -> None:
-        """Issue #27 続編 H1 / PR #272 Codex Medium 暫定防御の verify。
+    def test_form_to_config_reports_menu_path_immutable_after_h2(self) -> None:
+        """Issue #27 続編 H2: menu_path が tuple 化済のため defensive copy 不要を確認。
 
-        ``base.reports[i].menu_path`` と ``new_cfg.reports[i].menu_path`` が別
-        オブジェクトで、new_cfg 側 menu_path への mutation が base 側に漏れない
-        ことを確認する。settings.py:220 の
-        ``replace(r, menu_path=list(r.menu_path))`` の regression guard。
-        umbrella 続編 H2 で ``menu_path`` も tuple 化されると本暫定防御は不要
-        になるが、それまでは本テストで明示的に防御する。
+        旧 H1 時代は ``new_cfg.reports[0].menu_path.append("LEAK")`` が base 側に
+        漏れるため、``form_to_config`` 内で ``replace(r, menu_path=list(r.menu_path))``
+        による defensive shallow copy を行っていた。H2 で ``menu_path`` も
+        ``tuple[str, ...]`` 化したため、leaf 自体が immutable になり append は
+        ``AttributeError`` で構造的に阻止される。本テストは:
+
+          1. defensive copy が不要 (base.reports と new_cfg.reports は ReportTarget
+             identity を共有して OK、tuple は immutable なので alias は無害)
+          2. menu_path.append は AttributeError
+
+        を verify する umbrella 続編 H2 完了の regression guard。
         """
         base = replace(
             AppConfig(),
-            reports=(ReportTarget(name="A", menu_path=["m1", "m2"]),),
+            reports=(ReportTarget(name="A", menu_path=("m1", "m2")),),
         )
 
         new_cfg = form_to_config(_full_form(), base)
-        new_cfg.reports[0].menu_path.append("LEAK")
 
-        assert base.reports[0].menu_path == ["m1", "m2"]  # base に漏れていない
+        # tuple は append を持たない (構造的 immutability)。
+        with pytest.raises(AttributeError):
+            new_cfg.reports[0].menu_path.append("LEAK")  # type: ignore[attr-defined]
+        # base の menu_path が tuple のまま不変。
+        assert base.reports[0].menu_path == ("m1", "m2")
+        assert new_cfg.reports[0].menu_path == ("m1", "m2")
 
 
 # ---------------------------------------------------------------------------

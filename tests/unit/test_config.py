@@ -322,8 +322,8 @@ output_dir = ""
         cfg = replace(
             AppConfig(),
             reports=(
-                ReportTarget(name="報告書1", menu_path=["A", "B"], output_format="csv"),
-                ReportTarget(name="報告書2", menu_path=["X"], output_format="csv"),
+                ReportTarget(name="報告書1", menu_path=("A", "B"), output_format="csv"),
+                ReportTarget(name="報告書2", menu_path=("X",), output_format="csv"),
             ),
         )
 
@@ -333,9 +333,10 @@ output_dir = ""
         reloaded = load_config(target)
         assert len(reloaded.reports) == 2
         assert reloaded.reports[0].name == "報告書1"
-        assert reloaded.reports[0].menu_path == ["A", "B"]
+        # Issue #27 続編 H2: menu_path は tuple[str, ...] (load_config が TOML list を coerce)。
+        assert reloaded.reports[0].menu_path == ("A", "B")
         assert reloaded.reports[1].name == "報告書2"
-        assert reloaded.reports[1].menu_path == ["X"]
+        assert reloaded.reports[1].menu_path == ("X",)
         assert reloaded.reports[1].output_format == "csv"
 
     def test_save_creates_parent_directory_if_missing(self, tmp_path: Path) -> None:
@@ -417,7 +418,7 @@ output_dir = ""
         # Issue #27 続編 H1: reports は tuple 化済のため tuple 再構築。
         cfg = replace(
             AppConfig(),
-            reports=(ReportTarget(name="山田太郎", menu_path=["集計"]),),
+            reports=(ReportTarget(name="山田太郎", menu_path=("集計",)),),
         )
         target = tmp_path / "unicode.toml"
         save_config(cfg, target, create_if_missing=True)
@@ -1486,12 +1487,14 @@ class TestFrozenInstanceImmutability:
             setattr(cfg, field_name, new_value)
 
     def test_report_target_replace_reapplies_post_init_validation(self) -> None:
-        """replace() で menu_path に str を渡したら TypeError (list[str] 期待)。"""
+        """Issue #27 続編 H2: replace() で menu_path に str/list を渡したら TypeError (tuple[str, ...] 期待)。"""
         from wiseman_hub.config import ReportTarget
 
         cfg = ReportTarget()
-        with pytest.raises(TypeError, match="menu_path must be list"):
-            replace(cfg, menu_path="not-a-list")  # type: ignore[arg-type]
+        with pytest.raises(TypeError, match="menu_path must be tuple"):
+            replace(cfg, menu_path="not-a-tuple")  # type: ignore[arg-type]
+        with pytest.raises(TypeError, match="menu_path must be tuple"):
+            replace(cfg, menu_path=["a", "b"])  # type: ignore[arg-type]
 
     @pytest.mark.parametrize(
         "field_name,new_value",
@@ -1566,10 +1569,12 @@ class TestFrozenInstanceImmutability:
             setattr(cfg, field_name, new_value)
 
     def test_report_staff_entry_replace_reapplies_post_init_validation(self) -> None:
-        """replace() で suggest_patterns に str を渡したら TypeError。"""
+        """Issue #27 続編 H2: replace() で suggest_patterns に str/list を渡したら TypeError (tuple[str, ...] 期待)。"""
         cfg = ReportStaffEntry()
-        with pytest.raises(TypeError, match="suggest_patterns must be list"):
-            replace(cfg, suggest_patterns="not-a-list")  # type: ignore[arg-type]
+        with pytest.raises(TypeError, match="suggest_patterns must be tuple"):
+            replace(cfg, suggest_patterns="not-a-tuple")  # type: ignore[arg-type]
+        with pytest.raises(TypeError, match="suggest_patterns must be tuple"):
+            replace(cfg, suggest_patterns=["a", "b"])  # type: ignore[arg-type]
 
     @pytest.mark.parametrize(
         "field_name,new_value",
@@ -1685,6 +1690,46 @@ class TestFrozenInstanceImmutability:
         assert len(cfg_extended.reports) == 1
         assert cfg_extended.reports[0].name == "added"
 
+    def test_report_target_menu_path_tuple_content_mutation_blocked(self) -> None:
+        """Issue #27 続編 H2: ``ReportTarget.menu_path`` の tuple 化で要素変更が阻止される。
+
+        旧 ``list[str]`` 時代 (続編 H1 まで) は ``frozen=True`` でも leaf list の
+        ``.append`` / ``[i] = ...`` が阻止されず、PR #272 の暫定 defensive shallow
+        copy で防御していた。続編 H2 で ``tuple[str, ...]`` 化し、leaf も構造的に
+        immutable になった。本テストは続編 H2 の仕様 regression guard。
+        """
+        from wiseman_hub.config import ReportTarget
+
+        target = ReportTarget(name="X", menu_path=("a", "b"))
+        # tuple は append を持たない (AttributeError)。
+        with pytest.raises(AttributeError):
+            target.menu_path.append("LEAK")  # type: ignore[attr-defined]
+        # __setitem__ も tuple は持たない (TypeError)。
+        with pytest.raises(TypeError):
+            target.menu_path[0] = "replaced"  # type: ignore[index]
+        # replace 経由の tuple 再構築は通常通り動作する。
+        extended = replace(target, menu_path=(*target.menu_path, "c"))
+        assert extended.menu_path == ("a", "b", "c")
+
+    def test_report_staff_entry_suggest_patterns_tuple_content_mutation_blocked(self) -> None:
+        """Issue #27 続編 H2: ``ReportStaffEntry.suggest_patterns`` の tuple 化で要素変更阻止。
+
+        続編 H1 まで残っていた leaf list mutation 経路が tuple 化で構造的に閉鎖
+        される。続編 H2 仕様 regression guard。
+        """
+        entry = ReportStaffEntry(suggest_patterns=("a/*.xlsx", "b/*.xlsx"))
+        # tuple は append を持たない (AttributeError)。
+        with pytest.raises(AttributeError):
+            entry.suggest_patterns.append("c/*.xlsx")  # type: ignore[attr-defined]
+        # __setitem__ も tuple は持たない (TypeError)。
+        with pytest.raises(TypeError):
+            entry.suggest_patterns[0] = "replaced"  # type: ignore[index]
+        # replace 経由の tuple 再構築は通常通り動作する。
+        extended = replace(
+            entry, suggest_patterns=(*entry.suggest_patterns, "c/*.xlsx")
+        )
+        assert extended.suggest_patterns == ("a/*.xlsx", "b/*.xlsx", "c/*.xlsx")
+
 
 class TestLiteralValidation:
     """Issue #27 続編 F Phase 1: LogLevel + OutputFormat Literal 化の値域検証。
@@ -1745,7 +1790,7 @@ class TestLiteralValidation:
         assert target.output_format == "csv"
 
     def test_report_target_accepts_csv(self) -> None:
-        target = ReportTarget(name="X", menu_path=["a"], output_format="csv")
+        target = ReportTarget(name="X", menu_path=("a",), output_format="csv")
         assert target.output_format == "csv"
 
     @pytest.mark.parametrize(
@@ -1754,7 +1799,7 @@ class TestLiteralValidation:
     )
     def test_report_target_rejects_invalid_output_format(self, invalid: str) -> None:
         with pytest.raises(ValueError, match="ReportTarget.output_format"):
-            ReportTarget(name="X", menu_path=["a"], output_format=invalid)  # type: ignore[arg-type]
+            ReportTarget(name="X", menu_path=("a",), output_format=invalid)  # type: ignore[arg-type]
 
     # ---- frozenset の中身検証 (Literal alias と single source of truth で一致) ----
 
@@ -1969,15 +2014,18 @@ class TestDataclassTypeGuards:
             ScheduleConfig(cron=None)  # type: ignore[arg-type]
 
     # --- ReportTarget ---------------------------------------------------
-    def test_report_target_non_list_menu_path_raises(self) -> None:
+    def test_report_target_non_tuple_menu_path_raises(self) -> None:
+        # Issue #27 続編 H2: list 渡しも fail-close (tuple 限定)。
         from wiseman_hub.config import ReportTarget
-        with pytest.raises(TypeError, match="ReportTarget.menu_path must be list"):
+        with pytest.raises(TypeError, match="ReportTarget.menu_path must be tuple"):
             ReportTarget(menu_path="A/B/C")  # type: ignore[arg-type]
+        with pytest.raises(TypeError, match="ReportTarget.menu_path must be tuple"):
+            ReportTarget(menu_path=["A", "B"])  # type: ignore[arg-type]
 
     def test_report_target_non_string_menu_item_raises(self) -> None:
         from wiseman_hub.config import ReportTarget
         with pytest.raises(TypeError, match=r"menu_path\[0\] must be str"):
-            ReportTarget(menu_path=[123])  # type: ignore[list-item]
+            ReportTarget(menu_path=(123,))  # type: ignore[arg-type]
 
     # --- GcpConfig ------------------------------------------------------
     def test_gcp_non_string_project_id_raises(self) -> None:
@@ -2067,10 +2115,13 @@ class TestDataclassTypeGuards:
         with pytest.raises(TypeError, match="ReportStaffEntry.base_dir must be Path"):
             ReportStaffEntry(base_dir="\\\\Tera-station\\share\\PT 宮下")  # type: ignore[arg-type]
 
-    def test_report_staff_entry_non_list_suggest_patterns_raises(self) -> None:
+    def test_report_staff_entry_non_tuple_suggest_patterns_raises(self) -> None:
+        # Issue #27 続編 H2: list 渡しも fail-close (tuple 限定)。
         from wiseman_hub.config import ReportStaffEntry
-        with pytest.raises(TypeError, match="suggest_patterns must be list"):
+        with pytest.raises(TypeError, match="suggest_patterns must be tuple"):
             ReportStaffEntry(suggest_patterns="*.xlsx")  # type: ignore[arg-type]
+        with pytest.raises(TypeError, match="suggest_patterns must be tuple"):
+            ReportStaffEntry(suggest_patterns=["a.xlsx"])  # type: ignore[arg-type]
 
     # --- AppConfig default インスタンス化が全 type guard を通過 ----------
     def test_app_config_default_construction_passes_all_type_guards(self) -> None:
@@ -2206,20 +2257,23 @@ class TestTypeGuardHelpers:
         with pytest.raises(TypeError, match="field must be bool"):
             _check_bool("field", bad)
 
-    def test_check_list_of_str_passes(self) -> None:
-        from wiseman_hub.config import _check_list_of_str
-        _check_list_of_str("field", ["a", "b", "c"])
-        _check_list_of_str("field", [])  # 空 list も OK
+    def test_check_tuple_of_str_passes(self) -> None:
+        from wiseman_hub.config import _check_tuple_of_str
+        _check_tuple_of_str("field", ("a", "b", "c"))
+        _check_tuple_of_str("field", ())  # 空 tuple も OK
 
-    def test_check_list_of_str_raises_on_non_list(self) -> None:
-        from wiseman_hub.config import _check_list_of_str
-        with pytest.raises(TypeError, match="field must be list"):
-            _check_list_of_str("field", "abc")
+    def test_check_tuple_of_str_raises_on_non_tuple(self) -> None:
+        # Issue #27 続編 H2: list 渡しも fail-close (helper は tuple 限定)。
+        from wiseman_hub.config import _check_tuple_of_str
+        with pytest.raises(TypeError, match="field must be tuple"):
+            _check_tuple_of_str("field", "abc")
+        with pytest.raises(TypeError, match="field must be tuple"):
+            _check_tuple_of_str("field", ["a", "b"])
 
-    def test_check_list_of_str_raises_on_non_str_element(self) -> None:
-        from wiseman_hub.config import _check_list_of_str
+    def test_check_tuple_of_str_raises_on_non_str_element(self) -> None:
+        from wiseman_hub.config import _check_tuple_of_str
         with pytest.raises(TypeError, match=r"field\[1\] must be str"):
-            _check_list_of_str("field", ["a", 123, "c"])
+            _check_tuple_of_str("field", ("a", 123, "c"))
 
     def test_check_dict_str_to_str_passes(self) -> None:
         from wiseman_hub.config import _check_dict_str_to_str
@@ -3713,7 +3767,7 @@ class TestIssue27PathMigrationPhase3b:
         new_staff = dict(cfg.checklist.report_staff)
         new_staff["宮下"] = ReportStaffEntry(
             base_dir=Path("//Tera-station/share/PT 宮下"),
-            suggest_patterns=["リハ経過報告書/令和{era}年/*{month}月*.xlsx"],
+            suggest_patterns=("リハ経過報告書/令和{era}年/*{month}月*.xlsx",),
         )
         new_cfg = dc_replace(
             cfg, checklist=dc_replace(cfg.checklist, report_staff=new_staff)
@@ -3754,7 +3808,7 @@ class TestIssue27PathMigrationPhase3b:
         new_staff = dict(cfg.checklist.report_staff)
         new_staff["宮下"] = ReportStaffEntry(
             base_dir=Path(""),
-            suggest_patterns=[],
+            suggest_patterns=(),
         )
         cleared = dc_replace(
             cfg, checklist=dc_replace(cfg.checklist, report_staff=new_staff)
@@ -3786,9 +3840,10 @@ suggest_patterns = [
         entry = cfg.checklist.report_staff["宮下"]
         # Issue #27 続編 G Phase 3b: base_dir は Path 型に移行済 (coerce_path 経由)。
         assert entry.base_dir == Path("\\\\Tera-station\\share\\PT 宮下")
-        assert entry.suggest_patterns == [
+        # Issue #27 続編 H2: suggest_patterns は tuple[str, ...] (load_config が coerce)。
+        assert entry.suggest_patterns == (
             "リハ経過報告書/令和*年/リハ経過報告書*{month}月*.xlsx",
-        ]
+        )
         # deprecated フィールドは空のまま
         assert entry.year_subfolder_template == ""
         assert entry.file_template == ""
@@ -3807,7 +3862,8 @@ file_template = "リハ経過報告書 (宮下) {month}月 .xlsx"
         )
         cfg = load_config(cfg_path)
         entry = cfg.checklist.report_staff["宮下"]
-        assert entry.suggest_patterns == []
+        # Issue #27 続編 H2: suggest_patterns 空は () (tuple)。
+        assert entry.suggest_patterns == ()
         assert entry.year_subfolder_template == "リハ経過報告書\\令和{era}年"
         assert entry.file_template == "リハ経過報告書 (宮下) {month}月 .xlsx"
 
@@ -3887,15 +3943,15 @@ xlsx_path_cache = "not-a-table"
                 report_staff={
                     "宮下": ReportStaffEntry(
                         base_dir=Path("\\\\Tera-station\\share\\PT 宮下"),
-                        suggest_patterns=[
+                        suggest_patterns=(
                             "リハ経過報告書/令和*年/リハ経過報告書*{month}月*.xlsx",
-                        ],
+                        ),
                     ),
                     "小島": ReportStaffEntry(
                         base_dir=Path("\\\\Tera-station\\share\\PT 小島"),
-                        suggest_patterns=[
+                        suggest_patterns=(
                             "リハ経過報告書(新)/経過報告書*令和*{month}月(最新)*.xlsx",
-                        ],
+                        ),
                     ),
                 },
                 xlsx_path_cache={
@@ -3907,12 +3963,13 @@ xlsx_path_cache = "not-a-table"
         target = tmp_path / "out.toml"
         save_config(cfg, target, create_if_missing=True)
         reloaded = load_config(target)
-        assert reloaded.checklist.report_staff["宮下"].suggest_patterns == [
+        # Issue #27 続編 H2: suggest_patterns は tuple[str, ...] (load_config が TOML list を coerce)。
+        assert reloaded.checklist.report_staff["宮下"].suggest_patterns == (
             "リハ経過報告書/令和*年/リハ経過報告書*{month}月*.xlsx",
-        ]
-        assert reloaded.checklist.report_staff["小島"].suggest_patterns == [
+        )
+        assert reloaded.checklist.report_staff["小島"].suggest_patterns == (
             "リハ経過報告書(新)/経過報告書*令和*{month}月(最新)*.xlsx",
-        ]
+        )
         assert reloaded.checklist.xlsx_path_cache == {
             "宮下:2026:3": "\\\\Tera-station\\share\\PT 宮下\\a.xlsx",
             "小島:2026:3": "\\\\Tera-station\\share\\PT 小島\\b.xlsx",
@@ -3933,11 +3990,11 @@ xlsx_path_cache = "not-a-table"
                 report_staff={
                     "PT 宮下": ReportStaffEntry(
                         base_dir=Path("\\\\Tera-station\\share\\PT 宮下"),
-                        suggest_patterns=["x/{month}.xlsx"],
+                        suggest_patterns=("x/{month}.xlsx",),
                     ),
                     "OT 小林": ReportStaffEntry(
                         base_dir=Path("\\\\Tera-station\\share\\OT小林"),
-                        suggest_patterns=["y/{era}.xlsx"],
+                        suggest_patterns=("y/{era}.xlsx",),
                     ),
                 },
                 xlsx_path_cache={
@@ -3957,9 +4014,10 @@ xlsx_path_cache = "not-a-table"
         reloaded = load_config(target)
         assert "PT宮下" in reloaded.checklist.report_staff
         assert "OT小林" in reloaded.checklist.report_staff
-        assert reloaded.checklist.report_staff["PT宮下"].suggest_patterns == [
+        # Issue #27 続編 H2: suggest_patterns は tuple[str, ...]。
+        assert reloaded.checklist.report_staff["PT宮下"].suggest_patterns == (
             "x/{month}.xlsx",
-        ]
+        )
         # xlsx_path_cache の key は staff lookup と独立 (現状は正規化未適用、
         # 別 PR で staff:year:month 形式の staff 部分を text_norm 経由にする予定)
         assert reloaded.checklist.xlsx_path_cache == {
@@ -3998,7 +4056,8 @@ suggest_patterns = ""
         save_config(cfg, target, create_if_missing=True)
         reloaded = load_config(target)
         entry = reloaded.checklist.report_staff["宮下"]
-        assert entry.suggest_patterns == []
+        # Issue #27 続編 H2: suggest_patterns 空は ()。
+        assert entry.suggest_patterns == ()
         assert entry.year_subfolder_template == "リハ経過報告書\\令和{era}年"
         assert entry.file_template == "リハ経過報告書 (宮下) {month}月 .xlsx"
 

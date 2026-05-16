@@ -648,13 +648,15 @@ def _parse_staff_toml(text: str) -> dict[str, ReportStaffEntry]:
             raise TypeError(
                 f"staff[{name}].suggest_patterns must be a list of strings"
             )
-        suggest_patterns: list[str] = []
+        # Issue #27 続編 H2: ReportStaffEntry.suggest_patterns は tuple[str, ...] 化済。
+        # accumulate は list で行い、ReportStaffEntry には tuple で渡す。
+        suggest_patterns_list: list[str] = []
         for element in suggest_raw:
             if not isinstance(element, str):
                 raise TypeError(
                     f"staff[{name}].suggest_patterns elements must be strings"
                 )
-            suggest_patterns.append(element)
+            suggest_patterns_list.append(element)
         # Issue #27 続編 C: `entry.get(..., "")` を ``str(...)`` で包むと TOML 値の
         # 非文字列 (int/bool/list/dict) が ``"123"`` 等に強制変換され、
         # ``ReportStaffEntry.__post_init__`` の型ガードを bypass する。
@@ -671,7 +673,7 @@ def _parse_staff_toml(text: str) -> dict[str, ReportStaffEntry]:
                 entry.get("base_dir", ""),
                 echo_value=False,
             ),
-            suggest_patterns=suggest_patterns,
+            suggest_patterns=tuple(suggest_patterns_list),
             year_subfolder_template=entry.get("year_subfolder_template", ""),
             file_template=entry.get("file_template", ""),
         )

@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -286,7 +287,7 @@ class PywinautoEngine(RPAEngine):
         reg_window.wait("visible", timeout=10)
         logger.info("新規登録フォーム表示完了")
 
-    def navigate_menu(self, menu_path: list[str]) -> None:
+    def navigate_menu(self, menu_path: Sequence[str]) -> None:
         """MDIメニューを階層的に辿って指定画面に遷移する。"""
         if self._main_window is None:
             raise RuntimeError("メインウィンドウが未接続です。先にlaunchを実行してください")

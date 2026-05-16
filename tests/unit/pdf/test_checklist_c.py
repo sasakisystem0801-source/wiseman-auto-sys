@@ -95,7 +95,7 @@ def _entry_with_xlsx(tmp_path: Path) -> tuple[ReportStaffEntry, Path]:
     xlsx.write_text("")
     entry = ReportStaffEntry(
         base_dir=base,
-        suggest_patterns=["リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx"],
+        suggest_patterns=("リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx",),
     )
     return entry, xlsx
 
@@ -232,7 +232,7 @@ def test_resolve_xlsx_legacy_template_fallback(tmp_path: Path) -> None:
     xlsx.write_text("")
     entry = ReportStaffEntry(
         base_dir=base,
-        suggest_patterns=[],
+        suggest_patterns=(),
         year_subfolder_template="リハ経過報告書/令和{era}年",
         file_template="report.xlsx",
     )
@@ -248,7 +248,7 @@ def test_resolve_xlsx_no_candidates_returns_folder_tree(tmp_path: Path) -> None:
     # xlsx 不在
     entry = ReportStaffEntry(
         base_dir=base,
-        suggest_patterns=["リハ経過報告書/令和{era}年/*.xlsx"],
+        suggest_patterns=("リハ経過報告書/令和{era}年/*.xlsx",),
     )
     result = resolve_xlsx("宮下", entry, 2026, 3, cache={})
     assert result.status == CPlacementStatus.NEEDS_REVIEW
@@ -273,7 +273,7 @@ def test_resolve_xlsx_fallback_hits_returns_count_message(tmp_path: Path) -> Non
     entry = ReportStaffEntry(
         base_dir=base,
         # 意図的に異なる pattern (例: 月名 "3月" を含むファイル名を想定) で suggest_patterns 0 件にする
-        suggest_patterns=["リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx"],
+        suggest_patterns=("リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx",),
     )
     result = resolve_xlsx("平瀬", entry, 2026, 3, cache={})
     assert result.status == CPlacementStatus.NEEDS_REVIEW
@@ -284,14 +284,14 @@ def test_resolve_xlsx_fallback_hits_returns_count_message(tmp_path: Path) -> Non
 def test_resolve_xlsx_missing_base_dir_returns_skipped(tmp_path: Path) -> None:
     entry = ReportStaffEntry(
         base_dir=tmp_path / "nowhere",
-        suggest_patterns=["x/y.xlsx"],
+        suggest_patterns=("x/y.xlsx",),
     )
     result = resolve_xlsx("宮下", entry, 2026, 3, cache={})
     assert result.status == CPlacementStatus.SKIPPED_NO_XLSX
 
 
 def test_resolve_xlsx_empty_base_dir_returns_skipped() -> None:
-    entry = ReportStaffEntry(base_dir=Path(""), suggest_patterns=["x.xlsx"])
+    entry = ReportStaffEntry(base_dir=Path(""), suggest_patterns=("x.xlsx",))
     result = resolve_xlsx("宮下", entry, 2026, 3, cache={})
     assert result.status == CPlacementStatus.SKIPPED_NO_XLSX
 
@@ -304,7 +304,7 @@ def _checklist_cfg(
     *,
     cache: dict[str, str] | None = None,
     routing: dict[str, str] | None = None,
-    suggest: list[str] | None = None,
+    suggest: tuple[str, ...] | None = None,
 ) -> tuple[ChecklistConfig, Path]:
     fax_root = tmp_path / "FAX"
     fax_root.mkdir()
@@ -312,10 +312,11 @@ def _checklist_cfg(
     (base / "リハ経過報告書" / "令和8年").mkdir(parents=True)
     xlsx = base / "リハ経過報告書" / "令和8年" / "リハ経過報告書（宮下）3月    .xlsx"
     xlsx.write_text("")
+    # Issue #27 続編 H2: suggest_patterns は tuple[str, ...]。
     entry = ReportStaffEntry(
         base_dir=base,
         suggest_patterns=suggest
-        or ["リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx"],
+        or ("リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx",),
     )
     cfg = ChecklistConfig(
         fax_root=fax_root,
@@ -395,11 +396,11 @@ def _multi_staff_cfg(tmp_path: Path) -> tuple[ChecklistConfig, Path]:
     base_kizuka.mkdir()  # xlsx 実体なし
     entry_kojima = ReportStaffEntry(
         base_dir=base_kojima,
-        suggest_patterns=["リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx"],
+        suggest_patterns=("リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx",),
     )
     entry_kizuka = ReportStaffEntry(
         base_dir=base_kizuka,
-        suggest_patterns=["リハ経過報告書/令和{era}年/*.xlsx"],
+        suggest_patterns=("リハ経過報告書/令和{era}年/*.xlsx",),
     )
     cfg = ChecklistConfig(
         fax_root=fax_root,
@@ -590,7 +591,7 @@ def test_plan_c_placement_cache_hit_sets_auto_prefix(tmp_path: Path) -> None:
         c_output_subfolder="経過報告書",
         facility_routing={"事業所A": "事業所A_FAX"},
         report_staff={
-            "宮下": ReportStaffEntry(base_dir=base, suggest_patterns=["dummy"]),
+            "宮下": ReportStaffEntry(base_dir=base, suggest_patterns=("dummy",)),
         },
         xlsx_path_cache={"宮下:2026:3": str(xlsx)},  # cache hit を仕込む
     )
@@ -625,7 +626,7 @@ def test_plan_c_placement_legacy_template_sets_auto_legacy_prefix(
         report_staff={
             "宮下": ReportStaffEntry(
                 base_dir=base,
-                suggest_patterns=[],  # 空にして legacy 経路に乗せる
+                suggest_patterns=(),  # 空 tuple にして legacy 経路に乗せる
                 year_subfolder_template="リハ経過報告書/令和{era}年",
                 file_template="report.xlsx",
             ),

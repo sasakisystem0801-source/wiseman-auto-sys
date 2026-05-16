@@ -48,7 +48,7 @@ def _make_config(tmp_path: Path) -> AppConfig:
             report_staff={
                 "宮下": ReportStaffEntry(
                     base_dir=tmp_path / "PT 宮下",
-                    suggest_patterns=["dummy"],
+                    suggest_patterns=("dummy",),
                 ),
             },
             xlsx_path_cache={"宮下:2026:3": r"\\nas\share\PT 宮下\3月.xlsx"},
