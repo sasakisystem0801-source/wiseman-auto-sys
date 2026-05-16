@@ -194,6 +194,10 @@ def _check_dict_str_to_str(name: str, value: object) -> None:
     ``dataclasses.replace(cfg)`` で再 ``__init__`` する際の rewrap 経路
     (既存値が MappingProxyType の状態で __post_init__ に入る) を通過させる。
     list / tuple 等の非 Mapping 型は依然 fail-close。
+
+    エラーメッセージは ``"must be dict"`` 表現を維持する (TOML 運用者向けに
+    「table = dict」概念を一貫させる)。型注釈は内部実装の Mapping、メッセージは
+    運用者語彙の dict、で意図的に責務を分けている。
     """
     if not isinstance(value, Mapping):
         raise TypeError(
@@ -754,6 +758,23 @@ _LEGACY_MONITORING_SUBFOLDERS: Final[frozenset[str]] = frozenset({
 })
 
 
+# Issue #27 続編 H3: ``ChecklistConfig`` の ``MappingProxyType`` ラップされた dict
+# field 集合。``_update_checklist`` の ``asdict(checklist)`` 経路で
+# ``copy.deepcopy(mappingproxy)`` が ``TypeError`` を起こすため、これらの field は
+# asdict 対象から除外し、別途 ``dict(checklist.X)`` で個別に dict 化する。
+#
+# ⚠ MAINTENANCE NOTE: ``ChecklistConfig`` に新たな ``Mapping`` 系 field を追加した
+# 場合は本集合にも追加すること。漏らすと ``save_config`` 経路で ``asdict`` が
+# ``TypeError: cannot pickle 'mappingproxy' object`` を起こす silent serialization
+# 失敗が発生する (silent-failure-hunter PR #327 review I2 反映)。
+_CHECKLIST_DICT_FIELDS: Final[frozenset[str]] = frozenset({
+    "facility_routing",
+    "report_staff",
+    "xlsx_path_cache",
+    "staff_choice_cache",
+})
+
+
 @dataclass(frozen=True)
 class ChecklistConfig:
     """スプレッドシート連携 B/C PDF 自動配置機能の設定（MVP）。
@@ -813,9 +834,12 @@ class ChecklistConfig:
     b_output_subfolder: str = "運動機能向上計画書"
     c_output_subfolder: str = "経過報告書"
     # Issue #27 続編 H3: dict → Mapping + MappingProxyType ラップ (immutability)。
-    # default_factory は dict を返し、__post_init__ で MappingProxyType に包む
-    # (型ガード `_check_dict_str_to_str` 側が `isinstance(v, dict)` を要求するため、
-    # 型検証は dict 段階で済ませてから wrap する)。
+    # default_factory は素の dict を返し、__post_init__ で
+    # ``MappingProxyType(dict(self.X))`` に包む。``dict(...)`` は防御コピーであり、
+    # 呼出側が元 dict を持ち続けても新 ChecklistConfig インスタンスには波及しない
+    # (参照断絶)。``_check_dict_str_to_str`` は ``Mapping`` を受け付けるため、
+    # ``dataclasses.replace()`` で既存の MappingProxyType 値が再 ``__post_init__``
+    # に入る経路も型ガードを通過する (list/tuple 等の非 Mapping 型は依然 fail-close)。
     facility_routing: Mapping[str, str] = field(default_factory=dict)
     report_staff: Mapping[str, ReportStaffEntry] = field(default_factory=dict)
     xlsx_path_cache: Mapping[str, str] = field(default_factory=dict)
@@ -937,6 +961,12 @@ class AppConfig:
     される。dict 追加・更新・削除は
     ``cfg = replace(cfg, checklist=replace(cfg.checklist, xlsx_path_cache={..., k: v}))``
     形式で行う。
+
+    **続編 H シリーズ完遂**: E (frozen=True) → H1 (root tuple) → H2 (leaf tuple)
+    → H3 (dict MappingProxyType) で、``AppConfig`` 配下の immutability 強化は
+    完了した。mutable leaf は構造的に存在しない (post-construction mutation 全経路
+    を構造的に阻止)。umbrella 残作業は §1 Literal 拡張・§4 Path 移行 (一部完了済)
+    の続編 F/G のみで、本 frozen/immutability テーマからは離れる。
 
     本 docstring の表現は PR #272 Codex review Low 指摘に基づき、「型ガード
     bypass を構造的に防ぐ」を「直下フィールドの参照差し替えを防ぐ」に絞って
@@ -1538,13 +1568,8 @@ def _update_checklist(doc: TOMLDocument, checklist: ChecklistConfig) -> None:
     # ``asdict()`` の内部 deep-copy 経路で TypeError になる (mappingproxy は
     # ``copy.deepcopy`` 非対応)。直前で個別に dict 化済
     # (``routing`` / ``staff`` / ``cache`` / ``staff_choice``) のため、
-    # asdict() の対象から除外して非 mapping field のみ stringify する。
-    _CHECKLIST_DICT_FIELDS = {
-        "facility_routing",
-        "report_staff",
-        "xlsx_path_cache",
-        "staff_choice_cache",
-    }
+    # module-level ``_CHECKLIST_DICT_FIELDS`` で asdict 対象から除外し、
+    # 非 mapping field のみ stringify する。
     checklist_dict = _stringify_path_values(
         {
             f.name: getattr(checklist, f.name)

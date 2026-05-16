@@ -196,6 +196,152 @@ def test_staff_picker_replaces_self_config_with_new_appconfig(tmp_path: Path) ->
     assert len(cfg.checklist.staff_choice_cache) == 0
 
 
+# ---------- pr-test-analyzer Gap 1 反映: xlsx picker hotpath の identity test ----
+
+
+def _make_dialog_with_needs_review_xlsx_row(
+    tmp_path: Path,
+) -> tuple[ChecklistCDialog, CPlacementResult, AppConfig, Path]:
+    """Tk 不要で ``_open_picker_for_review`` (xlsx_path_cache 書込側 hotpath) の
+    前提状態を組む。NEEDS_REVIEW 1 行を仕込み、xlsx 選択 + cache 書込経路を
+    呼び出せるようにする。
+    """
+    cfg = _make_appconfig(tmp_path)
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text("[checklist]\n", encoding="utf-8")
+
+    row = ChecklistRow(
+        name="テスト 太郎", monitoring_raw=None, staff="小島", facility="事業所A"
+    )
+    result = CPlacementResult(
+        row=row,
+        status=CPlacementStatus.NEEDS_REVIEW,
+        xlsx_candidates=[tmp_path / "PT 小島" / "3月.xlsx"],
+        folder_tree=[],
+        message="xlsx 選択待ち",
+    )
+
+    dlg = ChecklistCDialog.__new__(ChecklistCDialog)
+    dlg._config = cfg  # type: ignore[attr-defined]
+    dlg._config_path = cfg_path  # type: ignore[attr-defined]
+    dlg._results = [result]  # type: ignore[attr-defined]
+    dlg._top = MagicMock()  # type: ignore[attr-defined]
+    dlg._status_var = MagicMock()  # type: ignore[attr-defined]
+    dlg._refresh_tree = MagicMock()  # type: ignore[attr-defined]
+    dlg._update_exec_button = MagicMock()  # type: ignore[attr-defined]
+    dlg._current_year_month = MagicMock(return_value=(2026, 3))  # type: ignore[attr-defined]
+    return dlg, result, cfg, cfg_path
+
+
+def test_xlsx_picker_replaces_self_config_with_new_appconfig(tmp_path: Path) -> None:
+    """Issue #27 続編 H3 (pr-test-analyzer Gap 1 反映): xlsx picker hotpath も
+    ``replace()`` で ``self._config`` を新 AppConfig に差し替える。
+
+    `_open_staff_picker_for_review` と並列構造の identity 差し替え regression guard。
+    PR #272 教訓の構造的予防を、3 hotpath すべてで verify する。
+    """
+    dlg, result, cfg, _ = _make_dialog_with_needs_review_xlsx_row(tmp_path)
+    selected_xlsx = tmp_path / "PT 小島" / "3月.xlsx"
+
+    # XlsxPickerDialog が selected_xlsx + remember=True を返す
+    picker_mock = MagicMock()
+    picker_mock.get_toplevel.return_value.wait_window = MagicMock()
+    picker_mock.get_result.return_value = (selected_xlsx, True)
+    # apply_xlsx_selection を mock し、status=PENDING に遷移させる
+    def _fake_apply(r: CPlacementResult, xlsx: Path, _ck: object) -> None:
+        r.status = CPlacementStatus.PENDING
+        r.xlsx_path = xlsx
+
+    with patch(
+        "wiseman_hub.ui.checklist_c_dialog.XlsxPickerDialog",
+        MagicMock(return_value=picker_mock),
+    ), patch(
+        "wiseman_hub.ui.checklist_c_dialog.apply_xlsx_selection",
+        side_effect=_fake_apply,
+    ), patch(
+        "wiseman_hub.ui.checklist_c_dialog.save_config"
+    ), patch(
+        "wiseman_hub.ui.checklist_c_dialog._mirror_upload_entry_async"
+    ):
+        dlg._open_picker_for_review(0, result)
+
+    # self._config は新 AppConfig に差し替わっている (identity 変更)
+    assert dlg._config is not cfg
+    # 新 cfg の xlsx_path_cache に entry あり (key 形式: "小島:2026:3")
+    assert "小島:2026:3" in dlg._config.checklist.xlsx_path_cache
+    assert dlg._config.checklist.xlsx_path_cache["小島:2026:3"] == str(selected_xlsx)
+    # 元 cfg は不変
+    assert "小島:2026:3" not in cfg.checklist.xlsx_path_cache
+
+
+# ---------- pr-test-analyzer Gap 2 反映: cache clear hotpath の identity test ----
+
+
+def test_clear_cache_replaces_self_config_with_new_appconfig(tmp_path: Path) -> None:
+    """Issue #27 続編 H3 (pr-test-analyzer Gap 2 反映): cache clear hotpath も
+    ``replace()`` で ``self._config`` を新 AppConfig に差し替える。
+
+    `_clear_cache_for_row` は削除経路のため del cache[k] が動かない MappingProxyType
+    対応として replace() 経由になっている。identity 差し替えが正しく実行される
+    regression guard (PR #272 教訓の構造的予防の最終 hotpath)。
+    """
+    # PENDING 行 + cache 1 件入りの状態を仕込む
+    cfg = AppConfig(
+        wiseman=WisemanConfig(),
+        gcp=GcpConfig(),
+        checklist=ChecklistConfig(
+            spreadsheet_id="dummy",
+            fax_root=tmp_path,
+            facility_routing={"事業所A": "事業所A_FAX"},
+            report_staff={
+                "宮下": ReportStaffEntry(
+                    base_dir=tmp_path / "PT 宮下", suggest_patterns=("x",)
+                ),
+            },
+            xlsx_path_cache={"宮下:2026:3": str(tmp_path / "3月.xlsx")},
+        ),
+        log_dir=tmp_path / "logs",
+    )
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text("[checklist]\n", encoding="utf-8")
+
+    row = ChecklistRow(
+        name="テスト 太郎", monitoring_raw=None, staff="宮下", facility="事業所A"
+    )
+    result = CPlacementResult(row=row, status=CPlacementStatus.PENDING)
+
+    dlg = ChecklistCDialog.__new__(ChecklistCDialog)
+    dlg._config = cfg  # type: ignore[attr-defined]
+    dlg._config_path = cfg_path  # type: ignore[attr-defined]
+    dlg._results = [result]  # type: ignore[attr-defined]
+    dlg._top = MagicMock()  # type: ignore[attr-defined]
+    dlg._status_var = MagicMock()  # type: ignore[attr-defined]
+    dlg._refresh_tree = MagicMock()  # type: ignore[attr-defined]
+    dlg._update_exec_button = MagicMock()  # type: ignore[attr-defined]
+    dlg._update_status_summary = MagicMock()  # type: ignore[attr-defined]
+    dlg._current_year_month = MagicMock(return_value=(2026, 3))  # type: ignore[attr-defined]
+
+    with patch(
+        "wiseman_hub.ui.checklist_c_dialog.messagebox.askyesno",
+        return_value=True,
+    ), patch(
+        "wiseman_hub.ui.checklist_c_dialog.save_config"
+    ), patch(
+        "wiseman_hub.ui.checklist_c_dialog._mirror_delete_entry_async"
+    ), patch(
+        "wiseman_hub.ui.checklist_c_dialog.plan_c_placement",
+        return_value=[result],
+    ):
+        dlg._clear_cache_for_row(0)
+
+    # self._config は新 AppConfig に差し替わっている (identity 変更)
+    assert dlg._config is not cfg
+    # 新 cfg の cache は空 (削除済)
+    assert "宮下:2026:3" not in dlg._config.checklist.xlsx_path_cache
+    # 元 cfg は不変 (MappingProxyType + 防御コピーで参照断絶)
+    assert "宮下:2026:3" in cfg.checklist.xlsx_path_cache
+
+
 # ---------- Critical #2: save_config 失敗 + remember=False 分岐 ----------
 
 
