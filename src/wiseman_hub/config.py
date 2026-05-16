@@ -864,14 +864,18 @@ class AppConfig:
         ``cfg = replace(cfg, pdf_merge=replace(cfg.pdf_merge, input_dir=...))``
         形式で行う。
 
-    **frozen 化の対象外 (mutable leaf の内容変更)**:
-        ``reports`` は ``list[ReportTarget]`` 型のため、参照差し替え
-        (``cfg.reports = [...]``) は阻止できるが、list 内容変更
-        (``cfg.reports.append(...)`` / ``cfg.reports[0] = ...``) は阻止できない。
-        ``ReportTarget.menu_path`` の list も同様 (Phase 3a で frozen=True 化済だが
-        leaf list は別)。完全 immutability が必要なら type を
-        ``tuple[ReportTarget, ...]`` に変える別議論が必要 (umbrella §1 Literal 拡張
-        側で扱う)。
+    Issue #27 続編 H1: ``reports`` を ``list[ReportTarget]`` →
+    ``tuple[ReportTarget, ...]`` に変更。tuple は ``append`` / ``__setitem__``
+    を持たないため、``cfg.reports.append(...)`` / ``cfg.reports[0] = ...`` は
+    ``AttributeError`` / ``TypeError`` で構造的に阻止される。要素追加・差し替え
+    は ``cfg = replace(cfg, reports=(*cfg.reports, new_target))`` 形式に統一。
+
+    **frozen 化の対象外 (依然として残る mutable leaf)**:
+        ``ReportTarget.menu_path`` の ``list[str]`` は依然 mutable
+        (Phase 3a で ``ReportTarget`` 自体は frozen=True 化済だが leaf list は別)。
+        ``ReportStaffEntry.suggest_patterns`` も同様。
+        ``ChecklistConfig.{facility_routing, xlsx_path_cache, staff_choice_cache}``
+        の dict も同様。これらは umbrella の続編 H2/H3 で対応する。
 
     本 docstring の表現は PR #272 Codex review Low 指摘に基づき、「型ガード
     bypass を構造的に防ぐ」を「直下フィールドの参照差し替えを防ぐ」に絞って
@@ -883,7 +887,7 @@ class AppConfig:
     log_dir: Path = field(default_factory=Path)
     wiseman: WisemanConfig = field(default_factory=WisemanConfig)
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
-    reports: list[ReportTarget] = field(default_factory=list)
+    reports: tuple[ReportTarget, ...] = field(default_factory=tuple)
     gcp: GcpConfig = field(default_factory=GcpConfig)
     updater: UpdaterConfig = field(default_factory=UpdaterConfig)
     ocr_backend: OcrBackendConfig = field(default_factory=OcrBackendConfig)
@@ -891,20 +895,25 @@ class AppConfig:
     checklist: ChecklistConfig = field(default_factory=ChecklistConfig)
 
     def __post_init__(self) -> None:
-        """AppConfig 自体の str field + reports list 要素を型ガード。
+        """AppConfig 自体の str field + reports tuple 要素を型ガード。
 
         ネスト dataclass (wiseman/schedule/gcp/...) は各々の ``__post_init__`` で
         守られるが、``AppConfig`` 直下の ``version`` / ``log_level`` / ``log_dir`` /
         ``reports`` は本層で守る (silent-failure-hunter PR #260 review 反映)。
+
+        Issue #27 続編 H1: ``reports`` を tuple 化したため isinstance 判定も
+        ``tuple`` に変更。直接構築テスト等で list を渡すと TypeError で起動時
+        fail-close する (load_config / form_to_config 経由は tuple を組み立てて
+        渡す責務を負う)。
         """
         _check_str("AppConfig.version", self.version)
         _check_str("AppConfig.log_level", self.log_level)
         _check_literal("AppConfig.log_level", self.log_level, VALID_LOG_LEVELS)
         # Issue #27 続編 G Phase 1: log_dir を str → Path 移行。
         _check_path("AppConfig.log_dir", self.log_dir)
-        if not isinstance(self.reports, list):
+        if not isinstance(self.reports, tuple):
             raise TypeError(
-                f"AppConfig.reports must be list, got "
+                f"AppConfig.reports must be tuple, got "
                 f"{type(self.reports).__name__}: {self.reports!r}"
             )
         for i, item in enumerate(self.reports):
@@ -1125,14 +1134,17 @@ def load_config(path: Path | None = None) -> AppConfig:
         raise TypeError(
             f"[reports].targets must be a list; got {type(targets).__name__}"
         )
-    reports: list[ReportTarget] = []
+    # Issue #27 続編 H1: AppConfig.reports は tuple[ReportTarget, ...] に変更。
+    # accumulate は list で行い、最後に tuple 化して AppConfig に渡す。
+    reports_list: list[ReportTarget] = []
     for i, target in enumerate(targets):
         if not isinstance(target, dict):
             raise TypeError(
                 f"[reports].targets[{i}] must be a table; "
                 f"got {type(target).__name__}: {target!r}"
             )
-        reports.append(ReportTarget(**target))
+        reports_list.append(ReportTarget(**target))
+    reports: tuple[ReportTarget, ...] = tuple(reports_list)
 
     # Issue #27 続編 D: ``pop`` の戻り値を ``_require_section_table`` で守る。
     # 旧コード ``UserNameBBox(**bbox_data)`` は ``user_name_bbox = []`` 等で
@@ -1529,10 +1541,13 @@ def _update_checklist(doc: TOMLDocument, checklist: ChecklistConfig) -> None:
         doc["checklist"] = new_table
 
 
-def _update_reports(doc: TOMLDocument, reports: list[ReportTarget]) -> None:
+def _update_reports(doc: TOMLDocument, reports: tuple[ReportTarget, ...]) -> None:
     """[[reports.targets]] 配列を書き戻す。
 
     既存の targets 配列はインラインコメントごと置換される（要素間の書式保持は未対応）。
+
+    Issue #27 続編 H1: 引数型を ``list[ReportTarget]`` → ``tuple[ReportTarget, ...]``
+    に変更 (AppConfig.reports の tuple 化に追随、caller は cfg.reports をそのまま渡せる)。
     """
     targets_data = [asdict(t) for t in reports]
     if "reports" in doc:

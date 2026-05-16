@@ -317,12 +317,14 @@ output_dir = ""
         """
         from wiseman_hub.config import ReportTarget
 
-        cfg = AppConfig()
-        cfg.reports.append(
-            ReportTarget(name="報告書1", menu_path=["A", "B"], output_format="csv")
-        )
-        cfg.reports.append(
-            ReportTarget(name="報告書2", menu_path=["X"], output_format="csv")
+        # Issue #27 続編 H1: reports は tuple 化済のため append 不可、
+        # replace() で tuple 再構築する。
+        cfg = replace(
+            AppConfig(),
+            reports=(
+                ReportTarget(name="報告書1", menu_path=["A", "B"], output_format="csv"),
+                ReportTarget(name="報告書2", menu_path=["X"], output_format="csv"),
+            ),
         )
 
         target = tmp_path / "reports.toml"
@@ -354,7 +356,8 @@ output_dir = ""
         save_config(cfg, target, create_if_missing=True)
 
         reloaded = load_config(target)
-        assert reloaded.reports == []
+        # Issue #27 続編 H1: reports は tuple 化済 (空 tuple は () で比較)。
+        assert reloaded.reports == ()
 
     def test_save_with_inline_table_notation(self, tmp_path: Path) -> None:
         """既存 TOML がインラインテーブル記法 `section = {...}` でも save できる。"""
@@ -411,8 +414,11 @@ output_dir = ""
         """日本語氏名が UTF-8 で実ファイルに保存されている（生バイト確認）。"""
         from wiseman_hub.config import ReportTarget
 
-        cfg = AppConfig()
-        cfg.reports.append(ReportTarget(name="山田太郎", menu_path=["集計"]))
+        # Issue #27 続編 H1: reports は tuple 化済のため tuple 再構築。
+        cfg = replace(
+            AppConfig(),
+            reports=(ReportTarget(name="山田太郎", menu_path=["集計"]),),
+        )
         target = tmp_path / "unicode.toml"
         save_config(cfg, target, create_if_missing=True)
 
@@ -1655,19 +1661,29 @@ class TestFrozenInstanceImmutability:
                 ),
             )
 
-    def test_app_config_reports_list_content_mutation_not_blocked(self) -> None:
-        """``cfg.reports.append(...)`` は frozen=True でも阻止されない (docstring 既述)。
+    def test_app_config_reports_tuple_content_mutation_blocked(self) -> None:
+        """Issue #27 続編 H1: ``cfg.reports`` の tuple 化で要素変更が構造的に阻止される。
 
-        ``AppConfig.reports`` は ``list[ReportTarget]`` 型のため、参照差し替え
-        (``cfg.reports = [...]``) は阻止できるが list 内容変更 (append/pop) は
-        対象外。これは仕様であり、umbrella §1 で type を ``tuple`` に変える別議論
-        として扱う旨を docstring に明記済み。本テストは仕様 regression guard。
+        旧 ``list[ReportTarget]`` 時代 (続編 E Phase 3b まで) は frozen=True でも
+        list mutation (``cfg.reports.append(...)`` / ``cfg.reports[0] = ...``) は
+        阻止されなかった。続編 H1 で型を ``tuple[ReportTarget, ...]`` に変更し、
+        ``append`` / ``__setitem__`` を ``AttributeError`` / ``TypeError`` で
+        阻止する。要素追加は ``replace(cfg, reports=(*cfg.reports, new))`` 形式。
+
+        本テストは続編 H1 の仕様 regression guard。
         """
         cfg = AppConfig()
-        # list mutation は raise しない (cfg.reports 参照は差し替わらない)
-        cfg.reports.append(ReportTarget(name="ad-hoc"))
-        assert len(cfg.reports) == 1
-        assert cfg.reports[0].name == "ad-hoc"
+        # tuple は append を持たない (AttributeError)。
+        with pytest.raises(AttributeError):
+            cfg.reports.append(ReportTarget(name="ad-hoc"))  # type: ignore[attr-defined]
+        # __setitem__ も tuple は持たない (TypeError、要素ありで確認)。
+        cfg_with_item = replace(cfg, reports=(ReportTarget(name="initial"),))
+        with pytest.raises(TypeError):
+            cfg_with_item.reports[0] = ReportTarget(name="replaced")  # type: ignore[index]
+        # replace 経由の tuple 再構築は通常通り動作する。
+        cfg_extended = replace(cfg, reports=(*cfg.reports, ReportTarget(name="added")))
+        assert len(cfg_extended.reports) == 1
+        assert cfg_extended.reports[0].name == "added"
 
 
 class TestLiteralValidation:
@@ -2063,7 +2079,8 @@ class TestDataclassTypeGuards:
         # Issue #27 続編 G §4: exe_path は Path 型
         assert isinstance(cfg.wiseman.exe_path, Path)
         assert isinstance(cfg.schedule.enabled, bool)
-        assert isinstance(cfg.reports, list)
+        # Issue #27 続編 H1: reports は tuple 化済。
+        assert isinstance(cfg.reports, tuple)
         assert isinstance(cfg.gcp.project_id, str)
         assert isinstance(cfg.updater.enabled, bool)
         assert isinstance(cfg.checklist.facility_routing, dict)
@@ -2077,13 +2094,18 @@ class TestDataclassTypeGuards:
         with pytest.raises(TypeError, match="AppConfig.log_level must be str"):
             AppConfig(log_level=None)  # type: ignore[arg-type]
 
-    def test_app_config_non_list_reports_raises(self) -> None:
-        with pytest.raises(TypeError, match="AppConfig.reports must be list"):
-            AppConfig(reports="not-a-list")  # type: ignore[arg-type]
+    def test_app_config_non_tuple_reports_raises(self) -> None:
+        # Issue #27 続編 H1: reports は tuple 化済、非 tuple は TypeError。
+        # list ですら fail-close (umbrella H1 の構造的 immutability 強制)。
+        with pytest.raises(TypeError, match="AppConfig.reports must be tuple"):
+            AppConfig(reports="not-a-tuple")  # type: ignore[arg-type]
+        with pytest.raises(TypeError, match="AppConfig.reports must be tuple"):
+            AppConfig(reports=[ReportTarget(name="x")])  # type: ignore[arg-type]
 
     def test_app_config_non_report_target_in_reports_raises(self) -> None:
+        # Issue #27 続編 H1: tuple 内要素の型違反は要素 index 付き TypeError。
         with pytest.raises(TypeError, match=r"AppConfig.reports\[0\] must be ReportTarget"):
-            AppConfig(reports=["not-a-ReportTarget"])  # type: ignore[list-item]
+            AppConfig(reports=("not-a-ReportTarget",))  # type: ignore[arg-type]
 
     # --- ChecklistConfig.report_staff inline 検査の漏れたケース (pr-test rating 7) ---
     def test_checklist_report_staff_non_dict_raises(self) -> None:
