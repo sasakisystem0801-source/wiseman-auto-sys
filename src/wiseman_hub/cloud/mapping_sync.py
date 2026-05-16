@@ -271,13 +271,15 @@ def pull_report_staff(gcp: GcpConfig) -> dict[str, ReportStaffEntry]:
             raise MappingSyncError(
                 f"staff[{name}].suggest_patterns must be a list"
             )
-        suggest_patterns: list[str] = []
+        # Issue #27 続編 H2: ReportStaffEntry.suggest_patterns は tuple[str, ...] 化済。
+        # accumulate は list で行い、ReportStaffEntry には tuple で渡す。
+        suggest_patterns_list: list[str] = []
         for element in suggest_raw:
             if not isinstance(element, str):
                 raise MappingSyncError(
                     f"staff[{name}].suggest_patterns elements must be str"
                 )
-            suggest_patterns.append(element)
+            suggest_patterns_list.append(element)
         # Issue #27 続編 G Phase 3b: JSON contract は str だが ReportStaffEntry は
         # Path 型必須化のため coerce_path 経由 (空白 strip → 未設定 sentinel)。
         result[name] = ReportStaffEntry(
@@ -286,7 +288,7 @@ def pull_report_staff(gcp: GcpConfig) -> dict[str, ReportStaffEntry]:
                 base_dir,
                 echo_value=False,
             ),
-            suggest_patterns=suggest_patterns,
+            suggest_patterns=tuple(suggest_patterns_list),
         )
     logger.info("report_staff pull: %d entries", len(result))
     return result

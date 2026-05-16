@@ -47,6 +47,21 @@ class TestMockEngine:
         engine.navigate_menu(["ケア記録", "集計表"])
         assert engine._current_screen == "集計表"
 
+    def test_navigate_menu_accepts_tuple(self) -> None:
+        # Issue #27 続編 H2: ReportTarget.menu_path が tuple 化されたため、
+        # Sequence[str] 抽象化で tuple も受け入れることを verify。
+        engine = MockEngine()
+        engine.navigate_menu(("ケア記録", "集計表"))
+        assert engine._current_screen == "集計表"
+
+    def test_navigate_menu_rejects_bare_str(self) -> None:
+        # Issue #27 続編 H2: Sequence[str] は str も satisfy するため、
+        # bare-str 渡しは silent corruption (`"ABC"` → `["A","B","C"]`) を起こす
+        # foot-gun。runtime guard で TypeError として fail-close することを verify。
+        engine = MockEngine()
+        with pytest.raises(TypeError, match="must be a sequence of str segments"):
+            engine.navigate_menu("ケア記録")  # type: ignore[arg-type]
+
     def test_export_csv_creates_file(self, tmp_path: Path) -> None:
         engine = MockEngine()
         engine._current_screen = "テスト帳票"

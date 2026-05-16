@@ -185,13 +185,10 @@ def form_to_config(form: SettingsForm, base: AppConfig) -> AppConfig:
     追加・差し替えは tuple 再構築で行う (``cfg.reports.append`` は AttributeError
     で阻止される)。
 
-    ただし mutable leaf (``ReportTarget.menu_path`` の list) は依然 frozen でも
-    内容変更不可ではないため、``form_to_config`` の戻り値経由で
-    ``new_cfg.reports[0].menu_path.append(...)`` 等を実行すると ``base`` 側にも
-    漏れる。Codex review (PR #272) Medium 指摘の防御として ``reports`` は
-    ``ReportTarget.menu_path`` まで含めて新 list で再構築し、mutable leaf の
-    base/new_cfg alias を切る (umbrella 続編 H2 で menu_path の tuple 化により
-    本暫定防御は不要になる予定)。
+    Issue #27 続編 H2: ``ReportTarget.menu_path`` も ``tuple[str, ...]`` 化済。
+    leaf も完全 immutable のため、PR #272 Codex Medium 指摘の暫定 defensive
+    shallow copy (``replace(r, menu_path=list(r.menu_path))``) は不要になり、
+    ``base.reports`` の tuple をそのまま ``replace(base, reports=...)`` に渡せる。
     """
     # bbox / concat_order は dataclass を再構築して __post_init__ で即時検証する
     # （個別属性代入では bypass されるため、不正値が次回起動まで silent になる問題を回避）。
@@ -211,14 +208,11 @@ def form_to_config(form: SettingsForm, base: AppConfig) -> AppConfig:
         tuple[ConcatSourceLetter, ...],
         tuple(s.strip() for s in form.concat_order.split(",") if s.strip()),
     )
-    # PR #272 Codex Medium 指摘対応: mutable leaf list の base/new_cfg alias を切る。
-    # Issue #27 続編 H1: AppConfig.reports は tuple 化済 (要素差し替え/追加は
-    # tuple 再構築のみ可能、append/__setitem__ は AttributeError/TypeError)。
-    # 残る mutable leaf は ReportTarget.menu_path (umbrella 続編 H2 対象)。
-    # 続編 H2 完了までの暫定防御として、leaf list を浅くコピーする。
-    decoupled_reports: tuple[ReportTarget, ...] = tuple(
-        replace(r, menu_path=list(r.menu_path)) for r in base.reports
-    )
+    # Issue #27 続編 H1/H2: AppConfig.reports は tuple[ReportTarget, ...] 化済かつ
+    # ReportTarget.menu_path も tuple[str, ...] 化済 (leaf も immutable)。
+    # base.reports をそのまま渡せばよい (PR #272 由来の defensive shallow copy は
+    # H2 で不要になり削除)。
+    decoupled_reports: tuple[ReportTarget, ...] = base.reports
     # API Key は前後空白も有効値として尊重（``form.ocr_api_key`` 生値を維持）。
     return replace(
         base,

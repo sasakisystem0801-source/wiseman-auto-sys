@@ -22,13 +22,14 @@ from wiseman_hub.ui.checklist_settings_dialog import (
 
 
 class TestStaffTomlRoundTrip:
-    def test_suggest_patterns_round_trip_preserves_list(self) -> None:
+    def test_suggest_patterns_round_trip_preserves_tuple(self) -> None:
+        # Issue #27 続編 H2: suggest_patterns は tuple[str, ...]。
         original = {
             "宮下": ReportStaffEntry(
                 base_dir=Path("\\\\Tera-station\\share\\PT 宮下"),
-                suggest_patterns=[
+                suggest_patterns=(
                     "リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx",
-                ],
+                ),
             ),
         }
         text = _staff_to_toml(original)
@@ -40,14 +41,14 @@ class TestStaffTomlRoundTrip:
         original = {
             "小島": ReportStaffEntry(
                 base_dir=Path("\\\\Tera-station\\share\\PT 小島"),
-                suggest_patterns=[
+                suggest_patterns=(
                     "リハ経過報告書(新)/経過報告書*令和{era}年{month}月*.xlsx",
                     "リハ経過報告書(旧)/令和{era}年度/経過報告書*{month}月*.xlsx",
-                ],
+                ),
             ),
             "OT 小林": ReportStaffEntry(
                 base_dir=Path("\\\\Tera-station\\share\\OT小林"),
-                suggest_patterns=["経過報告書/R{era}/*{month}月*.xlsx"],
+                suggest_patterns=("経過報告書/R{era}/*{month}月*.xlsx",),
             ),
         }
         text = _staff_to_toml(original)
@@ -60,19 +61,21 @@ class TestStaffTomlRoundTrip:
 
     def test_empty_suggest_patterns_emits_empty_list(self) -> None:
         original = {
-            "test": ReportStaffEntry(base_dir=Path("C:/x"), suggest_patterns=[]),
+            "test": ReportStaffEntry(base_dir=Path("C:/x"), suggest_patterns=()),
         }
         text = _staff_to_toml(original)
+        # TOML 出力は array リテラル `[]` (TOML 構文として list/tuple は array)。
         assert "suggest_patterns = []" in text
         roundtrip = _parse_staff_toml(text)
-        assert roundtrip["test"].suggest_patterns == []
+        # Python 側受け取りは tuple (空 tuple `()`)。
+        assert roundtrip["test"].suggest_patterns == ()
 
     def test_deprecated_fields_preserved_when_non_empty(self) -> None:
         """旧 MVP 互換: year_subfolder_template / file_template が非空なら保持。"""
         original = {
             "legacy": ReportStaffEntry(
                 base_dir=Path("C:/legacy"),
-                suggest_patterns=[],
+                suggest_patterns=(),
                 year_subfolder_template="令和{era}年",
                 file_template="経過報告書*{month}月*.xlsx",
             ),
@@ -87,7 +90,7 @@ class TestStaffTomlRoundTrip:
         original = {
             "new": ReportStaffEntry(
                 base_dir=Path("C:/x"),
-                suggest_patterns=["a/*.xlsx"],
+                suggest_patterns=("a/*.xlsx",),
             ),
         }
         text = _staff_to_toml(original)
@@ -104,13 +107,13 @@ class TestStaffTomlRoundTrip:
         original = {
             "PT 宮下": ReportStaffEntry(
                 base_dir=Path("C:/x"),
-                suggest_patterns=["a/*.xlsx"],
+                suggest_patterns=("a/*.xlsx",),
             ),
         }
         text = _staff_to_toml(original)
         roundtrip = _parse_staff_toml(text)
         assert "PT宮下" in roundtrip
-        assert roundtrip["PT宮下"].suggest_patterns == ["a/*.xlsx"]
+        assert roundtrip["PT宮下"].suggest_patterns == ("a/*.xlsx",)
 
 
 class TestStaffTomlValidation:
@@ -182,7 +185,8 @@ class TestStaffTomlPropagatesDataclassTypeGuard:
         result = _parse_staff_toml(good)
         # Issue #27 続編 G Phase 3b: base_dir は Path 型に移行済 (coerce_path 経由)。
         assert result["宮下"].base_dir == Path("C:/PT宮下")
-        assert result["宮下"].suggest_patterns == ["a/*.xlsx"]
+        # Issue #27 続編 H2: suggest_patterns は tuple[str, ...]。
+        assert result["宮下"].suggest_patterns == ("a/*.xlsx",)
         assert result["宮下"].year_subfolder_template == "令和{era}年"
         assert result["宮下"].file_template == "経過報告書*{month}月*.xlsx"
 

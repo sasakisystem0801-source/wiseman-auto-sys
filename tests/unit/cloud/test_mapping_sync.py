@@ -267,11 +267,11 @@ class TestPushReportStaff:
         original = {
             "宮下": ReportStaffEntry(
                 base_dir=Path("\\\\Tera-station\\share\\PT 宮下"),
-                suggest_patterns=["リハ経過報告書/令和{era}年/*{month}月*.xlsx"],
+                suggest_patterns=("リハ経過報告書/令和{era}年/*{month}月*.xlsx",),
             ),
             "小林": ReportStaffEntry(
                 base_dir=Path("\\\\Tera-station\\share\\OT小林"),
-                suggest_patterns=["経過報告書/R{era}/*{month}月*.xlsx"],
+                suggest_patterns=("経過報告書/R{era}/*{month}月*.xlsx",),
             ),
         }
         with patch(
@@ -287,9 +287,11 @@ class TestPushReportStaff:
         assert set(body["staff"].keys()) == {"宮下", "小林"}
         # Issue #27 続編 G Phase 3b: JSON body は str 維持 (push 側で str(Path) 変換)。
         assert body["staff"]["宮下"]["base_dir"] == str(original["宮下"].base_dir)
+        # Issue #27 続編 H2: Python 側は tuple だが JSON 経由は list (json.dumps が変換)。
+        # body は JSON deserialize 結果なので右辺を list() でラップ。
         assert (
             body["staff"]["宮下"]["suggest_patterns"]
-            == original["宮下"].suggest_patterns
+            == list(original["宮下"].suggest_patterns)
         )
         assert kwargs["content_type"] == "application/json; charset=utf-8"
 
@@ -322,7 +324,7 @@ class TestPushReportStaff:
         original = {
             "宮下": ReportStaffEntry(
                 base_dir=Path(""),  # 未設定 sentinel
-                suggest_patterns=[],
+                suggest_patterns=(),
             ),
         }
         with patch(
@@ -363,9 +365,13 @@ class TestPullReportStaff:
         assert set(result.keys()) == {"宮下"}
         # Issue #27 続編 G Phase 3b: pull 経由で Path 型に変換される (coerce_path)。
         assert result["宮下"].base_dir == Path("\\\\Tera-station\\share\\PT 宮下")
-        assert result["宮下"].suggest_patterns == [
-            "リハ経過報告書/令和{era}年/*{month}月*.xlsx"
-        ]
+        # Issue #27 続編 H2: pull で ReportStaffEntry 化された結果は tuple[str, ...]。
+        # isinstance check で coerce 経路 (mapping_sync.py:291 の `tuple(...)` ラップ)
+        # が retire しないことの直接 regression guard。
+        assert isinstance(result["宮下"].suggest_patterns, tuple)
+        assert result["宮下"].suggest_patterns == (
+            "リハ経過報告書/令和{era}年/*{month}月*.xlsx",
+        )
 
     def test_pull_empty_base_dir_becomes_unset_sentinel(self, gcp: GcpConfig) -> None:
         """Issue #27 続編 G Phase 3b: JSON ``""`` 値は coerce_path 経由で
@@ -482,13 +488,13 @@ class TestReportStaffRoundTrip:
         original = {
             "宮下": ReportStaffEntry(
                 base_dir=Path("\\\\Tera-station\\share\\PT 宮下"),
-                suggest_patterns=[
+                suggest_patterns=(
                     "リハ経過報告書/令和{era}年/リハ経過報告書*{month}月*.xlsx",
-                ],
+                ),
             ),
             "小林": ReportStaffEntry(
                 base_dir=Path("\\\\Tera-station\\share\\OT小林"),
-                suggest_patterns=["経過報告書/R{era}/*{month}月*.xlsx"],
+                suggest_patterns=("経過報告書/R{era}/*{month}月*.xlsx",),
             ),
         }
         with patch(

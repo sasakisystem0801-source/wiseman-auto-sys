@@ -72,11 +72,17 @@ def _check_bool(name: str, value: object) -> None:
         )
 
 
-def _check_list_of_str(name: str, value: object) -> None:
-    """``list[str]`` でなければ ``TypeError`` (要素まで検査)。"""
-    if not isinstance(value, list):
+def _check_tuple_of_str(name: str, value: object) -> None:
+    """``tuple[str, ...]`` でなければ ``TypeError`` (要素まで検査)。
+
+    Issue #27 続編 H2 で ``ReportTarget.menu_path`` /
+    ``ReportStaffEntry.suggest_patterns`` を ``list[str]`` → ``tuple[str, ...]``
+    化したのに伴い、helper も list 版から tuple 版に rename。list 渡しも
+    TypeError で fail-close する (umbrella H1/H2 の構造的 immutability 強制)。
+    """
+    if not isinstance(value, tuple):
         raise TypeError(
-            f"{name} must be list, got {type(value).__name__}: {value!r}"
+            f"{name} must be tuple, got {type(value).__name__}: {value!r}"
         )
     for i, item in enumerate(value):
         if not isinstance(item, str):
@@ -368,17 +374,19 @@ class ReportTarget:
     に阻止される。要素追加・差し替えは
     ``replace(cfg, reports=(*cfg.reports, new_target))`` 形式に統一。
 
-    一方、本 ``ReportTarget.menu_path`` 自体は依然 ``list[str]`` で内容変更可能
-    (umbrella 続編 H2 で tuple 化予定)。
+    Issue #27 続編 H2: ``menu_path`` を ``list[str]`` → ``tuple[str, ...]`` 化。
+    leaf list の内容変更 (``.append`` / ``[i] = ...``) も構造的に阻止される。
+    要素追加は ``replace(target, menu_path=(*target.menu_path, new_segment))``
+    形式に統一。
     """
 
     name: str = ""
-    menu_path: list[str] = field(default_factory=list)
+    menu_path: tuple[str, ...] = field(default_factory=tuple)
     output_format: OutputFormat = "csv"
 
     def __post_init__(self) -> None:
         _check_str("ReportTarget.name", self.name)
-        _check_list_of_str("ReportTarget.menu_path", self.menu_path)
+        _check_tuple_of_str("ReportTarget.menu_path", self.menu_path)
         _check_str("ReportTarget.output_format", self.output_format)
         _check_literal(
             "ReportTarget.output_format", self.output_format, VALID_OUTPUT_FORMATS
@@ -689,13 +697,18 @@ class ReportStaffEntry:
     で ``__post_init__`` 型ガードを bypass する経路を構造的に防ぐ。フィールド更新
     は ``replace()`` 経由に統一する。
 
+    Issue #27 続編 H2: ``suggest_patterns`` を ``list[str]`` → ``tuple[str, ...]``
+    化。leaf の内容変更 (``.append`` / ``[i] = ...``) も構造的に阻止される。
+    要素追加は ``replace(entry, suggest_patterns=(*entry.suggest_patterns, new))``
+    形式に統一。TOML / form parser 経路は accumulate 後に tuple 化する責務を負う。
+
     base_dir: 担当者フォルダの絶対パス（例: ``\\\\Tera-station\\share\\PT 宮下``）
     suggest_patterns: 候補 xlsx を絞り込む glob 風パターン（``{era}``/``{month}`` 埋め込み可）。
         複数指定可能で、上から順に試行され、いずれかに該当する xlsx を全て候補とする。
         パターン階層は ``/`` 区切り、ワイルドカード ``*`` のみサポート（再帰 ``**`` 不可）。
-        例（PT 宮下）: ``["リハ経過報告書/令和*年/リハ経過報告書*{month}月*.xlsx"]``
-        例（PT 木塚）: ``["経過報告書/令和*年度*/経過報告書*木塚*{month}月*.xlsx"]``
-        空 list の場合は year_subfolder_template/file_template にフォールバック（後方互換）。
+        例（PT 宮下）: ``("リハ経過報告書/令和*年/リハ経過報告書*{month}月*.xlsx",)``
+        例（PT 木塚）: ``("経過報告書/令和*年度*/経過報告書*木塚*{month}月*.xlsx",)``
+        空 tuple の場合は year_subfolder_template/file_template にフォールバック（後方互換）。
 
     year_subfolder_template / file_template:
         旧 MVP 互換フィールド（deprecated、suggest_patterns が空の場合のみ使用）。
@@ -706,7 +719,7 @@ class ReportStaffEntry:
     # (Path("") == Path(".") で未設定判定)、UNC default は持たない (Phase 3a の
     # karte_root / fax_root と違い、担当者ごとに本田様 PC 設定する性質のため)。
     base_dir: Path = field(default_factory=Path)
-    suggest_patterns: list[str] = field(default_factory=list)
+    suggest_patterns: tuple[str, ...] = field(default_factory=tuple)
     # deprecated（後方互換、suggest_patterns 空時のフォールバック）
     year_subfolder_template: str = ""
     file_template: str = ""
@@ -714,7 +727,7 @@ class ReportStaffEntry:
     def __post_init__(self) -> None:
         # Issue #27 続編 G Phase 3b: base_dir は Path 型に移行済。
         _check_path("ReportStaffEntry.base_dir", self.base_dir)
-        _check_list_of_str("ReportStaffEntry.suggest_patterns", self.suggest_patterns)
+        _check_tuple_of_str("ReportStaffEntry.suggest_patterns", self.suggest_patterns)
         _check_str("ReportStaffEntry.year_subfolder_template", self.year_subfolder_template)
         _check_str("ReportStaffEntry.file_template", self.file_template)
 
@@ -875,13 +888,14 @@ class AppConfig:
     ``AttributeError`` / ``TypeError`` で構造的に阻止される。要素追加・差し替え
     は ``cfg = replace(cfg, reports=(*cfg.reports, new_target))`` 形式に統一。
 
+    Issue #27 続編 H2: ``ReportTarget.menu_path`` / ``ReportStaffEntry.suggest_patterns``
+    も ``list[str]`` → ``tuple[str, ...]`` 化済。これにより leaf list 由来の
+    mutation 経路 (`reports[i].menu_path.append(...)` 等) は構造的に閉鎖された。
+
     **frozen 化の対象外 (依然として残る mutable leaf)**:
-        ``ReportTarget.menu_path`` の ``list[str]`` は依然 mutable
-        (Phase 3a で ``ReportTarget`` 自体は frozen=True 化済だが leaf list は別)。
-        ``ReportStaffEntry.suggest_patterns`` も同様。
         ``ChecklistConfig.{facility_routing, report_staff, xlsx_path_cache, staff_choice_cache}``
-        の dict も同様 (``ChecklistConfig`` docstring の対応節を参照)。これらは
-        umbrella の続編 H2/H3 で対応する。
+        の dict は依然 mutable (``ChecklistConfig`` docstring の対応節を参照)。
+        これらは umbrella の続編 H3 で対応する。
 
     本 docstring の表現は PR #272 Codex review Low 指摘に基づき、「型ガード
     bypass を構造的に防ぐ」を「直下フィールドの参照差し替えを防ぐ」に絞って
@@ -974,15 +988,18 @@ def _coerce_facility_aliases(aliases_data: Any) -> dict[str, list[str]]:
 def _coerce_report_staff_entry(staff_name: str, entry_data: dict[str, Any]) -> ReportStaffEntry:
     """TOML の checklist.report_staff.<name> table を ReportStaffEntry に強制変換する。
 
-    suggest_patterns は list[str] の正規化:
+    suggest_patterns の正規化:
+        - TOML は array リテラル ``[...]`` 表記、Python 側 (続編 H2) は ``tuple[str, ...]``
         - キー存在 + 値が list でない → TypeError（空文字 ``""`` も不正、Codex review M6 対策）
         - 要素が str でない → TypeError
-        - 空 list ``[]`` は正当（旧 *_template フォールバック対象）
+        - 空 list ``[]`` は正当（旧 *_template フォールバック対象、空 tuple ``()`` に coerce）
     deprecated フィールド（year_subfolder_template / file_template）は str 強制。
     PII 配慮: 例外メッセージに担当者名は含めるが（運用上トラブルシュートに必要）、
     パス値は含めない（NAS 構造はログ送信先で機密扱いになる）。
     """
-    suggest_patterns: list[str] = []
+    # Issue #27 続編 H2: ReportStaffEntry.suggest_patterns は tuple[str, ...] 化済。
+    # accumulate は list で行い、最後に tuple 化して ReportStaffEntry に渡す。
+    suggest_patterns_list: list[str] = []
     if "suggest_patterns" in entry_data:
         suggest_data = entry_data.pop("suggest_patterns")
         if not isinstance(suggest_data, list):
@@ -996,7 +1013,7 @@ def _coerce_report_staff_entry(staff_name: str, entry_data: dict[str, Any]) -> R
                     f"checklist.report_staff.{staff_name}.suggest_patterns elements must be strings; "
                     f"got {type(element).__name__}"
                 )
-            suggest_patterns.append(element)
+            suggest_patterns_list.append(element)
     # Issue #27 続編 G Phase 3b: base_dir を TOML str → Path coerce (空白 strip → 未設定 sentinel)。
     # 型違反は coerce_path が TypeError raise (起動時 fail-close、PII 配慮で path 値は echo しない)。
     if "base_dir" in entry_data:
@@ -1005,7 +1022,7 @@ def _coerce_report_staff_entry(staff_name: str, entry_data: dict[str, Any]) -> R
             entry_data["base_dir"],
             echo_value=False,
         )
-    return ReportStaffEntry(suggest_patterns=suggest_patterns, **entry_data)
+    return ReportStaffEntry(suggest_patterns=tuple(suggest_patterns_list), **entry_data)
 
 
 def _validate_facility_aliases(aliases: dict[str, list[str]]) -> None:
@@ -1142,6 +1159,9 @@ def load_config(path: Path | None = None) -> AppConfig:
         )
     # Issue #27 続編 H1: AppConfig.reports は tuple[ReportTarget, ...] に変更。
     # accumulate は list で行い、最後に tuple 化して AppConfig に渡す。
+    # Issue #27 続編 H2: ReportTarget.menu_path も tuple[str, ...] に変更。
+    # TOML の array リテラル (list) を ReportTarget コンストラクタに渡す前に
+    # tuple に coerce する (list 渡しは __post_init__ で fail-close するため)。
     reports_list: list[ReportTarget] = []
     for i, target in enumerate(targets):
         if not isinstance(target, dict):
@@ -1149,7 +1169,10 @@ def load_config(path: Path | None = None) -> AppConfig:
                 f"[reports].targets[{i}] must be a table; "
                 f"got {type(target).__name__}: {target!r}"
             )
-        reports_list.append(ReportTarget(**target))
+        target_kwargs = dict(target)
+        if "menu_path" in target_kwargs and isinstance(target_kwargs["menu_path"], list):
+            target_kwargs["menu_path"] = tuple(target_kwargs["menu_path"])
+        reports_list.append(ReportTarget(**target_kwargs))
     reports: tuple[ReportTarget, ...] = tuple(reports_list)
 
     # Issue #27 続編 D: ``pop`` の戻り値を ``_require_section_table`` で守る。

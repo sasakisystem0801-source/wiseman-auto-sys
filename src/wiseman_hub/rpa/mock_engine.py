@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 
 from wiseman_hub.rpa.base import RPAEngine
@@ -48,7 +49,14 @@ class MockEngine(RPAEngine):
             raise RuntimeError("先に select_care_system() を実行してください")
         self._registration_opened = True
 
-    def navigate_menu(self, menu_path: list[str]) -> None:
+    def navigate_menu(self, menu_path: Sequence[str]) -> None:
+        # Issue #27 続編 H2: Sequence[str] は str も含むため bare-str を runtime guard。
+        # base.py docstring 参照 (RPAEngine.navigate_menu の foot-gun 防御)。
+        if isinstance(menu_path, str):
+            raise TypeError(
+                "navigate_menu: menu_path must be a sequence of str segments "
+                f"(list/tuple), not a bare str: {menu_path!r}"
+            )
         path_str = " → ".join(menu_path)
         self._call_log.append(f"navigate_menu({path_str})")
         logger.info("[MOCK] メニュー遷移: %s", path_str)
