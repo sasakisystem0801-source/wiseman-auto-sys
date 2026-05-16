@@ -9,9 +9,11 @@ except ModuleNotFoundError:
 import logging
 import math
 import os
-from dataclasses import asdict, dataclass, field
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, field, fields
 from glob import glob
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Final, Literal, get_args
 
 import tomlkit
@@ -184,8 +186,16 @@ def coerce_path(name: str, raw: Any, *, echo_value: bool = True) -> Path:
 
 
 def _check_dict_str_to_str(name: str, value: object) -> None:
-    """``dict[str, str]`` でなければ ``TypeError`` (キー/値とも検査)。"""
-    if not isinstance(value, dict):
+    """``Mapping[str, str]`` でなければ ``TypeError`` (キー/値とも検査)。
+
+    Issue #27 続編 H3 で ``ChecklistConfig`` の 4 dict を ``MappingProxyType``
+    ラップに変更したため、``isinstance(value, dict)`` から
+    ``isinstance(value, Mapping)`` に緩和。これにより
+    ``dataclasses.replace(cfg)`` で再 ``__init__`` する際の rewrap 経路
+    (既存値が MappingProxyType の状態で __post_init__ に入る) を通過させる。
+    list / tuple 等の非 Mapping 型は依然 fail-close。
+    """
+    if not isinstance(value, Mapping):
         raise TypeError(
             f"{name} must be dict, got {type(value).__name__}: {value!r}"
         )
@@ -752,11 +762,13 @@ class ChecklistConfig:
     で ``__post_init__`` 型ガードを bypass する経路を構造的に防ぐ。フィールド更新
     は ``replace()`` 経由に統一する。
 
-    なお ``facility_routing`` / ``report_staff`` / ``xlsx_path_cache`` /
-    ``staff_choice_cache`` は ``dict[str, ...]`` のため、dict 自体の内容変更
-    (``cfg.facility_routing["X"] = "Y"``) は frozen 化の対象外
-    (参照差し替え ``cfg.facility_routing = {...}`` のみ阻止)。
-    値内容の immutability が必要なら ``frozenmap`` 等の不変 dict 型への移行を別途検討する。
+    Issue #27 続編 H3: ``facility_routing`` / ``report_staff`` / ``xlsx_path_cache`` /
+    ``staff_choice_cache`` の 4 dict を ``Mapping[str, ...]`` + ``MappingProxyType``
+    ラップに変更し、dict 内容変更 (``cfg.facility_routing["X"] = "Y"``) も
+    構造的に阻止する。dict 追加・更新・削除は ``dataclasses.replace()`` 経由で
+    ChecklistConfig を再生成する。``__post_init__`` で防御コピーを取って包むため、
+    呼出側が持ち続けている元 ``dict`` 経由の外部 mutation は新インスタンスには
+    波及しない (参照断絶)。
 
     spreadsheet_id: Google Drive 上の xlsx file id
     karte_root: B 用カルテルート（``\\\\Tera-station\\share\\02.カルテ``）
@@ -800,10 +812,14 @@ class ChecklistConfig:
     )
     b_output_subfolder: str = "運動機能向上計画書"
     c_output_subfolder: str = "経過報告書"
-    facility_routing: dict[str, str] = field(default_factory=dict)
-    report_staff: dict[str, ReportStaffEntry] = field(default_factory=dict)
-    xlsx_path_cache: dict[str, str] = field(default_factory=dict)
-    staff_choice_cache: dict[str, str] = field(default_factory=dict)
+    # Issue #27 続編 H3: dict → Mapping + MappingProxyType ラップ (immutability)。
+    # default_factory は dict を返し、__post_init__ で MappingProxyType に包む
+    # (型ガード `_check_dict_str_to_str` 側が `isinstance(v, dict)` を要求するため、
+    # 型検証は dict 段階で済ませてから wrap する)。
+    facility_routing: Mapping[str, str] = field(default_factory=dict)
+    report_staff: Mapping[str, ReportStaffEntry] = field(default_factory=dict)
+    xlsx_path_cache: Mapping[str, str] = field(default_factory=dict)
+    staff_choice_cache: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """型ガード (#27 §2 水平展開) + legacy ``monitoring_subfolder`` 検出。
@@ -833,8 +849,10 @@ class ChecklistConfig:
         _check_dict_str_to_str(
             "ChecklistConfig.facility_routing", self.facility_routing
         )
-        # report_staff は dict[str, ReportStaffEntry] (dataclass 値) なので直接検査
-        if not isinstance(self.report_staff, dict):
+        # report_staff は Mapping[str, ReportStaffEntry] (dataclass 値) なので直接検査。
+        # Issue #27 続編 H3: MappingProxyType ラップに伴い ``isinstance(..., dict)``
+        # から ``isinstance(..., Mapping)`` に緩和 (``_check_dict_str_to_str`` と同方針)。
+        if not isinstance(self.report_staff, Mapping):
             raise TypeError(
                 f"ChecklistConfig.report_staff must be dict, got "
                 f"{type(self.report_staff).__name__}: {self.report_staff!r}"
@@ -855,6 +873,26 @@ class ChecklistConfig:
         )
         _check_dict_str_to_str(
             "ChecklistConfig.staff_choice_cache", self.staff_choice_cache
+        )
+        # Issue #27 続編 H3: 4 dict を MappingProxyType でラップし、
+        # ``cfg.facility_routing["X"] = "Y"`` 等の dict 内容変更を構造的に阻止する。
+        # 防御コピー (``dict(self.X)``) を取って包むため、呼出側が持ち続けている
+        # 元 dict 経由の外部 mutation は新インスタンスには波及しない (参照断絶)。
+        # フィールド更新は ``dataclasses.replace()`` 経由で ChecklistConfig 自体を
+        # 再生成する経路に統一する (hotpath: ``checklist_c_dialog.py``)。
+        object.__setattr__(
+            self, "facility_routing", MappingProxyType(dict(self.facility_routing))
+        )
+        object.__setattr__(
+            self, "report_staff", MappingProxyType(dict(self.report_staff))
+        )
+        object.__setattr__(
+            self, "xlsx_path_cache", MappingProxyType(dict(self.xlsx_path_cache))
+        )
+        object.__setattr__(
+            self,
+            "staff_choice_cache",
+            MappingProxyType(dict(self.staff_choice_cache)),
         )
 
         if self.monitoring_subfolder in _LEGACY_MONITORING_SUBFOLDERS:
@@ -892,10 +930,13 @@ class AppConfig:
     も ``list[str]`` → ``tuple[str, ...]`` 化済。これにより leaf list 由来の
     mutation 経路 (`reports[i].menu_path.append(...)` 等) は構造的に閉鎖された。
 
-    **frozen 化の対象外 (依然として残る mutable leaf)**:
-        ``ChecklistConfig.{facility_routing, report_staff, xlsx_path_cache, staff_choice_cache}``
-        の dict は依然 mutable (``ChecklistConfig`` docstring の対応節を参照)。
-        これらは umbrella の続編 H3 で対応する。
+    Issue #27 続編 H3: ``ChecklistConfig.{facility_routing, report_staff,
+    xlsx_path_cache, staff_choice_cache}`` の 4 dict を ``Mapping[str, ...]`` +
+    ``MappingProxyType`` ラップ化済。``cfg.checklist.xlsx_path_cache[k] = v`` /
+    ``del cfg.checklist.facility_routing[k]`` は ``TypeError`` で構造的に阻止
+    される。dict 追加・更新・削除は
+    ``cfg = replace(cfg, checklist=replace(cfg.checklist, xlsx_path_cache={..., k: v}))``
+    形式で行う。
 
     本 docstring の表現は PR #272 Codex review Low 指摘に基づき、「型ガード
     bypass を構造的に防ぐ」を「直下フィールドの参照差し替えを防ぐ」に絞って
@@ -1493,11 +1534,24 @@ def _update_checklist(doc: TOMLDocument, checklist: ChecklistConfig) -> None:
     }
     cache = dict(checklist.xlsx_path_cache)
     staff_choice = dict(checklist.staff_choice_cache)
-    checklist_dict = _stringify_path_values(asdict(checklist))
-    checklist_dict.pop("facility_routing", None)
-    checklist_dict.pop("report_staff", None)
-    checklist_dict.pop("xlsx_path_cache", None)
-    checklist_dict.pop("staff_choice_cache", None)
+    # Issue #27 続編 H3: 4 dict 系 field は MappingProxyType ラップされており
+    # ``asdict()`` の内部 deep-copy 経路で TypeError になる (mappingproxy は
+    # ``copy.deepcopy`` 非対応)。直前で個別に dict 化済
+    # (``routing`` / ``staff`` / ``cache`` / ``staff_choice``) のため、
+    # asdict() の対象から除外して非 mapping field のみ stringify する。
+    _CHECKLIST_DICT_FIELDS = {
+        "facility_routing",
+        "report_staff",
+        "xlsx_path_cache",
+        "staff_choice_cache",
+    }
+    checklist_dict = _stringify_path_values(
+        {
+            f.name: getattr(checklist, f.name)
+            for f in fields(checklist)
+            if f.name not in _CHECKLIST_DICT_FIELDS
+        }
+    )
 
     def _build_routing_table() -> Table:
         routing_table = tomlkit.table()

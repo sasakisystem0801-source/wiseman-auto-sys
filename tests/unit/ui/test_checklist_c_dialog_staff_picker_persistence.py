@@ -125,8 +125,12 @@ def test_staff_picker_persists_cache_value_in_normalized_form(tmp_path: Path) ->
     ) as mock_save:
         dlg._open_staff_picker_for_review(0, result)
 
+    # Issue #27 続編 H3: hotpath は ``replace()`` で self._config を差し替える
+    # ため、``cfg`` (元参照) ではなく ``dlg._config`` (最新) を assert する。
+    # 元 ``cfg`` の cache は依然空 (新 ChecklistConfig には波及しない)。
+    assert len(cfg.checklist.staff_choice_cache) == 0  # 元インスタンスは不変
     # cache 書込内容: key は "木塚|小島:2026:3" (sort + `|`)、value は normalize 後
-    cache = cfg.checklist.staff_choice_cache
+    cache = dlg._config.checklist.staff_choice_cache
     assert len(cache) == 1
     # value は normalize_lookup_key("小島") (= "小島" だが正規化経路を通している保証)
     value = next(iter(cache.values()))
@@ -161,6 +165,37 @@ def test_staff_picker_uses_dataclasses_replace_for_row_copy(tmp_path: Path) -> N
     assert new_result.row.facility == original_row.facility
 
 
+def test_staff_picker_replaces_self_config_with_new_appconfig(tmp_path: Path) -> None:
+    """Issue #27 続編 H3: hotpath は ``replace()`` で self._config を差し替える。
+
+    元 cfg (``ChecklistConfig`` の MappingProxyType ラップ) を直接変更できない
+    ため、``replace()`` で新 ChecklistConfig + 新 AppConfig を生成して
+    ``self._config`` を差し替える必要がある (PR #272 教訓: facility_root_dialog
+    の永続化 silent regression 防止と同パターン)。
+
+    本テストは以下を verify:
+        - 永続化経路通過後、``dlg._config`` が元 ``cfg`` と異なる AppConfig
+          オブジェクトに差し替わっている (identity check)
+        - 新 ``dlg._config.checklist.staff_choice_cache`` に entry が反映されている
+        - 元 ``cfg`` の cache は不変 (immutability 保証)
+    """
+    dlg, result, cfg, _ = _make_dialog_with_needs_review_staff_row(tmp_path)
+    original_cfg_identity = id(cfg)
+
+    with _patch_staff_picker("小島", True), patch(
+        "wiseman_hub.ui.checklist_c_dialog.save_config"
+    ):
+        dlg._open_staff_picker_for_review(0, result)
+
+    # self._config は新 AppConfig に差し替わっている (identity 変更)
+    assert dlg._config is not cfg
+    assert id(dlg._config) != original_cfg_identity
+    # 新 cfg の cache に entry あり
+    assert len(dlg._config.checklist.staff_choice_cache) == 1
+    # 元 cfg の cache は不変 (MappingProxyType + 防御コピーで参照断絶)
+    assert len(cfg.checklist.staff_choice_cache) == 0
+
+
 # ---------- Critical #2: save_config 失敗 + remember=False 分岐 ----------
 
 
@@ -177,8 +212,10 @@ def test_staff_picker_remember_false_does_not_write_cache(tmp_path: Path) -> Non
     ) as mock_save:
         dlg._open_staff_picker_for_review(0, result)
 
-    # cache は空のまま
+    # cache は空のまま (remember=False では replace() も走らないため self._config 不変)
     assert cfg.checklist.staff_choice_cache == {}
+    assert dlg._config.checklist.staff_choice_cache == {}
+    assert dlg._config is cfg  # H3: 差し替わらないこと
     # save_config も呼ばれない
     mock_save.assert_not_called()
     # ただし行は再 plan されている (選択は反映)
@@ -204,8 +241,10 @@ def test_staff_picker_save_config_oserror_shows_warning(tmp_path: Path) -> None:
 
     # messagebox.showwarning が呼ばれる (silent fail 防止)
     mock_warn.assert_called_once()
-    # ただし cache dict 自体は更新済 (次回 save まで保留)
-    assert len(cfg.checklist.staff_choice_cache) == 1
+    # Issue #27 続編 H3: hotpath で self._config を ``replace()`` で差し替えてから
+    # save_config を呼ぶ経路。OSError が出ても self._config 側の cache は更新済
+    # (次回 save 成功時に永続化されるという挙動を維持)。元 cfg 参照は不変。
+    assert len(dlg._config.checklist.staff_choice_cache) == 1
     # 選択結果も反映
     assert dlg._results[0].row.staff == "小島"
 
@@ -235,8 +274,9 @@ def test_staff_picker_year_month_unset_early_returns(tmp_path: Path) -> None:
     mock_info.assert_called_once()
     # StaffPickerDialog は開かれない (early return)
     picker_cls_mock.assert_not_called()
-    # cache 書込も save_config も走らない
+    # cache 書込も save_config も走らない (early return で replace() も skip)
     assert cfg.checklist.staff_choice_cache == {}
+    assert dlg._config is cfg  # H3: early return 経路は self._config 不変
     mock_save.assert_not_called()
 
 
@@ -250,8 +290,9 @@ def test_staff_picker_cancel_is_noop_no_cache_write(tmp_path: Path) -> None:
     ) as mock_save:
         dlg._open_staff_picker_for_review(0, result)
 
-    # cache 書込なし
+    # cache 書込なし (キャンセル経路は replace() も走らない)
     assert cfg.checklist.staff_choice_cache == {}
+    assert dlg._config is cfg  # H3: キャンセル経路は self._config 不変
     mock_save.assert_not_called()
     # 再 plan も走らない (元 result が残る)
     assert dlg._results[0] is result
@@ -283,5 +324,8 @@ def test_staff_picker_cache_key_matches_staff_choice_cache_key(
     ):
         dlg._open_staff_picker_for_review(0, result)
 
-    assert expected_key in cfg.checklist.staff_choice_cache
-    assert cfg.checklist.staff_choice_cache[expected_key] == expected_normalized
+    # Issue #27 続編 H3: replace() で self._config が差し替わるため最新参照を assert。
+    assert expected_key in dlg._config.checklist.staff_choice_cache
+    assert (
+        dlg._config.checklist.staff_choice_cache[expected_key] == expected_normalized
+    )

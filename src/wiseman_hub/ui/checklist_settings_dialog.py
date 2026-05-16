@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import tkinter as tk
+from collections.abc import Mapping
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Any
@@ -555,7 +556,7 @@ def _record_sync_timestamp(config_path: Path, name: str) -> None:
         )
 
 
-def _routing_to_toml(routing: dict[str, str]) -> str:
+def _routing_to_toml(routing: Mapping[str, str]) -> str:
     """居宅マッピングを TOML 風テキストに変換（key = "value" の羅列）。
 
     過去失敗対策（codex review MEDIUM-2）: key/value に ``"`` や ``\\`` が混入した場合
@@ -567,7 +568,7 @@ def _routing_to_toml(routing: dict[str, str]) -> str:
     return "\n".join(lines)
 
 
-def _staff_to_toml(staff: dict[str, ReportStaffEntry]) -> str:
+def _staff_to_toml(staff: Mapping[str, ReportStaffEntry]) -> str:
     """担当者マッピングを TOML 風テキスト（``[name]\\n  key = "v"``）に変換。
 
     PR #179 (PR-α v3) で追加された ``suggest_patterns`` (list[str]) も書き出す。
