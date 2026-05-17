@@ -167,7 +167,11 @@ class ChecklistCDialog:
         self._config_path = config_path
         self._top = tk.Toplevel(parent)
         self._top.title("C: 経過報告書 自動配置")
-        self._top.geometry("780x520")
+        # Issue #274 Phase 1 追加修正: B ダイアログと同等の初期幅 1100px に拡大。
+        # 5 列合計 1020px (氏名/居宅/担当/ステータス/詳細) + 余白で詳細列を初期
+        # 表示で fit させる。Phase 1 PR #280 では width=500 と stretch=True を
+        # 設定したが、旧 geometry 780x520 では詳細列が画面外に押し出されていた。
+        self._top.geometry("1100x600")
         self._top.transient(parent)  # type: ignore[arg-type]
         self._top.grab_set()
 
