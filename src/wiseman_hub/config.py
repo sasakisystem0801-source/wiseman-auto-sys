@@ -391,7 +391,9 @@ class ReportTarget:
     Issue #27 続編 H2: ``menu_path`` を ``list[str]`` → ``tuple[str, ...]`` 化。
     leaf list の内容変更 (``.append`` / ``[i] = ...``) も構造的に阻止される。
     要素追加は ``replace(target, menu_path=(*target.menu_path, new_segment))``
-    形式に統一。
+    形式に統一。``Sequence[str]`` ではなく ``tuple[str, ...]`` を採用した
+    rationale は ``AppConfig`` docstring 参照 (PR #324 type-design Important #1
+    対応、dataclass field 型は immutability 契約)。
     """
 
     name: str = ""
@@ -715,6 +717,9 @@ class ReportStaffEntry:
     化。leaf の内容変更 (``.append`` / ``[i] = ...``) も構造的に阻止される。
     要素追加は ``replace(entry, suggest_patterns=(*entry.suggest_patterns, new))``
     形式に統一。TOML / form parser 経路は accumulate 後に tuple 化する責務を負う。
+    ``Sequence[str]`` ではなく ``tuple[str, ...]`` を採用した rationale は
+    ``AppConfig`` docstring 参照 (PR #324 type-design Important #1 対応、
+    dataclass field 型は immutability 契約)。
 
     base_dir: 担当者フォルダの絶対パス（例: ``\\\\Tera-station\\share\\PT 宮下``）
     suggest_patterns: 候補 xlsx を絞り込む glob 風パターン（``{era}``/``{month}`` 埋め込み可）。
@@ -950,6 +955,24 @@ class AppConfig:
     ``AttributeError`` / ``TypeError`` で構造的に阻止される。要素追加・差し替え
     は ``cfg = replace(cfg, reports=(*cfg.reports, new_target))`` 形式に統一。
 
+    **型注釈の選択 (Sequence[X] vs tuple[X, ...]、PR #324 type-design Important #1)**:
+        ``reports`` / ``menu_path`` / ``suggest_patterns`` 等の sequence 系 leaf に
+        ``Sequence[X]`` (abstract protocol、list/tuple 両受け) ではなく
+        ``tuple[X, ...]`` (具体型、immutable) を採用したのは、**呼出側に
+        immutability を強制する**ため。``Sequence[X]`` は abstract 契約だが
+        実装時に list を渡される silent 経路を残し、``isinstance(value, tuple)``
+        の runtime guard でも弾けない。``tuple[X, ...]`` は型システムレベル
+        で「mutation 不能な sequence」を表明し、``__post_init__`` の
+        ``isinstance(self.reports, tuple)`` で fail-close できる (PR #260 の
+        dataclass 型ガード参照)。
+
+        なお ``rpa/base.py:80`` の ``navigate_menu(menu_path: Sequence[str])`` 等、
+        **呼出側 API** の引数型では ``Sequence[str]`` を使い分ける (tuple/list
+        両受けで呼出柔軟性を確保、内部で bare-str を runtime guard、Issue #27
+        続編 H2 PR #325 で追加)。**dataclass field 型** と **API 引数型** の
+        使い分けが本 rationale の核心 — 前者は immutability 契約、後者は
+        受け入れ可能性契約。
+
     Issue #27 続編 H2: ``ReportTarget.menu_path`` / ``ReportStaffEntry.suggest_patterns``
     も ``list[str]`` → ``tuple[str, ...]`` 化済。これにより leaf list 由来の
     mutation 経路 (`reports[i].menu_path.append(...)` 等) は構造的に閉鎖された。
@@ -1057,16 +1080,32 @@ def _coerce_facility_aliases(aliases_data: Any) -> dict[str, list[str]]:
 
 
 def _coerce_report_staff_entry(staff_name: str, entry_data: dict[str, Any]) -> ReportStaffEntry:
-    """TOML の checklist.report_staff.<name> table を ReportStaffEntry に強制変換する。
+    """TOML の ``checklist.report_staff.<name>`` table を ``ReportStaffEntry`` に coerce する。
 
-    suggest_patterns の正規化:
-        - TOML は array リテラル ``[...]`` 表記、Python 側 (続編 H2) は ``tuple[str, ...]``
-        - キー存在 + 値が list でない → TypeError（空文字 ``""`` も不正、Codex review M6 対策）
-        - 要素が str でない → TypeError
-        - 空 list ``[]`` は正当（旧 *_template フォールバック対象、空 tuple ``()`` に coerce）
-    deprecated フィールド（year_subfolder_template / file_template）は str 強制。
-    PII 配慮: 例外メッセージに担当者名は含めるが（運用上トラブルシュートに必要）、
-    パス値は含めない（NAS 構造はログ送信先で機密扱いになる）。
+    suggest_patterns の coerce 仕様 (TOML array → Python tuple):
+        - TOML 側は array リテラル ``[...]`` (例 ``["pat1", "pat2"]``)
+        - Python 側 (続編 H2): ``tuple[str, ...]`` に変換して dataclass に渡す
+
+    suggest_patterns の TypeError 発火条件:
+        - キーが ``entry_data`` に存在し、かつ値が ``list`` 型でない
+          (空文字 ``""`` も不正、Codex review M6 対策)
+        - キー存在 + 要素のいずれかが ``str`` でない
+        - キーが ``entry_data`` に存在しない場合は raise せず、``ReportStaffEntry`` の
+          default (空 tuple) にフォールバック
+        - キー存在 + 空 list ``[]`` は正当 (空 ``tuple ()`` に coerce、deprecated
+          フィールドへのフォールバック対象)
+
+    base_dir の coerce: 続編 G Phase 3b で TOML ``str`` → ``Path`` 変換に移行済。
+    空白 strip + 空文字を ``Path("")`` sentinel 化する責務は ``coerce_path`` に委譲。
+
+    deprecated フィールド (``year_subfolder_template`` / ``file_template``) は本関数
+    では touch せず、``ReportStaffEntry.__post_init__`` 側で str 型検証する。
+
+    PII 配慮:
+        - 例外メッセージに担当者名 (``staff_name``) は含める (運用上トラブルシュート
+          に必要)
+        - パス値は含めない (NAS 構造はログ送信先で機密扱いになる、``coerce_path``
+          側で ``echo_value=False`` 指定)
     """
     # Issue #27 続編 H2: ReportStaffEntry.suggest_patterns は tuple[str, ...] 化済。
     # accumulate は list で行い、最後に tuple 化して ReportStaffEntry に渡す。
@@ -1589,13 +1628,15 @@ def _update_checklist(doc: TOMLDocument, checklist: ChecklistConfig) -> None:
         for name, entry in staff.items():
             inner = tomlkit.table()
             for k, v in entry.items():
-                if isinstance(v, list):
-                    arr = tomlkit.array()
-                    for element in v:
-                        arr.append(element)
-                    inner[k] = arr
-                else:
-                    inner[k] = v
+                # Issue #27 続編 H2 + PR #325 review S-1: 旧コードは
+                # ``isinstance(v, list)`` 分岐で明示的に ``tomlkit.array()`` を
+                # 構築していたが、続編 H2 で ``ReportStaffEntry.suggest_patterns``
+                # が ``tuple[str, ...]`` 化された結果、``asdict()`` は tuple を
+                # tuple のまま保持し、当該分岐は dead code 化した。tomlkit は
+                # tuple を array に透過変換するため、明示構築なしで TOML 表記
+                # ``suggest_patterns = [...]`` が得られる (``test_load_suggest_patterns``
+                # 系の roundtrip テストで検証済)。
+                inner[k] = v
             staff_table[name] = inner
         return staff_table
 
