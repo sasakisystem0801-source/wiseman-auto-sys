@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ctypes as _ctypes
 import importlib
+import logging
 import os
 import sys
 from pathlib import Path
@@ -391,14 +392,17 @@ class TestNavigateMenu:
         assert click_calls == []
 
     def test_fallback_to_individual_click_on_menu_select_failure(
-        self, engine_with_main: PywinautoEngine,
+        self, engine_with_main: PywinautoEngine, caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """menu_select 失敗 → 個別 MenuItem.click_input で fallback 完走。"""
+        """menu_select 失敗 → 個別 MenuItem.click_input で fallback 完走、warning log 出力."""
         engine_with_main._main_window.menu_select.side_effect = _ElementNotFoundError(
             "menu_select not supported in UIA",
         )
         # child_window(title=..., control_type="MenuItem") は default MagicMock で
         # click_input 成功扱い (side_effect なし)。
+
+        # silent fallback 検出のため、運用者の唯一の可観測 signal である warning log を assert
+        caplog.set_level(logging.WARNING, logger="wiseman_hub.rpa.pywinauto_engine")
 
         with patch("time.sleep"):
             engine_with_main.navigate_menu(["業務", "日報"])
@@ -410,6 +414,7 @@ class TestNavigateMenu:
         ]
         titles = [c.kwargs["title"] for c in menuitem_calls]
         assert titles == ["業務", "日報"]
+        assert "menu_select失敗" in caplog.text
 
     def test_both_paths_fail_raises_runtime_error_with_chain(
         self, engine_with_main: PywinautoEngine,
@@ -677,6 +682,42 @@ class TestCloseWiseman:
             engine_with_main.close_wiseman()
 
         # 直接 close() が呼ばれたこと、cleanup 完了
+        mock_main_ref.close.assert_called_once()
+        assert engine_with_main._main_window is None
+        assert engine_with_main._app is None
+
+    def test_yes_button_click_fails_falls_back_to_direct_close(
+        self, engine_with_main: PywinautoEngine,
+    ) -> None:
+        """確認ダイアログ visible だが「はい」click 失敗 → except 句で catch → 直接 close fallback."""
+        mock_btn_wrapper = MagicMock()
+        mock_btn_wrapper.handle = 0xFADE
+        mock_btn = MagicMock()
+        mock_btn.wrapper_object.return_value = mock_btn_wrapper
+
+        _mock_user32.PostMessageW.return_value = 1
+
+        # 確認ダイアログ自体は取得・visible 待機まで成功するが、内部の「はい」要素 click_input が失敗
+        mock_confirm = MagicMock()
+        mock_yes = MagicMock()
+        mock_yes.click_input.side_effect = _ElementNotFoundError("はい button not found")
+        mock_confirm.child_window.return_value = mock_yes
+
+        # _main_window.child_window(auto_id="btnExit") と _app.window(title_re=".*確認.*")
+        # の双方を分岐させるため side_effect を分ける
+        engine_with_main._main_window.child_window.return_value = mock_btn
+        engine_with_main._app.window.return_value = mock_confirm
+        engine_with_main._app.process = 5555
+
+        mock_main_ref = engine_with_main._main_window
+
+        with (
+            patch.object(os, "kill", side_effect=ProcessLookupError),
+            patch("time.sleep"),
+            patch("time.monotonic", side_effect=[0, 0.1]),
+        ):
+            engine_with_main.close_wiseman()
+
         mock_main_ref.close.assert_called_once()
         assert engine_with_main._main_window is None
         assert engine_with_main._app is None
