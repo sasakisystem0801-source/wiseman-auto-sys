@@ -116,7 +116,17 @@ class PywinautoEngine(RPAEngine):
         受け取り、helper 内で log warning / error message のテンプレ文言を生成する
         (呼出側の文言重複防止)。``extra_exceptions`` で base (``ElementNotFoundError``
         / ``PywinautoTimeoutError``) 以外の許容例外を追加できる。
+
+        **現状は保存ダイアログ呼出専用**: エラーメッセージの prefix「保存ダイアログ
+        内の」は固定。将来 menu / MDI 子ウィンドウ等の別 context で再利用する場合、
+        prefix を引数化 (例: ``error_context: str = "保存ダイアログ"``) する拡張が
+        必要。
         """
+        if not selectors:
+            raise ValueError(
+                f"_try_selectors_sequential: selectors must be non-empty "
+                f"(field_name={field_name!r})"
+            )
         catch_exceptions: tuple[type[BaseException], ...] = (
             ElementNotFoundError,
             PywinautoTimeoutError,

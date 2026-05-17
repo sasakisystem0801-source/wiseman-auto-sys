@@ -496,6 +496,27 @@ class TestExportCsvFailureModes:
         assert str(tmp_path) in str(exc_info.value)
 
 
+class TestTrySelectorsSequentialGuards:
+    """Issue #11 M6 helper の防御契約検証。
+
+    silent-failure-hunter Important I-1 (rating 6): 呼出側 typo 等で空 list が
+    混入すると「全 selector で発見できません: 」という空末尾メッセージのみで
+    原因 chain が消失する経路を防御。
+    """
+
+    def test_empty_selectors_raises_value_error(
+        self, engine_with_main: PywinautoEngine,
+    ) -> None:
+        with pytest.raises(ValueError, match="selectors must be non-empty"):
+            engine_with_main._try_selectors_sequential(
+                parent=MagicMock(),
+                selectors=[],
+                action=lambda w: w.click_input(),
+                error_cls=SaveButtonNotFoundError,
+                field_name="ダミー要素",
+            )
+
+
 # ── B5/B6: close_wiseman ─────────────────────────────────────────
 
 
