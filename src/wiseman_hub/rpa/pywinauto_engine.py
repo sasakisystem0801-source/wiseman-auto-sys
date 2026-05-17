@@ -7,7 +7,7 @@ import logging
 import os
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -81,6 +81,70 @@ class PywinautoEngine(RPAEngine):
         if not _USER32.IsWindow(hwnd):
             raise RuntimeError(f"SendMessageW: invalid hwnd=0x{hwnd:x}")
         return _USER32.SendMessageW(hwnd, msg, wparam, lparam)
+
+    def _ensure_main_connected(self, action_hint: str = "") -> None:
+        """メインウィンドウが未接続なら ``RuntimeError`` を raise する。
+
+        ``close_wiseman`` / ``take_screenshot`` は未接続時も raise せず別フォールバック
+        処理 (warning + return / 全画面 screenshot) に入るため本 helper の対象外。
+        """
+        if self._main_window is None:
+            suffix = f"。{action_hint}" if action_hint else ""
+            raise RuntimeError(f"メインウィンドウが未接続です{suffix}")
+
+    def _ensure_launcher_connected(self, action_hint: str = "") -> None:
+        """ランチャー (システム選択画面) が未接続なら ``RuntimeError`` を raise する。"""
+        if self._launcher_window is None:
+            suffix = f"。{action_hint}" if action_hint else ""
+            raise RuntimeError(f"ランチャーが未接続です{suffix}")
+
+    def _try_selectors_sequential(
+        self,
+        parent: WindowSpecification,
+        selectors: list[dict[str, str]],
+        action: Callable[[WindowSpecification], object],
+        error_cls: type[Exception],
+        field_name: str,
+        extra_exceptions: tuple[type[BaseException], ...] = (),
+    ) -> None:
+        """``selectors`` を順次試行し、最初に成功した子要素に ``action`` を実行する。
+
+        全 selector が失敗した場合、最後の例外を ``__cause__`` (from chain) として
+        保持し ``error_cls`` を raise する (silent-failure-hunter I-3 由来の方針)。
+
+        ``field_name`` で運用者向けの要素名 (例: "ファイル名入力欄" / "保存ボタン") を
+        受け取り、helper 内で log warning / error message のテンプレ文言を生成する
+        (呼出側の文言重複防止)。``extra_exceptions`` で base (``ElementNotFoundError``
+        / ``PywinautoTimeoutError``) 以外の許容例外を追加できる。
+
+        **現状は保存ダイアログ呼出専用**: エラーメッセージの prefix「保存ダイアログ
+        内の」は固定。将来 menu / MDI 子ウィンドウ等の別 context で再利用する場合、
+        prefix を引数化 (例: ``error_context: str = "保存ダイアログ"``) する拡張が
+        必要。
+        """
+        if not selectors:
+            raise ValueError(
+                f"_try_selectors_sequential: selectors must be non-empty "
+                f"(field_name={field_name!r})"
+            )
+        catch_exceptions: tuple[type[BaseException], ...] = (
+            ElementNotFoundError,
+            PywinautoTimeoutError,
+            *extra_exceptions,
+        )
+        last_exc: BaseException | None = None
+        for spec in selectors:
+            try:
+                action(parent.child_window(**spec))
+                return
+            except catch_exceptions as e:
+                last_exc = e
+                continue
+        logger.warning("%sが見つかりません", field_name)
+        raise error_cls(
+            f"保存ダイアログ内の{field_name}が全 selector で発見できません: "
+            + ", ".join(repr(s) for s in selectors)
+        ) from last_exc
 
     def _get_active_mdi_child(self) -> WindowSpecification | None:
         """アクティブなMDI子ウィンドウを取得する。
@@ -165,8 +229,7 @@ class PywinautoEngine(RPAEngine):
         実装されており、auto_id が動的なため title_re で検索する。
         Pane は UIA の InvokePattern を持たないことが多いため、座標クリックで対応する。
         """
-        if self._launcher_window is None:
-            raise RuntimeError("ランチャーが未接続です。先に launch() を実行してください")
+        self._ensure_launcher_connected("先に launch() を実行してください")
 
         logger.info("ケア記録システムを選択中...")
         # 実機はPane(auto_id動的)、モックはPanel+Labelの構造で、UIA の Name プロパティを
@@ -257,8 +320,7 @@ class PywinautoEngine(RPAEngine):
         実機の「新規登録」Button は auto_id が動的（例: 395888）なため title で検索する。
         クリック後、MDI子ウィンドウ frmKihon が開くのを待つ。
         """
-        if self._main_window is None:
-            raise RuntimeError("メインウィンドウが未接続です。先に select_care_system() を実行してください")
+        self._ensure_main_connected("先に select_care_system() を実行してください")
 
         logger.info("新規登録ボタンをクリック中...")
         btn = self._main_window.child_window(title="新規登録", control_type="Button")
@@ -296,8 +358,7 @@ class PywinautoEngine(RPAEngine):
                 "navigate_menu: menu_path must be a sequence of str segments "
                 f"(list/tuple), not a bare str: {menu_path!r}"
             )
-        if self._main_window is None:
-            raise RuntimeError("メインウィンドウが未接続です。先にlaunchを実行してください")
+        self._ensure_main_connected("先に launch を実行してください")
 
         logger.info("メニュー遷移: %s", " → ".join(menu_path))
 
@@ -341,8 +402,7 @@ class PywinautoEngine(RPAEngine):
         Raises:
             ExportCsvError: 失敗モード別のサブクラス例外を raise する (Issue #14)。
         """
-        if self._main_window is None:
-            raise RuntimeError("メインウィンドウが未接続です")
+        self._ensure_main_connected()
 
         logger.info("CSVエクスポート開始")
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -397,22 +457,14 @@ class PywinautoEngine(RPAEngine):
             {"auto_id": "txtFileName"},
             {"control_type": "Edit"},
         ]
-        # 最後に試行した selector の例外を保持し、from chain で原因を明示する
-        # (silent-failure-hunter I-3 / type-design Concerns 2)。
-        filename_last_exc: Exception | None = None
-        for spec in filename_selectors:
-            try:
-                save_dlg.child_window(**spec).set_edit_text(str(csv_path))
-                break
-            except (ElementNotFoundError, PywinautoTimeoutError, AttributeError) as e:
-                filename_last_exc = e
-                continue
-        else:
-            logger.warning("ファイル名入力欄が見つかりません")
-            raise FileNameFieldNotFoundError(
-                "保存ダイアログ内のファイル名入力欄が全 selector で発見できません: "
-                + ", ".join(repr(s) for s in filename_selectors)
-            ) from filename_last_exc
+        self._try_selectors_sequential(
+            parent=save_dlg,
+            selectors=filename_selectors,
+            action=lambda w: w.set_edit_text(str(csv_path)),
+            error_cls=FileNameFieldNotFoundError,
+            field_name="ファイル名入力欄",
+            extra_exceptions=(AttributeError,),
+        )
 
         time.sleep(0.5)
 
@@ -421,20 +473,13 @@ class PywinautoEngine(RPAEngine):
             {"title_re": ".*保存.*", "control_type": "Button"},
             {"title": "Save", "control_type": "Button"},
         ]
-        save_button_last_exc: Exception | None = None
-        for spec in save_button_selectors:
-            try:
-                save_dlg.child_window(**spec).click_input()
-                break
-            except (ElementNotFoundError, PywinautoTimeoutError) as e:
-                save_button_last_exc = e
-                continue
-        else:
-            logger.warning("保存ボタンが見つかりません")
-            raise SaveButtonNotFoundError(
-                "保存ダイアログ内の保存ボタンが全 selector で発見できません: "
-                + ", ".join(repr(s) for s in save_button_selectors)
-            ) from save_button_last_exc
+        self._try_selectors_sequential(
+            parent=save_dlg,
+            selectors=save_button_selectors,
+            action=lambda w: w.click_input(),
+            error_cls=SaveButtonNotFoundError,
+            field_name="保存ボタン",
+        )
 
         time.sleep(1)
 
@@ -463,8 +508,7 @@ class PywinautoEngine(RPAEngine):
 
     def read_grid_data(self) -> list[list[str]]:
         """現在の画面のデータグリッドからデータを直接読み取る。"""
-        if self._main_window is None:
-            raise RuntimeError("メインウィンドウが未接続です")
+        self._ensure_main_connected()
 
         # アクティブなMDI子ウィンドウのDataGridViewを検索
         active_child = self._get_active_mdi_child()
@@ -559,8 +603,7 @@ class PywinautoEngine(RPAEngine):
 
     def close_current_window(self) -> None:
         """現在のMDI子ウィンドウを閉じる。"""
-        if self._main_window is None:
-            raise RuntimeError("メインウィンドウが未接続です")
+        self._ensure_main_connected()
 
         active_child = self._get_active_mdi_child()
         if active_child is None:
