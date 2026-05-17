@@ -102,6 +102,10 @@ if ($pythonExe -and (Test-Path -LiteralPath $initTcl)) {
 Write-Section "3. tk.Tk() 起動試行 (10 回、intermittent 検出)"
 
 if ($pythonExe) {
+    # PowerShell 5.1 の native command argument passing は legacy モードで、
+    # `& python -c "...print(f"...")..."` のような引数渡しでは内側の `"` が消失する
+    # (PR #341 後の実機検証で `print(fFAIL:` という構文エラーで判明)。
+    # 一時ファイル経由で渡せば PowerShell の引数解釈が介入しないので回避できる。
     $tkScript = @'
 import sys
 import tkinter
@@ -115,23 +119,29 @@ except Exception as e:
     print(f"FAIL: {type(e).__name__}: {e}")
     sys.exit(1)
 '@
+    $tkScriptFile = Join-Path ([System.IO.Path]::GetTempPath()) ("diagnose-tcl-{0}.py" -f [System.Guid]::NewGuid().ToString('N'))
+    [System.IO.File]::WriteAllText($tkScriptFile, $tkScript, [System.Text.UTF8Encoding]::new($false))
     $tkFailCount = 0
     $tkErrors = @{}
-    1..10 | ForEach-Object {
-        $result = & $pythonExe -c $tkScript 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host ("  attempt {0}: OK" -f $_) -ForegroundColor Gray
-        } else {
-            $tkFailCount++
-            Write-Fail ("attempt {0}: {1}" -f $_, $result)
-            $key = "$result"
-            if ($tkErrors.ContainsKey($key)) {
-                $tkErrors[$key]++
+    try {
+        1..10 | ForEach-Object {
+            $result = & $pythonExe $tkScriptFile 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host ("  attempt {0}: OK" -f $_) -ForegroundColor Gray
             } else {
-                $tkErrors[$key] = 1
+                $tkFailCount++
+                Write-Fail ("attempt {0}: {1}" -f $_, $result)
+                $key = "$result"
+                if ($tkErrors.ContainsKey($key)) {
+                    $tkErrors[$key]++
+                } else {
+                    $tkErrors[$key] = 1
+                }
             }
+            Start-Sleep -Milliseconds 300
         }
-        Start-Sleep -Milliseconds 300
+    } finally {
+        Remove-Item -LiteralPath $tkScriptFile -Force -ErrorAction SilentlyContinue
     }
 
     Write-Host ""
