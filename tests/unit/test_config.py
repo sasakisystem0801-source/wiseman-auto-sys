@@ -2462,11 +2462,10 @@ class TestTypeGuardHelpers:
             _check_dict_str_to_str("field", {"k": 123})
 
     # ------------------------------------------------------------------
-    # Issue #27 umbrella (PR #259 silent-failure-hunter rating 5-6):
-    # TOML datetime 値が型違反として届いた場合、技術的な ``got date: ...``
-    # メッセージだけでは「文字列として書き直す」運用判断が伝わらない。
-    # ``_datetime_hint`` が helper の TypeError メッセージに付加されることを
-    # 5 helper × 境界 (date / datetime / time) で確認する。
+    # Issue #27 umbrella: TOML datetime 値が型違反として届いた場合、技術的な
+    # ``got date: ...`` メッセージだけでは「文字列として書き直す」運用判断が
+    # 伝わらない。``_datetime_hint`` が helper の TypeError メッセージに
+    # 付加されることを各 helper × 境界 (date / datetime / time) で確認する。
     # ------------------------------------------------------------------
 
     _DT_HINT_PHRASE = "TOML の日付/時刻値は文字列ではありません"
@@ -2545,6 +2544,63 @@ class TestTypeGuardHelpers:
         from wiseman_hub.config import coerce_path
         with pytest.raises(TypeError) as exc_info:
             coerce_path("field", datetime.date(2024, 1, 1))
+        assert self._DT_HINT_PHRASE in str(exc_info.value)
+
+    def test_check_path_echo_value_false_includes_hint_without_value(
+        self,
+    ) -> None:
+        """PII 経路 (echo_value=False) でも datetime ヒントが付与され、
+
+        ヒント文字列自体は固定リテラルで値補間しないため値漏洩は起きない。
+        SA key path 等の秘密フィールドに datetime が来た場合の安全性保証。
+        """
+        import datetime
+
+        # ヒント内の例示日付 "2024-01-01" と被らない値で検証 (assertion 誤マッチ防止)。
+        d = datetime.date(2031, 6, 15)
+        from wiseman_hub.config import _check_path
+        with pytest.raises(TypeError) as exc_info:
+            _check_path("sa_key", d, echo_value=False)
+        msg = str(exc_info.value)
+        assert self._DT_HINT_PHRASE in msg
+        # `repr(d)` (e.g. ``datetime.date(2031, 6, 15)``) がメッセージに残らない。
+        assert repr(d) not in msg
+        assert "2031" not in msg  # 値固有のリテラルも漏れない
+
+    def test_check_tuple_of_str_includes_datetime_hint_for_date(self) -> None:
+        """tuple field に TOML date 値 (非 tuple) が来た時もヒントが付く。"""
+        import datetime
+
+        from wiseman_hub.config import _check_tuple_of_str
+        with pytest.raises(TypeError) as exc_info:
+            _check_tuple_of_str("field", datetime.date(2024, 1, 1))
+        assert self._DT_HINT_PHRASE in str(exc_info.value)
+
+    def test_check_tuple_of_str_element_includes_datetime_hint(self) -> None:
+        """tuple 要素に TOML date が混入した時もヒントが付く。"""
+        import datetime
+
+        from wiseman_hub.config import _check_tuple_of_str
+        with pytest.raises(TypeError) as exc_info:
+            _check_tuple_of_str("field", ("a", datetime.date(2024, 1, 1), "c"))
+        assert self._DT_HINT_PHRASE in str(exc_info.value)
+
+    def test_check_dict_str_to_str_includes_datetime_hint_for_date(self) -> None:
+        """dict field に TOML date 値 (非 Mapping) が来た時もヒントが付く。"""
+        import datetime
+
+        from wiseman_hub.config import _check_dict_str_to_str
+        with pytest.raises(TypeError) as exc_info:
+            _check_dict_str_to_str("field", datetime.date(2024, 1, 1))
+        assert self._DT_HINT_PHRASE in str(exc_info.value)
+
+    def test_check_dict_str_to_str_value_includes_datetime_hint(self) -> None:
+        """dict 値に TOML date が混入した時もヒントが付く。"""
+        import datetime
+
+        from wiseman_hub.config import _check_dict_str_to_str
+        with pytest.raises(TypeError) as exc_info:
+            _check_dict_str_to_str("field", {"k": datetime.date(2024, 1, 1)})
         assert self._DT_HINT_PHRASE in str(exc_info.value)
 
 

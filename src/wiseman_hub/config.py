@@ -43,14 +43,15 @@ logger = logging.getLogger(__name__)
 #   - TOML datetime ヒント: TOML 1.0 は ``key = 2024-01-01`` をネイティブで
 #     ``datetime.date`` 等に解釈する。本リポジトリの dataclass は date/time/datetime
 #     を受け付けるフィールドが存在しないため、誤って渡された時は型名に加えて
-#     「文字列として記載」運用者向けヒントを添える (Issue #27 umbrella、
-#     PR #259 silent-failure-hunter rating 5-6 反映)
+#     「文字列として記載」運用者向けヒントを添える (Issue #27 umbrella)
 # ---------------------------------------------------------------------------
 
 
 _TOML_DATETIME_TYPES: Final[tuple[type, ...]] = (_dt.date, _dt.time)
 # ``datetime.datetime`` は ``datetime.date`` のサブクラスなので date だけで拾える。
-# ``time`` は別系統で独立列挙。``tzinfo`` は単体で TOML から来ることはなく除外。
+# ``time`` は別系統で独立列挙。TOML 1.0 仕様 (RFC 3339 partial-time) では tzinfo を
+# 単独で値として書く構文がない (local-time / local-date / local-date-time / offset-
+# date-time の 4 形式のみ) ため ``tzinfo`` 単独型は列挙対象外。
 
 
 def _datetime_hint(value: object) -> str:
@@ -118,12 +119,14 @@ def _check_tuple_of_str(name: str, value: object) -> None:
     if not isinstance(value, tuple):
         raise TypeError(
             f"{name} must be tuple, got {type(value).__name__}: {value!r}"
+            f"{_datetime_hint(value)}"
         )
     for i, item in enumerate(value):
         if not isinstance(item, str):
             raise TypeError(
                 f"{name}[{i}] must be str, got "
                 f"{type(item).__name__}: {item!r}"
+                f"{_datetime_hint(item)}"
             )
 
 
@@ -237,15 +240,18 @@ def _check_dict_str_to_str(name: str, value: object) -> None:
     if not isinstance(value, Mapping):
         raise TypeError(
             f"{name} must be dict, got {type(value).__name__}: {value!r}"
+            f"{_datetime_hint(value)}"
         )
     for k, v in value.items():
         if not isinstance(k, str):
             raise TypeError(
                 f"{name} key must be str, got {type(k).__name__}: {k!r}"
+                f"{_datetime_hint(k)}"
             )
         if not isinstance(v, str):
             raise TypeError(
                 f"{name}[{k!r}] must be str, got {type(v).__name__}: {v!r}"
+                f"{_datetime_hint(v)}"
             )
 
 
