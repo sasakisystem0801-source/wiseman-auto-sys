@@ -82,6 +82,26 @@ class PywinautoEngine(RPAEngine):
             raise RuntimeError(f"SendMessageW: invalid hwnd=0x{hwnd:x}")
         return _USER32.SendMessageW(hwnd, msg, wparam, lparam)
 
+    def _inject_for_test(
+        self,
+        *,
+        app: Application | None = None,
+        launcher_window: WindowSpecification | None = None,
+        main_window: WindowSpecification | None = None,
+    ) -> None:
+        """テスト専用: 接続状態 private 属性の inject。production 経路から呼ばない。
+
+        ``None`` を渡した引数は no-op で既存値を保持する (fixture が個別属性のみ
+        差し込む用途を想定)。pywinauto 接続 invariant は ``launch`` 経由でのみ
+        確立されるため、production code から本メソッドを呼んではならない。
+        """
+        if app is not None:
+            self._app = app
+        if launcher_window is not None:
+            self._launcher_window = launcher_window
+        if main_window is not None:
+            self._main_window = main_window
+
     def _ensure_main_connected(self, action_hint: str = "") -> None:
         """メインウィンドウが未接続なら ``RuntimeError`` を raise する。
 
