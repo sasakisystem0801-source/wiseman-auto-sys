@@ -1,108 +1,127 @@
-# Session 84 完了 - Issue #27 続編 F §1 実質完了済を確認 + 継続 debt 4 件消化 (PR #329 マージ)
+# Session 85 完了 - Issue #16 / Issue #332 解消 + Issue #27 続編 G 実態調査完了 (PR #331/#333 マージ)
 
 日時: 2026-05-17
-HEAD (main): `05c4e6e`
-前セッション archive: [session-83-issue-27-h3-merge.md](./archive/session-83-issue-27-h3-merge.md)
+HEAD (main): `d0b6332`
+前セッション archive: [session-84-issue-27-debt-cleanup.md](./archive/session-84-issue-27-debt-cleanup.md)
 
 ## 本セッション完了内容
 
-### PR #329 (merged `05c4e6e`): Issue #27 続編 - 継続 debt 4 件を一括消化
+### Phase 1: Issue #27 続編 G (Path 移行) 実態調査完了
 
-PR #324 / #325 review で rating 5-6 と評価された継続 debt 4 件を 1 PR で消化。続編 H シリーズ完遂後の文脈整合性を保ちつつ、scope は config.py / ui/settings.py / test_settings.py の 3 files に限定 (+77/-29 行)。
+Session 84 で続編 F §1 (Literal 拡張) を「実質完了済」と確定したのに続き、続編 G (§4 Path 移行) を Mac 単独で再調査した結果、**こちらも実質完了済**と確定。Issue #27 に [investigative comment](https://github.com/sasakisystem0801-source/wiseman-auto-sys/issues/27#issuecomment-4469830366) を追記し、新規実装 PR なし。
 
-#### Phase 1 調査での重要発見: **続編 F §1 (Literal 拡張) は実質完了済**
+#### 調査結果
 
-impl-plan の Phase 1 として config.py の Literal 適用状況を実態調査した結果、**続編 F §1 の主要対象 3 Literal はすべて既に dataclass フィールドに実適用済**であることが判明:
+`src/wiseman_hub/config.py` (1778 行) の全 dataclass フィールドを grep + 個別確認し、残存 `str` フィールド 16 件を Path 化適性で分類:
 
-| Literal 定義 (config.py:237-253) | 適用先 dataclass | 検証経路 |
+| 分類 | 件数 | フィールド例 |
 |---|---|---|
-| `LogLevel = Literal["DEBUG"..."CRITICAL"]` | `AppConfig.log_level: LogLevel` (L977) | `__post_init__` で `_check_literal` (L1002) |
-| `OutputFormat = Literal["csv"]` | `ReportTarget.output_format: OutputFormat` (L399) | `__post_init__` で `_check_literal` (L405) |
-| `ConcatSourceLetter = Literal["A","B","C"]` | `PdfMergeConfig.concat_order: tuple[ConcatSourceLetter, ...]` (L659) | `_coerce_concat_order` |
+| Path 化不適 (識別子 / pattern / template) | 11 | `window_title_pattern` (regex), `cron`, `project_id`, `region`, `api_key`, `source_b_pattern` (format string), `spreadsheet_id`, `version` |
+| Path 化候補 (path 部品 / basename) | 5 | `PdfMergeConfig.source_a_filename` / `source_d_filename`, `ChecklistConfig.monitoring_subfolder` / `b_output_subfolder` / `c_output_subfolder` |
 
-config.py:242 のコメント自体に「Issue #27 続編 F Phase 1: 離散集合制約フィールドの Literal 化」と明記されており、PR #328 の Session 83 handoff の「未着手」表現が古かった。
+#### 5 候補の評価
 
-**残候補の実態**: 他 dataclass の文字列フィールド (`GcpConfig.region` / `WisemanConfig.window_title_pattern` / `ScheduleConfig.cron` / `PdfMergeConfig.source_*_pattern` / `UpdaterConfig.release_bucket`) はすべて自由値または GCP region のような開発時拡張余地のあるフィールドで、Literal 化不適。**続編 F §1 は新規実装の根拠なし**として scope 確定。
+**Pro**: 型自己記述性、TOML 入力で os 不正文字早期検出 (`_check_path` 再利用可)。
 
-代替として、handoff の「未反映 review 指摘」5 件のうち continued debt 4 件 (rating 5-6) を一括消化する方針に切替。debt 5 (hotpath helper 化、rating 6-7) は PR #327 merge 時の「局所性とのトレードオフで見送り」判断を尊重して scope 外。
+**Con**:
+- TOML / UI 入力はいずれも `str` → 内部表現だけ Path 化する付加価値が小さい
+- consumer は `Path / str` で正常動作 → 既存挙動を変えるリスクのみ発生
+- basename-only な値を `Path` 型で持つのは pathlib 慣習に逆行 (pathlib 自身も basename は `Path.name: str` で返す)
+- 続編 E (frozen=True) + H シリーズで immutability は構造的に完遂済、残務として Path 化する優先度低
 
-#### 消化した debt 4 件
+#### umbrella Issue #27 の取り扱い
 
-| # | debt 内容 | 修正方針 | 場所 |
+§1 §4 とも実質完了確定だが、過去 PR コメント (#258 / #259 / #260 / #261 の review 指摘) で「新規 Issue 起票せず本 umbrella に集約」と明記された rating 5-6 級の小修正候補が集約状態で残存 (TOML datetime メッセージ改善 / PII default 反転検討 / `reports` section の `_require_section_table` 統一)。これらの消化先確保のため、**umbrella Issue #27 は引き続き OPEN 維持**。
+
+### Phase 2: PR #331 (merged `730d385`) - Issue #16 解消
+
+PR #13 review I5 で指摘された「`select_care_system()` の Pane/Text 分岐 (PostMessage WM_LBUTTONDOWN/UP) が 1 度もテストされない」を解消。実装変更ゼロ、テストカバレッジ補完のみ。
+
+#### 変更内容
+
+`tests/unit/test_pywinauto_engine.py::TestSelectCareSystem` の `test_pane_fallback_uses_post_message` を `test_non_button_fallback_uses_post_message` に rename し、`pytest.mark.parametrize` で `Pane / Text / Hyperlink` の 3 control_type を網羅:
+
+```python
+@pytest.mark.parametrize(
+    "matching_ct",
+    ["Pane", "Text", "Hyperlink"],
+    ids=["pane", "text", "hyperlink"],
+)
+def test_non_button_fallback_uses_post_message(...) -> None:
+    ...
+```
+
+加えて `WM_LBUTTONDOWN` の wparam (`MK_LBUTTON=0x0001`) と `WM_LBUTTONUP` の wparam (`0`) もチェック追加 (マウスボタン状態整合性)。`_mock_user32.PostMessageW.reset_mock()` で parametrize 間の状態リーク防止。
+
+#### 2 並列 light review
+
+| Reviewer | Critical | Important | 結論 |
 |---|---|---|---|
-| 1 | PR #324 type-design Important #1: Sequence vs tuple rationale (rating 6) | `AppConfig` docstring に rationale 集約、leaf 側は参照 | `config.py:935+` / `:378+` / `:707+` |
-| 2 | PR #325 type-design I-2: `decoupled_reports` 変数名 misleading (rating 5) | 変数削除 + 直書き、unused import 整理 | `ui/settings.py:215` |
-| 3 | PR #325 comment-analyzer I-1: `_coerce_report_staff_entry` docstring 用語ずれ (rating 5-6) | 「coerce」統一 + TypeError 条件分離 + key 欠落フォールバック明示 | `config.py:1059` |
-| 4 | PR #325 code-reviewer S-1: `_build_staff_table` の `isinstance(v, list)` dead code (rating 6) | 削除 + 削除根拠コメント | `config.py:1587` |
+| code-reviewer | 0 | 0 | Merge 可 (Suggestion 2 件は informational) |
+| pr-test-analyzer | 0 | **G1**: `target_hwnd == 0` 経路未カバー (rating 7、conf 80+) | Merge 推奨、G1 は別 Issue 化 |
 
-##### debt 1 (Sequence vs tuple rationale)
+`PR #331 — test(rpa): select_care_system の Pane/Text/Hyperlink 経路を parametrize 化 (Issue #16) (1 file, +33/-9)` 形式の番号認可受領、CI green 確認後 merge。
 
-`AppConfig` docstring に新 block 追加。dataclass field 型 (immutability 契約) vs API 引数型 (受け入れ可能性契約) の使い分けを明文化。`Sequence[X]` の silent な list 経路を `tuple[X, ...]` で構造的に遮断する設計意図と、`navigate_menu(menu_path: Sequence[str])` 等の API 引数型では tuple/list 両受けで柔軟性を確保する使い分けを記述。`ReportTarget` / `ReportStaffEntry` docstring からは AppConfig 参照に集約 (重複排除)。
+### Phase 3: Issue #332 起票 + PR #333 (merged `d0b6332`) で即解消
 
-##### debt 2 (decoupled_reports 削除)
+PR #331 pr-test-analyzer G1 (rating 7、conf 80+) を triage 基準充足で Issue #332 として新規起票 (`bug,P2`)、そのまま同セッション内で PR #333 として実装 → merge して close。
 
-PR #272 由来の defensive shallow copy は続編 H1/H2 完了で不要になり PR #325 で削除済だが、`decoupled_reports` 変数名が「decouple している」という誤った印象を残していた。変数自体を削除し `replace(base, reports=base.reports, ...)` 直書きに変更。`reports=` 指定を残した意図 (PR #272 の経緯を読み手に思い出させる navigation hint) は隣接コメントで「冗長だが意図的に残す (DRY 違反として削除しないこと)」と明示。型注釈消失に伴い `ReportTarget` の unused import も削除。
+#### Issue #332 の対象
 
-##### debt 3 (_coerce_report_staff_entry docstring)
+`PywinautoEngine.select_care_system()` (`src/wiseman_hub/rpa/pywinauto_engine.py:204`) の `if target_hwnd is None or target_hwnd == 0:` 分岐のうち、`target_hwnd == 0` 側が unit test で未カバー。UIA wrapper が一時無効化された瞬間 (comtypes COM プロキシ非同期破棄中、別アプリへのフォーカス切替直後等) に `wrapper.handle = 0` を返すケースで、ガード退化時に `PostMessageW(0, ...)` が `ERROR_INVALID_WINDOW_HANDLE` (1400) を返す silent failure 経路。
 
-「強制変換」「正規化」「coerce」の混在を「coerce」に統一。TypeError 発火条件を 4 分岐に分離記述:
-- キーが entry_data に存在し、かつ値が `list` 型でない
-- キー存在 + 要素のいずれかが `str` でない
-- **キー欠落時は raise せず、本関数内 `suggest_patterns_list = []` 初期化値を空 tuple に coerce して明示的に渡す** (`ReportStaffEntry` の dataclass default が triggered する誤解を排除、結果として default と同値)
-- キー存在 + 空 list `[]` は正当 (空 tuple に coerce)
+#### PR #333 の変更内容
 
-##### debt 4 (dead code 削除)
+`TestSelectCareSystem` に `test_target_hwnd_zero_raises` を追加 (実装変更ゼロ、structural guard の retention テスト 1 件):
 
-続編 H2 で `ReportStaffEntry.suggest_patterns` が tuple 化された結果、`asdict()` は tuple を tuple のまま保持し (`dataclasses` 仕様)、`isinstance(v, list)` 分岐は常に False で dead code 化していた。tomlkit が tuple を array に透過変換するため、削除しても動作上の差分なし (既存 roundtrip test `test_load_suggest_patterns` 系で検証済)。削除根拠と将来 list/tuple 型 field を追加する場合の確認方法をコメントで明示。
+| 検証項目 | assertion |
+|---|---|
+| ガード発火 | `pytest.raises(RuntimeError, match="ケア記録選択要素が見つかりません")` |
+| `SendMessageW(0, ...)` 未呼出 | `call_args_list` フィルタで `args[0] == 0` 件数 = 0 |
+| `PostMessageW(0, ...)` 未呼出 | 同上 |
 
-#### 2 並列 light review (light tier)
+`wrapper.handle = 0` を Button 分岐 (fallback 先頭) で意図的にマッチさせ、ガードが弾けば後続 fallback には流れず Send/PostMessage も hwnd=0 で呼ばれないはず。**ガード退化時は assert メッセージ「ガード退化: ...」で明示検出**される設計。
 
-| Reviewer | Critical | Important | Suggestions |
+#### 1 並列 light review
+
+| Reviewer | Critical | Important | 結論 |
 |---|---|---|---|
-| code-reviewer | 0 | 1 (test docstring 旧変数名参照、rating 6-7) → **inline 反映** | 2 (問題なし確認) |
-| comment-analyzer | 0 | 3 (navigation hint 表現 / フォールバック源主体 / `rpa/base.py:80` 行番号 rot) → **全 inline 反映** | 3 (rating ≤ 5、後続 PR / コメント記録 OK) |
+| code-reviewer | 0 | 0 | Merge 可 (Suggestion 1 件 rating 5、scope 外) |
 
-両 agent とも「Merge 可、Critical なし」判定。Important 4 件すべて 2 commit 目 (af33971) で inline 解消済。
+pr-test-analyzer は前 PR #331 で挙がった G1 の直接実装のため再実行不要と判断、code-reviewer 1 つに絞った。
 
-#### 反映した review Important 4 件 (2 commit 目)
+#### CI flaky test 対処
 
-1. **code-reviewer Important #1**: `tests/unit/ui/test_settings.py:311` の docstring 内 `settings.py:219 の decoupled_reports` 旧変数名参照を新実装 (`replace(base, reports=base.reports, ...)` 直書き) に整合化
-2. **comment-analyzer Important #1**: `ui/settings.py:217` の「`replace` のデフォルト挙動と等価」表現を「冗長だが意図的に残す (DRY 違反として削除しないこと)」に変更。次回読み手が「等価なら削除すべき」と判断する long-term comment rot を comment 自身で予防
-3. **comment-analyzer Important #2**: `config.py:1093+` の suggest_patterns キー欠落フォールバック記述を「ReportStaffEntry の default にフォールバック」から「本関数内 suggest_patterns_list = [] 初期化値を空 tuple に coerce して明示的に渡す (結果として default と同値)」に修正
-4. **comment-analyzer Important #3**: AppConfig docstring の `rpa/base.py:80` ハードコード行番号を `rpa.base.RPAEngine.navigate_menu` シンボル参照に変更 (line rot 予防)
+初回 `test-windows-ui` が `_tkinter.TclError: invalid command name "tcl_findLibrary"` で fail (`test_confirm_dialog.py::TestPersistenceFailFast::test_save_error_propagates` の setup フェーズで `tk.Tk()` 自体が失敗、テストロジック未到達)。本 PR の変更は `test_pywinauto_engine.py` への +46 行のみで Tk 一切触らず、同様の最小 PR #331 は同 job で pass していたことから **transient な GitHub Actions runner 環境問題** (Issue #316 で議論されている本田様 PC 症状と類似) と判定し、re-run で pass 確認後 merge。
 
 ### 検証結果
 
 | 項目 | 結果 |
 |---|---|
-| pytest (Mac local) | 2163 passed (前 session と同数、回帰なし)、120 skipped |
-| ruff check src/ / mypy src/ | All clean (78 source files) |
-| pytest tests/unit/test_config.py | 434 passed |
-| pytest tests/unit/ui/test_settings.py | 27 passed, 11 skipped (既存 Tk gating) |
-| CI 1 commit 目 (bb5f75c) | ✅ 全 5 jobs pass (build-smoke 2m33s / test-integration 2m57s / test-unit 3.11 48s / test-unit 3.12 49s / test-windows-ui 41s) |
-| CI 2 commit 目 (af33971、review 反映) | ✅ 全 5 jobs pass (build-smoke 3m20s / test-integration 2m31s / test-unit 3.11 43s / test-unit 3.12 47s / test-windows-ui 1m15s) |
+| pytest -m "not integration" (Mac local) | Session 84 末 2163 → **2166 passed** (+3 件: parametrize 3 ケース置換で +2 + target_hwnd=0 ガードで +1)、120 skipped、回帰なし |
+| ruff check src/ tests/ | All clean |
+| mypy src/ | Success: no issues found (78 files) |
+| CI PR #331 全 jobs | ✅ pass (build-smoke 4m3s / test-integration 2m23s / test-unit 3.11 50s / 3.12 54s / test-windows-ui 44s) |
+| CI PR #333 全 jobs | ✅ pass (build-smoke 2m55s / test-integration 2m36s / test-unit 3.11 50s / 3.12 54s / test-windows-ui 52s re-run) |
 
 ## Issue Net 変化
 
 ```
-Close 数: 0 件
-起票数: 0 件
-Net: 0 件
+Close 数: 2 件 (#16, #332)
+起票数: 1 件 (#332)
+Net: -1 件 ✅ (進捗あり)
 ```
 
-Net = 0 だが、これは「進捗ゼロ扱い」の悪い意味ではなく、**triage 基準を尊重して新規 Issue 化を抑制した結果**:
-
-- 本セッションの主成果は continued debt 4 件の消化 + 続編 F §1 実質完了済の確認で、いずれも既存 umbrella Issue #27 配下の internal cleanup
-- review 指摘 (Important rating 6-7) はすべて inline 反映で消化 → 新規 Issue 化不要
-- continued debt 5 (hotpath helper 化、rating 6-7) は PR #327 merge 時の「局所性トレードオフで見送り」判断を尊重して scope 外、新規 Issue 化せず PR #327 コメント既記録のまま継続
-
-Issue #27 umbrella は引き続き OPEN (続編 G 残り Path 移行のため意図的)。続編 F §1 完了確認のみで主要スコープは残作業 §4 Path 移行に絞られた。
+- #16 (Pane/Text/Hyperlink 経路カバー) は PR #331 で `Closes #16` により auto-close
+- #332 (target_hwnd=0 retention test) は本セッション内で起票 + PR #333 で `Closes #332` により auto-close、Issue Net では起票 1 件として計上 (同セッション close でも triage 基準を満たした起票は計上の上、close も計上する)
 
 ## 次セッション最優先タスク
 
 ### 1. **Issue #316 実機対処待ち** (本田様 PC、AI 着手不可)
 
 `scripts/diagnose-tcl.ps1` を本田様 PC で 1 度実行してもらい、結果を Issue #316 にコメント。runbook Step 1-4 (Windows セキュリティ GUI 除外 / 第三者 AV / Python 再 install / uv-managed Python) を順試行。Session 83 から状況変化なし、本田様 PC TeamViewer アクセスの機会次第。
+
+**本セッションで観測した補強情報**: PR #333 の CI `test-windows-ui` で `_tkinter.TclError: invalid command name "tcl_findLibrary"` が transient に発生 (re-run で pass)。本田様 PC の Tcl 症状と同根の可能性があり、Issue #316 調査時に GitHub Actions Windows runner の Tcl 環境差分 (Python 3.11.9 hostedtoolcache 配下) も比較対象に加える価値がある。
 
 ### 2. **Windows 実機で複数タスクの一括検証**
 
@@ -112,13 +131,18 @@ Issue #27 umbrella は引き続き OPEN (続編 G 残り Path 移行のため意
 - **Issue #274 Phase 1 動作確認**: exe 配布後、B/C ダイアログ「対象行を読込」で詳細列が 500px 表示 + 横スクロール出現を verify
 - **Issue #17 実機検証**: `$env:WISEMAN_REAL = "1"` + `$env:WISEMAN_LNK_PATH = "<.lnk path>"` 設定で `uv run pytest tests/integration/test_smoke_real.py -m wiseman_real` → 1 passed 確認
 
-### 3. **Issue #27 続編 G 残り** (Path 移行、Mac 単独着手可)
+### 3. **Issue #27 umbrella の小修正候補消化** (Mac 単独可)
 
-続編 F §1 が実質完了済と確定したため、umbrella Issue #27 の残スコープは §4 Path 移行のみ。続編 G Phase 3a で一部完了済 (`karte_root` / `fax_root` / `ReportStaffEntry.base_dir`)、残りの str→Path 候補があるか config.py 全体を再調査して着手判断する。consumer 影響あり、`/codex` セカンドオピニオン推奨。
+§1 §4 とも実質完了確定後の残務として、過去 PR コメントで集約された rating 5-6 級の小修正候補:
+
+- **TOML datetime メッセージの運用者向けヒント追記** (PR #259 silent-failure-hunter、rating 5-6)
+- **PII default 反転検討**: `_check_str(echo_value=False)` (PR #260 type-design-analyzer、rating 5)
+- **`reports` section の `_require_section_table` 統一 + `user_name_bbox` 名前付きエラー** (PR #261 silent-failure-hunter、rating 6)
+
+scope が膨らまない範囲で 1-2 件ずつ消化して umbrella を縮小。
 
 ### 4. **active 残 Issue (Mac 単独可 / 待機状態)**
 
-- **#16** test_new_registration_flow: Pane/Text 経路 (WM_LBUTTON) をカバー — Mac 単独可、`/tdd` で完結する小規模
 - **#275** ChecklistSettingsDialog GCP 同期ボタン UI シンプル化 — impl-plan たたき台あり、本田様ヒアリング 4 領域回答待ち
 
 ### 5. ポストポーン中 Issue (着手不可、ユーザー明示指示なき限り無視)
@@ -129,44 +153,41 @@ Issue #27 umbrella は引き続き OPEN (続編 G 残り Path 移行のため意
 
 ### 解消済み (本セッション)
 
-- ✅ continued debt 4 件 (PR #324/#325 review rating 5-6) を PR #329 で一括消化
-- ✅ Issue #27 続編 F §1 (Literal 拡張) の実態調査完了 → 実質完了済確定、新規実装不要を明確化
-- ✅ Sequence vs tuple rationale を AppConfig docstring に集約 (PR #324 type-design Important #1 対応)
-- ✅ `_build_staff_table` dead code 削除 (PR #325 code-reviewer S-1 対応)
-- ✅ ハードコード行番号 (`rpa/base.py:80`) を `rpa.base.RPAEngine.navigate_menu` シンボル参照に変更 (line rot 予防)
+- ✅ Issue #16 (PR #13 review I5 残件、Pane/Text/Hyperlink 経路カバー) を PR #331 で解消
+- ✅ Issue #27 続編 G (Path 移行) の実態調査完了 → 実質完了済確定、新規実装不要を明確化
+- ✅ Issue #332 (target_hwnd=0 silent failure 経路 retention test、PR #331 review G1 由来) を起票 + 即 PR #333 で解消
+- ✅ test_pywinauto_engine.py の `TestSelectCareSystem` クラスを 2 ケース増強 (Pane 1 → Pane/Text/Hyperlink 3 + target_hwnd=0 = 計 5 ケース、`is None` 経路は `test_all_control_types_fail_raises` が継続カバー)
 
 ### 継続 (次セッション以降)
 
 - Issue #316 実機対処 (本田様 PC AV 設定、本人の対応待ち)
 - Issue #17 実機検証 (本田様 PC で WISEMAN_REAL=1 + WISEMAN_LNK_PATH 設定下の pytest 実行)
-- Issue #27 続編 G 残り (Path 移行) — umbrella の最後のスコープ
 - Issue #274 / #275 (実機検証 + 本田様ヒアリング待ち)
+- Issue #27 umbrella の小修正候補消化 (rating 5-6 級、scope 限定で機会消化)
 
 ### 未反映 review 指摘 (rating ≤ 5、後続 PR / コメント記録で OK)
 
-- PR #329 comment-analyzer Suggestion #4: `_build_staff_table` dead code 削除コメントの「将来 list field 追加時の確認方法」のヒント強化 (rating 4)
-- PR #329 comment-analyzer Suggestion #5: PR #260 番号参照のアクセス容易性 (rating 5、本 repo 慣習で許容範囲)
-- PR #329 comment-analyzer Suggestion #6: AppConfig docstring の block 見出し引用による cross-reference アクセシビリティ向上 (rating 5)
-- PR #325 code-reviewer S-1 補遺: `_build_staff_table` 周辺の helper 再整理は将来 list 型 field 追加時に再評価
-- PR #327 code-reviewer I-1: hotpath 3 箇所 `_update_checklist_field()` helper 化 (rating 6-7、局所性トレードオフで継続見送り)
+- PR #331 code-reviewer Suggestion S1 (`pywinauto_engine.py:181` 行番号参照の rot リスク、rating 4): grep 復旧可能なため修正不要
+- PR #331 code-reviewer Suggestion S2 (lparam pin、rating 3): 過剰検証になるため追加不要
+- PR #333 code-reviewer Suggestion (autouse `reset_mock` fixture、rating 5): 本 PR scope 外、entry-reset パターンの既存慣習に従い対応見送り
 
 ## Quality Gate 適用状況
 
-| 段階 | PR #329 (debt 消化) |
-|---|---|
-| `/impl-plan` | **適用** (3 ステップ以上、impl-plan skill 経由で Phase 1 調査 + Phase 2 タスク分解 + Phase 2.7 AC 定義) |
-| `/simplify` | スキップ (2-3 files、小規模、docstring 中心) |
-| `/safe-refactor` | 適用相当 (ruff/mypy/pytest 全 clean) |
-| Evaluator 分離プロトコル | 該当外 (3 files、5 files 未満) |
-| 2 並列 light review | **適用** (code-reviewer + comment-analyzer、small tier、6 並列は過剰判断) |
-| Codex セカンドオピニオン | 不要 (3 files / 77 行で small tier、debt 消化 + docstring 中心) |
-| 番号単位明示認可 merge | ✅ CLAUDE.md 4 原則 §3 準拠 — ユーザー指示文「CI 全 pass 確認したら merge お願い」(直前ターンで PR #329 を文脈特定済) を **CI gate 条件付き認可** として受領し、CI green を `gh pr checks 329` で目視確認後に `gh pr merge 329 --squash --delete-branch` を実行。汎用「進めて良い」ではなく PR 番号特定 + 検証条件付き発言として `feedback_pr_merge_authorization.md` の趣旨と整合 (将来テンプレ化を避けるため「事前認可」表現は本 handoff では使わない)。 |
-| review 指摘 inline 反映 | **Important × 4 を 2 commit 目で全反映** (Critical 0、Suggestions rating ≤ 5 は本ハンドオフ debt 記録のみ) |
+| 段階 | PR #331 (Issue #16) | PR #333 (Issue #332) |
+|---|---|---|
+| `/impl-plan` | スキップ (1 file, テスト追加のみ、Issue #16 が明確な scope) | スキップ (極小、scope 明確) |
+| `/simplify` | スキップ (1 file <100 行) | スキップ (1 file <100 行) |
+| `/safe-refactor` | 適用相当 (ruff/mypy/pytest 全 clean) | 適用相当 (同上) |
+| Evaluator 分離プロトコル | 該当外 (1 file、5 files 未満) | 該当外 |
+| Light tier review | **2 並列** (code-reviewer + pr-test-analyzer、testing 観点必須のため) | **1 並列** (code-reviewer のみ、pr-test-analyzer 再実行不要と判断) |
+| Codex セカンドオピニオン | 不要 (small tier、テスト追加のみ) | 不要 (同上) |
+| 番号単位明示認可 merge | ✅ CLAUDE.md 4 原則 §3 準拠、`PR #331 — ... (1 file, +33/-9)` 形式で要約 + CI green 確認後 `gh pr merge 331 --squash --delete-branch` | ✅ 同形式 `PR #333 — ... (1 file, +46/-0)`、CI flaky の `test-windows-ui` を re-run で transient 確認後 `gh pr merge 333 --squash --delete-branch` |
+| review 指摘 inline 反映 | Important G1 は scope 外として別 Issue #332 化 (CRITICAL「Don't add features beyond what the task requires」遵守)、Suggestions rating ≤ 5 は handoff debt 記録 | Critical / Important なし、Suggestion 1 件は本 PR scope 外として継続記録 |
 
 ## ADR 状態
 
 - 16 件、本セッションで新規 ADR なし
-- continued debt 消化 + docstring 更新は ADR-014/-015 + PR #258/#267/#269/#270/#272/#324/#325/#327 (続編 E/H シリーズ) の延長線上で、新規 ADR を起こすほどの設計判断は含まれない
+- テスト追加のみで設計判断を含まず、新規 ADR 起こすほどのアーキテクチャ変化なし
 - ADR-016 (Windows アプライアンス化) は Proposed のまま、状況変化なし
 
 ## 残留プロセス
