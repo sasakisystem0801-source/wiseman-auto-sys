@@ -104,16 +104,14 @@ def engine() -> PywinautoEngine:
 @pytest.fixture()
 def engine_with_launcher(engine: PywinautoEngine) -> PywinautoEngine:
     """_launcher_window がセット済みの engine を返す。"""
-    engine._launcher_window = MagicMock()
-    engine._app = MagicMock()
+    engine._inject_for_test(launcher_window=MagicMock(), app=MagicMock())
     return engine
 
 
 @pytest.fixture()
 def engine_with_main(engine: PywinautoEngine) -> PywinautoEngine:
     """_main_window がセット済みの engine を返す。"""
-    engine._main_window = MagicMock()
-    engine._app = MagicMock()
+    engine._inject_for_test(main_window=MagicMock(), app=MagicMock())
     return engine
 
 
@@ -263,7 +261,7 @@ class TestSelectCareSystem:
         assert wm_lbutton_calls[1].args[2] == 0  # WM_LBUTTONUP wparam=0
 
     def test_all_control_types_fail_raises(self, engine_with_launcher: PywinautoEngine) -> None:
-        """B3: 全 control_type 失敗 → RuntimeError (target_hwnd is None)"""
+        """B3: 全 control_type 失敗 → RuntimeError (target_hwnd is None)、chain 保持."""
 
         def always_fail(**kwargs):
             mock_candidate = MagicMock()
@@ -273,12 +271,13 @@ class TestSelectCareSystem:
         engine_with_launcher._launcher_window.child_window.side_effect = always_fail
         engine_with_launcher._launcher_window.descendants.return_value = []
 
-        with pytest.raises(RuntimeError, match="ケア記録選択要素が見つかりません"):
+        with pytest.raises(RuntimeError, match="ケア記録選択要素が見つかりません") as exc_info:
             engine_with_launcher.select_care_system()
 
         calls = engine_with_launcher._launcher_window.child_window.call_args_list
         tried_cts = [c.kwargs["control_type"] for c in calls]
         assert tried_cts == ["Button", "Pane", "Text", "Hyperlink"]
+        assert isinstance(exc_info.value.__cause__, _PywinautoTimeoutError)
 
     def test_target_hwnd_zero_raises(self, engine_with_launcher: PywinautoEngine) -> None:
         """B3': wrapper.handle == 0 → RuntimeError (silent PostMessage 防止) (Issue #332).
@@ -362,6 +361,77 @@ class TestClickNewRegistration:
         mock_frmkihon.wait.assert_called_with("visible", timeout=10)
 
 
+# ── navigate_menu ────────────────────────────────────────────────
+
+
+class TestNavigateMenu:
+    """MDI メニュー遷移の failure path カバレッジ (bare-str / 未接続 / primary / fallback / both-fail+chain)."""
+
+    def test_bare_str_raises_type_error(self, engine: PywinautoEngine) -> None:
+        """bare str ("業務->日報" 等) は silent corruption (str→list[char]) を防ぐため拒否。"""
+        with pytest.raises(TypeError, match="must be a sequence of str segments"):
+            engine.navigate_menu("業務->日報")  # type: ignore[arg-type]
+
+    def test_requires_main_window(self, engine: PywinautoEngine) -> None:
+        """_main_window is None → RuntimeError"""
+        with pytest.raises(RuntimeError, match="メインウィンドウが未接続"):
+            engine.navigate_menu(["業務", "日報"])
+
+    def test_primary_path_uses_menu_select(self, engine_with_main: PywinautoEngine) -> None:
+        """menu_select 成功で fallback に降りないこと。"""
+        with patch("time.sleep"):
+            engine_with_main.navigate_menu(["業務", "日報"])
+
+        engine_with_main._main_window.menu_select.assert_called_once_with("業務->日報")
+        # primary 成功時は fallback の MenuItem click_input が呼ばれないことを確認
+        click_calls = [
+            c for c in engine_with_main._main_window.child_window.call_args_list
+            if c.kwargs.get("control_type") == "MenuItem"
+        ]
+        assert click_calls == []
+
+    def test_fallback_to_individual_click_on_menu_select_failure(
+        self, engine_with_main: PywinautoEngine,
+    ) -> None:
+        """menu_select 失敗 → 個別 MenuItem.click_input で fallback 完走。"""
+        engine_with_main._main_window.menu_select.side_effect = _ElementNotFoundError(
+            "menu_select not supported in UIA",
+        )
+        # child_window(title=..., control_type="MenuItem") は default MagicMock で
+        # click_input 成功扱い (side_effect なし)。
+
+        with patch("time.sleep"):
+            engine_with_main.navigate_menu(["業務", "日報"])
+
+        # fallback が走り、menu_path の各 item で child_window(title=item, ...) が呼ばれる
+        menuitem_calls = [
+            c for c in engine_with_main._main_window.child_window.call_args_list
+            if c.kwargs.get("control_type") == "MenuItem"
+        ]
+        titles = [c.kwargs["title"] for c in menuitem_calls]
+        assert titles == ["業務", "日報"]
+
+    def test_both_paths_fail_raises_runtime_error_with_chain(
+        self, engine_with_main: PywinautoEngine,
+    ) -> None:
+        """menu_select 失敗 + 個別クリック失敗 → RuntimeError、__cause__ は fallback 側例外."""
+        engine_with_main._main_window.menu_select.side_effect = _PywinautoTimeoutError(
+            "menu_select timeout",
+        )
+        engine_with_main._main_window.child_window.return_value.click_input.side_effect = (
+            _ElementNotFoundError("MenuItem not found in fallback")
+        )
+
+        with patch("time.sleep"), pytest.raises(RuntimeError, match="メニュー遷移失敗") as exc_info:
+            engine_with_main.navigate_menu(["業務", "日報"])
+
+        # chain は fallback_err (ElementNotFoundError) を指す
+        assert isinstance(exc_info.value.__cause__, _ElementNotFoundError)
+        # message には primary (menu_select) と fallback (individual click) の両方の文脈
+        assert "menu_select" in str(exc_info.value)
+        assert "individual click" in str(exc_info.value)
+
+
 # ── export_csv ───────────────────────────────────────────────────
 
 
@@ -420,7 +490,7 @@ class TestExportCsvFailureModes:
     def test_raises_save_dialog_not_shown(
         self, engine_with_main: PywinautoEngine, tmp_path: Path
     ) -> None:
-        """auto_export.csv なし + ダイアログ未出現 → SaveDialogNotShownError、context に title_re 含む"""
+        """auto_export.csv なし + ダイアログ未出現 → SaveDialogNotShownError、context に title_re + chain."""
         mock_child = MagicMock()
         mock_child.exists.return_value = True
         engine_with_main._main_window.child_window.return_value = mock_child
@@ -431,6 +501,7 @@ class TestExportCsvFailureModes:
             engine_with_main.export_csv(tmp_path)
 
         assert "title_re" in str(exc_info.value)
+        assert isinstance(exc_info.value.__cause__, _PywinautoTimeoutError)
 
     def test_raises_filename_field_not_found(
         self, engine_with_main: PywinautoEngine, tmp_path: Path
@@ -451,8 +522,10 @@ class TestExportCsvFailureModes:
 
         with patch("time.sleep"), pytest.raises(
             FileNameFieldNotFoundError, match="FileNameControlHost"
-        ):
+        ) as exc_info:
             engine_with_main.export_csv(tmp_path)
+
+        assert isinstance(exc_info.value.__cause__, _ElementNotFoundError)
 
     def test_raises_save_button_not_found(
         self, engine_with_main: PywinautoEngine, tmp_path: Path
@@ -473,8 +546,12 @@ class TestExportCsvFailureModes:
             _ElementNotFoundError("no save button")
         )
 
-        with patch("time.sleep"), pytest.raises(SaveButtonNotFoundError, match="btnSave"):
+        with patch("time.sleep"), pytest.raises(
+            SaveButtonNotFoundError, match="btnSave"
+        ) as exc_info:
             engine_with_main.export_csv(tmp_path)
+
+        assert isinstance(exc_info.value.__cause__, _ElementNotFoundError)
 
     def test_raises_csv_file_not_found(
         self, engine_with_main: PywinautoEngine, tmp_path: Path
@@ -569,6 +646,68 @@ class TestCloseWiseman:
         ):
             engine_with_main.close_wiseman()
 
+        assert engine_with_main._main_window is None
+        assert engine_with_main._app is None
+
+    def test_falls_back_to_direct_close_when_confirm_dialog_missing(
+        self, engine_with_main: PywinautoEngine,
+    ) -> None:
+        """確認ダイアログ未出現時に ``_main_window.close()`` 直接終了 fallback を選ぶこと."""
+        mock_btn_wrapper = MagicMock()
+        mock_btn_wrapper.handle = 0xCAFE
+        mock_btn = MagicMock()
+        mock_btn.wrapper_object.return_value = mock_btn_wrapper
+        engine_with_main._main_window.child_window.return_value = mock_btn
+
+        _mock_user32.PostMessageW.return_value = 1
+
+        # ``_app.window(title_re=".*確認.*")`` が ElementNotFoundError を投げる
+        engine_with_main._app.window.side_effect = _ElementNotFoundError("no confirm dialog")
+        engine_with_main._app.process = 7777
+
+        # close_wiseman は cleanup 時に _main_window = None にリセットするため、
+        # mock の close() 呼出を assert する前に参照を保持する。
+        mock_main_ref = engine_with_main._main_window
+
+        with (
+            patch.object(os, "kill", side_effect=ProcessLookupError),
+            patch("time.sleep"),
+            patch("time.monotonic", side_effect=[0, 0.1]),
+        ):
+            engine_with_main.close_wiseman()
+
+        # 直接 close() が呼ばれたこと、cleanup 完了
+        mock_main_ref.close.assert_called_once()
+        assert engine_with_main._main_window is None
+        assert engine_with_main._app is None
+
+    def test_permission_error_during_pid_check_continues(
+        self, engine_with_main: PywinautoEngine,
+    ) -> None:
+        """``os.kill(pid, 0)`` で PermissionError → 終了確認を継続し ProcessLookupError で cleanup."""
+        mock_btn_wrapper = MagicMock()
+        mock_btn_wrapper.handle = 0xBEEF
+        mock_btn = MagicMock()
+        mock_btn.wrapper_object.return_value = mock_btn_wrapper
+        engine_with_main._main_window.child_window.return_value = mock_btn
+
+        _mock_user32.PostMessageW.return_value = 1
+
+        mock_confirm = MagicMock()
+        engine_with_main._app.window.return_value = mock_confirm
+        engine_with_main._app.process = 6666
+
+        # 1 回目: PermissionError (pass で続行) → 2 回目: ProcessLookupError (break)
+        kill_side_effects = [PermissionError("access denied"), ProcessLookupError]
+
+        with (
+            patch.object(os, "kill", side_effect=kill_side_effects),
+            patch("time.sleep"),
+            patch("time.monotonic", side_effect=[0, 0.1, 0.2]),
+        ):
+            engine_with_main.close_wiseman()
+
+        # 最終的に cleanup される (timeout warning に流れていないこと = _main_window/_app が None)
         assert engine_with_main._main_window is None
         assert engine_with_main._app is None
 
