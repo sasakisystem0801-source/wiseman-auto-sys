@@ -60,7 +60,7 @@ def test_non_button_fallback_uses_post_message(...) -> None:
 | code-reviewer | 0 | 0 | Merge 可 (Suggestion 2 件は informational) |
 | pr-test-analyzer | 0 | **G1**: `target_hwnd == 0` 経路未カバー (rating 7、conf 80+) | Merge 推奨、G1 は別 Issue 化 |
 
-`PR #331 — test(rpa): select_care_system の Pane/Text/Hyperlink 経路を parametrize 化 (Issue #16) (1 files, +33/-9)` 形式の番号認可受領、CI green 確認後 merge。
+`PR #331 — test(rpa): select_care_system の Pane/Text/Hyperlink 経路を parametrize 化 (Issue #16) (1 file, +33/-9)` 形式の番号認可受領、CI green 確認後 merge。
 
 ### Phase 3: Issue #332 起票 + PR #333 (merged `d0b6332`) で即解消
 
