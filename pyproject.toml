@@ -43,6 +43,10 @@ dev = [
     "pytest>=8.3.0",
     "pytest-cov>=6.0.0",
     "pytest-timeout>=2.2.0",
+    # Issue #316: 本田様 PC の ESET 動的 scan と pytest subprocess 起動タイミングが
+    # 競合し、稀に init.tcl read が一時 lock される intermittent fail を retry で吸収。
+    # スタンドアロン tk.Tk() は 10/10 完全成功で tkinter コード自体は健全 (実機診断確定)。
+    "pytest-rerunfailures>=14.0",
     # v7.0 で onefile+BUNDLE error 化 / win_no_prefer_redirects 削除等の破壊的変更
     # が予告されているため、14A の spec を安定して使うため当面 6.x に固定する（Codex MEDIUM 指摘）。
     "pyinstaller>=6.11.0,<7.0",
@@ -81,7 +85,10 @@ disable_error_code = ["import-untyped", "import-not-found"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --tb=short"
+# --reruns 2 / --reruns-delay 1: Issue #316 対応。ESET 動的 scan × pytest subprocess
+# 起動の intermittent fail を最大 3 回試行 (初回+2 回 retry、1 秒間隔) で吸収する。
+# 全試行 fail なら通常通り fail として扱われ、真のバグは検出される。
+addopts = "-v --tb=short --reruns 2 --reruns-delay 1"
 pythonpath = ["src"]
 markers = [
     "integration: Windows-only integration tests requiring mock WinForms app",
