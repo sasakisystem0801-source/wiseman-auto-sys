@@ -6,6 +6,7 @@ try:
     import tomllib
 except ModuleNotFoundError:
     import tomli as tomllib  # type: ignore[no-redef]
+import datetime as _dt
 import logging
 import math
 import os
@@ -39,7 +40,36 @@ logger = logging.getLogger(__name__)
 #   - PII 隠蔽: ``echo_value=False`` を指定するとエラーメッセージから値を除外
 #     (api_key / spreadsheet_id / SA key path 等の秘密情報フィールド向け)
 #   - エラーメッセージに ``type(v).__name__`` は常時含める (デバッグ可読性確保)
+#   - TOML datetime ヒント: TOML 1.0 は ``key = 2024-01-01`` をネイティブで
+#     ``datetime.date`` 等に解釈する。本リポジトリの dataclass は date/time/datetime
+#     を受け付けるフィールドが存在しないため、誤って渡された時は型名に加えて
+#     「文字列として記載」運用者向けヒントを添える (Issue #27 umbrella、
+#     PR #259 silent-failure-hunter rating 5-6 反映)
 # ---------------------------------------------------------------------------
+
+
+_TOML_DATETIME_TYPES: Final[tuple[type, ...]] = (_dt.date, _dt.time)
+# ``datetime.datetime`` は ``datetime.date`` のサブクラスなので date だけで拾える。
+# ``time`` は別系統で独立列挙。``tzinfo`` は単体で TOML から来ることはなく除外。
+
+
+def _datetime_hint(value: object) -> str:
+    """TOML から date/time 値が来た時のみ運用者向けヒントを返す (それ以外は空文字)。
+
+    TOML パーサ (``tomllib``) は ``version = 2024-01-01`` のような記述を
+    ``datetime.date(2024, 1, 1)`` として返す。本リポジトリの dataclass は
+    str/int/bool/Path フィールドしか持たないため、誤った日付値を渡されると
+    技術的な ``got date: datetime.date(2024, 1, 1)`` メッセージだけが出て
+    「TOML の値をどう書き直せばよいか」が運用者に伝わらない。本 helper は
+    型違反値が date/time/datetime に該当する時に限り、文字列形式での記述を
+    促すヒント文字列を返す。
+    """
+    if isinstance(value, _TOML_DATETIME_TYPES):
+        return (
+            ' (TOML の日付/時刻値は文字列ではありません。'
+            '"2024-01-01" のように引用符で囲んで文字列として記載してください)'
+        )
+    return ""
 
 
 def _check_str(name: str, value: object, *, echo_value: bool = True) -> None:
@@ -51,6 +81,7 @@ def _check_str(name: str, value: object, *, echo_value: bool = True) -> None:
         suffix = f": {value!r}" if echo_value else ""
         raise TypeError(
             f"{name} must be str, got {type(value).__name__}{suffix}"
+            f"{_datetime_hint(value)}"
         )
 
 
@@ -63,6 +94,7 @@ def _check_int(name: str, value: object) -> None:
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(
             f"{name} must be int, got {type(value).__name__}: {value!r}"
+            f"{_datetime_hint(value)}"
         )
 
 
@@ -71,6 +103,7 @@ def _check_bool(name: str, value: object) -> None:
     if not isinstance(value, bool):
         raise TypeError(
             f"{name} must be bool, got {type(value).__name__}: {value!r}"
+            f"{_datetime_hint(value)}"
         )
 
 
@@ -146,6 +179,7 @@ def _check_path(name: str, value: object, *, echo_value: bool = True) -> None:
         suffix = f": {value!r}" if echo_value else ""
         raise TypeError(
             f"{name} must be Path, got {type(value).__name__}{suffix}"
+            f"{_datetime_hint(value)}"
         )
 
 
@@ -178,6 +212,7 @@ def coerce_path(name: str, raw: Any, *, echo_value: bool = True) -> Path:
         suffix = f": {raw!r}" if echo_value else ""
         raise TypeError(
             f"{name} must be str (TOML) or Path, got {type(raw).__name__}{suffix}"
+            f"{_datetime_hint(raw)}"
         )
     stripped = raw.strip()
     if not stripped:
