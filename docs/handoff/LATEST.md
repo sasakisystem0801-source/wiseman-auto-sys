@@ -1,213 +1,236 @@
-# Session 86 完了 - PR #335 / PR #336 / PR #338 全マージ済 (Issue #27 umbrella datetime hint + Issue #11 M2/M6 + handoff)
+# Session 87 完了 - Issue #316 完全解決 (4 PR マージ + 実機効果実証 + close)
 
-日時: 2026-05-17
-HEAD (main): `0a3cec6`
-前セッション archive: [session-85-issue-16-332-and-issue-27-g-investigation.md](./archive/session-85-issue-16-332-and-issue-27-g-investigation.md)
+日時: 2026-05-18
+HEAD (main): `68054d2`
+前セッション archive: [session-86-issue-27-datetime-and-issue-11-m2m6.md](./archive/session-86-issue-27-datetime-and-issue-11-m2m6.md)
+
+## セッション概要
+
+Session 86 handoff の「次セッション最優先」とは別に、ユーザーから「Windows 側処理が今なら可能」の合図を受け、**Issue #316 (本田様 PC の Tcl init.tcl read failure、deploy Phase 0 阻害) の完全対処** にフォーカスして 1 セッションで close まで到達。
+
+主要成果:
+
+- **4 PR マージ** (#340 / #341 / #342 / #343) で診断ツール完全復旧 + AI 完結対処策実装
+- **Issue #316 close** (実機効果実証 = `1 rerun` で AV intermittent fail を実吸収)
+- **真因確定**: ESET 動的 scan × pytest subprocess 起動の race condition
+- **ADR-017** (test retry policy) 新規追加 (本 handoff PR で同時 commit)
 
 ## 本セッション完了内容
 
-### Phase 1: PR #335 (merged `ef56ed9`) - Issue #27 umbrella TOML datetime ヒント追加
+### Phase 1: PR #340 (merged `842d3a6`) - diagnose-tcl.ps1 BOM 付き UTF-8 変換
 
-Session 85 の handoff 「次セッション最優先 #3」(Issue #27 umbrella の rating 5-6 級小修正候補消化) のうち、**TOML datetime メッセージの運用者向けヒント追記** (PR #259 silent-failure-hunter、rating 5-6) を消化。
+ユーザー: 「Windows側処理が今なら可能」 → 最優先 Issue #316 の `scripts/diagnose-tcl.ps1` 実行を依頼 → ParserError 連発で実行不能。
 
-#### 背景
+#### 原因
 
-TOML 1.0 は `version = 2024-01-01` を `datetime.date(2024, 1, 1)` にネイティブ解釈する。本リポジトリの dataclass は str/int/bool/Path しか持たないため、誤入力時の TypeError メッセージが従来 `got date: datetime.date(2024, 1, 1)` のみで「文字列として書き直す」運用判断が伝わらなかった。
+`scripts/diagnose-tcl.ps1` のみ **BOM 無し UTF-8** で commit されており、Windows PowerShell 5.1 が cp932 (Shift-JIS) として解釈、日本語文字列内の特殊バイトを構文要素として誤認していた。同じ `scripts/` 配下の `deploy-windows.ps1` `create_shortcut.ps1` は BOM 付き UTF-8 で commit されており、PR #319 で `diagnose-tcl.ps1` を追加した際の漏れ。
 
-#### 変更内容
+#### 修正
 
-`src/wiseman_hub/config.py` (+41) に `_datetime_hint(value)` helper 追加、5 経路 (`_check_str` / `_check_int` / `_check_bool` / `_check_path` / `coerce_path`) + collection 経路 (`_check_tuple_of_str` / `_check_dict_str_to_str` の 5 raise 点) の TypeError メッセージに `_TOML_DATETIME_TYPES = (datetime.date, datetime.time)` に該当する値が来た時のみヒントを付加。
+`scripts/diagnose-tcl.ps1` の先頭に `EF BB BF` (BOM) を追加するのみ (内容無変更、1 file changed, +1/-1)。
 
-ヒント: `(TOML の日付/時刻値は文字列ではありません。"2024-01-01" のように引用符で囲んで文字列として記載してください)`
+### Phase 2: PR #341 (merged `cfb2cf7`) - line 53 backtick エスケープ事故修正
 
-`tests/unit/test_config.py` (+142) に `TestTypeGuardHelpers` 末尾セクション追加 (15 件):
-- `_datetime_hint` 単体: date / datetime / time / 非 datetime (parametrize 7 件)
-- 5 helper + 2 collection helper の hint 付加確認
-- 非 datetime regression guard (int で hint 無し)
-- PII 経路 (`_check_path(echo_value=False)` + date) で repr(value) と固有日付リテラルが漏れないことを assertion
+PR #340 マージ後、本田様 PC で再実行したが **別の ParserError**: line 74 `'回連続、intermittent' を使用できません`。
 
-#### 4 並列 review + フォローアップ inline 反映
+#### 原因
 
-| Reviewer | Critical | Important | 結論 |
-|---|---|---|---|
-| code-reviewer | 0 | 0 | Merge 可 (Suggestion: テスト import DRY 任意) |
-| pr-test-analyzer | 0 | 0 | Gap2 rating 4 (echo_value=False+date) → **本 PR で消化** |
-| comment-analyzer | 0 | **rating 6**: PR#259/rating 5-6 参照 rot → **本 PR で消化** | tzinfo コメント根拠付け → **本 PR で消化** |
-| silent-failure-hunter | 0 | 0 | L1 rating 3: tuple/dict helper も hint 未付加 → **本 PR で消化** |
+Line 53 の `Write-Host "...または \`uv python install 3.11\`"` で:
 
-`PR #335 — feat(config): TOML datetime 型違反 TypeError に運用者向けヒント付加 (Issue #27) (2 files, +191/-8)` の番号認可受領、5 ワークフロー全 SUCCESS 確認後 squash merge + branch 削除完了。
+- `` `u `` → `u` (リテラル、エラーなし)
+- **`` `" `` → エスケープされた `"`** (致命的: 文字列終端と認識されない)
 
-### Phase 2: PR #336 (`feat/issue-11-pywinauto-refactor`、CI 完了待ち / マージ認可待ち) - Issue #11 M2+M6 消化
+PowerShell parser が文字列リテラル `"  対処:..."` を閉じないまま line 54 以降を文字列継続として読み、後続の `"` で誤終端 → line 74 で構文エラー表面化。
 
-Session 85 handoff 「次セッション最優先 #4」(active 残 Issue) の **#11 PywinautoEngine コードレビュー残件 (MEDIUM 5件)** を `/impl-plan` で分解、`M2` と `M6` を本 PR-A スコープに集約。`M3/M4/M5` はテスト構造変更 (private 属性 inject / failure path 拡張 / `tests/unit/rpa/` 移動 + conftest.py) を伴うため別 PR-B で次セッション以降扱う方針。
+#### 修正
 
-#### M2: 接続チェック helper 抽出
+Line 53 を single quote 文字列 `'...'` に変更。PowerShell の single quote 内では backtick がリテラル扱い (公式仕様)。表示文字列は完全同一、動作変更ゼロ。1 file changed, +1/-1。
 
-7 箇所の `if self._main_window is None: raise RuntimeError(...)` パターンを 2 helper (`_ensure_main_connected` / `_ensure_launcher_connected`) に集約。`action_hint=""` 引数で個別操作案内 (「先に launch() を実行してください」等) を保持しつつ、ベースメッセージは統一。既存テスト assertion は部分一致 (`match="メインウィンドウが未接続"`) のため破壊なし。`close_wiseman` (warning + return) / `take_screenshot` (全画面 fallback) は raise しない処理のため対象外。
+### Phase 3: PR #342 (merged `e1fce7c`) - Section 3 Python embed 一時ファイル方式
 
-#### M6: selector 順次試行 helper 抽出
-
-`export_csv` 内の filename / save_button の 2 つの「順次試行ループ + 失敗時 from chain raise」パターンを `_try_selectors_sequential(parent, selectors, action, error_cls, field_name, extra_exceptions=())` に統合。`field_name` から log warning / error message のテンプレ文言を helper 内で生成 (呼出側の文言重複排除)。`__cause__` (from chain) 保持 / silent-failure-hunter I-3 由来の方針を踏襲。
-
-#### /simplify 3 並列レビュー反映 (本 PR 内消化)
-
-| 指摘元 | rating | 内容 | 対応 |
-|---|---|---|---|
-| Quality | 6 | failure_log_msg + failure_error_msg 文言重複 | field_name 1 引数化テンプレ生成 |
-| Quality | 5 | 引数 7 個 sprawl | 上記消化で 6 個に削減 |
-| Quality | 4 | docstring 内「Issue #11 M2/M6」「silent-failure-hunter I-3」等の履歴/rating 参照 | 削除 (git blame で辿れる) |
-
-#### 4 並列 review + フォローアップ inline 反映 (commit `18fd404`)
-
-| Reviewer | Critical | Important | 結論 |
-|---|---|---|---|
-| code-reviewer | 0 | 0 | Merge 可 (Suggestion: prefix 固定 confidence 55、見送り) |
-| comment-analyzer | 0 | **rating 7**: 汎用 helper signature と "保存ダイアログ内の" prefix hardcoded 矛盾 → **本 PR で消化** | docstring rot 注意 |
-| silent-failure-hunter | 0 | **rating 6, conf 90**: 空 list ガード未追加 → **本 PR で消化** | warning 等価性 OK |
-| pr-test-analyzer | 0 | 0 | Gap2 rating 4: `__cause__` chain assertion (follow-up TODO 級) |
-
-フォローアップ:
-- `_try_selectors_sequential` の docstring に「現状は保存ダイアログ呼出専用、prefix「保存ダイアログ内の」は固定。将来別 context (menu / MDI 子) で再利用時は `error_context` 引数化が必要」と明記
-- helper 先頭に `if not selectors: raise ValueError(...)` 空 list ガード追加 + 単体テスト 1 件 `TestTrySelectorsSequentialGuards.test_empty_selectors_raises_value_error` 追加
-
-#### CI 状況 (commit `18fd404`) → マージ完了
-
-| Workflow | 状態 |
-|---|---|
-| build-smoke | ✅ SUCCESS |
-| test-integration | ✅ SUCCESS |
-| test-unit (3.11) | ✅ SUCCESS |
-| test-unit (3.12) | ✅ SUCCESS |
-| test-windows-ui | ✅ SUCCESS |
-
-全 5 ワークフロー SUCCESS 確定後、ユーザーから「PR #336 と PR #338 が CI 5/5 SUCCESS でマージ」の番号単位明示認可を受領、`gh pr merge 336 --squash --delete-branch` 実行完了 (main: `7a6c580`)。
-
-### Phase 3: PR #338 (merged `0a3cec6`) - Session 86 handoff ドキュメント
-
-Session 86 handoff 更新の中間版 (PR #336 マージ前の状態スナップショット)。`docs/handoff-session-86-clean` branch を main 起点で切り直して作成 (旧 `docs/handoff-session-86` branch は PR #336 の commits 混入のため PR #337 として close)。
-
-code-reviewer 1 並列 light review で Important (CI 状況の取り残し、confidence 95) を inline 反映 (commit `26c4759`)。ユーザー認可受領後マージ完了。
-
-**注**: 本 LATEST.md は **PR #338 マージ完了後の Session 86 final 状態**を記録 (PR #338 本体は PR #336 マージ前の中間スナップショット)。
-
-### 検証結果
-
-| 項目 | 結果 |
-|---|---|
-| pytest -m "not integration" (Mac local) | Session 85 末 2166 → **2188 passed** (+22 件: PR #335 で +15 + PR #336 で +1 + 既存テスト不変)、120 skipped、回帰なし |
-| ruff check src/ tests/ | All clean |
-| mypy src/ | Success: no issues found (78 files) |
-| CI PR #335 全 jobs | ✅ pass (5 ワークフロー SUCCESS) → squash merge + delete-branch 完了 |
-| CI PR #336 全 jobs | ✅ 5/5 SUCCESS (build-smoke + test-integration + test-unit 3.11/3.12 + test-windows-ui) → squash merge + delete-branch 完了 (main `7a6c580`) |
-| PR #338 (handoff) マージ | ✅ ユーザー番号認可後 squash merge + delete-branch 完了 (main `0a3cec6`)、code-reviewer Important 1 件 inline 反映済 |
-
-## Issue Net 変化
+PR #341 マージ後、診断ツールは完走するように。しかし **Section 3 (tk.Tk() 10 回試行) が Python 構文エラー** で実体未取得:
 
 ```
-Close 数: 0 件
-起票数: 0 件
-Net: 0 件 (進捗ゼロ扱いだが、umbrella 内 progress あり + 3 PR マージ完了の実進捗あり)
+[10 回] File "<string>", line 10  print(fFAIL:  ^ SyntaxError: invalid syntax
 ```
 
-**umbrella Issue 内 progress (Net 計上外)**:
-- **#27** (config dataclass 型設計強化、umbrella): PR #259 由来の rating 5-6 級 1 件 (TOML datetime ヒント) を PR #335 で消化 (main `ef56ed9`)。残り 2 件 (PII default 反転検討 rating 5 / `reports` section 統一 rating 6 — ただし後者は続編 D で既に実質完了済確認) は OPEN 維持で次セッション以降。
-- **#11** (PywinautoEngine MEDIUM 5件): 2 件 (M2/M6) を PR #336 で消化済 (main `7a6c580`)、3 件 (M3/M4/M5) は PR-B として次セッション以降。
+期待: `print(f"FAIL: ...")` / 実態: `print(fFAIL:` (内側 `"` 消失)
 
-両 Issue とも umbrella 性質で OPEN 維持の方針が PR body に明記されており、Net 計測上は 0 だが progress 実態としては rating 5-7 級指摘の段階的消化が進んでいる。本セッション内で **3 PR マージ完了** (累積 +298 行 / -51 行)、ハンドオフ的には実質「中規模 progress」セッション。
+#### 原因
 
-## 次セッション最優先タスク
+PowerShell 5.1 の **native command argument passing は legacy モード**。`& $pythonExe -c $tkScript` の `$tkScript` 内の `"` が PowerShell に食われて Python に届かない (PSNativeCommandArgumentPassing 設定は PS 7.3+ のみで PS 5.1 では不可)。Windows PowerShell 5.1 限定で macOS では再現できないため見逃された。
 
-### 1. **Issue #11 PR-B (M3/M4/M5) 着手** (前提条件: 本セッションで PR #336 マージ済 ✅)
+#### 修正
 
-PR-A 完了後の残務として、テスト構造改善を含む PR-B を別スコープで作成:
+一時ファイル経由 (`python tempfile.py`) に変更:
 
-- **M5 (PR-A 構造を踏まえて scope 再評価)**: `tests/unit/rpa/conftest.py` 新設 + `test_pywinauto_engine.py` を `tests/unit/rpa/` に移動 + fixture 切り出し。ただし PR-A の Session 86 調査で「`_build_fake_pywinauto` + `patch.dict(sys.modules)` セットアップが fixture と切り離せない」「3 fixture は当該 1 ファイルのみ利用、cross-file 用途なし」と確認済のため、**現状維持で M5 不要** の判断も再検討対象
-- **M3 (テスト private 属性 inject API 化)**: `engine._main_window = MagicMock()` のような直代入を `engine._inject_main_window_for_test(mock)` のような明示 API or factory 関数経由に集約。test design 議論が必要
-- **M4 (failure path テスト拡張)**: `TestExportCsvFailureModes` 5 件を参考に、`select_care_system` / `navigate_menu` / `close_wiseman` 等の他 method にも failure path テストを横展開。PR #336 follow-up TODO の `__cause__` chain assertion 追加 (rating 4) もこの段階で消化候補
+- `[System.IO.Path]::GetTempPath()` + GUID で一意ファイル名
+- `[System.IO.File]::WriteAllText` で BOM なし UTF-8 で書き出し
+- `try/finally` で確実にクリーンアップ
 
-impl-plan で再分解後、PR-B として実装。
+引数を「ファイルパス 1 個のみ」にすれば PowerShell の引数解釈は ASCII path のみで通過し、`"` 消失問題は原理的に発生しない。1 file changed, +22/-12。
 
-### 2. **Issue #27 umbrella 残務消化** (Mac 単独可)
+### Phase 4: 実機診断結果取得 + 真因確定
 
-PR #335 で消化した残り:
+PR #342 マージ後、本田様 PC で diagnose-tcl.ps1 が **5 セクション全完走**:
 
-- **PII default 反転検討**: `_check_str(echo_value=False)` (PR #260 type-design-analyzer、rating 5) — 「検討」項目で設計議論を伴うため AI 単独進行不適、ユーザー判断仰ぐ
-- **`reports` section の `_require_section_table` 統一 + `user_name_bbox` 名前付きエラー** (PR #261 silent-failure-hunter、rating 6) — Session 85 → 86 で実態確認した結果、**既に Issue #27 続編 D で完了済** (config.py L1267 + L1295)。umbrella コメントに残存しているが実質クリア、消化不要
+| Section | 結果 | 解釈 |
+|---------|------|------|
+| 1. Python/init.tcl 実在 | ✅ OK (25633 bytes) | ファイル健全 |
+| 2. init.tcl read 5 回 | ✅ **5/5 成功** | スタンドアロン read 経路に AV 干渉なし |
+| 3. tk.Tk() 10 回 | ✅ **10/10 成功** | **tkinter コード自体は健全** |
+| 4. Defender 状態 | ⚠️ `Get-MpPreference` 0x800106ba 失敗 | ESET が Tamper Protection 化 |
+| 5. 第三者 AV プロセス | ⚠️ **ESET (ekrn) 検出** | NOD32 / Endpoint Security |
 
-umbrella を縮小する観点では、上記 2 件のうち PII default は決断待ち、`reports` section は実質クリア。**umbrella close 判断のタイミングが近づきつつある** (続編 E/H 完遂 + §1 §4 実質完了 + 残務 1 件未決)。次セッションで PII default の方針をユーザーに確認できれば umbrella close 候補。
+#### 真因確定
 
-### 3. **Issue #316 実機対処待ち** (本田様 PC、AI 着手不可)
+スタンドアロン実行で **15 連続 (read 5 + tk.Tk() 10) 全成功** という事実から:
 
-`scripts/diagnose-tcl.ps1` を本田様 PC で 1 度実行してもらい、結果を Issue #316 にコメント。runbook Step 1-4 (Windows セキュリティ GUI 除外 / 第三者 AV / Python 再 install / uv-managed Python) を順試行。Session 83 から状況変化なし、本田様 PC TeamViewer アクセスの機会次第。
+> **pytest 実行時にのみ発生する intermittent fail** = subprocess 大量起動 × ESET 動的 scan のタイミング競合
 
-### 4. **Windows 実機で複数タスクの一括検証** (本田様 PC TeamViewer 待ち)
+Issue #316 body の観察 (毎回違うテストで失敗、PR #311 で 4 件 → PR #312 で 1 件と推移) と完全整合。
 
-本田様 PC TeamViewer アクセスの機会ができたら以下を 1 セッションで消化:
+### Phase 5: AI 完結対処策の選定 (Issue #316 コメント [#issuecomment-4472459362](https://github.com/sasakisystem0801-source/wiseman-auto-sys/issues/316#issuecomment-4472459362))
 
-- **Issue #316**: deploy-windows.ps1 実行 → Phase 0 Tcl エラー再現確認 → diagnose-tcl.ps1 → runbook Step 1-4
-- **Issue #274 Phase 1 動作確認**: exe 配布後、B/C ダイアログ「対象行を読込」で詳細列 500px 表示 + 横スクロール
-- **Issue #17 実機検証**: WISEMAN_REAL=1 + WISEMAN_LNK_PATH 設定下の test_smoke_real.py
+ユーザー方針確認: **本田様 PC 側で人手の設定変更 (ESET GUI 除外、Python 再 install) は一切行わない**。AI 完結で対処する。
 
-### 5. **active 残 Issue (待機状態)**
+| 候補 | 評価 |
+|------|------|
+| A. uv-managed Python 切替 | ❌ tkinter 健全なので不要、副作用大 |
+| B. `-SkipPytest` 正規化 | ⚠️ CI 信頼倒しは大袈裟 |
+| **C. pytest-rerunfailures** | **🎯 採用**: 副作用最小、診断結果と整合 |
+| D. tk テスト marker skip | ❌ どのテストが failing するか predictable でない |
 
-- **#275** ChecklistSettingsDialog GCP 同期ボタン UI シンプル化 — impl-plan たたき台あり、本田様ヒアリング 4 領域回答待ち
-- **#6** PoC E2Eテスト (ログイン→CSV抽出→GCSアップロード) — `P1, PoC` ラベル、本田様 PC TeamViewer + WISEMAN_REAL=1 環境必須、上記 #4 と同枠
+### Phase 6: PR #343 (merged `68054d2`) - pytest-rerunfailures 導入
 
-### 6. **branch クリーンアップ認可待ち** (destructive 操作、scope 極小)
+`pyproject.toml` のみの変更 (2 files / +23/-1):
 
-- リモート branch `origin/docs/handoff-session-86` (PR #337 close 由来、PR #336 の commits 混入で再作成不可) の削除
-- コマンド: `git push origin --delete docs/handoff-session-86`
-- 影響: なし (close 済 PR、誰も触っていない)、認可受領で即時実行可
+- `[project.optional-dependencies] dev` に `pytest-rerunfailures>=14.0` 追加
+- `[tool.pytest.ini_options] addopts` に `--reruns 2 --reruns-delay 1` 追加
+- 両所に WHY コメント明記 (Issue #316 / 実機診断結果を参照)
 
-### 7. ポストポーン中 Issue (着手不可、ユーザー明示指示なき限り無視)
+uv が自動生成した `[dependency-groups]` セクションは削除し `[project.optional-dependencies]` に統一 (`deploy-windows.ps1` Phase 0 の `uv sync --extra dev` で正しく install されるため)。
 
-#245 / #170 / #161 / #134 / #39 (postponed ラベル、再開条件は各 Issue コメント参照)
+### Phase 7: 実機効果実証 (Issue #316 コメント [#issuecomment-4472478145](https://github.com/sasakisystem0801-source/wiseman-auto-sys/issues/316#issuecomment-4472478145))
 
-## ハンドオフ debt
+PR #343 マージ後、本田様 PC で `uv sync --extra dev` + `uv run pytest -q -m "not integration"` 実行:
 
-### 解消済み (本セッション)
+```
+===== 2302 passed, 3 skipped, 10 deselected, 3 xpassed, 1 rerun in 30.63s =====
+```
 
-- ✅ Issue #27 umbrella の rating 5-6 級 1 件 (TOML datetime ヒント) を PR #335 でマージ済 (main `ef56ed9`)
-- ✅ Issue #11 PR-A (M2 + M6) を PR #336 でマージ済 (main `7a6c580`)
-- ✅ Session 86 handoff 中間版を PR #338 でマージ済 (main `0a3cec6`)
-- ✅ Issue #27 続編 D の実態確認: `reports` section + `user_name_bbox` の `_require_section_table` 統一は **既に完了済** と Session 86 で再確認 (config.py L1267 + L1295)、umbrella の残務 1 件分は実質クリア
+- **🎯 `1 rerun`**: pytest-rerunfailures による retry が **実機で発火**
+- 該当テスト: `tests\unit\ui\test_checklist_c_dialog_mirror_hook.py` (出力に `R` マーカー)
+- **PR #343 がなければこの 1 件で deploy 停止** = Issue #316 現象の再現
+- 全 2302 PASS で最終的にエラーゼロ
 
-### 継続 (次セッション以降)
+### Phase 8: Issue #316 close
 
-- Issue #11 PR-B (M3/M4/M5、PR-A の test 構造踏まえて scope 再評価必要)
-- Issue #27 PII default 反転検討 (`_check_str(echo_value=False)` rating 5) — ユーザー判断待ち、決断次第で umbrella close 候補
-- Issue #316 実機対処 (本田様 PC AV 設定、本人の対応待ち)
-- Issue #17 / #6 実機検証 (本田様 PC で WISEMAN_REAL=1 + WISEMAN_LNK_PATH 設定下の pytest)
-- Issue #274 / #275 (実機検証 + 本田様ヒアリング待ち)
-- リモート branch `origin/docs/handoff-session-86` 削除認可待ち (destructive 操作)
+実機効果実証完了のため `gh issue close 316` (closed: 2026-05-17T20:55:29Z)。
 
-### 未反映 review 指摘 (rating ≤ 5、後続 PR / コメント記録で OK)
+## 学んだこと (今セッション固有の知見)
 
-- PR #335 code-reviewer Suggestion (テスト import DRY、rating 5): 関数内 import パターンは既存テストでも一貫使用、本 PR scope 外で見送り
-- PR #335 pr-test-analyzer Gap 1 (tzinfo): 既存 datetime テストで実質カバー済
-- PR #335 pr-test-analyzer Gap 3 (load_config e2e): `TestLoadConfigWithValidation` で型違反伝播を既存検証済
-- PR #336 pr-test-analyzer Gap 2 (`__cause__` chain assertion、rating 4): PR-B で M4 失敗パス拡張時に消化候補
-- PR #336 code-reviewer Suggestion (prefix 固定 confidence 55): 本 PR docstring 明記で対応済、将来再利用時に拡張
+### PowerShell 5.1 の 3 つの罠 (新規 ps1 作成時の必須チェックリスト)
+
+1. **エンコーディング**: 日本語含む `.ps1` は **BOM 付き UTF-8** で commit する。BOM なし UTF-8 は cp932 として解釈され文字化け + 構文エラー
+2. **backtick エスケープ**: `"..."` 内の `` `" `` は **エスケープされた `"` リテラル** として扱われ文字列が閉じない。markdown コード形式の意図で書いた backtick が `"` の直前に来ないよう注意
+3. **native command argument passing**: `& python -c $script` で `$script` 内の `"` が消失する。一時ファイル経由 (`python tempfile.py`) で回避
+
+→ 関連 memory: [feedback_no_manual_windows_changes.md](https://github.com/yasushi-honda/claude-code-config/blob/main/memory/feedback_no_manual_windows_changes.md) (新規追加)
+
+### CLAUDE.md MUST「変更コードパスを最低 1 回実行」の重要性 (再確認)
+
+PR #319 で `scripts/diagnose-tcl.ps1` を「Windows PS 5.1 限定で macOS 実行不可」を理由に実機検証 skip した結果、上記 3 罠が同時混入。3 段階 PR で表面化を解消する手間が発生。
+
+**今後の方針**: Windows 専用スクリプトでも macOS 上で pwsh 7+ の構文 parser 検証を最低限通す。本セッションでは brew cask + tar.gz 両方が permission 等で skip されたが、可能なら CI に `.github/workflows/` で PowerShell lint job を追加する候補あり (本セッション範囲外、別 Issue 候補)。
+
+### Windows 機側で手動設定変更しない方針 (確立)
+
+Issue #316 の対処方針として **「本田様 PC 側で人手の設定変更 (GUI / install / レジストリ) は一切しない、AI 完結で完了する」** をユーザーから明示。今後の wiseman_auto_sys 関連の運用問題対応では:
+
+- OK: `git pull`、`scripts/*.ps1` の実行、`uv sync` 等のコマンド、結果の貼り付け / 共有
+- NG: ESET / Defender / 第三者 AV の GUI 除外設定、Python の install / 再 install / uninstall、レジストリ編集、グループポリシー変更
+
+該当する対処案 (例: 「ESET 除外設定して」) を出さないこと。原理的に AI 完結不可なケースは明示報告し、別アプローチを提案する。
+
+詳細: [feedback_no_manual_windows_changes.md](https://github.com/yasushi-honda/claude-code-config/blob/main/memory/feedback_no_manual_windows_changes.md)
 
 ## Quality Gate 適用状況
 
-| 段階 | PR #335 (Issue #27 datetime hint) | PR #336 (Issue #11 M2/M6) |
-|---|---|---|
-| `/impl-plan` | スキップ (umbrella 残務 1 件、scope 明確) | **実行** (5 件のリファクタ分解、M5 scope 修正で PR-A=M2+M6 確定) |
-| `/simplify` | スキップ前 (2 file <200 行) → review で吸収 | **実行** (3 並列、Quality rating 4-6 を inline 反映) |
-| `/safe-refactor` | 適用相当 (ruff/mypy/pytest 全 clean) | 適用相当 (同上) |
-| Evaluator 分離プロトコル | 該当外 (2 file、5 files 未満) | 該当外 |
-| Medium tier review | **4 並列** (code/test/comment/silent-failure、新型なしで type-design スキップ) | **4 並列** (同構成) |
-| Codex セカンドオピニオン | 不要 (small-medium tier、helper 抽出のみ) | 実施前にユーザー確認 → セカンドオピニオン不要判断 (M6 helper API 設計のみ borderline) |
-| 番号単位明示認可 merge | ✅ CLAUDE.md 4 原則 §3 準拠、`PR #335 — ... (2 files, +191/-8)` 形式で要約 + CI 5/5 SUCCESS 確認後 `gh pr merge 335 --squash --delete-branch` | ✅ ユーザー「PR #336 と PR #338 が CI 5/5 SUCCESS でマージ」の明示認可受領後 `gh pr merge 336/338 --squash --delete-branch` 完了 |
-| review 指摘 inline 反映 | Important rating 6 (comment rot) + rating 4 (tzinfo 根拠) + Gap 2 (PII 経路 test) を本 PR 内消化、低 rating は見送りで TODO 化 | Important rating 7 (docstring 矛盾) + rating 6 (空 list ガード) を本 PR 内消化、低 rating は follow-up TODO |
+| 段階 | PR #340 (BOM) | PR #341 (backtick) | PR #342 (Section 3) | PR #343 (rerunfailures) |
+|---|---|---|---|---|
+| `/impl-plan` | スキップ (1 file 1 行) | スキップ (1 file 1 行) | スキップ (1 file 34 行、設計判断不要) | スキップ (2 file、設計判断は Issue コメントで実施済) |
+| `/simplify` | スキップ (1-2 file < 30 行) | スキップ (同上) | スキップ (1 file 34 行) | スキップ (2 file 24 行) |
+| `/safe-refactor` | スキップ | スキップ | スキップ | 適用相当 (ruff/mypy/pytest 全 clean) |
+| Evaluator 分離プロトコル | 該当外 (1 file) | 該当外 | 該当外 | 該当外 (2 file、5 file 未満) |
+| Medium tier review | スキップ (small PR) | スキップ | スキップ | スキップ (small PR、PR description で診断結果根拠提示) |
+| Codex セカンドオピニオン | 不要 | 不要 | 不要 | 不要 (実機実証で確証) |
+| 番号単位明示認可 merge | ✅ `PR #340 — ... (1 files, +1/-1)` | ✅ `PR #341 — ... (1 files, +1/-1)` | ✅ `PR #342 — ... (1 files, +22/-12)` | ✅ `PR #343 — ... (2 files, +23/-1)` |
+| 実機検証 | (1 段目で発覚、part2 へ) | (2 段目で発覚、part3 へ) | (3 段目で完走、真因確定) | **✅ `1 rerun` で効果実証** |
 
 ## ADR 状態
 
-- 16 件、本セッションで新規 ADR なし
-- helper 抽出 + テスト追加で設計判断を含まず、新規 ADR 起こすほどのアーキテクチャ変化なし
-- ADR-016 (Windows アプライアンス化) は Proposed のまま、状況変化なし
+- **新規 ADR-017** (`017-test-retry-policy-for-windows-av-interference.md`) を本 handoff PR で同時 commit
+- Status: Accepted
+- 内容: pytest-rerunfailures 採用の経緯、reruns=2 / delay=1s の数値根拠、代替案 (A/B/D) の評価、将来の retry 数調整・dep 廃止判断の根拠
+- 既存 ADR (001-016): 状況変化なし、変更不要
 
 ## 残留プロセス
 
-✅ 残留 Node プロセスなし
+✅ 残留 Node プロセスなし (handoff スキル事前取得データで確認済)
+
+## CI 状態
+
+main `68054d2` で **全 4 ジョブ SUCCESS**:
+
+- ✅ Unit Tests (macOS/Linux)
+- ✅ Windows UI Tests
+- ✅ Build Windows Smoke
+- ✅ Windows Integration Tests
+
+## Issue Net 変化 (CLAUDE.md MUST)
+
+- **Close 数**: 1 件 (#316)
+- **起票数**: 0 件
+- **Net: -1 件 ✅** (CLAUDE.md MUST「Net ≤ 0 は進捗ゼロ扱い」をクリア)
+
+セッション開始時: open active 6 (#316 含む) + postponed 5 = 11
+セッション終了時: open active 5 + postponed 5 = 10
+
+## 次セッション最優先 (catchup 推奨)
+
+### AI 単独で着手可能 (decision-maker 判断不要)
+
+1. **Issue #11 PR-B (M3/M4/M5)** — Session 86 から継続最優先
+   - M3: テスト private 属性 inject API 化
+   - M4: failure path テスト横展開 (`select_care_system` / `navigate_menu` / `close_wiseman` 等) + PR #336 follow-up の `__cause__` chain assertion (rating 4)
+   - M5: テスト構造改善 (PR-A の調査で「現状維持で M5 不要」の判断も再検討対象)
+   - 着手前に `/impl-plan` 必須 (3 ステップ以上 + テスト構造変更)
+
+2. **Issue #27 umbrella 残務消化判断** — `reports` section は実質クリア確認済。PII default 反転検討 (rating 5) はユーザー判断待ち。umbrella close 候補のタイミング近接
+
+### 外部条件待ち (AI 着手不可)
+
+3. **Issue #274** — 本田様 PC 実機検証待ち (B/C ダイアログ詳細列表示)
+4. **Issue #275** — 本田様ヒアリング 4 領域回答待ち
+5. **Issue #17 / #6** — WISEMAN_REAL=1 環境 (本田様 PC) 必須
+
+### Issue #316 follow-up (発生時)
+
+- 次回 `scripts/deploy-windows.ps1` 実行時、Phase 0 が retry 吸収で完走することを確認 (実機で `R` マーカーが出るか、または出ずに完走するか)
+- 万一 3/3 retry で fail するケースが出たら Issue を reopen して `--reruns 5` 等への数値調整を検討
+- PR #312 で xfail にしている `test_persists_after_fetch` (Issue #316 body の元事案) は別途状態確認
+
+## 関連 PR / コミット
+
+- PR #340 (merge `842d3a6`): diagnose-tcl.ps1 BOM 付き UTF-8 変換
+- PR #341 (merge `cfb2cf7`): diagnose-tcl.ps1 line 53 backtick エスケープ修正
+- PR #342 (merge `e1fce7c`): diagnose-tcl.ps1 Section 3 Python embed 一時ファイル化
+- PR #343 (merge `68054d2`): pytest-rerunfailures 導入
+- (本 handoff PR): Session 87 handoff 記録 + ADR-017
+
+## 関連 Issue
+
+- Closed: #316 (Tcl init.tcl read failure)
+- Open active: #275, #274, #27, #11, #6
+- Open postponed: #245, #170, #161, #134, #39
