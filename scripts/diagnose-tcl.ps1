@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     本田様 PC で発生する Tcl init.tcl read failure (Issue #316) の診断スクリプト。
 
