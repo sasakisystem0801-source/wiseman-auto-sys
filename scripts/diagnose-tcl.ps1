@@ -50,7 +50,7 @@ Write-Section "1. Python / Tcl ファイル実在確認"
 $pythonExe = (Get-Command python -ErrorAction SilentlyContinue).Source
 if (-not $pythonExe) {
     Write-Fail "python が PATH に無い (Microsoft Store stub の可能性)"
-    Write-Host "  対処: python.org から MSI で再 install、または `uv python install 3.11`"
+    Write-Host '  対処: python.org から MSI で再 install、または `uv python install 3.11`'
 } else {
     Write-OK "python.exe: $pythonExe"
     $pythonRoot = Split-Path $pythonExe -Parent
