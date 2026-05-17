@@ -25,7 +25,6 @@ from typing import Any, assert_never, cast
 from wiseman_hub.config import (
     AppConfig,
     ConcatSourceLetter,
-    ReportTarget,
     UserNameBBox,
     coerce_path,
     is_path_configured,
@@ -208,15 +207,18 @@ def form_to_config(form: SettingsForm, base: AppConfig) -> AppConfig:
         tuple[ConcatSourceLetter, ...],
         tuple(s.strip() for s in form.concat_order.split(",") if s.strip()),
     )
-    # Issue #27 続編 H1/H2: AppConfig.reports は tuple[ReportTarget, ...] 化済かつ
-    # ReportTarget.menu_path も tuple[str, ...] 化済 (leaf も immutable)。
-    # base.reports をそのまま渡せばよい (PR #272 由来の defensive shallow copy は
-    # H2 で不要になり削除)。
-    decoupled_reports: tuple[ReportTarget, ...] = base.reports
     # API Key は前後空白も有効値として尊重（``form.ocr_api_key`` 生値を維持）。
+    # Issue #27 続編 H1/H2: AppConfig.reports は tuple[ReportTarget, ...] 化済かつ
+    # ReportTarget.menu_path も tuple[str, ...] 化済 (leaf も immutable)。base.reports
+    # をそのまま渡せばよい (PR #272 由来の defensive shallow copy は H2 で不要になり
+    # 削除)。``reports=base.reports`` を明示的に指定する意図は、過去 PR #272 で同 field
+    # に defensive copy が必要だった経緯を読み手に思い出させるための「navigation hint」
+    # としての記述。``replace`` のデフォルト挙動 (base.reports 維持) と冗長 (機能的に
+    # 等価) だが、PR #272 / 続編 H1/H2 の歴史を docs だけに残さずコードからも辿れる
+    # ようにするため**意図的に残している (DRY 違反として削除しないこと)**。
     return replace(
         base,
-        reports=decoupled_reports,
+        reports=base.reports,
         pdf_merge=replace(
             base.pdf_merge,
             # Issue #27 続編 G Phase 2a: form (str) → Path 変換。coerce_path で
