@@ -210,24 +210,46 @@ class TestSelectCareSystem:
 
         _mock_user32.SendMessageW.assert_called_with(0xAAAA, 0x00F5, 0, 0)
 
-    def test_pane_fallback_uses_post_message(self, engine_with_launcher: PywinautoEngine) -> None:
-        """B2: Button 失敗 → Pane で WM_LBUTTON via PostMessage"""
+    @pytest.mark.parametrize(
+        "matching_ct",
+        ["Pane", "Text", "Hyperlink"],
+        ids=["pane", "text", "hyperlink"],
+    )
+    def test_non_button_fallback_uses_post_message(
+        self,
+        engine_with_launcher: PywinautoEngine,
+        matching_ct: str,
+    ) -> None:
+        """B2: Button 失敗 → Pane/Text/Hyperlink いずれかで WM_LBUTTON via PostMessage.
+
+        実機 (本田様 PC) はケア記録要素を Pane として公開するが、OS テーマ /
+        UIA バージョン / .NET ランタイム差で Text や Hyperlink としても露出
+        し得る。本 parametrize で 3 系統が同一 PostMessage WM_LBUTTONDOWN/UP
+        経路に流れることを保証する (Issue #16)。
+        """
         mock_wrapper = MagicMock()
         mock_wrapper.handle = 0xBBBB
 
         def child_window_side_effect(**kwargs):
             ct = kwargs.get("control_type")
-            if ct == "Button":
-                raise _ElementNotFoundError("not found")
-            mock_candidate = MagicMock()
-            mock_candidate.wait.return_value = mock_wrapper
-            return mock_candidate
+            if ct == matching_ct:
+                mock_candidate = MagicMock()
+                mock_candidate.wait.return_value = mock_wrapper
+                return mock_candidate
+            # `matching_ct` より優先度の高い control_type (Button + 前段の
+            # fallback) はすべて失敗させる。fallback 順は
+            # ("Button", "Pane", "Text", "Hyperlink") を前提とする
+            # (pywinauto_engine.py:181)。
+            raise _ElementNotFoundError(f"not found: {ct}")
 
-        engine_with_launcher._launcher_window.child_window.side_effect = child_window_side_effect
+        engine_with_launcher._launcher_window.child_window.side_effect = (
+            child_window_side_effect
+        )
 
         mock_main = MagicMock()
         engine_with_launcher._app.window.return_value = mock_main
 
+        _mock_user32.PostMessageW.reset_mock()
         _mock_user32.PostMessageW.return_value = 1
 
         engine_with_launcher.select_care_system()
@@ -236,7 +258,9 @@ class TestSelectCareSystem:
         wm_lbutton_calls = [c for c in post_calls if c.args[0] == 0xBBBB]
         assert len(wm_lbutton_calls) >= 2  # DOWN + UP
         assert wm_lbutton_calls[0].args[1] == 0x0201  # WM_LBUTTONDOWN
+        assert wm_lbutton_calls[0].args[2] == 0x0001  # MK_LBUTTON wparam
         assert wm_lbutton_calls[1].args[1] == 0x0202  # WM_LBUTTONUP
+        assert wm_lbutton_calls[1].args[2] == 0  # WM_LBUTTONUP wparam=0
 
     def test_all_control_types_fail_raises(self, engine_with_launcher: PywinautoEngine) -> None:
         """B3: 全 control_type 失敗 → RuntimeError (target_hwnd is None)"""
