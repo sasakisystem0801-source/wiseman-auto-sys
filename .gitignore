@@ -51,3 +51,11 @@ data/screenshots/
 
 # Claude Code runtime (scheduled_tasks.lock, transient state)
 .claude/
+
+# WisemanMock C# build artifacts (tests/integration helper)
+mock_wiseman_app/WisemanMock/bin/
+mock_wiseman_app/WisemanMock/obj/
+
+# Diagnostic outputs (scripts/diagnose-tcl.ps1 + pytest retry verification)
+diagnose-output.txt
+pytest-retry-verify.txt
