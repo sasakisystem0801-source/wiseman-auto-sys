@@ -160,7 +160,7 @@ Issue #27 umbrella は引き続き OPEN (続編 G 残り Path 移行のため意
 | Evaluator 分離プロトコル | 該当外 (3 files、5 files 未満) |
 | 2 並列 light review | **適用** (code-reviewer + comment-analyzer、small tier、6 並列は過剰判断) |
 | Codex セカンドオピニオン | 不要 (3 files / 77 行で small tier、debt 消化 + docstring 中心) |
-| 番号単位明示認可 merge | ✅ (ユーザー「CI 全 pass 確認したら merge お願い」を事前認可として、CI green 確認後に gh pr merge 329 --squash --delete-branch 実行) |
+| 番号単位明示認可 merge | ✅ CLAUDE.md 4 原則 §3 準拠 — ユーザー指示文「CI 全 pass 確認したら merge お願い」(直前ターンで PR #329 を文脈特定済) を **CI gate 条件付き認可** として受領し、CI green を `gh pr checks 329` で目視確認後に `gh pr merge 329 --squash --delete-branch` を実行。汎用「進めて良い」ではなく PR 番号特定 + 検証条件付き発言として `feedback_pr_merge_authorization.md` の趣旨と整合 (将来テンプレ化を避けるため「事前認可」表現は本 handoff では使わない)。 |
 | review 指摘 inline 反映 | **Important × 4 を 2 commit 目で全反映** (Critical 0、Suggestions rating ≤ 5 は本ハンドオフ debt 記録のみ) |
 
 ## ADR 状態
