@@ -311,10 +311,12 @@ class TestFormToConfig:
     def test_form_to_config_preserves_reports_as_tuple(self) -> None:
         """Issue #27 続編 H1: form_to_config の戻り値で reports が tuple を維持する。
 
-        settings.py:219 の ``decoupled_reports: tuple[ReportTarget, ...] = tuple(...)``
-        が将来 ``list(...)`` に退化した場合、``replace(base, reports=...)`` 経由で
-        ``AppConfig.__post_init__`` の ``isinstance(tuple)`` チェックが TypeError を
-        raise して UI save 経路が壊れる。本テストはその regression guard。
+        ``settings.py`` の ``replace(base, reports=base.reports, ...)`` で渡される
+        ``base.reports`` が将来 list 化 (e.g. 中間 list comprehension に退化) した
+        場合、``AppConfig.__post_init__`` の ``isinstance(self.reports, tuple)``
+        チェックが TypeError を raise して UI save 経路が壊れる。本テストは
+        その regression guard (PR #329 で debt 2 として `decoupled_reports`
+        中間変数を削除した後の挙動を verify)。
         """
         base = replace(
             AppConfig(),

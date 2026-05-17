@@ -213,7 +213,9 @@ def form_to_config(form: SettingsForm, base: AppConfig) -> AppConfig:
     # をそのまま渡せばよい (PR #272 由来の defensive shallow copy は H2 で不要になり
     # 削除)。``reports=base.reports`` を明示的に指定する意図は、過去 PR #272 で同 field
     # に defensive copy が必要だった経緯を読み手に思い出させるための「navigation hint」
-    # としての記述。実態上は ``replace`` のデフォルト挙動 (base.reports 維持) と等価。
+    # としての記述。``replace`` のデフォルト挙動 (base.reports 維持) と冗長 (機能的に
+    # 等価) だが、PR #272 / 続編 H1/H2 の歴史を docs だけに残さずコードからも辿れる
+    # ようにするため**意図的に残している (DRY 違反として削除しないこと)**。
     return replace(
         base,
         reports=base.reports,

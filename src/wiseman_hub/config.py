@@ -966,12 +966,12 @@ class AppConfig:
         ``isinstance(self.reports, tuple)`` で fail-close できる (PR #260 の
         dataclass 型ガード参照)。
 
-        なお ``rpa/base.py:80`` の ``navigate_menu(menu_path: Sequence[str])`` 等、
-        **呼出側 API** の引数型では ``Sequence[str]`` を使い分ける (tuple/list
-        両受けで呼出柔軟性を確保、内部で bare-str を runtime guard、Issue #27
-        続編 H2 PR #325 で追加)。**dataclass field 型** と **API 引数型** の
-        使い分けが本 rationale の核心 — 前者は immutability 契約、後者は
-        受け入れ可能性契約。
+        なお ``rpa.base.RPAEngine.navigate_menu`` (``menu_path: Sequence[str]``)
+        等、**呼出側 API** の引数型では ``Sequence[str]`` を使い分ける
+        (tuple/list 両受けで呼出柔軟性を確保、内部で bare-str を runtime guard、
+        Issue #27 続編 H2 PR #325 で追加)。**dataclass field 型** と **API
+        引数型** の使い分けが本 rationale の核心 — 前者は immutability 契約、
+        後者は受け入れ可能性契約。
 
     Issue #27 続編 H2: ``ReportTarget.menu_path`` / ``ReportStaffEntry.suggest_patterns``
     も ``list[str]`` → ``tuple[str, ...]`` 化済。これにより leaf list 由来の
@@ -1090,8 +1090,11 @@ def _coerce_report_staff_entry(staff_name: str, entry_data: dict[str, Any]) -> R
         - キーが ``entry_data`` に存在し、かつ値が ``list`` 型でない
           (空文字 ``""`` も不正、Codex review M6 対策)
         - キー存在 + 要素のいずれかが ``str`` でない
-        - キーが ``entry_data`` に存在しない場合は raise せず、``ReportStaffEntry`` の
-          default (空 tuple) にフォールバック
+        - キーが ``entry_data`` に存在しない場合は raise せず、本関数内の
+          ``suggest_patterns_list = []`` 初期化値を空 ``tuple ()`` に coerce
+          して ``ReportStaffEntry`` に渡す (``ReportStaffEntry`` の dataclass
+          default が triggered されるわけではない — 明示的に ``tuple()`` を
+          引数指定する経路。結果として default と同値)
         - キー存在 + 空 list ``[]`` は正当 (空 ``tuple ()`` に coerce、deprecated
           フィールドへのフォールバック対象)
 
