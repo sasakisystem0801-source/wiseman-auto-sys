@@ -58,7 +58,11 @@ class ChecklistBDialog:
         self._config_path = config_path
         self._top = tk.Toplevel(parent)
         self._top.title("B: 運動機能向上計画書 自動配置")
-        self._top.geometry("780x520")
+        # Issue #274 Phase 1 追加修正: 5 列合計 1020px (140+160+60+160+500) +
+        # vscroll/padding 余白で初期幅 1100px。Phase 1 (PR #280) で詳細列を
+        # 500px に拡大したが、旧 geometry 780x520 では詳細列の右側が画面外で
+        # 初期表示時に見えなかった。横スクロールで回避できるが UX 完成のため幅拡大。
+        self._top.geometry("1100x600")
         self._top.transient(parent)  # type: ignore[arg-type]
         self._top.grab_set()
 

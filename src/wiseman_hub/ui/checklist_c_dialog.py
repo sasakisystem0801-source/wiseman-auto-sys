@@ -167,7 +167,9 @@ class ChecklistCDialog:
         self._config_path = config_path
         self._top = tk.Toplevel(parent)
         self._top.title("C: 経過報告書 自動配置")
-        self._top.geometry("780x520")
+        # Issue #274 Phase 1: B ダイアログと同等理由で 1100x600
+        # (詳細は src/wiseman_hub/ui/checklist_b_dialog.py の同箇所コメント参照)
+        self._top.geometry("1100x600")
         self._top.transient(parent)  # type: ignore[arg-type]
         self._top.grab_set()
 
