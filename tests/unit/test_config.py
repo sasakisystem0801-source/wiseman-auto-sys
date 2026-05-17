@@ -2461,6 +2461,148 @@ class TestTypeGuardHelpers:
         with pytest.raises(TypeError, match=r"field\['k'\] must be str"):
             _check_dict_str_to_str("field", {"k": 123})
 
+    # ------------------------------------------------------------------
+    # Issue #27 umbrella: TOML datetime 値が型違反として届いた場合、技術的な
+    # ``got date: ...`` メッセージだけでは「文字列として書き直す」運用判断が
+    # 伝わらない。``_datetime_hint`` が helper の TypeError メッセージに
+    # 付加されることを各 helper × 境界 (date / datetime / time) で確認する。
+    # ------------------------------------------------------------------
+
+    _DT_HINT_PHRASE = "TOML の日付/時刻値は文字列ではありません"
+
+    def test_datetime_hint_returns_phrase_for_date(self) -> None:
+        import datetime
+
+        from wiseman_hub.config import _datetime_hint
+        assert self._DT_HINT_PHRASE in _datetime_hint(datetime.date(2024, 1, 1))
+
+    def test_datetime_hint_returns_phrase_for_datetime(self) -> None:
+        import datetime
+
+        from wiseman_hub.config import _datetime_hint
+        # datetime は date のサブクラスなので date 列挙だけで拾える境界。
+        assert self._DT_HINT_PHRASE in _datetime_hint(
+            datetime.datetime(2024, 1, 1, 12, 0)
+        )
+
+    def test_datetime_hint_returns_phrase_for_time(self) -> None:
+        import datetime
+
+        from wiseman_hub.config import _datetime_hint
+        assert self._DT_HINT_PHRASE in _datetime_hint(datetime.time(10, 30))
+
+    @pytest.mark.parametrize("non_dt", [123, "str", [], {}, None, True, 1.5])
+    def test_datetime_hint_returns_empty_for_non_datetime(
+        self, non_dt: object
+    ) -> None:
+        from wiseman_hub.config import _datetime_hint
+        assert _datetime_hint(non_dt) == ""
+
+    def test_check_str_includes_datetime_hint_for_date(self) -> None:
+        """str field に TOML date が来たらヒントが TypeError に含まれる。"""
+        import datetime
+
+        from wiseman_hub.config import _check_str
+        with pytest.raises(TypeError) as exc_info:
+            _check_str("field", datetime.date(2024, 1, 1))
+        assert self._DT_HINT_PHRASE in str(exc_info.value)
+
+    def test_check_str_no_hint_for_plain_int(self) -> None:
+        """非 datetime 型違反では既存メッセージのままヒントが付かない。"""
+        from wiseman_hub.config import _check_str
+        with pytest.raises(TypeError) as exc_info:
+            _check_str("field", 123)
+        assert self._DT_HINT_PHRASE not in str(exc_info.value)
+
+    def test_check_int_includes_datetime_hint_for_date(self) -> None:
+        import datetime
+
+        from wiseman_hub.config import _check_int
+        with pytest.raises(TypeError) as exc_info:
+            _check_int("field", datetime.date(2024, 1, 1))
+        assert self._DT_HINT_PHRASE in str(exc_info.value)
+
+    def test_check_bool_includes_datetime_hint_for_time(self) -> None:
+        import datetime
+
+        from wiseman_hub.config import _check_bool
+        with pytest.raises(TypeError) as exc_info:
+            _check_bool("field", datetime.time(9, 0))
+        assert self._DT_HINT_PHRASE in str(exc_info.value)
+
+    def test_check_path_includes_datetime_hint_for_date(self) -> None:
+        import datetime
+
+        from wiseman_hub.config import _check_path
+        with pytest.raises(TypeError) as exc_info:
+            _check_path("field", datetime.date(2024, 1, 1))
+        assert self._DT_HINT_PHRASE in str(exc_info.value)
+
+    def test_coerce_path_includes_datetime_hint_for_date(self) -> None:
+        import datetime
+
+        from wiseman_hub.config import coerce_path
+        with pytest.raises(TypeError) as exc_info:
+            coerce_path("field", datetime.date(2024, 1, 1))
+        assert self._DT_HINT_PHRASE in str(exc_info.value)
+
+    def test_check_path_echo_value_false_includes_hint_without_value(
+        self,
+    ) -> None:
+        """PII 経路 (echo_value=False) でも datetime ヒントが付与され、
+
+        ヒント文字列自体は固定リテラルで値補間しないため値漏洩は起きない。
+        SA key path 等の秘密フィールドに datetime が来た場合の安全性保証。
+        """
+        import datetime
+
+        # ヒント内の例示日付 "2024-01-01" と被らない値で検証 (assertion 誤マッチ防止)。
+        d = datetime.date(2031, 6, 15)
+        from wiseman_hub.config import _check_path
+        with pytest.raises(TypeError) as exc_info:
+            _check_path("sa_key", d, echo_value=False)
+        msg = str(exc_info.value)
+        assert self._DT_HINT_PHRASE in msg
+        # `repr(d)` (e.g. ``datetime.date(2031, 6, 15)``) がメッセージに残らない。
+        assert repr(d) not in msg
+        assert "2031" not in msg  # 値固有のリテラルも漏れない
+
+    def test_check_tuple_of_str_includes_datetime_hint_for_date(self) -> None:
+        """tuple field に TOML date 値 (非 tuple) が来た時もヒントが付く。"""
+        import datetime
+
+        from wiseman_hub.config import _check_tuple_of_str
+        with pytest.raises(TypeError) as exc_info:
+            _check_tuple_of_str("field", datetime.date(2024, 1, 1))
+        assert self._DT_HINT_PHRASE in str(exc_info.value)
+
+    def test_check_tuple_of_str_element_includes_datetime_hint(self) -> None:
+        """tuple 要素に TOML date が混入した時もヒントが付く。"""
+        import datetime
+
+        from wiseman_hub.config import _check_tuple_of_str
+        with pytest.raises(TypeError) as exc_info:
+            _check_tuple_of_str("field", ("a", datetime.date(2024, 1, 1), "c"))
+        assert self._DT_HINT_PHRASE in str(exc_info.value)
+
+    def test_check_dict_str_to_str_includes_datetime_hint_for_date(self) -> None:
+        """dict field に TOML date 値 (非 Mapping) が来た時もヒントが付く。"""
+        import datetime
+
+        from wiseman_hub.config import _check_dict_str_to_str
+        with pytest.raises(TypeError) as exc_info:
+            _check_dict_str_to_str("field", datetime.date(2024, 1, 1))
+        assert self._DT_HINT_PHRASE in str(exc_info.value)
+
+    def test_check_dict_str_to_str_value_includes_datetime_hint(self) -> None:
+        """dict 値に TOML date が混入した時もヒントが付く。"""
+        import datetime
+
+        from wiseman_hub.config import _check_dict_str_to_str
+        with pytest.raises(TypeError) as exc_info:
+            _check_dict_str_to_str("field", {"k": datetime.date(2024, 1, 1)})
+        assert self._DT_HINT_PHRASE in str(exc_info.value)
+
 
 class TestLoadConfigWithValidation:
     """load_config が検証エラーを伝播することを確認。"""
