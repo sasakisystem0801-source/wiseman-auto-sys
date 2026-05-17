@@ -280,6 +280,52 @@ class TestSelectCareSystem:
         tried_cts = [c.kwargs["control_type"] for c in calls]
         assert tried_cts == ["Button", "Pane", "Text", "Hyperlink"]
 
+    def test_target_hwnd_zero_raises(self, engine_with_launcher: PywinautoEngine) -> None:
+        """B3': wrapper.handle == 0 → RuntimeError (silent PostMessage 防止) (Issue #332).
+
+        pywinauto の UIA wrapper が一時的に無効化された瞬間 (comtypes の
+        COM プロキシ非同期破棄中、別アプリへのフォーカス切替直後等) に
+        ``wrapper.handle = 0`` を返すケースで、``_post_message(0, ...)`` への
+        silent fall-through を防ぐ structural guard
+        (``select_care_system`` 内 ``if target_hwnd is None or target_hwnd == 0:``
+        分岐) の retention テスト。
+
+        ガードが将来 regression で外れると、PostMessageW(0, ...) が
+        ERROR_INVALID_WINDOW_HANDLE (1400) を返し、運用者には文脈情報を
+        欠いた謎エラーとなる。
+        """
+        mock_wrapper = MagicMock()
+        mock_wrapper.handle = 0  # ← UIA wrapper 無効化シナリオ
+        mock_candidate = MagicMock()
+        mock_candidate.wait.return_value = mock_wrapper
+
+        # Button 分岐 (fallback の先頭) で最初にマッチさせる: handle=0 が
+        # 検出された時点でガードが弾けば、後続の Pane/Text/Hyperlink
+        # fallback には流れず、SendMessage/PostMessage も呼ばれないはず。
+        engine_with_launcher._launcher_window.child_window.return_value = mock_candidate
+        engine_with_launcher._launcher_window.descendants.return_value = []
+
+        # ガード退化時の検出のため、SendMessage/PostMessage の呼出履歴を
+        # 直前で reset し、テスト後の hwnd=0 呼出有無で判定する。
+        _mock_user32.SendMessageW.reset_mock()
+        _mock_user32.PostMessageW.reset_mock()
+
+        with pytest.raises(RuntimeError, match="ケア記録選択要素が見つかりません"):
+            engine_with_launcher.select_care_system()
+
+        send_zero_calls = [
+            c for c in _mock_user32.SendMessageW.call_args_list if c.args[0] == 0
+        ]
+        post_zero_calls = [
+            c for c in _mock_user32.PostMessageW.call_args_list if c.args[0] == 0
+        ]
+        assert send_zero_calls == [], (
+            f"ガード退化: SendMessageW(0, ...) が呼ばれた: {send_zero_calls}"
+        )
+        assert post_zero_calls == [], (
+            f"ガード退化: PostMessageW(0, ...) が呼ばれた: {post_zero_calls}"
+        )
+
 
 # ── B4: click_new_registration ───────────────────────────────────
 
