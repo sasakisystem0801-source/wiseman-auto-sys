@@ -59,3 +59,17 @@ mock_wiseman_app/WisemanMock/obj/
 # Diagnostic outputs (scripts/diagnose-tcl.ps1 + pytest retry verification)
 diagnose-output.txt
 pytest-retry-verify.txt
+
+# Firebase Hosting local artifacts
+.firebase/
+
+# Playwright MCP local artifacts (screenshots / traces)
+.playwright-mcp/
+
+# Debug screenshots at repo root from ad-hoc Playwright runs
+# （docs/help-site/assets/ 配下の正規スクショは除外しない）
+/*.png
+
+# Firebase / Firestore CLI debug logs (auto-generated)
+firebase-debug.log
+firestore-debug.log

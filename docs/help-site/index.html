@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Wiseman PDF ツール 操作マニュアル</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,minimum-scale=1.0">
+  <meta name="description" content="Wiseman PDF ツールの操作マニュアル">
+  <link rel="stylesheet" href="//cdn.jsdelivr.net/npm/docsify@4/themes/vue.css">
+  <style>
+    :root {
+      --theme-color: #2c8cf0;
+      --theme-color-secondary: #4ea3f5;
+      --accent-orange: #ff9800;
+      --accent-green: #4caf50;
+      --accent-red: #f44336;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, sans-serif;
+    }
+    .markdown-section {
+      max-width: 960px;
+    }
+    .markdown-section h1, .markdown-section h2 {
+      border-bottom: 2px solid var(--theme-color);
+      padding-bottom: 0.3em;
+    }
+    .markdown-section h3 {
+      border-left: 4px solid var(--theme-color);
+      padding-left: 0.6em;
+    }
+    .markdown-section table {
+      display: table;
+      width: 100%;
+    }
+    .markdown-section table th {
+      background: #f0f7ff;
+    }
+    .markdown-section blockquote {
+      border-left: 4px solid var(--theme-color);
+      background: #f6f8fa;
+      padding: 0.5em 1em;
+      margin: 1em 0;
+    }
+    .markdown-section blockquote.warn {
+      border-left-color: var(--accent-orange);
+      background: #fff8e1;
+    }
+    .markdown-section blockquote.error {
+      border-left-color: var(--accent-red);
+      background: #ffebee;
+    }
+    .markdown-section blockquote.success {
+      border-left-color: var(--accent-green);
+      background: #e8f5e9;
+    }
+
+    /* アプリ画面モックアップ */
+    .app-mockup {
+      max-width: 480px;
+      margin: 1.5em auto;
+      border: 2px solid #ccc;
+      border-radius: 10px;
+      background: linear-gradient(180deg, #fafbfc 0%, #f0f2f5 100%);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+      overflow: hidden;
+    }
+    .app-mockup-title {
+      background: linear-gradient(180deg, #e8eaed 0%, #d8dbdf 100%);
+      color: #333;
+      padding: 0.6em 1em;
+      font-weight: bold;
+      font-size: 0.95em;
+      border-bottom: 1px solid #c0c4c8;
+      display: flex;
+      align-items: center;
+      gap: 0.4em;
+    }
+    .app-mockup-title::before {
+      content: "🟢";
+      font-size: 0.8em;
+    }
+    .app-mockup-body {
+      padding: 1.5em 1.2em;
+    }
+    a.app-btn, .app-btn {
+      display: block;
+      width: 100%;
+      padding: 0.9em 1em;
+      margin: 0.5em 0;
+      background: linear-gradient(180deg, #ffffff 0%, #f0f2f5 100%);
+      border: 1px solid #bbb;
+      border-radius: 6px;
+      font-size: 0.95em;
+      font-weight: 500;
+      color: #333 !important;
+      text-decoration: none !important;
+      text-align: left;
+      cursor: pointer;
+      transition: all 0.15s ease-out;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+      box-sizing: border-box;
+      position: relative;
+    }
+    a.app-btn::after {
+      content: "→";
+      position: absolute;
+      right: 1em;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #bbb;
+      font-weight: bold;
+      transition: all 0.15s ease-out;
+      opacity: 0;
+    }
+    a.app-btn:hover {
+      background: linear-gradient(180deg, #f0f7ff 0%, #d6e8ff 100%);
+      border-color: var(--theme-color);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(44,140,240,0.25);
+    }
+    a.app-btn:hover::after {
+      opacity: 1;
+      color: var(--theme-color);
+      right: 0.7em;
+    }
+    a.app-btn:active {
+      transform: translateY(0);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+    }
+    a.app-btn-settings:hover {
+      background: linear-gradient(180deg, #fafafa 0%, #eeeeee 100%);
+      border-color: #888;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    a.app-btn-settings:hover::after {
+      color: #666;
+    }
+    .app-btn-num {
+      display: inline-block;
+      background: var(--theme-color);
+      color: white;
+      width: 1.6em;
+      height: 1.6em;
+      border-radius: 50%;
+      text-align: center;
+      line-height: 1.6em;
+      font-weight: bold;
+      margin-right: 0.6em;
+      font-size: 0.85em;
+    }
+    .app-btn-settings .app-btn-num {
+      background: #888;
+    }
+
+    /* ステップカード */
+    .step-card {
+      border: 1px solid #e0e6ed;
+      border-left: 4px solid var(--theme-color);
+      border-radius: 6px;
+      padding: 1em 1.2em;
+      margin: 0.8em 0;
+      background: #fafbfc;
+    }
+    .step-card-num {
+      display: inline-block;
+      background: var(--theme-color);
+      color: white;
+      width: 1.8em;
+      height: 1.8em;
+      border-radius: 50%;
+      text-align: center;
+      line-height: 1.8em;
+      font-weight: bold;
+      margin-right: 0.6em;
+    }
+
+    /* ダイアログモックアップ */
+    .dialog-mockup {
+      max-width: 560px;
+      margin: 1.5em auto;
+      border: 2px solid #aab;
+      border-radius: 8px;
+      background: #fafbfc;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+    .dialog-mockup-title {
+      background: #2c5282;
+      color: white;
+      padding: 0.5em 1em;
+      font-size: 0.9em;
+      font-weight: bold;
+    }
+    .dialog-mockup-body {
+      padding: 1em;
+    }
+    .dialog-toolbar {
+      display: flex;
+      gap: 0.4em;
+      flex-wrap: wrap;
+      padding: 0.6em;
+      background: #eef2f7;
+      border-radius: 4px;
+      margin-bottom: 0.6em;
+    }
+    .dialog-toolbar-btn {
+      padding: 0.4em 0.9em;
+      background: white;
+      border: 1px solid #bbb;
+      border-radius: 4px;
+      font-size: 0.85em;
+      cursor: default;
+    }
+    .dialog-table {
+      border: 1px solid #ddd;
+      background: white;
+      padding: 0.6em;
+      min-height: 120px;
+      border-radius: 4px;
+      color: #999;
+      font-size: 0.85em;
+      text-align: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .dialog-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.4em;
+      margin-top: 0.6em;
+    }
+
+    /* badge */
+    .badge {
+      display: inline-block;
+      padding: 0.15em 0.6em;
+      border-radius: 999px;
+      font-size: 0.8em;
+      font-weight: bold;
+      margin: 0 0.2em;
+    }
+    .badge-ok { background: #e8f5e9; color: #2e7d32; }
+    .badge-warn { background: #fff8e1; color: #f57c00; }
+    .badge-error { background: #ffebee; color: #c62828; }
+
+    /* Mermaid 図のスタイル微調整 */
+    .mermaid {
+      text-align: center;
+      margin: 1.5em 0;
+    }
+
+    /* マニュアルフッター（バージョン情報） */
+    .manual-footer {
+      margin: 3em 0 1em;
+      padding: 1em;
+      background: #f6f8fa;
+      border: 1px solid #e0e6ed;
+      border-radius: 6px;
+      font-size: 0.85em;
+      color: #555;
+      text-align: center;
+    }
+    .manual-footer .meta-sep {
+      color: #bbb;
+      margin: 0 0.6em;
+    }
+    .manual-footer a {
+      color: var(--theme-color);
+      text-decoration: none;
+    }
+    .manual-footer a:hover {
+      text-decoration: underline;
+    }
+    .manual-footer .meta-label {
+      color: #888;
+      font-size: 0.95em;
+    }
+
+    /* カバーページのバージョン表示 */
+    section.cover small#cover-version {
+      display: inline-block;
+      font-size: 0.45em;
+      padding: 0.2em 0.6em;
+      background: rgba(44,140,240,0.15);
+      color: var(--theme-color);
+      border-radius: 999px;
+      margin-left: 0.5em;
+      vertical-align: middle;
+      font-weight: bold;
+    }
+    section.cover #cover-meta {
+      margin-top: 1.5em;
+    }
+
+    /* モバイル */
+    @media (max-width: 768px) {
+      .app-mockup, .dialog-mockup { max-width: 100%; }
+      .manual-footer .meta-sep { display: block; height: 0.3em; visibility: hidden; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script>
+    window.$docsify = {
+      name: 'Wiseman PDF ツール',
+      repo: '',
+      loadSidebar: true,
+      loadNavbar: true,
+      coverpage: true,
+      onlyCover: false,
+      auto2top: true,
+      maxLevel: 3,
+      subMaxLevel: 2,
+      // サブディレクトリでも /_sidebar.md / /_navbar.md を一律に解決
+      alias: {
+        '/.*/_sidebar.md': '/_sidebar.md',
+        '/.*/_navbar.md': '/_navbar.md',
+      },
+      search: {
+        placeholder: 'マニュアル内を検索',
+        noData: '結果なし',
+        depth: 6,
+      },
+      copyCode: {
+        buttonText: 'コピー',
+        errorText: 'コピー失敗',
+        successText: 'コピー完了',
+      },
+      mermaidConfig: {
+        querySelector: '.mermaid',
+      },
+      markdown: {
+        renderer: {
+          code: function(code, lang) {
+            if (lang === 'mermaid') {
+              return '<div class="mermaid">' + code + '</div>';
+            }
+            return this.origin.code.apply(this, arguments);
+          },
+        },
+      },
+      plugins: [
+        function(hook, vm) {
+          function esc(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+              return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
+          }
+
+          var meta = null;
+          var metaPromise = fetch('/_meta.json', { cache: 'no-cache' })
+            .then(function(r) { return r.ok ? r.json() : null; })
+            .then(function(m) { meta = m; })
+            .catch(function() { meta = null; });
+
+          hook.afterEach(function(html, next) {
+            metaPromise.then(function() {
+              if (!meta) { next(html); return; }
+              var footer =
+                '<div class="manual-footer">' +
+                  '<span class="meta-label">マニュアル</span> <strong>v' + esc(meta.manual_version) + '</strong>' +
+                  '<span class="meta-sep">·</span>' +
+                  '<span class="meta-label">最終更新</span> ' + esc(meta.manual_updated) +
+                  '<span class="meta-sep">·</span>' +
+                  '<span class="meta-label">対応アプリ</span> <strong>' + esc(meta.app_version_supported) + '</strong>' +
+                  '<span class="meta-sep">·</span>' +
+                  '<a href="#/changelog">変更履歴</a>' +
+                '</div>';
+              next(html + footer);
+            });
+          });
+
+          hook.doneEach(function() {
+            metaPromise.then(function() {
+              if (!meta) return;
+              var v = document.getElementById('cover-version');
+              if (v) v.textContent = 'v' + meta.manual_version;
+              var m = document.getElementById('cover-meta');
+              if (m) {
+                while (m.firstChild) m.removeChild(m.firstChild);
+                m.appendChild(document.createTextNode('Version '));
+                var s1 = document.createElement('strong');
+                s1.textContent = meta.manual_version;
+                m.appendChild(s1);
+                m.appendChild(document.createTextNode(' · Last updated ' + meta.manual_updated));
+                m.appendChild(document.createTextNode(' · 対応アプリ ' + meta.app_version_supported));
+              }
+            });
+          });
+        },
+      ],
+    };
+  </script>
+  <script src="//cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'default',
+      themeVariables: {
+        primaryColor: '#e3f2fd',
+        primaryTextColor: '#1565c0',
+        primaryBorderColor: '#2c8cf0',
+        lineColor: '#666',
+        fontFamily: '-apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, sans-serif',
+      },
+    });
+  </script>
+  <script src="//cdn.jsdelivr.net/npm/docsify@4"></script>
+  <script src="//cdn.jsdelivr.net/npm/docsify/lib/plugins/search.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/docsify/lib/plugins/zoom-image.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/docsify-copy-code@2"></script>
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1/components/prism-bash.min.js"></script>
+  <script>
+    // docsify ロード完了後に mermaid を都度実行
+    setTimeout(function checkMermaid() {
+      if (window.mermaid && document.querySelectorAll('.mermaid').length > 0) {
+        mermaid.run({ querySelector: '.mermaid' }).catch(function(){});
+      }
+      setTimeout(checkMermaid, 1000);
+    }, 500);
+  </script>
+</body>
+</html>

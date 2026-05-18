@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "wiseman-hub-prod"
+  },
+  "targets": {
+    "wiseman-hub-prod": {
+      "hosting": {
+        "help": [
+          "wiseman-hub-help"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}
